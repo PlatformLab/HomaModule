@@ -114,104 +114,128 @@ char *homa_metrics_print(void)
 
 	homa_mout.length = 0;
 #define M(...) homa_metric_append(__VA_ARGS__)
-	M("time_cycles          %20llu  homa_clock() time when metrics were gathered\n",
+	M("time_cycles              %20llu  homa_clock() time when metrics were gathered\n",
 	  homa_clock());
-	M("cpu_khz                   %15llu  Clock rate in khz\n",
+	M("cpu_khz                       %15llu  Clock rate in khz\n",
 	  homa_clock_khz());
 	for (core = 0; core < nr_cpu_ids; core++) {
 		struct homa_metrics *m = &per_cpu(homa_metrics, core);
 		s64 delta;
 
-		M("core                      %15d  Core id for following metrics\n",
+		M("core                          %15d  Core id for following metrics\n",
 		  core);
 		for (i = 0; i < HOMA_NUM_SMALL_COUNTS; i++) {
-			M("msg_bytes_%-9d       %15llu  Bytes in incoming messages containing %d-%d bytes\n",
+			M("msg_bytes_%-9d           %15llu  Bytes in incoming messages containing %d-%d bytes\n",
 			  (i + 1) * 64, m->small_msg_bytes[i], lower,
 			  (i + 1) * 64);
 			lower = (i + 1) * 64 + 1;
 		}
 		for (i = (HOMA_NUM_SMALL_COUNTS * 64) / 1024;
 				i < HOMA_NUM_MEDIUM_COUNTS; i++) {
-			M("msg_bytes_%-9d       %15llu  Bytes in incoming messages containing %d-%d bytes\n",
+			M("msg_bytes_%-9d           %15llu  Bytes in incoming messages containing %d-%d bytes\n",
 			  (i + 1) * 1024, m->medium_msg_bytes[i], lower,
 			  (i + 1) * 1024);
 			lower = (i + 1) * 1024 + 1;
 		}
-		M("large_msg_count           %15llu  # of incoming messages >= %d bytes\n",
+		M("large_msg_count               %15llu  # of incoming messages >= %d bytes\n",
 		  m->large_msg_count, lower);
-		M("large_msg_bytes           %15llu  Bytes in incoming messages >= %d bytes\n",
+		M("large_msg_bytes               %15llu  Bytes in incoming messages >= %d bytes\n",
 		  m->large_msg_bytes, lower);
-		M("rx_msgs_started           %15llu  Messages for which at least one packet was received\n",
-		  m->rx_msgs_started);
-		M("rx_msg_bytes_started      %15llu  Total bytes in new message starts\n",
-		  m->rx_msg_bytes_started);
-		M("rx_msg_bytes_retired      %15llu  Incoming message bytes either received or aborted\n",
-		  m->rx_msg_bytes_retired);
-		M("rx_msgs_ended             %15llu  Incoming messages completed or aborted\n",
-		  m->rx_msgs_ended);
-		M("sent_msg_bytes            %15llu  Total bytes in all outgoing messages\n",
+		M("client_requests_started       %15llu  Client RPCs initiated\n",
+		  m->client_requests_started);
+		M("client_request_bytes_started  %15llu  Request bytes in all initiated client RPCs\n",
+		  m->client_request_bytes_started);
+		M("client_request_bytes_done     %15llu  Transmitted request bytes in all client RPCs\n",
+		  m->client_request_bytes_done);
+		M("client_requests_done          %15llu  Client RPC requests fully transmitted\n",
+		  m->client_requests_done);
+		M("client_responses_started      %15llu  Client RPCs for which at least one response pkt recvd\n",
+		  m->client_responses_started);
+		M("client_response_bytes_started %15llu  Response bytes in all RPCS in client_responses_started\n",
+		  m->client_response_bytes_started);
+		M("client_response_bytes_done    %15llu  Response bytes received for all client RPCs\n",
+		  m->client_response_bytes_done);
+		M("client_responses_done         %15llu  Client RPC responses fully received\n",
+		  m->client_responses_done);
+		M("server_requests_started       %15llu  Server RPCs for which at least one request pkt rcvd\n",
+		  m->server_requests_started);
+		M("server_request_bytes_started  %15llu  Request bytes in all RPCS in server_requests_started\n",
+		  m->server_request_bytes_started);
+		M("server_request_bytes_done     %15llu  Request bytes received for all server RPCs\n",
+		  m->server_request_bytes_done);
+		M("server_requests_done          %15llu  Server RPC requests fully received\n",
+		  m->server_requests_done);
+		M("server_responses_started      %15llu  Server RPCs for which response was initiated\n",
+		  m->server_responses_started);
+		M("server_response_bytes_started %15llu  Message bytes in all initiated server responses\n",
+		  m->server_response_bytes_started);
+		M("server_response_bytes_done    %15llu  Transmitted response bytes in all server RPCs\n",
+		  m->server_response_bytes_done);
+		M("server_responses_done         %15llu  Server RPC responses fully transmitted\n",
+		  m->server_responses_done);
+		M("sent_msg_bytes                %15llu  Total bytes in all outgoing messages\n",
 		  m->sent_msg_bytes);
 		for (i = DATA; i <= MAX_OP;  i++) {
 			char *symbol = homa_symbol_for_type(i);
 
-			M("packets_sent_%-7s      %15llu  %s packets sent\n",
+			M("packets_sent_%-12s     %15llu  %s packets sent\n",
 			  symbol, m->packets_sent[i - DATA], symbol);
 		}
 		for (i = DATA; i <= MAX_OP;  i++) {
 			char *symbol = homa_symbol_for_type(i);
 
-			M("packets_rcvd_%-7s      %15llu  %s packets received\n",
+			M("packets_rcvd_%-12s     %15llu  %s packets received\n",
 			  symbol, m->packets_received[i - DATA], symbol);
 		}
 		for (i = 0; i < HOMA_MAX_PRIORITIES; i++) {
-			M("priority%d_bytes        %15llu  Bytes sent at priority %d (including headers)\n",
+			M("priority%d_bytes               %15llu  Bytes sent at priority %d (including headers)\n",
 			  i, m->priority_bytes[i], i);
 		}
 		for (i = 0; i < HOMA_MAX_PRIORITIES; i++) {
-			M("priority%d_packets      %15llu  Packets sent at priority %d\n",
+			M("priority%d_packets             %15llu  Packets sent at priority %d\n",
 			  i, m->priority_packets[i], i);
 		}
-		M("skb_allocs                %15llu  sk_buffs allocated\n",
+		M("skb_allocs                    %15llu  sk_buffs allocated\n",
 		  m->skb_allocs);
-		M("skb_alloc_cycles          %15llu  Time spent allocating sk_buffs\n",
+		M("skb_alloc_cycles              %15llu  Time spent allocating sk_buffs\n",
 		  m->skb_alloc_cycles);
-		M("skb_frees                 %15llu  Data sk_buffs freed in normal paths\n",
+		M("skb_frees                     %15llu  Data sk_buffs freed in normal paths\n",
 		  m->skb_frees);
-		M("skb_free_cycles           %15llu  Time spent freeing data sk_buffs\n",
+		M("skb_free_cycles               %15llu  Time spent freeing data sk_buffs\n",
 		  m->skb_free_cycles);
-		M("skb_page_allocs           %15llu  Pages allocated for sk_buff frags\n",
+		M("skb_page_allocs               %15llu  Pages allocated for sk_buff frags\n",
 		  m->skb_page_allocs);
-		M("skb_page_alloc_cycles     %15llu  Time spent allocating pages for sk_buff frags\n",
+		M("skb_page_alloc_cycles         %15llu  Time spent allocating pages for sk_buff frags\n",
 		  m->skb_page_alloc_cycles);
-		M("requests_received         %15llu  Incoming request messages\n",
+		M("requests_received             %15llu  Incoming request messages\n",
 		  m->requests_received);
-		M("responses_received        %15llu  Incoming response messages\n",
+		M("responses_received            %15llu  Incoming response messages\n",
 		  m->responses_received);
-		M("wait_none                 %15llu  Messages received without blocking or polling\n",
+		M("wait_none                     %15llu  Messages received without blocking or polling\n",
 		  m->wait_none);
-		M("wait_fast                 %15llu  Messages received while polling\n",
+		M("wait_fast                     %15llu  Messages received while polling\n",
 		  m->wait_fast);
-		M("wait_block                %15llu  Messages received after thread went to sleep\n",
+		M("wait_block                    %15llu  Messages received after thread went to sleep\n",
 		  m->wait_block);
-		M("handoffs_thread_waiting   %15llu  RPC handoffs to waiting threads (vs. queue)\n",
+		M("handoffs_thread_waiting       %15llu  RPC handoffs to waiting threads (vs. queue)\n",
 		  m->handoffs_thread_waiting);
-		M("handoffs_alt_thread       %15llu  RPC handoffs not to first on list (avoid busy core)\n",
+		M("handoffs_alt_thread           %15llu  RPC handoffs not to first on list (avoid busy core)\n",
 		  m->handoffs_alt_thread);
-		M("poll_cycles               %15llu  Time spent polling for incoming messages\n",
+		M("poll_cycles                   %15llu  Time spent polling for incoming messages\n",
 		  m->poll_cycles);
-		M("softirq_calls             %15llu  Calls to homa_softirq (i.e. # GRO pkts received)\n",
+		M("softirq_calls                 %15llu  Calls to homa_softirq (i.e. # GRO pkts received)\n",
 		  m->softirq_calls);
-		M("softirq_cycles            %15llu  Time spent in homa_softirq during SoftIRQ\n",
+		M("softirq_cycles                %15llu  Time spent in homa_softirq during SoftIRQ\n",
 		  m->softirq_cycles);
-		M("bypass_softirq_cycles     %15llu  Time spent in homa_softirq during bypass from GRO\n",
+		M("bypass_softirq_cycles         %15llu  Time spent in homa_softirq during bypass from GRO\n",
 		  m->bypass_softirq_cycles);
-		M("linux_softirq_cycles      %15llu  Time spent in all Linux SoftIRQ\n",
+		M("linux_softirq_cycles          %15llu  Time spent in all Linux SoftIRQ\n",
 		  m->linux_softirq_cycles);
-		M("napi_cycles               %15llu  Time spent in NAPI-level packet handling\n",
+		M("napi_cycles                   %15llu  Time spent in NAPI-level packet handling\n",
 		  m->napi_cycles);
-		M("send_cycles               %15llu  Time spent in homa_sendmsg for requests\n",
+		M("send_cycles                   %15llu  Time spent in homa_sendmsg for requests\n",
 		  m->send_cycles);
-		M("send_calls                %15llu  Total invocations of homa_sendmsg for equests\n",
+		M("send_calls                    %15llu  Total invocations of homa_sendmsg for equests\n",
 		  m->send_calls);
 		// It is possible for us to get here at a time when a
 		// thread has been blocked for a long time and has
@@ -222,157 +246,157 @@ char *homa_metrics_print(void)
 		delta = m->recv_cycles - m->blocked_cycles;
 		if (delta < 0)
 			delta = 0;
-		M("recv_cycles               %15llu  Unblocked time spent in recvmsg kernel call\n",
+		M("recv_cycles                   %15llu  Unblocked time spent in recvmsg kernel call\n",
 		  delta);
-		M("recv_calls                %15llu  Total invocations of recvmsg kernel call\n",
+		M("recv_calls                    %15llu  Total invocations of recvmsg kernel call\n",
 		  m->recv_calls);
-		M("blocked_cycles            %15llu  Time spent blocked in homa_recvmsg\n",
+		M("blocked_cycles                %15llu  Time spent blocked in homa_recvmsg\n",
 		  m->blocked_cycles);
-		M("reply_cycles              %15llu  Time spent in homa_sendmsg for responses\n",
+		M("reply_cycles                  %15llu  Time spent in homa_sendmsg for responses\n",
 		  m->reply_cycles);
-		M("reply_calls               %15llu  Total invocations of homa_sendmsg for responses\n",
+		M("reply_calls                   %15llu  Total invocations of homa_sendmsg for responses\n",
 		  m->reply_calls);
-		M("abort_cycles              %15llu  Time spent in homa_ioc_abort kernel call\n",
+		M("abort_cycles                  %15llu  Time spent in homa_ioc_abort kernel call\n",
 		  m->reply_cycles);
-		M("abort_calls               %15llu  Total invocations of abort kernel call\n",
+		M("abort_calls                   %15llu  Total invocations of abort kernel call\n",
 		  m->reply_calls);
-		M("so_set_buf_cycles         %15llu  Time spent in setsockopt SO_HOMA_RCVBUF\n",
+		M("so_set_buf_cycles             %15llu  Time spent in setsockopt SO_HOMA_RCVBUF\n",
 		  m->so_set_buf_cycles);
-		M("so_set_buf_calls          %15llu  Total invocations of setsockopt SO_HOMA_RCVBUF\n",
+		M("so_set_buf_calls              %15llu  Total invocations of setsockopt SO_HOMA_RCVBUF\n",
 		  m->so_set_buf_calls);
-		M("grant_lock_cycles         %15llu  Time spent with grant lock locked\n",
+		M("grant_lock_cycles             %15llu  Time spent with grant lock locked\n",
 		  m->grant_lock_cycles);
-		M("timer_cycles              %15llu  Time spent in homa_timer\n",
+		M("timer_cycles                  %15llu  Time spent in homa_timer\n",
 		  m->timer_cycles);
-		M("timer_reap_cycles         %15llu  Time in homa_timer spent reaping RPCs\n",
+		M("timer_reap_cycles             %15llu  Time in homa_timer spent reaping RPCs\n",
 		  m->timer_reap_cycles);
-		M("data_pkt_reap_cycles      %15llu  Time in homa_data_pkt spent reaping RPCs\n",
+		M("data_pkt_reap_cycles          %15llu  Time in homa_data_pkt spent reaping RPCs\n",
 		  m->data_pkt_reap_cycles);
-		M("pacer_cycles              %15llu  Time spent in homa_pacer_main\n",
+		M("pacer_cycles                  %15llu  Time spent in homa_pacer_main\n",
 		  m->pacer_cycles);
-		M("homa_cycles               %15llu  Total time in all Homa-related functions\n",
+		M("homa_cycles                   %15llu  Total time in all Homa-related functions\n",
 		  m->softirq_cycles + m->napi_cycles +
 		  m->send_cycles + m->recv_cycles +
 		  m->reply_cycles - m->blocked_cycles +
 		  m->timer_cycles + m->pacer_cycles);
-		M("pacer_lost_cycles         %15llu  Lost transmission time because pacer was slow\n",
+		M("pacer_lost_cycles             %15llu  Lost transmission time because pacer was slow\n",
 		  m->pacer_lost_cycles);
-		M("pacer_bytes               %15llu  Bytes transmitted when the pacer was active\n",
+		M("pacer_bytes                   %15llu  Bytes transmitted when the pacer was active\n",
 		  m->pacer_bytes);
-		M("pacer_skipped_rpcs        %15llu  Pacer aborts because of locked RPCs\n",
+		M("pacer_skipped_rpcs            %15llu  Pacer aborts because of locked RPCs\n",
 		  m->pacer_skipped_rpcs);
-		M("pacer_needed_help         %15llu  homa_pacer_xmit invocations from homa_check_pacer\n",
+		M("pacer_needed_help             %15llu  homa_pacer_xmit invocations from homa_check_pacer\n",
 		  m->pacer_needed_help);
-		M("throttled_cycles          %15llu  Time when the throttled queue was nonempty\n",
+		M("throttled_cycles              %15llu  Time when the throttled queue was nonempty\n",
 		  m->throttled_cycles);
-		M("resent_packets            %15llu  DATA packets sent in response to RESENDs\n",
+		M("resent_packets                %15llu  DATA packets sent in response to RESENDs\n",
 		  m->resent_packets);
-		M("peer_allocs               %15llu  New entries created in peer table\n",
+		M("peer_allocs                   %15llu  New entries created in peer table\n",
 		  m->peer_allocs);
-		M("peer_kmalloc_errors       %15llu  kmalloc failures creating peer table entries\n",
+		M("peer_kmalloc_errors           %15llu  kmalloc failures creating peer table entries\n",
 		  m->peer_kmalloc_errors);
-		M("peer_route_errors         %15llu  Routing failures creating peer table entries\n",
+		M("peer_route_errors             %15llu  Routing failures creating peer table entries\n",
 		  m->peer_route_errors);
-		M("peer_dst_refreshes        %15llu  Obsolete dsts had to be regenerated\n",
+		M("peer_dst_refreshes            %15llu  Obsolete dsts had to be regenerated\n",
 		  m->peer_dst_refreshes);
-		M("control_xmit_errors       %15llu  Errors sending control packets\n",
+		M("control_xmit_errors           %15llu  Errors sending control packets\n",
 		  m->control_xmit_errors);
-		M("data_xmit_errors          %15llu  Errors sending data packets\n",
+		M("data_xmit_errors              %15llu  Errors sending data packets\n",
 		  m->data_xmit_errors);
-		M("unknown_rpcs              %15llu  Non-grant packets discarded because RPC unknown\n",
+		M("unknown_rpcs                  %15llu  Non-grant packets discarded because RPC unknown\n",
 		  m->unknown_rpcs);
-		M("server_cant_create_rpcs   %15llu  Packets discarded because server couldn't create RPC\n",
+		M("server_cant_create_rpcs       %15llu  Packets discarded because server couldn't create RPC\n",
 		  m->server_cant_create_rpcs);
-		M("unknown_packet_types      %15llu  Packets discarded because of unsupported type\n",
+		M("unknown_packet_types          %15llu  Packets discarded because of unsupported type\n",
 		  m->unknown_packet_types);
-		M("short_packets             %15llu  Packets discarded because too short\n",
+		M("short_packets                 %15llu  Packets discarded because too short\n",
 		  m->short_packets);
-		M("packet_discards           %15llu  Non-resent packets discarded because data already received\n",
+		M("packet_discards               %15llu  Non-resent packets discarded because data already received\n",
 		  m->packet_discards);
-		M("resent_discards           %15llu  Resent packets discarded because data already received\n",
+		M("resent_discards               %15llu  Resent packets discarded because data already received\n",
 		  m->resent_discards);
-		M("resent_packets_used       %15llu  Retransmitted packets that were actually used\n",
+		M("resent_packets_used           %15llu  Retransmitted packets that were actually used\n",
 		  m->resent_packets_used);
-		M("rpc_timeouts             %15llu   RPCs aborted because peer was nonresponsive\n",
+		M("rpc_timeouts                  %15llu   RPCs aborted because peer was nonresponsive\n",
 		  m->rpc_timeouts);
-		M("server_rpc_discards       %15llu  RPCs discarded by server because of errors\n",
+		M("server_rpc_discards           %15llu  RPCs discarded by server because of errors\n",
 		  m->server_rpc_discards);
-		M("server_rpcs_unknown       %15llu  RPCs aborted by server because unknown to client\n",
+		M("server_rpcs_unknown           %15llu  RPCs aborted by server because unknown to client\n",
 		  m->server_rpcs_unknown);
-		M("client_lock_misses        %15llu  Bucket lock misses for client RPCs\n",
+		M("client_lock_misses            %15llu  Bucket lock misses for client RPCs\n",
 		  m->client_lock_misses);
-		M("client_lock_miss_cycles   %15llu  Time lost waiting for client bucket locks\n",
+		M("client_lock_miss_cycles       %15llu  Time lost waiting for client bucket locks\n",
 		  m->client_lock_miss_cycles);
-		M("server_lock_misses        %15llu  Bucket lock misses for server RPCs\n",
+		M("server_lock_misses            %15llu  Bucket lock misses for server RPCs\n",
 		  m->server_lock_misses);
-		M("server_lock_miss_cycles   %15llu  Time lost waiting for server bucket locks\n",
+		M("server_lock_miss_cycles       %15llu  Time lost waiting for server bucket locks\n",
 		  m->server_lock_miss_cycles);
-		M("socket_lock_misses        %15llu  Socket lock misses\n",
+		M("socket_lock_misses            %15llu  Socket lock misses\n",
 		  m->socket_lock_misses);
-		M("socket_lock_miss_cycles   %15llu  Time lost waiting for socket locks\n",
+		M("socket_lock_miss_cycles       %15llu  Time lost waiting for socket locks\n",
 		  m->socket_lock_miss_cycles);
-		M("throttle_lock_misses      %15llu  Throttle lock misses\n",
+		M("throttle_lock_misses          %15llu  Throttle lock misses\n",
 		  m->throttle_lock_misses);
-		M("throttle_lock_miss_cycles %15llu  Time lost waiting for throttle locks\n",
+		M("throttle_lock_miss_cycles     %15llu  Time lost waiting for throttle locks\n",
 		  m->throttle_lock_miss_cycles);
-		M("peer_ack_lock_misses      %15llu  Misses on peer ack locks\n",
+		M("peer_ack_lock_misses          %15llu  Misses on peer ack locks\n",
 		  m->peer_ack_lock_misses);
-		M("peer_ack_lock_miss_cycles %15llu  Time lost waiting for peer ack locks\n",
+		M("peer_ack_lock_miss_cycles     %15llu  Time lost waiting for peer ack locks\n",
 		  m->peer_ack_lock_miss_cycles);
-		M("grant_lock_misses         %15llu  Grant lock misses\n",
+		M("grant_lock_misses             %15llu  Grant lock misses\n",
 		  m->grant_lock_misses);
-		M("grant_lock_miss_cycles    %15llu  Time lost waiting for grant lock\n",
+		M("grant_lock_miss_cycles        %15llu  Time lost waiting for grant lock\n",
 		  m->grant_lock_miss_cycles);
-		M("grantable_rpcs_integral   %15llu  Integral of homa->num_grantable_rpcs*dt\n",
+		M("grantable_rpcs_integral       %15llu  Integral of homa->num_grantable_rpcs*dt\n",
 		  m->grantable_rpcs_integral);
-		M("grant_check_calls         %15llu  Number of calls to homa_grant_check_rpc\n",
+		M("grant_check_calls             %15llu  Number of calls to homa_grant_check_rpc\n",
 		  m->grant_check_calls);
-		M("grant_check_locked        %15llu  Number of calls to homa_grant_check_rpc that acquired grant lock\n",
+		M("grant_check_locked            %15llu  Number of calls to homa_grant_check_rpc that acquired grant lock\n",
 		  m->grant_check_locked);
-		M("grant_check_others        %15llu  Number of times homa_grant_check_rpc checked non-caller RPCs for grants\n",
+		M("grant_check_others            %15llu  Number of times homa_grant_check_rpc checked non-caller RPCs for grants\n",
 		  m->grant_check_others);
-		M("grant_check_recalcs       %15llu  Number of times homa_grant_check_rpc updated grant priority order\n",
+		M("grant_check_recalcs           %15llu  Number of times homa_grant_check_rpc updated grant priority order\n",
 		  m->grant_check_recalcs);
-		M("grant_priority_bumps      %15llu  Number of times an RPC moved up in the grant priority order\n",
+		M("grant_priority_bumps          %15llu  Number of times an RPC moved up in the grant priority order\n",
 		  m->grant_priority_bumps);
-		M("fifo_grants               %15llu  Grants issued using FIFO priority\n",
+		M("fifo_grants                   %15llu  Grants issued using FIFO priority\n",
 		  m->fifo_grants);
-		M("fifo_grants_no_incoming   %15llu  FIFO grants to messages with no outstanding grants\n",
+		M("fifo_grants_no_incoming       %15llu  FIFO grants to messages with no outstanding grants\n",
 		  m->fifo_grants_no_incoming);
-		M("disabled_reaps            %15llu  Reaper invocations that were disabled\n",
+		M("disabled_reaps                %15llu  Reaper invocations that were disabled\n",
 		  m->disabled_reaps);
-		M("deferred_rpc_reaps        %15llu  RPCs skipped by reaper because still in use\n",
+		M("deferred_rpc_reaps            %15llu  RPCs skipped by reaper because still in use\n",
 		  m->deferred_rpc_reaps);
-		M("reaper_calls              %15llu  Reaper invocations that were not disabled\n",
+		M("reaper_calls                  %15llu  Reaper invocations that were not disabled\n",
 		  m->reaper_calls);
-		M("reaper_dead_skbs          %15llu  Sum of hsk->dead_skbs across all reaper calls\n",
+		M("reaper_dead_skbs              %15llu  Sum of hsk->dead_skbs across all reaper calls\n",
 		  m->reaper_dead_skbs);
-		M("throttle_list_adds        %15llu  Calls to homa_add_to_throttled\n",
+		M("throttle_list_adds            %15llu  Calls to homa_add_to_throttled\n",
 		  m->throttle_list_adds);
-		M("throttle_list_checks      %15llu  List elements checked in homa_add_to_throttled\n",
+		M("throttle_list_checks          %15llu  List elements checked in homa_add_to_throttled\n",
 		  m->throttle_list_checks);
-		M("ack_overflows             %15llu  Explicit ACKs sent because peer->acks was full\n",
+		M("ack_overflows                 %15llu  Explicit ACKs sent because peer->acks was full\n",
 		  m->ack_overflows);
-		M("ignored_need_acks         %15llu  NEED_ACKs ignored because RPC result not yet received\n",
+		M("ignored_need_acks             %15llu  NEED_ACKs ignored because RPC result not yet received\n",
 		  m->ignored_need_acks);
-		M("bpage_reuses              %15llu  Buffer page could be reused because ref count was zero\n",
+		M("bpage_reuses                  %15llu  Buffer page could be reused because ref count was zero\n",
 		  m->bpage_reuses);
-		M("buffer_alloc_failures     %15llu  homa_pool_alloc_msg didn't find enough buffer space for an RPC\n",
+		M("buffer_alloc_failures         %15llu  homa_pool_alloc_msg didn't find enough buffer space for an RPC\n",
 		  m->buffer_alloc_failures);
-		M("linux_pkt_alloc_bytes     %15llu  Bytes allocated in new packets by NIC driver due to cache overflows\n",
+		M("linux_pkt_alloc_bytes         %15llu  Bytes allocated in new packets by NIC driver due to cache overflows\n",
 		  m->linux_pkt_alloc_bytes);
-		M("dropped_data_no_bufs      %15llu  Data bytes dropped because app buffers full\n",
+		M("dropped_data_no_bufs          %15llu  Data bytes dropped because app buffers full\n",
 		  m->dropped_data_no_bufs);
-		M("gen3_handoffs             %15llu  GRO->SoftIRQ handoffs made by Gen3 balancer\n",
+		M("gen3_handoffs                 %15llu  GRO->SoftIRQ handoffs made by Gen3 balancer\n",
 		  m->gen3_handoffs);
-		M("gen3_alt_handoffs         %15llu  Gen3 handoffs to secondary core (primary was busy)\n",
+		M("gen3_alt_handoffs             %15llu  Gen3 handoffs to secondary core (primary was busy)\n",
 		  m->gen3_alt_handoffs);
-		M("gro_grant_bypasses        %15llu  Grant packets passed directly to homa_softirq by homa_gro_receive\n",
+		M("gro_grant_bypasses            %15llu  Grant packets passed directly to homa_softirq by homa_gro_receive\n",
 		  m->gro_grant_bypasses);
-		M("gro_data_bypasses         %15llu  Data packets passed directly to homa_softirq by homa_gro_receive\n",
+		M("gro_data_bypasses             %15llu  Data packets passed directly to homa_softirq by homa_gro_receive\n",
 		  m->gro_data_bypasses);
 		for (i = 0; i < NUM_TEMP_METRICS;  i++)
-			M("temp%-2d                  %15llu  Temporary use in testing\n",
+			M("temp%-2d                        %15llu  Temporary use in testing\n",
 			  i, m->temp[i]);
 	}
 

@@ -179,7 +179,7 @@ TEST_F(homa_incoming, homa_message_in_init__no_buffers_available)
 #endif /* See strip.py */
 }
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_incoming, homa_message_in_init__update_metrics)
+TEST_F(homa_incoming, homa_message_in_init__update_message_length_metrics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
@@ -197,6 +197,27 @@ TEST_F(homa_incoming, homa_message_in_init__update_metrics)
 	EXPECT_EQ(0x3000, homa_metrics_per_cpu()->medium_msg_bytes[11]);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->medium_msg_bytes[15]);
 	EXPECT_EQ(1900000, homa_metrics_per_cpu()->large_msg_bytes);
+}
+TEST_F(homa_incoming, homa_message_in_init__update_client_rpc_metrics)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, 98, 1000, 1000);
+
+	EXPECT_EQ(0, homa_message_in_init(crpc, 5000, 1000));
+	EXPECT_EQ(1, homa_metrics_per_cpu()->client_responses_started);
+	EXPECT_EQ(5000, homa_metrics_per_cpu()->client_response_bytes_started);
+}
+TEST_F(homa_incoming, homa_message_in_init__update_server_rpc_metrics)
+{
+	struct homa_rpc *srpc;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, self->client_port,
+			       self->server_id, 4000, 10000);
+	EXPECT_FALSE(srpc == NULL);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->server_requests_started);
+	EXPECT_EQ(4000, homa_metrics_per_cpu()->server_request_bytes_started);
 }
 #endif /* See strip.py */
 
@@ -642,7 +663,7 @@ TEST_F(homa_incoming, homa_add_packet__scan_multiple_gaps)
 	EXPECT_STREQ("start 0, end 1400", unit_print_gaps(crpc));
 }
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_incoming, homa_add_packet__metrics)
+TEST_F(homa_incoming, homa_add_packet__discard_metrics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
@@ -669,6 +690,47 @@ TEST_F(homa_incoming, homa_add_packet__metrics)
 			&self->data.common, 1400, 4200));
 	EXPECT_EQ(1, skb_queue_len(&crpc->msgin.packets));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->resent_packets_used);
+}
+TEST_F(homa_incoming, homa_add_packet__client_rpc_metrics)
+{
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 1000, 2000);
+
+	homa_message_in_init(crpc, 2000, 0);
+
+	/* First packet doesn't complete message. */
+	self->data.seg.offset = htonl(0);
+	homa_add_packet(crpc, mock_skb_alloc(self->client_ip,
+			&self->data.common, 1400, 0));
+	EXPECT_EQ(1400, homa_metrics_per_cpu()->client_response_bytes_done);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->client_responses_done);
+
+	/* Second packet completes message. */
+	self->data.seg.offset = htonl(1400);
+	homa_add_packet(crpc, mock_skb_alloc(self->client_ip,
+			&self->data.common, 600, 0));
+	EXPECT_EQ(2000, homa_metrics_per_cpu()->client_response_bytes_done);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->client_responses_done);
+}
+TEST_F(homa_incoming, homa_add_packet__server_rpc_metrics)
+{
+	struct homa_rpc *srpc;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, self->client_port,
+			       self->server_id, 2000, 10000);
+	EXPECT_EQ(1400, homa_metrics_per_cpu()->server_request_bytes_done);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->server_requests_done);
+
+	/* Second packet completes message. */
+	self->data.seg.offset = htonl(1400);
+	homa_add_packet(srpc, mock_skb_alloc(self->server_ip,
+			&self->data.common, 600, 0));
+	EXPECT_EQ(2000, homa_metrics_per_cpu()->server_request_bytes_done);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->server_requests_done);
 }
 #endif /* See strip.py */
 

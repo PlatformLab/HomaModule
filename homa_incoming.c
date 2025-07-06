@@ -66,8 +66,13 @@ int homa_message_in_init(struct homa_rpc *rpc, int length)
 		INC_METRIC(large_msg_count, 1);
 		INC_METRIC(large_msg_bytes, length);
 	}
-	INC_METRIC(rx_msgs_started, 1);
-	INC_METRIC(rx_msg_bytes_started, length);
+	if (homa_is_client(rpc->id)) {
+		INC_METRIC(client_responses_started, 1);
+		INC_METRIC(client_response_bytes_started, length);
+	} else {
+		INC_METRIC(server_requests_started, 1);
+		INC_METRIC(server_request_bytes_started, length);
+	}
 #endif /* See strip.py */
 	return 0;
 }
@@ -253,14 +258,21 @@ discard:
 	return;
 
 keep:
+	__skb_queue_tail(&rpc->msgin.packets, skb);
+	rpc->msgin.bytes_remaining -= length;
 #ifndef __STRIP__ /* See strip.py */
 	if (h->retransmit)
 		INC_METRIC(resent_packets_used, 1);
+	if (homa_is_client(rpc->id)) {
+		INC_METRIC(client_response_bytes_done, length);
+		INC_METRIC(client_responses_done,
+			   rpc->msgin.bytes_remaining == 0);
+	} else {
+		INC_METRIC(server_request_bytes_done, length);
+		INC_METRIC(server_requests_done,
+			   rpc->msgin.bytes_remaining == 0);
+	}
 #endif /* See strip.py */
-	__skb_queue_tail(&rpc->msgin.packets, skb);
-	rpc->msgin.bytes_remaining -= length;
-	INC_METRIC(rx_msg_bytes_retired, length);
-	INC_METRIC(rx_msgs_ended, rpc->msgin.bytes_remaining == 0);
 }
 
 /**

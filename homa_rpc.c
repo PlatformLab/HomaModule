@@ -571,9 +571,10 @@ release:
 		homa_sock_unlock(hsk);
 		homa_skb_free_many_tx(hsk->homa, skbs, num_skbs);
 		for (i = 0; i < num_rpcs; i++) {
+			IF_NO_STRIP(int tx_left);
 			rpc = rpcs[i];
-			UNIT_LOG("; ", "reaped %llu", rpc->id);
 
+			UNIT_LOG("; ", "reaped %llu", rpc->id);
 			if (unlikely(rpc->msgin.num_bpages))
 				homa_pool_release_buffers(rpc->hsk->buffer_pool,
 							  rpc->msgin.num_bpages,
@@ -598,10 +599,32 @@ release:
 			}
 			tt_record2("homa_rpc_reap finished reaping id %d, socket %d",
 				   rpc->id, rpc->hsk->port);
-			INC_METRIC(rx_msg_bytes_retired,
-				   rpc->msgin.bytes_remaining);
-			INC_METRIC(rx_msgs_ended,
-				   rpc->msgin.bytes_remaining != 0);
+#ifndef __STRIP__ /* See strip.py */
+
+			tx_left = rpc->msgout.length -
+				rpc->msgout.next_xmit_offset;
+			if (homa_is_client(rpc->id)) {
+				INC_METRIC(client_response_bytes_done,
+					rpc->msgin.bytes_remaining);
+				INC_METRIC(client_responses_done,
+					rpc->msgin.bytes_remaining != 0);
+				if (tx_left > 0) {
+					INC_METRIC(client_request_bytes_done,
+						tx_left);
+					INC_METRIC(client_requests_done, 1);
+				}
+			} else {
+				INC_METRIC(server_request_bytes_done,
+					rpc->msgin.bytes_remaining);
+				INC_METRIC(server_requests_done,
+					rpc->msgin.bytes_remaining != 0);
+				if (tx_left > 0) {
+					INC_METRIC(server_response_bytes_done,
+						tx_left);
+					INC_METRIC(server_responses_done, 1);
+				}
+			}
+#endif /* See strip.py */
 			rpc->state = 0;
 			kfree(rpc);
 		}

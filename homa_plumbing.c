@@ -1063,6 +1063,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		finish = homa_clock();
 #endif /* See strip.py */
 		INC_METRIC(send_cycles, finish - start);
+		INC_METRIC(client_requests_started, 1);
+		INC_METRIC(client_request_bytes_started, length);
 	} else {
 		/* This is a response message. */
 		struct in6_addr canonical_dest;
@@ -1110,6 +1112,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		finish = homa_clock();
 #endif /* See strip.py */
 		INC_METRIC(reply_cycles, finish - start);
+		INC_METRIC(server_responses_started, 1);
+		INC_METRIC(server_response_bytes_started, length);
 	}
 	tt_record1("homa_sendmsg finished, id %d", args.id);
 	return 0;
@@ -1390,7 +1394,7 @@ int homa_softirq(struct sk_buff *skb)
 		if (unlikely(h->type == FREEZE)) {
 			if (!atomic_read(&tt_frozen)) {
 				homa_rpc_log_active_tt(homa_from_skb(skb), 0);
-				homa_rx_snapshot_log_tt();
+				homa_rpc_snapshot_log_tt();
 				tt_record4("Freezing because of request on port %d from 0x%x:%d, id %d",
 					   ntohs(h->dport),
 					   tt_addr(skb_canonical_ipv6_saddr(skb)),
@@ -1654,7 +1658,7 @@ int homa_dointvec(const struct ctl_table *table, int write,
 				tt_freeze();
 			} else if (homa->sysctl_action == 7) {
 				homa_rpc_log_active_tt(homa, 0);
-				homa_rx_snapshot_log_tt();
+				homa_rpc_snapshot_log_tt();
 				tt_record("Freezing cluster because of action 7");
 				homa_freeze_peers();
 				tt_record("Finished freezing cluster");
@@ -1663,7 +1667,7 @@ int homa_dointvec(const struct ctl_table *table, int write,
 				pr_notice("homa_total_incoming is %d\n",
 					  atomic_read(&homa->grant->total_incoming));
 			} else if (homa->sysctl_action == 9) {
-				tt_print_file("/users/ouster/node.tt");
+				homa_rpc_stats_log();
 			} else {
 				homa_rpc_log_active(homa, homa->sysctl_action);
 			}

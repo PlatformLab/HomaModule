@@ -50,34 +50,111 @@ struct homa_metrics {
 	u64 large_msg_bytes;
 
 	/**
-	 * @rx_msgs_started: incremented whenever the first packet is received
-	 * for a new incoming message.
+	 * @client_requests_started: cumulative count of all client RPCs
+	 * that have been initiated on this node.
 	 */
-	u64 rx_msgs_started;
+	u64 client_requests_started;
 
 	/**
-	 * @rx_msg_bytes_started: total number of incoming message bytes for
-	 * which at least one packet of the message has been received
-	 * (incremented by the length of the message when the first packet is
-	 * received).
+	 * @client_request_bytes_started: total number of bytes in the
+	 * request messages for all client RPCs that have been initiated on
+	 * this node.
 	 */
-	u64 rx_msg_bytes_started;
+	u64 client_request_bytes_started;
 
 	/**
-	 * @rx_msg_bytes_retired: cumulative count of incoming message bytes
-	 * that were either (a) successfully received (counts only goodput,
-	 * not retransmits) or (b) abandoned because the message was deleted
-	 * before they were received. Or, think of this as the bytes from
-	 * @rx_msg_bytes_started that we're no longer waiting to receive.
+	 * @client_request_bytes_done: total number of bytes in request
+	 * messages that no longer need to be transmitted (for the first time)
+	 * either because they were transmitted or because the RPC was aborted.
+	 * Always <= client_request_bytes_started.
 	 */
-	u64 rx_msg_bytes_retired;
+	u64 client_request_bytes_done;
 
 	/**
-	 * @rx_msgs_ended: incremented whenever an input message is "retired",
-	 * either because it was completed or because it was destroyed before
-	 * it completed.
+	 * @client_requests_done: cumulative count of all client RPCs
+	 * whose request messages have been completely transmitted (or the RPC
+	 * was aborted).
 	 */
-	u64 rx_msgs_ended;
+	u64 client_requests_done;
+
+	/**
+	 * @client_responses_started: cumulative count of all client RPCs
+	 * for which at least one packet of the response has been received.
+	 */
+	u64 client_responses_started;
+
+	/**
+	 * @client_response_bytes_started: total number of bytes in
+	 * response messages for client RPCs for which at least one byte
+	 * of response has been received.
+	 */
+	u64 client_response_bytes_started;
+
+	/**
+	 * @client_response_bytes_done: cumulative count of bytes in
+	 * @client_response_bytes_started that no longer need to be received
+	 * (either they were received or the RPC was aborted).
+	 */
+	u64 client_response_bytes_done;
+
+	/**
+	 * @client_responses_done: cumulative count of all client RPCs
+	 * that have been completed on this node (either successfully or
+	 * with errors).
+	 */
+	u64 client_responses_done;
+
+	/**
+	 * @server_requests_started: cumulative count of all server RPCs
+	 * for which at least one packet of the request has been received.
+	 */
+	u64 server_requests_started;
+
+	/**
+	 * @server_request_bytes_started: total number of bytes in the
+	 * request messages for server RPCs counted by @server_reuqests_started.
+	 */
+	u64 server_request_bytes_started;
+
+	/**
+	 * @server_request_bytes_done: total number of bytes in
+	 * @server_request_bytes_started that no longer need to be received
+	 * (either they were received or the RPC was aborted).
+	 */
+	u64 server_request_bytes_done;
+
+	/**
+	 * @server_requests_done: cumulative count of all server RPCs
+	 * whose request messages have been completely received (or the RPC
+	 * was aborted).
+	 */
+	u64 server_requests_done;
+
+	/**
+	 * @server_responses_started: cumulative count of all server RPCs
+	 * for which transmission of the response has begun.
+	 */
+	u64 server_responses_started;
+
+	/**
+	 * @server_response_bytes_started: total number of bytes in
+	 * the messages counted by @server_responses_started.
+	 */
+	u64 server_response_bytes_started;
+
+	/**
+	 * @server_response_bytes_done: total number of bytes in
+	 * @server_response_bytes_started that no longer need to be transmitted
+	 * (either they were transmitted at least once or the RPC was aborted).
+	 */
+	u64 server_response_bytes_done;
+
+	/**
+	 * @server_responses_done: total number of server RPCS in
+	 * @server_requests_started that are no longer active (either the
+	 * response was completely sent or the RPC was aborted).
+	 */
+	u64 server_responses_done;
 
 	/**
 	 * @sent_msg_bytes: The total number of bytes in outbound

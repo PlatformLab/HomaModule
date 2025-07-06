@@ -901,6 +901,46 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request id 1234, next_offset 2800", unit_log_get());
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_xmit_data__metrics_for_client_rpc)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 6000, 1000);
+
+	crpc->msgout.granted = 4000;
+	homa_rpc_lock(crpc);
+	homa_xmit_data(crpc, false);
+	EXPECT_EQ(4200, homa_metrics_per_cpu()->client_request_bytes_done);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->client_requests_done);
+
+	crpc->msgout.granted = 6000;
+	homa_xmit_data(crpc, false);
+	EXPECT_EQ(6000, homa_metrics_per_cpu()->client_request_bytes_done);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->client_requests_done);
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_xmit_data__metrics_for_server_rpc)
+{
+	struct homa_rpc *srpc;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->client_port,
+			       self->server_id, 1000, 10000);
+
+	srpc->msgout.granted = 4000;
+	homa_rpc_lock(srpc);
+	homa_xmit_data(srpc, false);
+	EXPECT_EQ(4200, homa_metrics_per_cpu()->server_response_bytes_done);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->server_responses_done);
+
+	srpc->msgout.granted = 9900;
+	homa_xmit_data(srpc, false);
+	EXPECT_EQ(10000, homa_metrics_per_cpu()->server_response_bytes_done);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->server_responses_done);
+	homa_rpc_unlock(srpc);
+}
+#endif /* See strip.py */
 TEST_F(homa_outgoing, homa_xmit_data__rpc_freed)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

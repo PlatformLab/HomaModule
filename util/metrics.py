@@ -142,10 +142,10 @@ if len(prev) > 0:
     pad = pad.ljust(13)
     secs = "(%.1f s)" % (elapsed_secs)
     secs = secs.ljust(12)
-    print("%-28s %15d %s %s" % ("time_cycles", time_delta, secs,
+    print("%-30s %15d %s %s" % ("time_cycles", time_delta, secs,
             docs["time_cycles"]))
 else:
-    print("%-15s %28d %s%s" % ("time_cycles", cur[0]["time_cycles"],
+    print("%-17s %28d %s%s" % ("time_cycles", cur[0]["time_cycles"],
             "", docs["time_cycles"]))
 
 for symbol in symbols:
@@ -164,7 +164,7 @@ for symbol in symbols:
         if symbol.endswith("_cycles") and (time_delta != 0):
             percent = "(%.1f%%)" % (100.0*delta/time_delta)
             percent = percent.ljust(12)
-            print("%-28s %15d %s %s" % (symbol, delta, percent, doc))
+            print("%-30s %15d %s %s" % (symbol, delta, percent, doc))
         elif symbol.endswith("_queued") and (time_delta != 0):
             received = deltas[symbol[:-7] + "_received"]
             if received != 0:
@@ -172,35 +172,35 @@ for symbol in symbols:
             else:
                 percent = " "
             percent = percent.ljust(12)
-            print("%-28s %15d %s %s" % (symbol, delta, percent, doc))
+            print("%-30s %15d %s %s" % (symbol, delta, percent, doc))
         else:
-            print("%-28s %15d %s%s" % (symbol, delta, rate_info, doc))
+            print("%-30s %15d %s%s" % (symbol, delta, rate_info, doc))
             if symbol.startswith("packets_rcvd_"):
                 total_packets += delta
             if symbol == "softirq_calls":
                 gro_packets = delta
         if (symbol == "reaper_dead_skbs") and ("reaper_calls" in deltas):
-            print("%-28s          %6.1f %sAvg. hsk->dead_skbs in reaper" % (
+            print("%-30s          %6.1f %sAvg. hsk->dead_skbs in reaper" % (
                   "avg_dead_skbs", delta/deltas["reaper_calls"], pad))
         if symbol.endswith("_miss_cycles") and (time_delta != 0):
             prefix = symbol[:-12]
             if ((prefix + "_misses") in deltas) and (deltas[prefix + "_misses"] != 0):
                 ns = (delta/deltas[prefix + "_misses"])/(cpu_khz * 1e-06)
-                print("%-28s          %6.1f %sAvg. wait time per %s miss (ns)" % (
+                print("%-30s          %6.1f %sAvg. wait time per %s miss (ns)" % (
                     prefix + "_miss_delay", ns, pad, prefix))
     if (symbol == "large_msg_bytes") and (total_received_bytes != 0) \
             and (time_delta != 0):
         rate = float(total_received_bytes)/elapsed_secs
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
-        print("%-28s %15d %s%s" % ("received_msg_bytes", total_received_bytes,
+        print("%-30s %15d %s%s" % ("received_msg_bytes", total_received_bytes,
                 rate_info, "Total bytes in all incoming messages"))
 if gro_packets != 0:
-    print("%-28s          %6.2f %sHoma packets per homa_softirq call" % (
+    print("%-30s          %6.2f %sHoma packets per homa_softirq call" % (
           "gro_benefit", float(total_packets)/float(gro_packets), pad))
 avg_grantable_rpcs = 0.0
 if ("grantable_rpcs_integral" in deltas) and (time_delta != 0):
     avg_grantable_rpcs = float(deltas["grantable_rpcs_integral"])/time_delta
-    print("%-28s          %6.2f %sAverage number of grantable incoming RPCs" % (
+    print("%-30s          %6.2f %sAverage number of grantable incoming RPCs" % (
           "avg_grantable_rpcs", avg_grantable_rpcs, pad))
 
 if elapsed_secs != 0:
@@ -449,7 +449,7 @@ if elapsed_secs != 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
-        print("%-28s %15d %s%s" % (symbol, deltas[symbol],
+        print("%-30s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
     for symbol in ["pacer_lost_cycles", "timer_reap_cycles",
             "data_pkt_reap_cycles", "grant_lock_cycles"]:
@@ -458,18 +458,18 @@ if elapsed_secs != 0:
             continue
         percent = "(%.1f%%)" % (100.0*delta/time_delta)
         percent = percent.ljust(12)
-        print("%-28s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
+        print("%-30s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
 
     if deltas["throttle_list_adds"] > 0:
-        print("%-28s %15.1f              List traversals per throttle "
+        print("%-30s %15.1f              List traversals per throttle "
                 "list insert" % ("checks_per_throttle_insert",
                 deltas["throttle_list_checks"]/deltas["throttle_list_adds"]))
 
     if deltas["responses_received"] > 0:
-        print("%-28s %15.1f              ACK packets sent per 1000 client RPCs"
+        print("%-30s %15.1f              ACK packets sent per 1000 client RPCs"
                 % ("acks_per_krpc", 1000.0 * deltas["packets_sent_ACK"]
                 / deltas["responses_received"]))
 
     if avg_grantable_rpcs > 1.0:
-        print("%-28s          %6.2f %sAverage number of grantable incoming RPCs" % (
+        print("%-30s          %6.2f %sAverage number of grantable incoming RPCs" % (
               "avg_grantable_rpcs", avg_grantable_rpcs, pad))

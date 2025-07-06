@@ -572,6 +572,15 @@ TEST_F(homa_plumbing, homa_sendmsg__request_sent_successfully)
 	EXPECT_EQ(88888, crpc->completion_cookie);
 	homa_rpc_unlock(crpc);
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_plumbing, homa_sendmsg__request_metrics)
+{
+	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(1, homa_metrics_per_cpu()->client_requests_started);
+	EXPECT_EQ(200, homa_metrics_per_cpu()->client_request_bytes_started);
+}
+#endif /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__response_nonzero_completion_cookie)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
@@ -662,6 +671,19 @@ TEST_F(homa_plumbing, homa_sendmsg__response_succeeds)
 	EXPECT_EQ(RPC_OUTGOING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_plumbing, homa_sendmsg__response_metrics)
+{
+	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 2000, 100);
+	self->sendmsg_args.id = self->server_id;
+	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(1, homa_metrics_per_cpu()->server_responses_started);
+	EXPECT_EQ(200, homa_metrics_per_cpu()->server_response_bytes_started);
+}
+#endif /* See strip.py */
 
 TEST_F(homa_plumbing, homa_recvmsg__wrong_args_length)
 {

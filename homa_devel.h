@@ -43,24 +43,35 @@ enum homa_freeze_type {
 };
 
 /**
- * struct homa_rx_state - Captures the state of incoming messages at a
- * point in time.
+ * struct homa_rpc_snapshot - Captures the state of RPCs (both client and
+ * server) on a node at a given point in time.
  */
-struct homa_rx_snapshot {
+struct homa_rpc_snapshot {
 	/** @clock: homa_clock() value when data was gathered. */
 	u64 clock;
 
-	/** @msgs_started: sum of all rx_msgs_started metrics. */
-	u64 msgs_started;
+	/* Each value below is the sum (across all cores) of the metric with
+	 * the same name.
+	 */
+	u64 client_requests_started;
+	u64 client_request_bytes_started;
+	u64 client_request_bytes_done;
+	u64 client_requests_done;
 
-	/** @msgs_ended: sum of all rx_msgs_ended metrics. */
-	u64 msgs_ended;
+	u64 client_responses_started;
+	u64 client_response_bytes_started;
+	u64 client_response_bytes_done;
+	u64 client_responses_done;
 
-	/** @bytes_started: sum of all rx_msg_bytes_started metrics. */
-	u64 bytes_started;
+	u64 server_requests_started;
+	u64 server_request_bytes_started;
+	u64 server_request_bytes_done;
+	u64 server_requests_done;
 
-	/** @bytes_retired: sum of all rx_msg_bytes_retired metrics. */
-	u64 bytes_retired;
+	u64 server_responses_started;
+	u64 server_response_bytes_started;
+	u64 server_response_bytes_done;
+	u64 server_responses_done;
 };
 
 /**
@@ -115,8 +126,10 @@ void     homa_rpc_log(struct homa_rpc *rpc);
 void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 void     homa_rpc_log_tt(struct homa_rpc *rpc);
 void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
-void     homa_rx_snapshot_log_tt(void);
-void     homa_snapshot_rx(void);
+void     homa_rpc_snapshot_log_tt(void);
+void     homa_rpc_stats_log(void);
+void     homa_snapshot_get_stats(struct homa_rpc_snapshot *snap);
+void     homa_snapshot_rpcs(void);
 int      homa_snprintf(char *buffer, int size, int used,
 		       const char *format, ...) __printf(4, 5);
 char    *homa_symbol_for_type(uint8_t type);

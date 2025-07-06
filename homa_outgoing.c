@@ -592,16 +592,13 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
-#ifndef __STRIP__ /* See strip.py */
-	struct netdev_queue *txq;
-#endif /* See strip.py */
+	IF_NO_STRIP(struct netdev_queue *txq);
+	int length;
 
 	homa_rpc_hold(rpc);
 	while (*rpc->msgout.next_xmit) {
-#ifndef __STRIP__ /* See strip.py */
-		int priority;
-#endif /* See strip.py */
 		struct sk_buff *skb = *rpc->msgout.next_xmit;
+		IF_NO_STRIP(int priority);
 
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.next_xmit_offset >= rpc->msgout.granted) {
@@ -623,16 +620,28 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		}
 
 #ifndef __STRIP__ /* See strip.py */
-		if (rpc->msgout.next_xmit_offset < rpc->msgout.unscheduled) {
+		if (rpc->msgout.next_xmit_offset < rpc->msgout.unscheduled)
 			priority = homa_unsched_priority(homa, rpc->peer,
 							 rpc->msgout.length);
-		} else {
+		else
 			priority = rpc->msgout.sched_priority;
-		}
 #endif /* See strip.py */
 		rpc->msgout.next_xmit = &(homa_get_skb_info(skb)->next_skb);
-		rpc->msgout.next_xmit_offset +=
-				homa_get_skb_info(skb)->data_bytes;
+		length = homa_get_skb_info(skb)->data_bytes;
+		rpc->msgout.next_xmit_offset += length;
+#ifndef __STRIP__ /* See strip.py */
+		if (homa_is_client(rpc->id)) {
+			INC_METRIC(client_request_bytes_done, length);
+			INC_METRIC(client_requests_done,
+				   rpc->msgout.next_xmit_offset ==
+				   rpc->msgout.length);
+		} else {
+			INC_METRIC(server_response_bytes_done, length);
+			INC_METRIC(server_responses_done,
+				   rpc->msgout.next_xmit_offset ==
+				   rpc->msgout.length);
+		}
+#endif /* See strip.py */
 
 		homa_rpc_hold(rpc);
 		homa_rpc_unlock(rpc);

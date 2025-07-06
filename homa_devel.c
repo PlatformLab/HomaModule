@@ -31,7 +31,7 @@ static u32 seed;
 
 /* Used to record a history of rx state. */
 #define MAX_RX_SNAPSHOTS 1000
-static struct homa_rx_snapshot rx_snapshots[MAX_RX_SNAPSHOTS];
+static struct homa_rpc_snapshot rpc_snapshots[MAX_RX_SNAPSHOTS];
 static int next_snapshot;
 
 /* homa_clock() time when most recent rx snapshot was taken. */
@@ -930,14 +930,55 @@ int homa_drop_packet(struct homa *homa)
 #endif /* See strip.py */
 
 /**
- * homa_snapshot_rx() - This function is called by homa_timer; it collects
- * data about the backlog of partially received incoming messages.
+ * homa_snapshot_get_stats() - Fill in a homa_rpc_snapshot with the latest
+ * statistics.
+ * @snap:    Structure to fill in.
  */
-void homa_snapshot_rx(void)
+void homa_snapshot_get_stats(struct homa_rpc_snapshot *snap)
 {
-	struct homa_rx_snapshot *snap;
-	u64 now = homa_clock();
 	int core;
+
+	memset(snap, 0, sizeof(*snap));
+	snap->clock = homa_clock();
+	for (core = 0; core < nr_cpu_ids; core++) {
+		struct homa_metrics *m = &per_cpu(homa_metrics, core);
+
+		snap->client_requests_started += m->client_requests_started;
+		snap->client_request_bytes_started +=
+				m->client_request_bytes_started;
+		snap->client_request_bytes_done += m->client_request_bytes_done;
+		snap->client_requests_done += m->client_requests_done;
+
+		snap->client_responses_started += m->client_responses_started;
+		snap->client_response_bytes_started +=
+				m->client_response_bytes_started;
+		snap->client_response_bytes_done +=
+				m->client_response_bytes_done;
+		snap->client_responses_done += m->client_responses_done;
+
+		snap->server_requests_started += m->server_requests_started;
+		snap->server_request_bytes_started +=
+				m->server_request_bytes_started;
+		snap->server_request_bytes_done += m->server_request_bytes_done;
+		snap->server_requests_done += m->server_requests_done;
+
+		snap->server_responses_started += m->server_responses_started;
+		snap->server_response_bytes_started +=
+				m->server_response_bytes_started;
+		snap->server_response_bytes_done +=
+				m->server_response_bytes_done;
+		snap->server_responses_done += m->server_responses_done;
+	}
+}
+
+/**
+ * homa_snapshot_rpcs() - This function is called by homa_timer; it collects
+ * data about overall progress of client and server RPCs.
+ */
+void homa_snapshot_rpcs(void)
+{
+	struct homa_rpc_snapshot *snap;
+	u64 now = homa_clock();
 
 	if (snapshot_interval == 0)
 		snapshot_interval = homa_clock_khz() * RX_SNAPSHOT_INTERVAL;
@@ -945,46 +986,41 @@ void homa_snapshot_rx(void)
 	if (now < snapshot_time + snapshot_interval)
 		return;
 	snapshot_time = now;
-	snap = &rx_snapshots[next_snapshot];
-	snap->clock = now;
-	snap->msgs_started = 0;
-	snap->msgs_ended = 0;
-	snap->bytes_started = 0;
-	snap->bytes_retired = 0;
-	for (core = 0; core < nr_cpu_ids; core++) {
-		struct homa_metrics *m = &per_cpu(homa_metrics, core);
-
-		snap->msgs_started += m->rx_msgs_started;
-		snap->msgs_ended += m->rx_msgs_ended;
-		snap->bytes_started += m->rx_msg_bytes_started;
-		snap->bytes_retired += m->rx_msg_bytes_retired;
-	}
+	snap = &rpc_snapshots[next_snapshot];
+	homa_snapshot_get_stats(snap);
 	next_snapshot++;
 	if (next_snapshot >= MAX_RX_SNAPSHOTS)
 		next_snapshot = 0;
 }
 
 /**
- * homa_rx_snapshot_log_tt() - Dump all of the snapshot data for incoming
- * messages to the timetrace.
+ * homa_rpc_snapshot_log_tt() - Dump all of the RPC snapshot data to the
+ * timetrace.
  */
-void homa_rx_snapshot_log_tt(void)
+void homa_rpc_snapshot_log_tt(void)
 {
-	struct homa_rx_snapshot *snap;
+	struct homa_rpc_snapshot *snap;
 	u64 now = homa_clock();
-	u64 mbase, bbase;
+	u64 creq_base, creq_bbase, cresp_base, cresp_bbase;
+	u64 sreq_base, sreq_bbase, sresp_base, sresp_bbase;
 	u64 usecs;
 	int i;
 
 	i = next_snapshot;
 
-	/* Adjust all the output values to start at 0, in order to avoid
+	/* Offset all the output values to start at 0, in order to avoid
 	 * wraparound in 32-bit timetrace values.
 	 */
-	mbase = rx_snapshots[i].msgs_ended;
-	bbase = rx_snapshots[i].bytes_retired;
+	creq_base = rpc_snapshots[i].client_requests_done;
+	creq_bbase = rpc_snapshots[i].client_request_bytes_done;
+	cresp_base = rpc_snapshots[i].client_responses_done;
+	cresp_bbase = rpc_snapshots[i].client_response_bytes_done;
+	sreq_base = rpc_snapshots[i].server_requests_done;
+	sreq_bbase = rpc_snapshots[i].server_request_bytes_done;
+	sresp_base = rpc_snapshots[i].server_responses_done;
+	sresp_bbase = rpc_snapshots[i].server_response_bytes_done;
 	do {
-		snap = &rx_snapshots[i];
+		snap = &rpc_snapshots[i];
 
 		/* Compute how many microseconds before now this snapshot
 		 * was taken.
@@ -992,18 +1028,79 @@ void homa_rx_snapshot_log_tt(void)
 		usecs = 1000*(now - snap->clock);
 		do_div(usecs, homa_clock_khz());
 
-		tt_record3("rx snapshot part 1, usecs %d, msgs_started %d, msgs_ended %d",
-			   -usecs, snap->msgs_started - mbase,
-			   snap->msgs_ended - mbase);
-		tt_record3("rx snapshot part 2, usecs %d, 4kbytes_started %d, 4kbytes_retired %d",
-			   -usecs, (snap->bytes_started - bbase) >> 12,
-			   (snap->bytes_retired - bbase) >> 12);
-		tt_record2("rx snapshot time: 0x%x%08x", snap->clock >> 32,
-			   snap->clock & 0xffffffff);
+		tt_record1("rpc snapshot usecs %d", -usecs);
+		tt_record4("rpc snapshot client requests started %d, kbytes_started %d, kbytes_done %d, done %d",
+			   snap->client_requests_started - creq_base,
+			   (snap->client_request_bytes_started -
+			    creq_bbase) >> 10,
+			   (snap->client_request_bytes_done -
+			    creq_bbase) >> 10,
+			   snap->client_requests_done - creq_base);
+		tt_record4("rpc snapshot client responses started %d, kbytes_started %d, kbytes_done %d, done %d",
+			   snap->client_responses_started - cresp_base,
+			   (snap->client_response_bytes_started -
+			    cresp_bbase) >> 10,
+			   (snap->client_response_bytes_done -
+			    cresp_bbase) >> 10,
+			   snap->client_responses_done - cresp_base);
+		tt_record4("rpc snapshot server requests started %d, kbytes_started %d, kbytes_done %d, done %d",
+			   snap->server_requests_started - sreq_base,
+			   (snap->server_request_bytes_started -
+			    sreq_bbase) >> 10,
+			   (snap->server_request_bytes_done -
+			    sreq_bbase) >> 10,
+			   snap->server_requests_done - sreq_base);
+		tt_record4("rpc snapshot server responses started %d, kbytes_started %d, kbytes_done %d, done %d",
+			   snap->server_responses_started - sresp_base,
+			   (snap->server_response_bytes_started -
+			    sresp_bbase) >> 10,
+			   (snap->server_response_bytes_done -
+			    sresp_bbase) >> 10,
+			   snap->server_responses_done - sresp_base);
 
 		i++;
 		if (i >= MAX_RX_SNAPSHOTS)
 			i = 0;
 	} while (i != next_snapshot);
+}
+/**
+ * homa_rpc_stats_log() - Print statistics on RPC progress to the system log.
+ */
+void homa_rpc_stats_log(void)
+{
+	struct homa_rpc_snapshot snap;
 
+	homa_snapshot_get_stats(&snap);
+	pr_notice("Client requests: started %llu, done %llu, delta %llu\n",
+		  snap.client_requests_started, snap.client_requests_done,
+		  snap.client_requests_started - snap.client_requests_done);
+	pr_notice("Client request bytes: started %llu, bytes_done %llu, delta %llu\n",
+		  snap.client_request_bytes_started,
+		  snap.client_request_bytes_done,
+		  snap.client_request_bytes_started -
+		  snap.client_request_bytes_done);
+	pr_notice("Client responses: started %llu, done %llu, delta %llu\n",
+		  snap.client_responses_started, snap.client_responses_done,
+		  snap.client_responses_started - snap.client_responses_done);
+	pr_notice("Client response bytes: started %llu, bytes_done %llu, delta %llu\n",
+		  snap.client_response_bytes_started,
+		  snap.client_response_bytes_done,
+		  snap.client_response_bytes_started -
+		  snap.client_response_bytes_done);
+	pr_notice("Server requests: started %llu, done %llu, delta %llu\n",
+		  snap.server_requests_started, snap.server_requests_done,
+		  snap.server_requests_started - snap.server_requests_done);
+	pr_notice("Server request bytes: started %llu, bytes_done %llu, delta %llu\n",
+		  snap.server_request_bytes_started,
+		  snap.server_request_bytes_done,
+		  snap.server_request_bytes_started -
+		  snap.server_request_bytes_done);
+	pr_notice("Server responses: started %llu, done %llu, delta %llu\n",
+		  snap.server_responses_started, snap.server_responses_done,
+		  snap.server_responses_started - snap.server_responses_done);
+	pr_notice("Server response bytes: started %llu, bytes_done %llu, delta %llu\n",
+		  snap.server_response_bytes_started,
+		  snap.server_response_bytes_done,
+		  snap.server_response_bytes_started -
+		  snap.server_response_bytes_done);
 }

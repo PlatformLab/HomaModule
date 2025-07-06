@@ -765,6 +765,91 @@ TEST_F(homa_rpc, homa_rpc_reap__release_peer_ref)
 	EXPECT_EQ(0, atomic_read(&peer->refs));
 	EXPECT_EQ(NULL, crpc->peer);
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_rpc, homa_rpc_reap__metrics_for_client_response)
+{
+	struct homa_rpc *crpc, *crpc2;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, 4000, 98, 4000,	10000);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(1400, homa_metrics_per_cpu()->client_response_bytes_done);
+
+	homa_rpc_end(crpc);
+	homa_rpc_reap(&self->hsk, false);
+	EXPECT_EQ(10000, homa_metrics_per_cpu()->client_response_bytes_done);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->client_responses_done);
+
+	/* Second RPC has already completed, so no need to increment metrics. */
+	homa_metrics_per_cpu()->client_response_bytes_done = 0;
+	homa_metrics_per_cpu()->client_responses_done = 0;
+	crpc2 = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+				self->server_ip, 4000, 98, 4000, 1400);
+	ASSERT_NE(NULL, crpc2);
+	EXPECT_EQ(1400, homa_metrics_per_cpu()->client_response_bytes_done);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->client_responses_done);
+
+	homa_rpc_end(crpc2);
+	homa_rpc_reap(&self->hsk, false);
+	EXPECT_EQ(1400, homa_metrics_per_cpu()->client_response_bytes_done);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->client_responses_done);
+}
+TEST_F(homa_rpc, homa_rpc_reap__metrics_for_client_request)
+{
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, 4000, 98, 4000,	10000);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.granted = 1000;
+	homa_rpc_lock(crpc);
+	homa_xmit_data(crpc, false);
+	homa_rpc_unlock(crpc);
+	EXPECT_EQ(1400, homa_metrics_per_cpu()->client_request_bytes_done);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->client_requests_done);
+
+	homa_rpc_end(crpc);
+	homa_rpc_reap(&self->hsk, false);
+	EXPECT_EQ(4000, homa_metrics_per_cpu()->client_request_bytes_done);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->client_requests_done);
+}
+TEST_F(homa_rpc, homa_rpc_reap__metrics_for_server_request)
+{
+	struct homa_rpc *srpc;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, self->client_port,
+			       self->server_id, 5000, 10000);
+	ASSERT_NE(NULL, srpc);
+	EXPECT_EQ(1400, homa_metrics_per_cpu()->server_request_bytes_done);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->server_requests_done);
+
+	homa_rpc_end(srpc);
+	homa_rpc_reap(&self->hsk, false);
+	EXPECT_EQ(5000, homa_metrics_per_cpu()->server_request_bytes_done);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->server_requests_done);
+}
+TEST_F(homa_rpc, homa_rpc_reap__metrics_for_server_response)
+{
+	struct homa_rpc *srpc;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->client_port,
+			       self->server_id, 5000, 10000);
+	ASSERT_NE(NULL, srpc);
+	srpc->msgout.granted = 1000;
+	homa_rpc_lock(srpc);
+	homa_xmit_data(srpc, false);
+	homa_rpc_unlock(srpc);
+	EXPECT_EQ(1400, homa_metrics_per_cpu()->server_response_bytes_done);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->server_responses_done);
+
+	homa_rpc_end(srpc);
+	homa_rpc_reap(&self->hsk, false);
+	EXPECT_EQ(10000, homa_metrics_per_cpu()->server_response_bytes_done);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->server_responses_done);
+}
+#endif /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_reap__call_homa_sock_wakeup_wmem)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
