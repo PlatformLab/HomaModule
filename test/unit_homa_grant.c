@@ -567,9 +567,7 @@ TEST_F(homa_grant, homa_grant_manage_rpc__insert_and_bump_to_grantables)
 	EXPECT_EQ(850, homa_metrics_per_cpu()->grantable_rpcs_integral);
 	EXPECT_EQ(300, self->homa.grant->last_grantable_change);
 	EXPECT_EQ(-1, rpc1->msgin.rank);
-	EXPECT_EQ(200, rpc1->msgin.birth);
 	EXPECT_EQ(0, rpc2->msgin.rank);
-	EXPECT_EQ(300, rpc2->msgin.birth);
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("active[0]: id 102 ungranted 19000; "

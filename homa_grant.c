@@ -428,7 +428,6 @@ void homa_grant_manage_rpc(struct homa_rpc *rpc)
 		   grant->num_grantable_rpcs, rpc->id);
 	if (grant->num_grantable_rpcs > grant->max_grantable_rpcs)
 		grant->max_grantable_rpcs = grant->num_grantable_rpcs;
-	rpc->msgin.birth = time;
 
 	bumped = homa_grant_insert_active(rpc);
 	if (bumped)

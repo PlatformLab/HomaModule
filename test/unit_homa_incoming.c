@@ -135,8 +135,10 @@ TEST_F(homa_incoming, homa_message_in_init__basics)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, 99, 1000, 1000);
 
+	mock_clock = 200;
 	EXPECT_EQ(0, homa_message_in_init(crpc, 127, 100));
 	EXPECT_EQ(100, crpc->msgin.granted);
+	EXPECT_EQ(200, crpc->msgin.birth);
 	EXPECT_EQ(0, homa_message_in_init(crpc, 128, 500));
 	EXPECT_EQ(128, crpc->msgin.granted);
 	EXPECT_EQ(1, crpc->msgin.num_bpages);
