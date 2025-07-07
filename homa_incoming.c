@@ -555,8 +555,6 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 				goto discard;
 			}
 		} else {
-			tt_record1("homa_dispatch_pkts has rpc lock for id %d",
-				   rpc->id);
 			if (h->common.type == DATA ||
 #ifndef __STRIP__ /* See strip.py */
 			    h->common.type == GRANT ||

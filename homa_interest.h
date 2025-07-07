@@ -72,7 +72,6 @@ struct homa_interest {
  */
 static inline void homa_interest_unlink_shared(struct homa_interest *interest)
 {
-	tt_record("homa_interest_unlink_shared invoked");
 	if (!list_empty(&interest->links)) {
 		homa_sock_lock(interest->hsk);
 		list_del_init(&interest->links);
