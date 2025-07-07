@@ -20,7 +20,7 @@
  */
 void homa_interest_init_shared(struct homa_interest *interest,
 			       struct homa_sock *hsk)
-	__must_hold(&hsk->lock)
+	__must_hold(hsk->lock)
 {
 	interest->rpc = NULL;
 	atomic_set(&interest->ready, 0);
@@ -42,7 +42,7 @@ void homa_interest_init_shared(struct homa_interest *interest,
  */
 int homa_interest_init_private(struct homa_interest *interest,
 			       struct homa_rpc *rpc)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	if (rpc->private_interest)
 		return -EINVAL;
@@ -138,7 +138,7 @@ done:
  *            locked by the caller.
  */
 void homa_interest_notify_private(struct homa_rpc *rpc)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	if (rpc->private_interest) {
 		atomic_set_release(&rpc->private_interest->ready, 1);
@@ -157,7 +157,7 @@ void homa_interest_notify_private(struct homa_rpc *rpc)
  *               currently busy doing Homa transport work.
  */
 struct homa_interest *homa_choose_interest(struct homa_sock *hsk)
-	__must_hold(&hsk->lock)
+	__must_hold(hsk->lock)
 {
 	u64 busy_time = homa_clock() - hsk->homa->busy_cycles;
 	struct homa_interest *interest, *first;

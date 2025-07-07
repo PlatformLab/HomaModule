@@ -270,7 +270,7 @@ int homa_grant_priority(struct homa *homa, int rank)
  *         that @rpc displaced).
  */
 struct homa_rpc *homa_grant_insert_active(struct homa_rpc *rpc)
-	__must_hold(&rpc->hsk->homa->grant->lock)
+	__must_hold(rpc->hsk->homa->grant->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_rpc *other, *result;
@@ -350,7 +350,7 @@ struct homa_rpc *homa_grant_insert_active(struct homa_rpc *rpc)
  *          or grantable_peers.
  */
 void homa_grant_insert_grantable(struct homa_rpc *rpc)
-	__must_hold(&rpc->hsk->homa->grant->lock)
+	__must_hold(rpc->hsk->homa->grant->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_peer *peer = rpc->peer;
@@ -411,7 +411,7 @@ position_peer:
  * @rpc:    The RPC to add. Must be locked by caller.
  */
 void homa_grant_manage_rpc(struct homa_rpc *rpc)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_rpc *bumped;
@@ -445,7 +445,7 @@ void homa_grant_manage_rpc(struct homa_rpc *rpc)
  *           a grantable list.
  */
 void homa_grant_remove_grantable(struct homa_rpc *rpc)
-	__must_hold(&rpc->hsk->homa->grant->lock)
+	__must_hold(rpc->hsk->homa->grant->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_peer *peer = rpc->peer;
@@ -493,7 +493,7 @@ void homa_grant_remove_grantable(struct homa_rpc *rpc)
  */
 void homa_grant_remove_active(struct homa_rpc *rpc,
 			      struct homa_grant_candidates *cand)
-	__must_hold(&rpc->hsk->homa->grant->lock)
+	__must_hold(rpc->hsk->homa->grant->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_peer *peer;
@@ -538,7 +538,7 @@ void homa_grant_remove_active(struct homa_rpc *rpc,
  */
 void homa_grant_unmanage_rpc(struct homa_rpc *rpc,
 			     struct homa_grant_candidates *cand)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	u64 time = homa_clock();
@@ -570,7 +570,7 @@ void homa_grant_unmanage_rpc(struct homa_rpc *rpc,
  * @grant:  Grant information for a Homa transport.
  */
 void homa_grant_update_incoming(struct homa_rpc *rpc, struct homa_grant *grant)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	int incoming, delta;
 
@@ -596,7 +596,7 @@ void homa_grant_update_incoming(struct homa_rpc *rpc, struct homa_grant *grant)
  *         and no grant should be sent.
  */
 int homa_grant_update_granted(struct homa_rpc *rpc, struct homa_grant *grant)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	int received, new_grant_offset, incoming_delta, avl_incoming, rank;
 	int prev_stalled;
@@ -672,7 +672,7 @@ void homa_grant_send(struct homa_rpc *rpc, int priority)
  * @rpc:    RPC to check. Must be locked by the caller.
  */
 void homa_grant_check_rpc(struct homa_rpc *rpc)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	int needy_rank, stalled_rank, rank;
@@ -808,7 +808,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
  *              or INT_MAX if no RPCs were promoted.
  */
 int homa_grant_fix_order(struct homa_grant *grant)
-	__must_hold(&grant->lock)
+	__must_hold(grant->lock)
 {
 	struct homa_rpc *rpc, *other;
 	int result = INT_MAX;
@@ -1028,7 +1028,7 @@ void homa_grant_cand_check(struct homa_grant_candidates *cand,
  * @grant:    Grant management information.
  */
 void homa_grant_lock_slow(struct homa_grant *grant)
-	__acquires(&grant->lock)
+	__acquires(grant->lock)
 {
 	u64 start = homa_clock();
 

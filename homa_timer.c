@@ -25,7 +25,7 @@
  * @rpc:     RPC to check; must be locked by the caller.
  */
 void homa_timer_check_rpc(struct homa_rpc *rpc)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
 

@@ -294,7 +294,7 @@ struct homa_sock  *homa_socktab_start_scan(struct homa_socktab *socktab,
  * @hsk:     Socket to lock.
  */
 static inline void homa_sock_lock(struct homa_sock *hsk)
-	__acquires(&hsk->lock)
+	__acquires(hsk->lock)
 {
 	if (!spin_trylock_bh(&hsk->lock))
 		homa_sock_lock_slow(hsk);
@@ -305,7 +305,7 @@ static inline void homa_sock_lock(struct homa_sock *hsk)
  * @hsk:     Socket to lock.
  */
 static inline void homa_sock_lock(struct homa_sock *hsk)
-	__acquires(&hsk->lock)
+	__acquires(hsk->lock)
 {
 	spin_lock_bh(&hsk->lock);
 }
@@ -316,7 +316,7 @@ static inline void homa_sock_lock(struct homa_sock *hsk)
  * @hsk:   Socket to lock.
  */
 static inline void homa_sock_unlock(struct homa_sock *hsk)
-	__releases(&hsk->lock)
+	__releases(hsk->lock)
 {
 	spin_unlock_bh(&hsk->lock);
 }

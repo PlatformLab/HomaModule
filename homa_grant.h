@@ -288,7 +288,7 @@ static inline bool homa_grant_cand_empty(struct homa_grant_candidates *cand)
  * @grant:   Grant management info.
  */
 static inline void homa_grant_lock(struct homa_grant *grant)
-	__acquires(&grant->lock)
+	__acquires(grant->lock)
 {
 	if (!spin_trylock_bh(&grant->lock))
 		homa_grant_lock_slow(grant);
@@ -300,7 +300,7 @@ static inline void homa_grant_lock(struct homa_grant *grant)
  * @grant:   Grant management info.
  */
 static inline void homa_grant_unlock(struct homa_grant *grant)
-	__releases(&grant->grant_lock)
+	__releases(grant->grant_lock)
 {
 	INC_METRIC(grant_lock_cycles, homa_clock() - grant->lock_time);
 	spin_unlock_bh(&grant->lock);

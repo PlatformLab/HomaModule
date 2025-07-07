@@ -1071,7 +1071,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
  *          a negative errno.
  */
 int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_interest interest;
 #ifndef __STRIP__ /* See strip.py */

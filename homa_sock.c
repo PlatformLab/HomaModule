@@ -444,7 +444,7 @@ struct homa_sock *homa_sock_find(struct homa_net *hnet, u16 port)
  * @hsk:    socket to  lock.
  */
 void homa_sock_lock_slow(struct homa_sock *hsk)
-	__acquires(&hsk->lock)
+	__acquires(hsk->lock)
 {
 	u64 start = homa_clock();
 

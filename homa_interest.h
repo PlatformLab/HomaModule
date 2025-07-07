@@ -88,7 +88,7 @@ static inline void homa_interest_unlink_shared(struct homa_interest *interest)
  *               the caller.
  */
 static inline void homa_interest_unlink_private(struct homa_interest *interest)
-	__must_hold(&interest->rpc->bucket->lock)
+	__must_hold(interest->rpc->bucket->lock)
 {
 	if (interest == interest->rpc->private_interest)
 		interest->rpc->private_interest = NULL;

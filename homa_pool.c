@@ -287,7 +287,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
  * returned.
  */
 int homa_pool_alloc_msg(struct homa_rpc *rpc)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_pool *pool = rpc->hsk->buffer_pool;
 	int full_pages, partial, i, core_id;

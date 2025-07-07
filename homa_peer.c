@@ -220,7 +220,7 @@ void homa_peer_rcu_callback(struct rcu_head *head)
  * @peertab:    Check the dead peers here.
  */
 void homa_peer_free_dead(struct homa_peertab *peertab)
-	__must_hold(&peertab->lock)
+	__must_hold(peertab->lock)
 {
 	struct homa_peer *peer, *tmp;
 
@@ -689,7 +689,7 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
  * @peer:    Peer to  lock.
  */
 void homa_peer_lock_slow(struct homa_peer *peer)
-	__acquires(&peer->ack_lock)
+	__acquires(peer->ack_lock)
 {
 	u64 start = homa_clock();
 

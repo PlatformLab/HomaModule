@@ -321,7 +321,7 @@ void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
  * @peer:    Peer to lock.
  */
 static inline void homa_peer_lock(struct homa_peer *peer)
-	__acquires(&peer->ack_lock)
+	__acquires(peer->ack_lock)
 {
 	if (!spin_trylock_bh(&peer->ack_lock))
 		homa_peer_lock_slow(peer);
@@ -332,7 +332,7 @@ static inline void homa_peer_lock(struct homa_peer *peer)
  * @peer:    Peer to lock.
  */
 static inline void homa_peer_lock(struct homa_peer *peer)
-	__acquires(&peer->ack_lock)
+	__acquires(peer->ack_lock)
 {
 	spin_lock_bh(&peer->ack_lock);
 }
@@ -343,7 +343,7 @@ static inline void homa_peer_lock(struct homa_peer *peer)
  * @peer:   Peer to lock.
  */
 static inline void homa_peer_unlock(struct homa_peer *peer)
-	__releases(&peer->ack_lock)
+	__releases(peer->ack_lock)
 {
 	spin_unlock_bh(&peer->ack_lock);
 }

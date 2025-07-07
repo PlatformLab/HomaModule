@@ -195,7 +195,7 @@ static inline void homa_pacer_check(struct homa_pacer *pacer)
  * @pacer:    Pacer information for a Homa transport.
  */
 static inline void homa_pacer_throttle_lock(struct homa_pacer *pacer)
-	__acquires(&pacer->throttle_lock)
+	__acquires(pacer->throttle_lock)
 {
 	if (!spin_trylock_bh(&pacer->throttle_lock))
 		homa_pacer_throttle_lock_slow(pacer);
@@ -206,7 +206,7 @@ static inline void homa_pacer_throttle_lock(struct homa_pacer *pacer)
  * @pacer:    Pacer information for a Homa transport.
  */
 static inline void homa_pacer_throttle_lock(struct homa_pacer *pacer)
-	__acquires(&pacer->throttle_lock)
+	__acquires(pacer->throttle_lock)
 {
 	spin_lock_bh(&pacer->throttle_lock);
 }
@@ -217,7 +217,7 @@ static inline void homa_pacer_throttle_lock(struct homa_pacer *pacer)
  * @pacer:    Pacer information for a Homa transport.
  */
 static inline void homa_pacer_throttle_unlock(struct homa_pacer *pacer)
-	__releases(&pacer->throttle_lock)
+	__releases(pacer->throttle_lock)
 {
 	spin_unlock_bh(&pacer->throttle_lock);
 }

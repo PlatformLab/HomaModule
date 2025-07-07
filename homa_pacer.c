@@ -487,7 +487,7 @@ void homa_pacer_log_throttled(struct homa_pacer *pacer)
  * @pacer:    Pacer information for a Homa transport.
  */
 void homa_pacer_throttle_lock_slow(struct homa_pacer *pacer)
-	__acquires(&pacer->throttle_lock)
+	__acquires(pacer->throttle_lock)
 {
 	u64 start = homa_clock();
 
