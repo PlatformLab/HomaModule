@@ -839,24 +839,23 @@ int homa_grant_fix_order(struct homa_grant *grant)
 }
 
 /**
- * homa_grant_find_oldest() - Recompute the value of homa->oldest_rpc.
- * @homa:    Overall data about the Homa protocol implementation. The
- *           grant_lock must be held by the caller.
+ * homa_grant_find_oldest() - Recompute the value of homa->grant->oldest_rpc.
+ * @homa:    Overall data about the Homa protocol implementation.
  */
-void homa_grant_find_oldest(struct homa *homa)
+void homa_grant_find_oldest(struct homa_grant *grant)
+	__must_hold(grant->lock)
 {
-	int max_incoming = homa->grant->window + 2 * homa->grant->fifo_grant_increment;
+	int max_incoming = grant->window +  2 * grant->fifo_grant_increment;
 	struct homa_rpc *rpc, *oldest;
 	struct homa_peer *peer;
 	u64 oldest_birth;
+	int i;
 
 	oldest = NULL;
 	oldest_birth = ~0;
 
-	/* Find the oldest message that doesn't currently have an
-	 * outstanding "pity grant".
-	 */
-	list_for_each_entry(peer, &homa->grant->grantable_peers, grantable_links) {
+	/* Check the grantable lists. */
+	list_for_each_entry(peer, &grant->grantable_peers, grantable_links) {
 		list_for_each_entry(rpc, &peer->grantable_rpcs,
 				    grantable_links) {
 			int received, incoming;
@@ -869,7 +868,7 @@ void homa_grant_find_oldest(struct homa *homa)
 			incoming = rpc->msgin.granted - received;
 			if (incoming >= max_incoming) {
 				/* This RPC has been granted way more bytes
-				 * than by the grant window. This can only
+				 * than the grant window. This can only
 				 * happen for FIFO grants, and it means the
 				 * peer isn't responding to grants we've sent.
 				 * Pick a different "oldest" RPC.
@@ -880,7 +879,27 @@ void homa_grant_find_oldest(struct homa *homa)
 			oldest_birth = rpc->msgin.birth;
 		}
 	}
-	homa->grant->oldest_rpc = oldest;
+
+	/* Check the active RPCs. */
+	for (i = 0; i < grant->num_active_rpcs; i++) {
+		int received, incoming;
+
+		rpc = grant->active_rpcs[i];
+		if (rpc->msgin.birth >= oldest_birth)
+			continue;
+
+		received = (rpc->msgin.length
+				- rpc->msgin.bytes_remaining);
+		incoming = rpc->msgin.granted - received;
+		if (incoming >= max_incoming) {
+			continue;
+		}
+		oldest = rpc;
+		oldest_birth = rpc->msgin.birth;
+	}
+
+	/* Check active RPCs. */
+	grant->oldest_rpc = oldest;
 }
 
 #ifndef __STRIP__ /* See strip.py */

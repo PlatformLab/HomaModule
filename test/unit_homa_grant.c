@@ -129,12 +129,6 @@ static struct homa_rpc *test_rpc(FIXTURE_DATA(homa_grant) *self,
 	return rpc;
 }
 
-/* Add an RPC to the front of its peer's grantable_rpcs. */
-// static void add_to_peer(struct homa_rpc *rpc)
-// {
-// 	list_add_tail(&rpc->grantable_links, &rpc->peer->grantable_rpcs);
-// }
-
 /* Create a client RPC whose msgin is properly initialized with no
  * unscheduled bytes and no packets received.
  */
@@ -1323,48 +1317,87 @@ TEST_F(homa_grant, homa_grant_fix_order)
 	EXPECT_EQ(3, homa_metrics_per_cpu()->grant_priority_bumps);
 }
 
-#if 0
-TEST_F(homa_grant, homa_grant_find_oldest__basics)
+TEST_F(homa_grant, homa_grant_find_oldest__check_grantable_lists)
 {
-	mock_clock_tick = 10;
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 11, 40000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
-			self->server_ip, self->client_port, 33, 30000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 55, 20000, 100);
+	struct homa_rpc *rpc1, *rpc2, *rpc3;
 
-	unit_log_clear();
-	homa_grant_find_oldest(&self->homa);
-	EXPECT_NE(NULL, self->homa.oldest_rpc);
-	EXPECT_EQ(11, self->homa.oldest_rpc->id);
+	rpc1 = test_rpc(self, 100, self->server_ip, 40000);
+	rpc1->msgin.birth = 100;
+	rpc2 = test_rpc(self, 102, self->server_ip, 20000);
+	rpc2->msgin.birth = 200;
+	rpc3 = test_rpc(self, 104, self->server_ip + 1, 30000);
+	rpc3->msgin.birth = 300;
+	homa_grant_insert_grantable(rpc1);
+	homa_grant_insert_grantable(rpc2);
+	homa_grant_insert_grantable(rpc3);
+
+	homa_grant_find_oldest(self->homa.grant);
+	ASSERT_NE(NULL, self->homa.grant->oldest_rpc);
+	EXPECT_EQ(100, self->homa.grant->oldest_rpc->id);
 }
 TEST_F(homa_grant, homa_grant_find_oldest__fifo_grant_unused)
 {
-	struct homa_rpc *srpc1, *srpc2;
+	struct homa_rpc *rpc1, *rpc2, *rpc3;
 
-	mock_clock_tick = 10;
-	srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 11, 400000, 100);
-	srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
-			self->server_ip, self->client_port, 33, 300000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 55, 200000, 100);
-	ASSERT_NE(NULL, srpc1);
-	ASSERT_NE(NULL, srpc2);
-	srpc1->msgin.granted += + 2*self->homa.fifo_grant_increment;
+	rpc1 = test_rpc(self, 100, self->server_ip, 400000);
+	rpc1->msgin.birth = 100;
+	self->homa.grant->fifo_grant_increment = 10000;
+	rpc1->msgin.granted += 20000 + self->homa.grant->window;
+	rpc2 = test_rpc(self, 102, self->server_ip, 20000);
+	rpc2->msgin.birth = 200;
+	rpc3 = test_rpc(self, 104, self->server_ip + 1, 30000);
+	rpc3->msgin.birth = 300;
+	homa_grant_insert_grantable(rpc1);
+	homa_grant_insert_grantable(rpc2);
+	homa_grant_insert_grantable(rpc3);
 
-	unit_log_clear();
-	homa_grant_find_oldest(&self->homa);
-	EXPECT_NE(NULL, self->homa.oldest_rpc);
-	EXPECT_EQ(33, self->homa.oldest_rpc->id);
+	homa_grant_find_oldest(self->homa.grant);
+	ASSERT_NE(NULL, self->homa.grant->oldest_rpc);
+	EXPECT_EQ(102, self->homa.grant->oldest_rpc->id);
+}
+TEST_F(homa_grant, homa_grant_find_oldest__check_active_rpcs)
+{
+	struct homa_rpc *rpc1, *rpc2, *rpc3;
+
+	rpc1 = test_rpc_init(self, 100, self->server_ip, 40000);
+	rpc1->msgin.birth = 100;
+	rpc2 = test_rpc_init(self, 102, self->server_ip, 20000);
+	rpc2->msgin.birth = 200;
+	rpc3 = test_rpc(self, 104, self->server_ip + 1, 30000);
+	rpc3->msgin.birth = 300;
+	homa_grant_insert_grantable(rpc3);
+	EXPECT_EQ(2, self->homa.grant->num_active_rpcs);
+
+	homa_grant_find_oldest(self->homa.grant);
+	ASSERT_NE(NULL, self->homa.grant->oldest_rpc);
+	EXPECT_EQ(100, self->homa.grant->oldest_rpc->id);
+}
+TEST_F(homa_grant, homa_grant_find_oldest__active_rpc_has_unused_fifo_grant)
+{
+	struct homa_rpc *rpc1, *rpc2, *rpc3;
+
+	rpc1 = test_rpc_init(self, 100, self->server_ip, 400000);
+	rpc1->msgin.birth = 100;
+	self->homa.grant->fifo_grant_increment = 10000;
+	rpc1->msgin.granted += 20000 + self->homa.grant->window;
+	rpc2 = test_rpc_init(self, 102, self->server_ip, 20000);
+	rpc2->msgin.birth = 200;
+	rpc3 = test_rpc(self, 104, self->server_ip + 1, 30000);
+	rpc3->msgin.birth = 300;
+	homa_grant_insert_grantable(rpc3);
+	EXPECT_EQ(2, self->homa.grant->num_active_rpcs);
+
+	homa_grant_find_oldest(self->homa.grant);
+	ASSERT_NE(NULL, self->homa.grant->oldest_rpc);
+	EXPECT_EQ(102, self->homa.grant->oldest_rpc->id);
 }
 TEST_F(homa_grant, homa_grant_find_oldest__no_good_candidates)
 {
-	homa_grant_find_oldest(&self->homa);
-	EXPECT_EQ(NULL, self->homa.oldest_rpc);
+	self->homa.grant->oldest_rpc =
+			test_rpc(self, 100, self->server_ip, 40000);
+	homa_grant_find_oldest(self->homa.grant);
+	EXPECT_EQ(NULL, self->homa.grant->oldest_rpc);
 }
-#endif
 
 TEST_F(homa_grant, homa_grant_cand_add__basics)
 {

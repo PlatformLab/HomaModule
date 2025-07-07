@@ -236,7 +236,7 @@ void     homa_grant_check_rpc(struct homa_rpc *rpc);
 int      homa_grant_dointvec(const struct ctl_table *table, int write,
 			     void *buffer, size_t *lenp, loff_t *ppos);
 void     homa_grant_end_rpc(struct homa_rpc *rpc);
-void     homa_grant_find_oldest(struct homa *homa);
+void     homa_grant_find_oldest(struct homa_grant *grant);
 int      homa_grant_fix_order(struct homa_grant *grant);
 void     homa_grant_free(struct homa_grant *grant);
 void     homa_grant_init_rpc(struct homa_rpc *rpc, int unsched);
