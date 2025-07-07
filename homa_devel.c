@@ -217,11 +217,10 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 #ifndef __STRIP__ /* See strip.py */
 	case GRANT: {
 		struct homa_grant_hdr *h = (struct homa_grant_hdr *)header;
-		char *resend = (h->resend_all) ? ", resend_all" : "";
 
 		used = homa_snprintf(buffer, buf_len, used,
-				     ", offset %d, grant_prio %u%s",
-				     ntohl(h->offset), h->priority, resend);
+				     ", offset %d, grant_prio %u",
+				     ntohl(h->offset), h->priority);
 		break;
 	}
 #endif /* See strip.py */
@@ -349,10 +348,9 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 #ifndef __STRIP__ /* See strip.py */
 	case GRANT: {
 		struct homa_grant_hdr *h = (struct homa_grant_hdr *)header;
-		char *resend = h->resend_all ? " resend_all" : "";
 
-		snprintf(buffer, buf_len, "GRANT %d@%d%s", ntohl(h->offset),
-			 h->priority, resend);
+		snprintf(buffer, buf_len, "GRANT %d@%d", ntohl(h->offset),
+			 h->priority);
 		break;
 	}
 #endif /* See strip.py */

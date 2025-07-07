@@ -187,20 +187,6 @@ TEST_F(homa_grant, homa_grant_free__sysctls_not_registered)
 	EXPECT_STREQ("", unit_log_get());
 }
 
-TEST_F(homa_grant, homa_grant_init_rpc__no_bpages_available)
-{
-	struct homa_rpc *rpc;
-
-	rpc= unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-		              self->server_ip, self->server_port, 100, 1000,
-			      20000);
-
-	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
-	homa_message_in_init(rpc, 20000, 10000);
-	EXPECT_EQ(0, rpc->msgin.num_bpages);
-	EXPECT_EQ(-1, rpc->msgin.rank);
-	EXPECT_EQ(0, rpc->msgin.granted);
-}
 TEST_F(homa_grant, homa_grant_init_rpc__grants_not_needed)
 {
 	struct homa_rpc *rpc;
@@ -223,6 +209,20 @@ TEST_F(homa_grant, homa_grant_init_rpc__grants_needed)
 	homa_message_in_init(rpc, 5000, 2000);
 	EXPECT_EQ(0, rpc->msgin.rank);
 	EXPECT_EQ(2000, rpc->msgin.granted);
+}
+TEST_F(homa_grant, homa_grant_init_rpc__no_bpages_available)
+{
+	struct homa_rpc *rpc;
+
+	rpc= unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+		              self->server_ip, self->server_port, 100, 1000,
+			      20000);
+
+	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
+	homa_message_in_init(rpc, 20000, 10000);
+	EXPECT_EQ(0, rpc->msgin.num_bpages);
+	EXPECT_EQ(-1, rpc->msgin.rank);
+	EXPECT_EQ(10000, rpc->msgin.granted);
 }
 
 TEST_F(homa_grant, homa_grant_end_rpc__basics)
@@ -952,20 +952,6 @@ TEST_F(homa_grant, homa_grant_send__basics)
 	unit_log_clear();
 	homa_grant_send(rpc, 3);
 	EXPECT_SUBSTR("id 100, offset 2600, grant_prio 3", unit_log_get());
-}
-TEST_F(homa_grant, homa_grant_send__resend_all)
-{
-	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-
-	mock_xmit_log_verbose = 1;
-	rpc->msgin.granted = 9999;
-	rpc->msgin.rank = 0;
-	rpc->msgin.resend_all = 1;
-	unit_log_clear();
-	homa_grant_send(rpc, 1);
-	EXPECT_SUBSTR("id 100, offset 9999, grant_prio 1, resend_all",
-		      unit_log_get());
-	EXPECT_EQ(0, rpc->msgin.resend_all);
 }
 
 TEST_F(homa_grant, homa_grant_check_rpc__msgin_not_initialized)

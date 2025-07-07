@@ -337,7 +337,6 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	h.common.type = GRANT;
 	h.offset = htonl(11000);
 	h.priority = 3;
-	h.resend_all = 0;
 
 	/* First attempt: HOMA_GRO_FAST_GRANTS not enabled. */
 	self->homa.gro_policy = 0;

@@ -675,6 +675,29 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
 	EXPECT_EQ(2, pool->bpages_needed);
+	EXPECT_EQ(-1, crpc->msgin.rank);
+
+	/* Free the required pages. */
+	unit_log_clear();
+	atomic_set(&pool->free_bpages, 2);
+	homa_pool_check_waiting(pool);
+	EXPECT_EQ(2, crpc->msgin.num_bpages);
+	EXPECT_STREQ("xmit RESEND 0--2@6", unit_log_get());
+	EXPECT_EQ(0, crpc->msgin.rank);
+}
+TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_only_one_priority_level)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	struct homa_rpc *crpc;
+
+	/* Queue up an RPC that needs 2 bpages. */
+	atomic_set(&pool->free_bpages, 0);
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			&self->server_ip, 4000, 98, 1000, 2*HOMA_BPAGE_SIZE);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(0, crpc->msgin.num_bpages);
+	EXPECT_EQ(2, pool->bpages_needed);
+	self->homa.num_priorities = 1;
 
 	/* Free the required pages. */
 	unit_log_clear();
@@ -682,8 +705,28 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 	homa_pool_check_waiting(pool);
 	EXPECT_EQ(2, crpc->msgin.num_bpages);
 	EXPECT_EQ(0, crpc->msgin.rank);
-	EXPECT_STREQ("xmit GRANT 10000@0 resend_all",
-		     unit_log_get());
+	EXPECT_STREQ("xmit RESEND 0--2@0", unit_log_get());
+}
+TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_no_need_for_grants)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	struct homa_rpc *crpc;
+
+	atomic_set(&pool->free_bpages, 0);
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			&self->server_ip, 4000, 98, 1000, 5000);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(0, crpc->msgin.num_bpages);
+	EXPECT_EQ(1, pool->bpages_needed);
+	EXPECT_EQ(-1, crpc->msgin.rank);
+
+	/* Free the required pages. */
+	unit_log_clear();
+	atomic_set(&pool->free_bpages, 2);
+	homa_pool_check_waiting(pool);
+	EXPECT_EQ(1, crpc->msgin.num_bpages);
+	EXPECT_STREQ("xmit RESEND 0--2@6", unit_log_get());
+	EXPECT_EQ(-1, crpc->msgin.rank);
 }
 #endif /* See strip.py */
 TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)

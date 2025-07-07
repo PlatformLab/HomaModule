@@ -769,10 +769,6 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		   homa_local_id(h->common.sender_id), ntohl(h->offset),
 		   h->priority, new_offset - rpc->msgout.granted);
 	if (rpc->state == RPC_OUTGOING) {
-		if (h->resend_all)
-			homa_resend_data(rpc, 0, rpc->msgout.next_xmit_offset,
-					 h->priority);
-
 		if (new_offset > rpc->msgout.granted) {
 			rpc->msgout.granted = new_offset;
 			if (new_offset > rpc->msgout.length)

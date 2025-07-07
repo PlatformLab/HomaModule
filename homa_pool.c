@@ -527,10 +527,22 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 		homa_pool_alloc_msg(rpc);
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgin.num_bpages > 0) {
-			/* Allocation succeeded; "wake up" the RPC. */
-			rpc->msgin.resend_all = 1;
-			homa_grant_init_rpc(rpc, 0);
-			homa_grant_check_rpc(rpc);
+			struct homa_resend_hdr resend;
+
+			/* To "wake up" the RPC, request retransmission of
+			 * all the packets that were dropped. Use the
+			 * next-to-highest priority level to provide a priority
+			 * boost without interfering with the highest priority
+			 * traffic such as control packets.
+			 */
+			resend.offset = htonl(0);
+			resend.length = htonl(-1);
+			resend.priority = (rpc->hsk->homa->num_priorities < 2) ?
+					   0 :
+					   rpc->hsk->homa->num_priorities - 2;
+			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
+			if (rpc->msgin.granted < rpc->msgin.length)
+				homa_grant_manage_rpc(rpc);
 		}
 #endif /* See strip.py */
 		homa_rpc_unlock(rpc);

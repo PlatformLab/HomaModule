@@ -388,13 +388,6 @@ struct homa_grant_hdr {
 	 * with higher offset. Larger numbers indicate higher priorities.
 	 */
 	u8 priority;
-
-	/**
-	 * @resend_all: Nonzero means that the sender should resend all previously
-	 * transmitted data, starting at the beginning of the message (assume
-	 * that no packets have been successfully received).
-	 */
-	u8 resend_all;
 } __packed;
 #endif /* See strip.py */
 

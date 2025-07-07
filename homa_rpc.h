@@ -195,9 +195,6 @@ struct homa_message_in {
 	 * (i.e. first data packet was received for message).
 	 */
 	u64 birth;
-
-	/** @resend_all: if nonzero, set resend_all in the next grant packet. */
-	u8 resend_all;
 #endif /* See strip.py */
 };
 

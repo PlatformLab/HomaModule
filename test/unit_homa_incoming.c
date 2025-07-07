@@ -176,9 +176,6 @@ TEST_F(homa_incoming, homa_message_in_init__no_buffers_available)
 	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
 	EXPECT_EQ(0, homa_message_in_init(crpc, HOMA_BPAGE_SIZE*2, 10000));
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(0, crpc->msgin.granted);
-#endif /* See strip.py */
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_message_in_init__update_message_length_metrics)
@@ -1183,7 +1180,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = GRANT},
-			.offset = htonl(12600), .priority = 3, .resend_all = 0};
+			.offset = htonl(12600), .priority = 3};
 
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(10000, crpc->msgout.granted);
@@ -1574,8 +1571,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = GRANT},
 			.offset = htonl(11000),
-			.priority = 3,
-			.resend_all = 0};
+			.priority = 3};
 
 	ASSERT_NE(NULL, srpc);
 	homa_rpc_lock(srpc);
@@ -1604,39 +1600,6 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 
 	/* Must restore old state to avoid potential crashes. */
 	srpc->state = RPC_OUTGOING;
-}
-TEST_F(homa_incoming, homa_grant_pkt__reset)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id, 100, 20000);
-	struct homa_grant_hdr h = {{.sport = htons(srpc->dport),
-			.dport = htons(self->hsk.port),
-			.sender_id = cpu_to_be64(self->client_id),
-			.type = GRANT},
-			.offset = htonl(3000),
-			.priority = 2,
-			.resend_all = 1};
-
-	ASSERT_NE(NULL, srpc);
-	homa_rpc_lock(srpc);
-	homa_xmit_data(srpc, false);
-	homa_rpc_unlock(srpc);
-	unit_log_clear();
-	EXPECT_EQ(10000, srpc->msgout.granted);
-	EXPECT_EQ(10000, srpc->msgout.next_xmit_offset);
-
-	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &h.common, 0, 0));
-	EXPECT_EQ(10000, srpc->msgout.granted);
-	EXPECT_EQ(10000, srpc->msgout.next_xmit_offset);
-	EXPECT_STREQ("xmit DATA retrans 1400@0; "
-			"xmit DATA retrans 1400@1400; "
-			"xmit DATA retrans 1400@2800; "
-			"xmit DATA retrans 1400@4200; "
-			"xmit DATA retrans 1400@5600; "
-			"xmit DATA retrans 1400@7000; "
-			"xmit DATA retrans 1400@8400; "
-			"xmit DATA retrans 200@9800", unit_log_get());
 }
 TEST_F(homa_incoming, homa_grant_pkt__grant_past_end_of_message)
 {

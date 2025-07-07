@@ -146,9 +146,6 @@ void homa_grant_init_rpc(struct homa_rpc *rpc, int unsched)
 	__must_hold(rpc->bucket->lock)
 {
 	rpc->msgin.rank = -1;
-	if (rpc->msgin.num_bpages == 0)
-		/* Can't issue grants until buffer space becomes available. */
-		return;
 	if (unsched >= rpc->msgin.length) {
 		rpc->msgin.granted = rpc->msgin.length;
 		rpc->msgin.prev_grant = rpc->msgin.granted;
@@ -156,7 +153,11 @@ void homa_grant_init_rpc(struct homa_rpc *rpc, int unsched)
 	}
 	rpc->msgin.granted = unsched;
 	rpc->msgin.prev_grant = unsched;
-	homa_grant_manage_rpc(rpc);
+	if (rpc->msgin.num_bpages != 0)
+		/* Can't issue grants unless buffer space has been allocated
+		 * for the message.
+		 */
+		homa_grant_manage_rpc(rpc);
 }
 
 /**
@@ -656,9 +657,6 @@ void homa_grant_send(struct homa_rpc *rpc, int priority)
 
 	grant.offset = htonl(rpc->msgin.granted);
 	grant.priority = priority;
-	grant.resend_all = rpc->msgin.resend_all;
-	if (grant.resend_all)
-		rpc->msgin.resend_all = 0;
 	tt_record4("sending grant for id %d, offset %d, priority %d, increment %d",
 		   rpc->id, rpc->msgin.granted, grant.priority,
 		   rpc->msgin.granted - rpc->msgin.prev_grant);

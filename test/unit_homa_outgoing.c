@@ -116,7 +116,6 @@ TEST_F(homa_outgoing, set_priority__priority_mapping)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
-	h.resend_all = 0;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	self->homa.priority_map[7] = 3;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
@@ -725,7 +724,6 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
-	h.resend_all = 0;
 	mock_xmit_log_verbose = 1;
 	mock_ip_queue_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
@@ -749,7 +747,6 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
-	h.resend_all = 0;
 	mock_xmit_log_verbose = 1;
 	mock_ip6_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
@@ -763,8 +760,7 @@ TEST_F(homa_outgoing, homa_xmit_unknown)
 			.dport = htons(self->server_port),
 			.sender_id = cpu_to_be64(99990),
 			.type = GRANT},
-			.offset = htonl(11200),
-			.resend_all = 0};
+			.offset = htonl(11200)};
 	struct sk_buff *skb;
 
 	mock_xmit_log_verbose = 1;
