@@ -226,6 +226,8 @@ struct homa_grant_candidates {
 
 struct homa_grant
 	*homa_grant_alloc(void);
+void     homa_grant_adjust_peer(struct homa_grant *grant,
+				struct homa_peer *peer);
 void     homa_grant_cand_add(struct homa_grant_candidates *cand,
 			     struct homa_rpc *rpc);
 void     homa_grant_cand_check(struct homa_grant_candidates *cand,

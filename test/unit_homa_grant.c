@@ -129,6 +129,12 @@ static struct homa_rpc *test_rpc(FIXTURE_DATA(homa_grant) *self,
 	return rpc;
 }
 
+/* Add an RPC to the front of its peer's grantable_rpcs. */
+// static void add_to_peer(struct homa_rpc *rpc)
+// {
+// 	list_add_tail(&rpc->grantable_links, &rpc->peer->grantable_rpcs);
+// }
+
 /* Create a client RPC whose msgin is properly initialized with no
  * unscheduled bytes and no packets received.
  */
@@ -457,6 +463,134 @@ TEST_F(homa_grant, homa_grant_insert_active__insert_in_middle_no_bump)
 	EXPECT_EQ(4, rpc1->peer->active_rpcs);
 }
 
+TEST_F(homa_grant, homa_grant_adjust_peer__remove_peer_from_grantable_peers)
+{
+	struct homa_rpc *rpc = test_rpc(self, 200, self->server_ip, 100000);
+	struct homa_peer *peer = rpc->peer;
+
+	list_add_tail(&peer->grantable_links,
+		      &self->homa.grant->grantable_peers);
+	EXPECT_EQ(1, list_empty(&peer->grantable_rpcs));
+	EXPECT_EQ(0, list_empty(&peer->grantable_links));
+	EXPECT_EQ(0, list_empty(&self->homa.grant->grantable_peers));
+
+	homa_grant_adjust_peer(self->homa.grant, peer);
+	EXPECT_EQ(1, list_empty(&peer->grantable_links));
+	EXPECT_EQ(1, list_empty(&self->homa.grant->grantable_peers));
+}
+TEST_F(homa_grant, homa_grant_adjust_peer__insert_in_grantable_peers)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 70000);
+
+	homa_grant_insert_grantable(test_rpc(self, 200, self->server_ip + 1,
+					     100000));
+	homa_grant_insert_grantable(test_rpc(self, 300, self->server_ip + 2,
+					     50000));
+	list_add_tail(&rpc->grantable_links, &rpc->peer->grantable_rpcs);
+	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("peer 3.2.3.4: id 300 ungranted 49000; "
+		     "peer 1.2.3.4: id 100 ungranted 69000; "
+		     "peer 2.2.3.4: id 200 ungranted 99000",
+		     unit_log_get());
+}
+TEST_F(homa_grant, homa_grant_adjust_peer__append_to_grantable_peers)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 120000);
+
+	homa_grant_insert_grantable(test_rpc(self, 200, self->server_ip + 1,
+					     100000));
+	homa_grant_insert_grantable(test_rpc(self, 300, self->server_ip + 2,
+					     50000));
+	list_add_tail(&rpc->grantable_links, &rpc->peer->grantable_rpcs);
+	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("peer 3.2.3.4: id 300 ungranted 49000; "
+		     "peer 2.2.3.4: id 200 ungranted 99000; "
+		     "peer 1.2.3.4: id 100 ungranted 119000",
+		     unit_log_get());
+}
+TEST_F(homa_grant, homa_grant_adjust_peer__move_peer_upwards)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 120000);
+
+	homa_grant_insert_grantable(rpc);
+	homa_grant_insert_grantable(test_rpc(self, 200, self->server_ip + 1,
+					     100000));
+	homa_grant_insert_grantable(test_rpc(self, 300, self->server_ip + 2,
+					     50000));
+	homa_grant_insert_grantable(test_rpc(self, 400, self->server_ip + 3,
+					     80000));
+	rpc->msgin.granted += 45000;
+	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("peer 3.2.3.4: id 300 ungranted 49000; "
+		     "peer 1.2.3.4: id 100 ungranted 74000; "
+		     "peer 4.2.3.4: id 400 ungranted 79000; "
+		     "peer 2.2.3.4: id 200 ungranted 99000",
+		     unit_log_get());
+}
+TEST_F(homa_grant, homa_grant_adjust_peer__move_peer_to_front)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 100000);
+
+	homa_grant_insert_grantable(rpc);
+	homa_grant_insert_grantable(test_rpc(self, 200, self->server_ip + 1,
+					     50000));
+	rpc->msgin.granted += 55000;
+	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("peer 1.2.3.4: id 100 ungranted 44000; "
+		     "peer 2.2.3.4: id 200 ungranted 49000",
+		     unit_log_get());
+}
+TEST_F(homa_grant, homa_grant_adjust_peer__move_peer_downwards)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 40000);
+
+	homa_grant_insert_grantable(rpc);
+	homa_grant_insert_grantable(test_rpc(self, 200, self->server_ip + 1,
+					     100000));
+	homa_grant_insert_grantable(test_rpc(self, 300, self->server_ip + 2,
+					     50000));
+	homa_grant_insert_grantable(test_rpc(self, 400, self->server_ip + 3,
+					     80000));
+	rpc->msgin.length += 41000;
+	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("peer 3.2.3.4: id 300 ungranted 49000; "
+		     "peer 4.2.3.4: id 400 ungranted 79000; "
+		     "peer 1.2.3.4: id 100 ungranted 80000; "
+		     "peer 2.2.3.4: id 200 ungranted 99000",
+		     unit_log_get());
+}
+TEST_F(homa_grant, homa_grant_adjust_peer__move_peer_to_back)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 50000);
+
+	homa_grant_insert_grantable(rpc);
+	homa_grant_insert_grantable(test_rpc(self, 200, self->server_ip + 1,
+					     100000));
+	rpc->msgin.length += 55000;
+	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("peer 2.2.3.4: id 200 ungranted 99000; "
+		     "peer 1.2.3.4: id 100 ungranted 104000",
+		     unit_log_get());
+}
+
 TEST_F(homa_grant, homa_grant_insert_grantable__insert_in_peer_list)
 {
 	homa_grant_insert_grantable(test_rpc(self, 100, self->server_ip,
@@ -492,42 +626,6 @@ TEST_F(homa_grant, homa_grant_insert_grantable__insert_peer_in_grantable_peers)
 		     "peer 4.2.3.4: id 500 ungranted 69000; "
 		     "peer 1.2.3.4: id 200 ungranted 99000; "
 		     "peer 3.2.3.4: id 400 ungranted 119000",
-		     unit_log_get());
-}
-TEST_F(homa_grant, homa_grant_insert_grantable__move_peer_in_grantable_peers)
-{
-	homa_grant_insert_grantable(test_rpc(self, 200, self->server_ip,
-					     20000));
-	homa_grant_insert_grantable(test_rpc(self, 300, self->server_ip+1,
-					     30000));
-	homa_grant_insert_grantable(test_rpc(self, 400, self->server_ip+2,
-					     40000));
-	homa_grant_insert_grantable(test_rpc(self, 500, self->server_ip+3,
-					     50000));
-
-	/* This insertion moves the peer upwards in the list. */
-	homa_grant_insert_grantable(test_rpc(self, 600, self->server_ip+3,
-					     25000));
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("peer 1.2.3.4: id 200 ungranted 19000; "
-		     "peer 4.2.3.4: id 600 ungranted 24000 "
-		     "id 500 ungranted 49000; "
-		     "peer 2.2.3.4: id 300 ungranted 29000; "
-		     "peer 3.2.3.4: id 400 ungranted 39000",
-		     unit_log_get());
-
-	/* This insertion moves the peer to the front of the list. */
-	homa_grant_insert_grantable(test_rpc(self, 700, self->server_ip+3,
-					     10000));
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("peer 4.2.3.4: id 700 ungranted 9000 "
-		     "id 600 ungranted 24000 "
-		     "id 500 ungranted 49000; "
-		     "peer 1.2.3.4: id 200 ungranted 19000; "
-		     "peer 2.2.3.4: id 300 ungranted 29000; "
-		     "peer 3.2.3.4: id 400 ungranted 39000",
 		     unit_log_get());
 }
 
@@ -609,7 +707,7 @@ TEST_F(homa_grant, homa_grant_remove_grantable__not_first_in_peer_list)
 		     "peer 2.2.3.4: id 400 ungranted 24000",
 		     unit_log_get());
 }
-TEST_F(homa_grant, homa_grant_remove_grantable__only_entry_in_peer_list)
+TEST_F(homa_grant, homa_grant_remove_grantable__remove_peer_from_grantable_peers)
 {
 	struct homa_rpc *rpc = test_rpc(self, 200, self->server_ip, 30000);
 
@@ -631,53 +729,6 @@ TEST_F(homa_grant, homa_grant_remove_grantable__only_entry_in_peer_list)
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("peer 3.2.3.4: id 400 ungranted 19000; "
 		     "peer 2.2.3.4: id 300 ungranted 39000",
-		     unit_log_get());
-}
-TEST_F(homa_grant, homa_grant_remove_grantable__reposition_peer_in_grantable_peers)
-{
-	struct homa_rpc *rpc1 = test_rpc(self, 200, self->server_ip, 20000);
-	struct homa_rpc *rpc2 = test_rpc(self, 202, self->server_ip, 35000);
-
-	homa_grant_insert_grantable(rpc1);
-	homa_grant_insert_grantable(rpc2);
-	homa_grant_insert_grantable(test_rpc(self, 204, self->server_ip,
-					     60000));
-	homa_grant_insert_grantable(test_rpc(self, 300, self->server_ip+1,
-					     30000));
-	homa_grant_insert_grantable(test_rpc(self, 400, self->server_ip+2,
-					     40000));
-	homa_grant_insert_grantable(test_rpc(self, 500, self->server_ip+3,
-					     50000));
-
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("peer 1.2.3.4: id 200 ungranted 19000 "
-		     "id 202 ungranted 34000 "
-		     "id 204 ungranted 59000; "
-		     "peer 2.2.3.4: id 300 ungranted 29000; "
-		     "peer 3.2.3.4: id 400 ungranted 39000; "
-		     "peer 4.2.3.4: id 500 ungranted 49000",
-		     unit_log_get());
-
-	/* First removal moves peer down, but not to end of list. */
-	homa_grant_remove_grantable(rpc1);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("peer 2.2.3.4: id 300 ungranted 29000; "
-		     "peer 1.2.3.4: id 202 ungranted 34000 "
-		     "id 204 ungranted 59000; "
-		     "peer 3.2.3.4: id 400 ungranted 39000; "
-		     "peer 4.2.3.4: id 500 ungranted 49000",
-		     unit_log_get());
-
-	/* Second removal moves peer to end of list. */
-	homa_grant_remove_grantable(rpc2);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("peer 2.2.3.4: id 300 ungranted 29000; "
-		     "peer 3.2.3.4: id 400 ungranted 39000; "
-		     "peer 4.2.3.4: id 500 ungranted 49000; "
-		     "peer 1.2.3.4: id 204 ungranted 59000",
 		     unit_log_get());
 }
 

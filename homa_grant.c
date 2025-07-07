@@ -344,6 +344,72 @@ struct homa_rpc *homa_grant_insert_active(struct homa_rpc *rpc)
 }
 
 /**
+ * homa_grant_adjust_peer() - This function is invoked when the contents
+ * of a peer's grantable_rpcs list has changed, so it's possible that
+ * the position of this peer in grantable_peers is no longer correct. The
+ * function adjusts the position of peer in grantable_peers (which could
+ * include adding or removing the peer to/from grantable_peers).
+ * @grant:         Overall information about grants
+ * @peer:          Peer to adjust
+ */
+void homa_grant_adjust_peer(struct homa_grant *grant, struct homa_peer *peer)
+	__must_hold(&grant->lock)
+{
+	struct homa_rpc *head, *other_rpc;
+	struct homa_peer *other_peer;
+
+	if (list_empty(&peer->grantable_rpcs)) {
+		list_del_init(&peer->grantable_links);
+		return;
+	}
+
+	head = list_first_entry(&peer->grantable_rpcs,
+				struct homa_rpc, grantable_links);
+	if (list_empty(&peer->grantable_links)) {
+		/* Must add peer to grantable_peers. */
+		list_for_each_entry(other_peer, &grant->grantable_peers,
+				    grantable_links) {
+			other_rpc = list_first_entry(&other_peer->grantable_rpcs,
+						     struct homa_rpc,
+						     grantable_links);
+			if (homa_grant_outranks(head, other_rpc)) {
+				list_add_tail(&peer->grantable_links,
+					      &other_peer->grantable_links);
+				return;
+			}
+		}
+		list_add_tail(&peer->grantable_links, &grant->grantable_peers);
+		return;
+	}
+
+	/* The peer is on grantable_peers; this loop moves it upward, if
+	 * needed.
+	 */
+	while (peer != list_first_entry(&grant->grantable_peers,
+					struct homa_peer, grantable_links)) {
+		other_peer = list_prev_entry(peer, grantable_links);
+		other_rpc = list_first_entry(&other_peer->grantable_rpcs,
+					     struct homa_rpc, grantable_links);
+		if (!homa_grant_outranks(head, other_rpc))
+			break;
+		__list_del_entry(&other_peer->grantable_links);
+		list_add(&other_peer->grantable_links, &peer->grantable_links);
+	}
+
+	/* This loop moves the peer downward in grantable_peers, if needed. */
+	while (peer != list_last_entry(&grant->grantable_peers,
+				       struct homa_peer, grantable_links)) {
+		other_peer = list_next_entry(peer, grantable_links);
+		other_rpc = list_first_entry(&other_peer->grantable_rpcs,
+					     struct homa_rpc, grantable_links);
+		if (!homa_grant_outranks(other_rpc, head))
+			break;
+		__list_del_entry(&peer->grantable_links);
+		list_add(&peer->grantable_links, &other_peer->grantable_links);
+	}
+}
+
+/**
  * homa_grant_insert_grantable() - Insert an RPC into the grantable list
  * for its peer.
  * @rpc:    The RPC to add. Must not currently be in either active_rpcs
@@ -354,7 +420,6 @@ void homa_grant_insert_grantable(struct homa_rpc *rpc)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_peer *peer = rpc->peer;
-	struct homa_peer *other_peer;
 	struct homa_rpc *other;
 
 	/* Insert @rpc in the right place in the grantable_rpcs list for
@@ -370,38 +435,7 @@ void homa_grant_insert_grantable(struct homa_rpc *rpc)
 	list_add_tail(&rpc->grantable_links, &peer->grantable_rpcs);
 
 position_peer:
-	/* At this point rpc is positioned correctly on the list for its peer.
-	 * However, the peer may need to be added to, or moved upward in,
-	 * grantable_peers.
-	 */
-	if (list_empty(&peer->grantable_links)) {
-		/* Must add peer to grantable_peers. */
-		list_for_each_entry(other_peer, &grant->grantable_peers,
-				    grantable_links) {
-			other = list_first_entry(&other_peer->grantable_rpcs,
-						 struct homa_rpc,
-						 grantable_links);
-			if (homa_grant_outranks(rpc, other)) {
-				list_add_tail(&peer->grantable_links,
-					      &other_peer->grantable_links);
-				return;
-			}
-		}
-		list_add_tail(&peer->grantable_links, &grant->grantable_peers);
-		return;
-	}
-	/* The peer is on grantable_peers, but it may need to move upward. */
-	while (peer != list_first_entry(&grant->grantable_peers,
-					struct homa_peer, grantable_links)) {
-		struct homa_peer *prev_peer = list_prev_entry(peer,
-							      grantable_links);
-		other = list_first_entry(&prev_peer->grantable_rpcs,
-					 struct homa_rpc, grantable_links);
-		if (!homa_grant_outranks(rpc, other))
-			break;
-		__list_del_entry(&prev_peer->grantable_links);
-		list_add(&prev_peer->grantable_links, &peer->grantable_links);
-	}
+	homa_grant_adjust_peer(grant, peer);
 }
 
 /**
@@ -447,42 +481,14 @@ void homa_grant_manage_rpc(struct homa_rpc *rpc)
 void homa_grant_remove_grantable(struct homa_rpc *rpc)
 	__must_hold(rpc->hsk->homa->grant->lock)
 {
-	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_peer *peer = rpc->peer;
-	struct homa_rpc *other;
 	struct homa_rpc *head;
 
 	head =  list_first_entry(&peer->grantable_rpcs,
 				 struct homa_rpc, grantable_links);
 	list_del_init(&rpc->grantable_links);
-	if (rpc != head)
-		return;
-
-	/* The removed RPC was at the front of the peer's list. This means
-	 * we may have to adjust the position of the peer in the peer list,
-	 * or perhaps remove it.
-	 */
-	if (list_empty(&peer->grantable_rpcs)) {
-		list_del_init(&peer->grantable_links);
-		return;
-	}
-
-	/* The peer may have to move down in Homa's list (its highest priority
-	 * may now be lower).
-	 */
-	head = list_first_entry(&peer->grantable_rpcs,
-				struct homa_rpc, grantable_links);
-	while (peer != list_last_entry(&grant->grantable_peers,
-				       struct homa_peer, grantable_links)) {
-		struct homa_peer *next_peer = list_next_entry(peer,
-							      grantable_links);
-		other = list_first_entry(&next_peer->grantable_rpcs,
-					 struct homa_rpc, grantable_links);
-		if (!homa_grant_outranks(other, head))
-			break;
-		__list_del_entry(&peer->grantable_links);
-		list_add(&peer->grantable_links, &next_peer->grantable_links);
-	}
+	if (rpc == head)
+		homa_grant_adjust_peer(rpc->hsk->homa->grant, peer);
 }
 
 /**
