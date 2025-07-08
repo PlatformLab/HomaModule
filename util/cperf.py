@@ -565,14 +565,15 @@ def do_ssh(command, nodes):
     for id in nodes:
         do_subprocess(["ssh", "node%d" % id] + command)
 
-def get_sysctl_parameter(name):
+def get_sysctl_parameter(name, node):
     """
     Retrieve the value of a particular system parameter using sysctl on
-    the current host, and return the value as a string.
+    the given node, and return the value as a string.
 
     name:      name of the desired configuration parameter
+    node:      node number on which the value should be retrieved
     """
-    output = do_subprocess(["sysctl", name])
+    output = do_subprocess(["ssh", "node%d" % node, "sysctl", name])
     match = re.match('.*= (.*)', output)
     if not match:
          raise Exception("Couldn't parse sysctl output: %s" % output)

@@ -51,7 +51,8 @@ if options.workload != "":
 
 # First, run all of the experiments
 if not options.plot_only:
-    congestion = get_sysctl_parameter("net.ipv4.tcp_congestion_control")
+    congestion = get_sysctl_parameter("net.ipv4.tcp_congestion_control",
+            options.nodes[0])
     for workload, bw, seconds in load_info:
         options.workload = workload
         options.gbps = bw * bw_multiplier

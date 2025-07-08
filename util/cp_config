@@ -283,19 +283,6 @@ if not options.plot_only:
                             'label': '%.1f MB' % (mb),
                         'switch_buffer': mb})
 
-            # Run unloaded experiment
-            o = copy.deepcopy(options)
-            o.protocol = 'homa'
-            o.workload = workload
-            o.seconds = seconds
-            o.client_ports = 1
-            o.client_max = 1
-            o.server_ports = 1
-            o.servers = options.nodes[1:2]
-            o.unloaded = 500
-            start_servers(o.servers, o)
-            run_experiment("unloaded_" + workload, o.clients[0:1], o)
-
             for spec in specs:
                 o = copy.deepcopy(options)
                 o.workload = workload
@@ -307,7 +294,8 @@ if not options.plot_only:
                         name = spec['sysctl'][i]
                         value = spec['sysctl'][i+1]
                         if name not in old_values:
-                            old_values[name] = get_sysctl_parameter(name)
+                            old_values[name] = get_sysctl_parameter(name,
+                                    options.nodes[0])
                         log("Setting %s = %s" % (name, value))
                         set_sysctl_parameter(name, value, options.nodes)
                 if 'options' in spec:
@@ -325,7 +313,7 @@ if not options.plot_only:
                     do_ssh(["config", "mtu", str(spec['mtu'])], options.nodes)
                 if 'lb' in spec:
                     do_ssh(["config", "lb", spec['lb']], options.nodes)
-                start_servers(o.servers, o)
+                start_servers(exp_name, o.servers, o)
                 run_experiment(exp_name, o.clients, o)
     except Exception as e:
         log(traceback.format_exc())
@@ -344,8 +332,6 @@ if switch:
 
 # Generate plots and reports
 for workload, bw, seconds in load_info:
-    set_unloaded("unloaded_" + workload)
-
     # Generate slowdown plot.
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
@@ -375,8 +361,6 @@ for workload, bw, seconds in load_info:
         exp_name = "%s_%s" % (spec['exp_name'], workload)
         x, y = get_short_cdf(exp_name)
         plt.plot(x, y, label=spec['label'])
-    x, y = get_short_cdf("unloaded_" + workload)
-    plt.plot(x, y, label="Homa best case")
 
     plt.legend(loc="upper right", prop={'size': 9})
     plt.savefig("%s/reports/%s_%s_cdfs.pdf" %
