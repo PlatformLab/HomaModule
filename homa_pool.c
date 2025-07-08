@@ -537,9 +537,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			 */
 			resend.offset = htonl(0);
 			resend.length = htonl(-1);
-			resend.priority = (rpc->hsk->homa->num_priorities < 2) ?
-					   0 :
-					   rpc->hsk->homa->num_priorities - 2;
+			resend.priority = homa_high_priority(rpc->hsk->homa);
 			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 			if (rpc->msgin.granted < rpc->msgin.length)
 				homa_grant_manage_rpc(rpc);

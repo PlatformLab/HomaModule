@@ -905,6 +905,20 @@ static inline u64 homa_usecs_to_cycles(u64 usecs)
 #endif /* __UNIT_TEST__ */
 }
 
+/**
+ * homa_high_priority() - Return the next-to-highest available priority
+ * level.  Used in situations where we want to boost the priority of
+ * something but don't want to interfere with the highest priority packets
+ * such as control packets.
+ * @homa:  Overall information about the Homa protocol.
+ * Return: See above.
+ *
+ */
+static inline int homa_high_priority(struct homa *homa)
+{
+	return (homa->num_priorities <= 2) ? 0 : homa->num_priorities - 2;
+}
+
 /* Homa Locking Strategy:
  *
  * (Note: this documentation is referenced in several other places in the
