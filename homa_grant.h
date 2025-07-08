@@ -20,6 +20,9 @@
  * stored in each struct homa.
  */
 struct homa_grant {
+	/** @homa: The struct homa that this object belongs to. */
+	struct homa *homa;
+
 	/**
 	 * @total_incoming: the total number of bytes that we expect to receive
 	 * (across all messages) even if we don't send out any more grants
@@ -162,23 +165,22 @@ struct homa_grant {
 	int fifo_fraction;
 
 	/**
-	 * @grant_nonfifo: How many bytes should be granted using the
-	 * normal priority system between grants to the oldest message.
+	 * @fifo_grant_interval: The time (in homa_clock units) between
+	 * successive FIFO grants.
 	 */
-	int grant_nonfifo;
+	u64 fifo_grant_interval;
 
 	/**
-	 * @grant_nonfifo_left: Counts down bytes granted using the normal
-	 * priority mechanism. When this reaches zero, it's time to grant
-	 * to the oldest message.
+	 * @fifo_grant_time: The time when we should issue the next FIFO
+	 * grant.
 	 */
-	int grant_nonfifo_left;
+	u64 fifo_grant_time;
 
 	/**
 	 * @oldest_rpc: The RPC with incoming data whose start_cycles is
 	 * farthest in the past). NULL means either there are no incoming
-	 * RPCs or the oldest needs to be recomputed. Must hold grant_lock
-	 * to update.
+	 * RPCs or the oldest needs to be recomputed. There is always a
+	 * reference taken for this RPC. Must hold grant_lock to update.
 	 */
 	struct homa_rpc *oldest_rpc;
 
@@ -225,13 +227,14 @@ struct homa_grant_candidates {
 };
 
 struct homa_grant
-	*homa_grant_alloc(void);
+	*homa_grant_alloc(struct homa *homa);
 void     homa_grant_adjust_peer(struct homa_grant *grant,
 				struct homa_peer *peer);
 void     homa_grant_cand_add(struct homa_grant_candidates *cand,
 			     struct homa_rpc *rpc);
 void     homa_grant_cand_check(struct homa_grant_candidates *cand,
 			       struct homa_grant *grant);
+void     homa_grant_check_fifo(struct homa_grant *grant);
 void     homa_grant_check_rpc(struct homa_rpc *rpc);
 int      homa_grant_dointvec(const struct ctl_table *table, int write,
 			     void *buffer, size_t *lenp, loff_t *ppos);
@@ -250,6 +253,7 @@ int      homa_grant_outranks(struct homa_rpc *rpc1,
 			     struct homa_rpc *rpc2);
 void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 int      homa_grant_priority(struct homa *homa, int rank);
+void     homa_grant_promote_rpc(struct homa_grant *grant, struct homa_rpc *rpc);
 void     homa_grant_remove_active(struct homa_rpc *rpc,
 				  struct homa_grant_candidates *cand);
 void     homa_grant_remove_grantable(struct homa_rpc *rpc);

@@ -108,6 +108,11 @@ struct homa {
 	 */
 	atomic64_t next_outgoing_id;
 
+	/**
+	 * @pacer:  Information related to the pacer; managed by homa_pacer.c.
+	 */
+	struct homa_pacer *pacer;
+
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @grant: Contains information used by homa_grant.c to manage
@@ -115,11 +120,6 @@ struct homa {
 	 */
 	struct homa_grant *grant;
 #endif /* See strip.py */
-
-	/**
-	 * @pacer:  Information related to the pacer; managed by homa_pacer.c.
-	 */
-	struct homa_pacer *pacer;
 
 	/**
 	 * @peertab: Info about all the other hosts we have communicated with;

@@ -9,10 +9,6 @@
 struct homa;
 struct homa_pool;
 
-#ifndef __STRIP__ /* See strip.py */
-void     homa_sock_lock_slow(struct homa_sock *hsk);
-#endif /* See strip.py */
-
 /* Number of hash buckets in a homa_socktab. Must be a power of 2. */
 #define HOMA_SOCKTAB_BUCKET_BITS 10
 #define HOMA_SOCKTAB_BUCKETS BIT(HOMA_SOCKTAB_BUCKET_BITS)
@@ -270,6 +266,7 @@ struct homa_v6_sock {
 #ifndef __STRIP__ /* See strip.py */
 void               homa_bucket_lock_slow(struct homa_rpc_bucket *bucket,
 					 u64 id);
+void               homa_sock_lock_slow(struct homa_sock *hsk);
 #endif /* See strip.py */
 int                homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 				  u16 port);

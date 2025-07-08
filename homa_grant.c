@@ -6,6 +6,7 @@
 
 #include "homa_impl.h"
 #include "homa_grant.h"
+#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #include "homa_wire.h"
@@ -79,9 +80,10 @@ static struct ctl_table grant_ctl_table[] = {
 /**
  * homa_grant_alloc() - Allocate and initialize a new grant object, which
  * will hold grant management information for @homa.
+ * @homa:   The struct homa that the new object is associated with.
  * Return:  A pointer to the new struct grant, or a negative errno.
  */
-struct homa_grant *homa_grant_alloc(void)
+struct homa_grant *homa_grant_alloc(struct homa *homa)
 {
 	struct homa_grant *grant;
 	int err;
@@ -89,6 +91,7 @@ struct homa_grant *homa_grant_alloc(void)
 	grant = kzalloc(sizeof(*grant), GFP_KERNEL);
 	if (!grant)
 		return ERR_PTR(-ENOMEM);
+	grant->homa = homa;
 	atomic_set(&grant->stalled_rank, INT_MAX);
 	grant->max_incoming = 400000;
 	spin_lock_init(&grant->lock);
@@ -97,7 +100,7 @@ struct homa_grant *homa_grant_alloc(void)
 	grant->max_rpcs_per_peer = 1;
 	grant->max_overcommit = 8;
 	grant->recalc_usecs = 20;
-	grant->fifo_grant_increment = 10000;
+	grant->fifo_grant_increment = 50000;
 	grant->fifo_fraction = 50;
 
 #ifndef __STRIP__ /* See strip.py */
@@ -563,6 +566,10 @@ void homa_grant_unmanage_rpc(struct homa_rpc *rpc,
 	if (!list_empty(&rpc->grantable_links))
 		homa_grant_remove_grantable(rpc);
 	grant->window = homa_grant_window(grant);
+	if (rpc == grant->oldest_rpc) {
+		homa_rpc_put(rpc);
+		grant->oldest_rpc = NULL;
+	}
 
 	homa_grant_unlock(grant);
 }
@@ -713,7 +720,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	 *    priority) in order to prevent starvation.
 	 *
 	 * Each of these situations requires the grant lock.
-	 **/
+	 */
 
 	if (rpc->msgin.length < 0 || rpc->msgin.num_bpages <= 0 ||
 	    rpc->state == RPC_DEAD)
@@ -765,6 +772,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 			homa_grant_send(rpc, priority);
 			if (!homa_grant_cand_empty(&cand))
 				homa_grant_cand_check(&cand, grant);
+			homa_grant_check_fifo(grant);
 			homa_rpc_lock(rpc);
 			homa_rpc_put(rpc);
 		}
@@ -840,7 +848,8 @@ int homa_grant_fix_order(struct homa_grant *grant)
 
 /**
  * homa_grant_find_oldest() - Recompute the value of homa->grant->oldest_rpc.
- * @homa:    Overall data about the Homa protocol implementation.
+ * @grant:      Overall grant management information. @grant->oldest_rpc
+ *              must be NULL.
  */
 void homa_grant_find_oldest(struct homa_grant *grant)
 	__must_hold(grant->lock)
@@ -858,15 +867,9 @@ void homa_grant_find_oldest(struct homa_grant *grant)
 	list_for_each_entry(peer, &grant->grantable_peers, grantable_links) {
 		list_for_each_entry(rpc, &peer->grantable_rpcs,
 				    grantable_links) {
-			int received, incoming;
-
 			if (rpc->msgin.birth >= oldest_birth)
 				continue;
-
-			received = (rpc->msgin.length
-					- rpc->msgin.bytes_remaining);
-			incoming = rpc->msgin.granted - received;
-			if (incoming >= max_incoming) {
+			if (rpc->msgin.rec_incoming >= max_incoming) {
 				/* This RPC has been granted way more bytes
 				 * than the grant window. This can only
 				 * happen for FIFO grants, and it means the
@@ -880,112 +883,151 @@ void homa_grant_find_oldest(struct homa_grant *grant)
 		}
 	}
 
-	/* Check the active RPCs. */
-	for (i = 0; i < grant->num_active_rpcs; i++) {
-		int received, incoming;
-
+	/* Check the active RPCs (skip the highest priority one, since
+	 * it is already getting lots of grants).
+	 */
+	for (i = 1; i < grant->num_active_rpcs; i++) {
 		rpc = grant->active_rpcs[i];
 		if (rpc->msgin.birth >= oldest_birth)
 			continue;
-
-		received = (rpc->msgin.length
-				- rpc->msgin.bytes_remaining);
-		incoming = rpc->msgin.granted - received;
-		if (incoming >= max_incoming) {
+		if (rpc->msgin.rec_incoming >= max_incoming) {
 			continue;
 		}
 		oldest = rpc;
 		oldest_birth = rpc->msgin.birth;
 	}
 
-	/* Check active RPCs. */
+	if (oldest)
+		homa_rpc_hold(oldest);
 	grant->oldest_rpc = oldest;
 }
 
-#ifndef __STRIP__ /* See strip.py */
-#if 0
 /**
- * homa_choose_fifo_grant() - This function is invoked occasionally to give
- * a high-priority grant to the oldest incoming message. We do this in
- * order to reduce the starvation that SRPT can cause for long messages.
- * Note: this method is obsolete and should never be invoked; it's code is
- * being retained until fifo grants are reimplemented using the new grant
- * mechanism.
- * @homa:    Overall data about the Homa protocol implementation. The
- *           grant lock must be held by the caller.
- * Return: An RPC to which to send a FIFO grant, or NULL if there is
- *         no appropriate RPC. This method doesn't actually send a grant,
- *         but it updates @msgin.granted to reflect the desired grant.
- *         Also updates homa->total_incoming.
+ * homa_grant_promote_rpc() - This function is invoked when the grant priority
+ * of an RPC has increased (e.g., because it received a FIFO grant); it adjusts
+ * the position of the RPC within the grantable lists and may promote it into
+ * grant->active_rpcs. This function does not promote within grant->active_rpcs:
+ * that is handled by homa_grant_fix_order.
+ * @rpc:    The RPC to consider for promotion. Must currently be managed for
+ *          grants.
  */
-struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
+void homa_grant_promote_rpc(struct homa_grant *grant, struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
 {
-	struct homa_rpc *rpc, *oldest;
-	u64 oldest_birth;
-	int granted;
+	struct homa_peer *peer = rpc->peer;
+	struct homa_rpc *other, *bumped;
 
-	oldest = NULL;
-	oldest_birth = ~0;
+	homa_grant_lock(grant);
+	if (rpc->msgin.rank >= 0)
+		goto done;
 
-	/* Find the oldest message that doesn't currently have an
-	 * outstanding "pity grant".
+	/* Promote into active_rpcs if appropriate. */
+	if (grant->num_active_rpcs < grant->max_overcommit ||
+	    homa_grant_outranks(rpc, grant->active_rpcs[grant->num_active_rpcs -
+							1])) {
+		homa_grant_remove_grantable(rpc);
+		bumped = homa_grant_insert_active(rpc);
+		if (bumped)
+			homa_grant_insert_grantable(bumped);
+		goto done;
+	}
+
+	/* Promote within the grantable lists. */
+	while (rpc != list_first_entry(&peer->grantable_rpcs,
+				       struct homa_rpc, grantable_links)) {
+		other = list_prev_entry(rpc, grantable_links);
+		if (!homa_grant_outranks(rpc, other))
+			goto done;
+		list_del(&rpc->grantable_links);
+		list_add_tail(&rpc->grantable_links, &other->grantable_links);
+	}
+
+	/* The RPC is now at the head of its peer list, so the peer may need
+	 * to be promoted also.
 	 */
-	list_for_each_entry(rpc, &homa->grantable_rpcs, grantable_links) {
-		int received, on_the_way;
+	homa_grant_adjust_peer(grant, peer);
 
-		if (rpc->msgin.birth >= oldest_birth)
-			continue;
-
-		received = (rpc->msgin.length
-				- rpc->msgin.bytes_remaining);
-		on_the_way = rpc->msgin.granted - received;
-		if (on_the_way > homa->unsched_bytes) {
-			/* The last "pity" grant hasn't been used
-			 * up yet.
-			 */
-			continue;
-		}
-		oldest = rpc;
-		oldest_birth = rpc->msgin.birth;
-	}
-	if (!oldest)
-		return NULL;
-	INC_METRIC(fifo_grants, 1);
-	if ((oldest->msgin.length - oldest->msgin.bytes_remaining)
-			== oldest->msgin.granted)
-		INC_METRIC(fifo_grants_no_incoming, 1);
-
-	oldest->silent_ticks = 0;
-	granted = homa->fifo_grant_increment;
-	oldest->msgin.granted += granted;
-	if (oldest->msgin.granted >= oldest->msgin.length) {
-		granted -= oldest->msgin.granted - oldest->msgin.length;
-		oldest->msgin.granted = oldest->msgin.length;
-		// homa_remove_grantable_locked(homa, oldest);
-	}
-
-	/* Try to update homa->total_incoming; if we can't lock
-	 * the RPC, just skip it (waiting could deadlock), and it
-	 * will eventually get updated elsewhere.
-	 */
-	if (homa_rpc_try_lock(oldest)) {
-		homa_grant_update_incoming(oldest, homa);
-		homa_rpc_unlock(oldest);
-	}
-
-	if (oldest->msgin.granted < (oldest->msgin.length
-				- oldest->msgin.bytes_remaining)) {
-		/* We've already received all of the bytes in the new
-		 * grant; most likely this means that the sender sent extra
-		 * data after the last fifo grant (e.g. by rounding up to a
-		 * TSO packet). Don't send this grant.
-		 */
-		return NULL;
-	}
-	return oldest;
+done:
+	homa_grant_unlock(grant);
 }
-#endif
-#endif /* See strip.py */
+
+/**
+ * homa_grant_check_fifo() - Check to see if it is time to make the next
+ * FIFO grant; if so, make the grant. FIFO grants keep long messages from
+ * being starved by Homa's SRPT grant mechanism.
+ * @grant:      Overall grant management information.
+*/
+void homa_grant_check_fifo(struct homa_grant *grant)
+{
+	struct homa_grant_candidates cand;
+	struct homa_rpc *rpc;
+	u64 now;
+
+	/* Note: placing this check before locking saves lock overhead
+	 * in the normal case where it's not yet time for the next FIFO
+	 * grant. This results in a race (2 cores could simultaneously
+	 * decide to make FIFO grants) but that is relatively harmless
+	 * (an occasional extra FIFO grant).
+	 */
+	now = homa_clock();
+	if (now < grant->fifo_grant_time)
+		return;
+	homa_grant_lock(grant);
+	grant->fifo_grant_time = now + grant->fifo_grant_interval;
+	if (grant->fifo_fraction == 0 || grant->fifo_grant_increment == 0) {
+		homa_grant_unlock(grant);
+		return;
+	}
+
+	/* See if there is an RPC to grant. */
+	rpc = grant->oldest_rpc;
+	if (rpc) {
+		/* If the oldest RPC hasn't been responding to FIFO grants
+		 * then switch to a different RPC.
+		 */
+		int max_incoming = grant->window + 2 *
+				   grant->fifo_grant_increment;
+		if (rpc->msgin.rec_incoming >= max_incoming) {
+			grant->oldest_rpc = NULL;
+			homa_rpc_put(rpc);
+			rpc = NULL;
+		}
+	}
+	if (!rpc) {
+		homa_grant_find_oldest(grant);
+		rpc = grant->oldest_rpc;
+		if (!rpc) {
+			homa_grant_unlock(grant);
+			return;
+		}
+	}
+
+	/* Trickiness here: must release the grant lock before acquiring
+	 * the RPC lock. Must acquire a reference on the RPC to keep it
+	 * from being deleted in the gap where no lock is held.
+	 */
+	homa_rpc_hold(rpc);
+	homa_grant_unlock(grant);
+	homa_rpc_lock(rpc);
+	homa_grant_cand_init(&cand);
+	rpc->msgin.granted += grant->fifo_grant_increment;
+	if (rpc->msgin.granted >= rpc->msgin.length) {
+		INC_METRIC(fifo_grant_bytes, grant->fifo_grant_increment +
+			                     rpc->msgin.length -
+					     rpc->msgin.granted);
+		rpc->msgin.granted = rpc->msgin.length;
+		homa_grant_unmanage_rpc(rpc, &cand);
+	} else {
+		INC_METRIC(fifo_grant_bytes, grant->fifo_grant_increment);
+		homa_grant_promote_rpc(grant, rpc);
+	}
+	homa_grant_update_incoming(rpc, grant);
+	homa_rpc_unlock(rpc);
+	homa_grant_send(rpc, homa_high_priority(grant->homa));
+	homa_rpc_put(rpc);
+	if (!homa_grant_cand_empty(&cand))
+		homa_grant_cand_check(&cand, grant);
+}
 
 /**
  * homa_grant_cand_add() - Add an RPC into the struct, if there is
@@ -1071,18 +1113,26 @@ void homa_grant_lock_slow(struct homa_grant *grant)
  */
 void homa_grant_update_sysctl_deps(struct homa_grant *grant)
 {
-	u64 tmp;
+	u64 fifo_mbps, clocks_per_fifo_mbit, interval;
 
 	if (grant->max_overcommit > HOMA_MAX_GRANTS)
 		grant->max_overcommit = HOMA_MAX_GRANTS;
 
 	if (grant->fifo_fraction > 500)
 		grant->fifo_fraction = 500;
-	tmp = grant->fifo_fraction;
-	if (tmp != 0)
-		tmp = (1000 * grant->fifo_grant_increment) / tmp -
-				grant->fifo_grant_increment;
-	grant->grant_nonfifo = tmp;
+	fifo_mbps = (u64)homa_pacer_get_link_mbps(grant->homa->pacer) *
+		   grant->fifo_fraction;
+	do_div(fifo_mbps, 1000);
+	if (fifo_mbps > 0 && grant->fifo_grant_increment > 0) {
+		clocks_per_fifo_mbit = 1000 * homa_clock_khz();
+		do_div(clocks_per_fifo_mbit, fifo_mbps);
+		interval = clocks_per_fifo_mbit * grant->fifo_grant_increment *
+			   8;
+		do_div(interval, 1000000);
+		grant->fifo_grant_interval = interval;
+	} else {
+		grant->fifo_grant_interval = 1000 * homa_clock_khz();
+	}
 
 	grant->recalc_cycles = homa_usecs_to_cycles(grant->recalc_usecs);
 

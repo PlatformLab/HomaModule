@@ -33,20 +33,20 @@ int homa_init(struct homa *homa)
 	memset(homa, 0, sizeof(*homa));
 
 	atomic64_set(&homa->next_outgoing_id, 2);
-#ifndef __STRIP__ /* See strip.py */
-	homa->grant = homa_grant_alloc();
-	if (IS_ERR(homa->grant)) {
-		err = PTR_ERR(homa->grant);
-		homa->grant = NULL;
-		return err;
-	}
-#endif /* See strip.py */
 	homa->pacer = homa_pacer_alloc(homa);
 	if (IS_ERR(homa->pacer)) {
 		err = PTR_ERR(homa->pacer);
 		homa->pacer = NULL;
 		return err;
 	}
+#ifndef __STRIP__ /* See strip.py */
+	homa->grant = homa_grant_alloc(homa);
+	if (IS_ERR(homa->grant)) {
+		err = PTR_ERR(homa->grant);
+		homa->grant = NULL;
+		return err;
+	}
+#endif /* See strip.py */
 	homa->peertab = homa_peer_alloc_peertab();
 	if (IS_ERR(homa->peertab)) {
 		err = PTR_ERR(homa->peertab);

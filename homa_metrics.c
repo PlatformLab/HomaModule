@@ -359,10 +359,8 @@ char *homa_metrics_print(void)
 		  m->grant_check_recalcs);
 		M("grant_priority_bumps          %15llu  Number of times an RPC moved up in the grant priority order\n",
 		  m->grant_priority_bumps);
-		M("fifo_grants                   %15llu  Grants issued using FIFO priority\n",
-		  m->fifo_grants);
-		M("fifo_grants_no_incoming       %15llu  FIFO grants to messages with no outstanding grants\n",
-		  m->fifo_grants_no_incoming);
+		M("fifo_grant_bytes              %15llu  Bytes of grants issued using the FIFO mechanism\n",
+		  m->fifo_grant_bytes);
 		M("disabled_reaps                %15llu  Reaper invocations that were disabled\n",
 		  m->disabled_reaps);
 		M("deferred_rpc_reaps            %15llu  RPCs skipped by reaper because still in use\n",

@@ -622,17 +622,10 @@ struct homa_metrics {
 	u64 grant_priority_bumps;
 
 	/**
-	 * @fifo_grants: total number of times that grants were sent to
-	 * the oldest message.
+	 * @fifo_grant_bytes: total number of bytes of grants issued via
+	 * the FIFO granting mechanism
 	 */
-	u64 fifo_grants;
-
-	/**
-	 * @fifo_grants_no_incoming: total number of times that, when a
-	 * FIFO grant was issued, the message had no outstanding grants
-	 * (everything granted had been received).
-	 */
-	u64 fifo_grants_no_incoming;
+	u64 fifo_grant_bytes;
 
 	/**
 	 * @disabled_reaps: total number of times that the reaper couldn't

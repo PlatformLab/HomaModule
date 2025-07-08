@@ -5,6 +5,8 @@
  * the buildup of large queues in the NIC.
  */
 
+#include "homa_impl.h"
+#include "homa_grant.h"
 #include "homa_pacer.h"
 #include "homa_rpc.h"
 
@@ -443,8 +445,12 @@ int homa_pacer_dointvec(const struct ctl_table *table, int write,
 	table_copy.data = ((char *)pacer) + (uintptr_t)table_copy.data;
 
 	result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
-	if (write)
+	if (write) {
 		homa_pacer_update_sysctl_deps(pacer);
+
+		/* Grant info depends on link speed. */
+		homa_grant_update_sysctl_deps(pacer->homa->grant);
+	}
 	return result;
 }
 

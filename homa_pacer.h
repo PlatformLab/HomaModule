@@ -222,4 +222,14 @@ static inline void homa_pacer_throttle_unlock(struct homa_pacer *pacer)
 	spin_unlock_bh(&pacer->throttle_lock);
 }
 
+/**
+ * homa_pacer_get_link_mbps() - Return the link speed for this transport.
+ * @pacer:    Pacer information for a Homa transport.
+ * Return:    The link speed, in units of 1e6 bits per second.
+ */
+static inline int homa_pacer_get_link_mbps(struct homa_pacer *pacer)
+{
+	return pacer->link_mbps;
+}
+
 #endif /* _HOMA_PACER_H */
