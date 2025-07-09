@@ -1,13 +1,6 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Loose ends as of 6/13/2025:
-  * Analyze poor throughput under w4 with -b30
-  * Reimplement FIFO grants
-  * Refactor RPC reference counts: acquire at top-level so no-one else
-    has to worry about them.
-  * Check out peformance on c6525-25g.
-
 * Move interest cleanup code from homa_sock to a new function in
   homa_interest. Also move wakeup code from homa_rpc_handoff.
 
@@ -71,18 +64,6 @@ Notes for Homa implementation in Linux:
     bytes in from user space (it takes 16 usec to copy in 60 KB at 30 Gbps).
   * The grant will be sent more quickly by the server because it doesn't
     have to process a batch of data packets first
-
-* homa_grant_recalc is being invoked a *lot* and it takes a lot of time each
-  call (13 usec/call, duty cycle > 100%):
-  * Does it need to relock every ranked RPC every call?
-  * About 25% of calls are failed attempts to promote an unranked RPC
-    (perhaps because the slots for its host are all taken?)
-  * Could it abort early if there is no incoming headroom?
-
-* Notes on refactoring of grant mechanism:
-  * Need to reimplement FIFO grants
-  * Replace fifo_grant_increment with fifo_grant_interval
-  * Refactor so that the msgin structure is always properly initialized?
 
 * The current implementation can execute RPCs multiple times on the server:
   * The initial RPC arrives, but takes the slow path to SoftIRQ, which can
@@ -188,13 +169,6 @@ Notes for Homa implementation in Linux:
 * IPv6 issues:
   * See if error checking made syscalls slower.
   * GSO always uses SKB_GSO_TCPV6; sometimes it should be V4.
-
-* Refactor of granting mechanism:
-  * Eliminate grant_increment: change to fifo_grant_increment instead
-  * grant_non_fifo may need to grant to a message that is also receiving
-    regular grants
-  * What if a message receives data beyond incoming, which completes the
-    message?
 
 * Pinning memory: see mm.h and mm/gup.c
   * get_user_page
