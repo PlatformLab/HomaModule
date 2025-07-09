@@ -270,7 +270,6 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	int gso_size;
 	int err;
 
-	homa_rpc_hold(rpc);
 	if (unlikely(iter->count > HOMA_MAX_MESSAGE_LENGTH ||
 		     iter->count == 0)) {
 		tt_record2("homa_message_out_fill found bad length %d for id %d",
@@ -391,14 +390,12 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		   rpc->id, rpc->msgout.length);
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
 	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
-	homa_rpc_put(rpc);
 	if (!overlap_xmit && xmit)
 		homa_xmit_data(rpc, false);
 	return 0;
 
 error:
 	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
-	homa_rpc_put(rpc);
 	return err;
 }
 
@@ -595,7 +592,6 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 	IF_NO_STRIP(struct netdev_queue *txq);
 	int length;
 
-	homa_rpc_hold(rpc);
 	while (*rpc->msgout.next_xmit) {
 		struct sk_buff *skb = *rpc->msgout.next_xmit;
 		IF_NO_STRIP(int priority);
@@ -643,7 +639,6 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		}
 #endif /* See strip.py */
 
-		homa_rpc_hold(rpc);
 		homa_rpc_unlock(rpc);
 		skb_get(skb);
 #ifndef __STRIP__ /* See strip.py */
@@ -658,11 +653,9 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 #endif /* See strip.py */
 		force = false;
 		homa_rpc_lock(rpc);
-		homa_rpc_put(rpc);
 		if (rpc->state == RPC_DEAD)
 			break;
 	}
-	homa_rpc_put(rpc);
 }
 
 #ifndef __STRIP__ /* See strip.py */

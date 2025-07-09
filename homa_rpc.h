@@ -505,9 +505,16 @@ static inline void homa_unprotect_rpcs(struct homa_sock *hsk)
 #ifndef __UNIT_TEST__
 /**
  * homa_rpc_hold() - Increment the reference count on an RPC, which will
- * prevent it from being freed until homa_rpc_put() is called. Used in
- * situations where a pointer to the RPC needs to be retained during a
- * period where it is unprotected by locks.
+ * prevent it from being freed until homa_rpc_put() is called. References
+ * are taken in two situations:
+ * 1. An RPC is going to be manipulated by a collection of functions. In
+ *    this case the top-most function that identifies the RPC takes the
+ *    reference; any function that receives an RPC as an argument can
+ *    assume that a reference has been taken on the RPC by some higher
+ *    function on the call stack.
+ * 2. A pointer to an RPC is stored in an object for use later, such as
+ *    an interest. A reference must be held as long as the pointer remains
+ *    accessible in the object.
  * @rpc:      RPC on which to take a reference.
  */
 static inline void homa_rpc_hold(struct homa_rpc *rpc)

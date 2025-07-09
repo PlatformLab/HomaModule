@@ -1037,6 +1037,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			rpc = NULL;
 			goto error;
 		}
+		homa_rpc_hold(rpc);
 		if (args.flags & HOMA_SENDMSG_PRIVATE)
 			atomic_or(RPC_PRIVATE, &rpc->flags);
 		INC_METRIC(send_calls, 1);
@@ -1051,14 +1052,14 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			goto error;
 		args.id = rpc->id;
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_alloc_client. */
-		rpc = NULL;
 
 		if (unlikely(copy_to_user((void __user *)msg->msg_control,
 					  &args, sizeof(args)))) {
-			rpc = homa_rpc_find_client(hsk, args.id);
+			homa_rpc_lock(rpc);
 			result = -EFAULT;
 			goto error;
 		}
+		homa_rpc_put(rpc);
 #ifndef __STRIP__ /* See strip.py */
 		finish = homa_clock();
 #endif /* See strip.py */
@@ -1089,6 +1090,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 				   args.id, tt_addr(canonical_dest));
 			return 0;
 		}
+		homa_rpc_hold(rpc);
 		if (rpc->error) {
 			result = rpc->error;
 			goto error;
@@ -1096,17 +1098,15 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		if (rpc->state != RPC_IN_SERVICE) {
 			tt_record2("homa_sendmsg error: RPC id %d in bad state %d",
 				   rpc->id, rpc->state);
-			/* Locked by homa_rpc_find_server. */
-			homa_rpc_unlock(rpc);
-			rpc = NULL;
 			result = -EINVAL;
-			goto error;
+			goto error_dont_end_rpc;
 		}
 		rpc->state = RPC_OUTGOING;
 
 		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
 		if (result && rpc->state != RPC_DEAD)
 			goto error;
+		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 #ifndef __STRIP__ /* See strip.py */
 		finish = homa_clock();
@@ -1119,9 +1119,15 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 	return 0;
 
 error:
-	if (rpc) {
+	if (rpc)
 		homa_rpc_end(rpc);
-		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
+
+error_dont_end_rpc:
+	if (rpc) {
+		homa_rpc_put(rpc);
+
+		/* Locked by homa_rpc_find_server or homa_rpc_alloc_client. */
+		homa_rpc_unlock(rpc);
 	}
 	tt_record2("homa_sendmsg returning error %d for id %d",
 		   result, args.id);
@@ -1144,8 +1150,8 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	IF_NO_STRIP(u64 start = homa_clock());
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_recvmsg_args control;
+	struct homa_rpc *rpc = NULL;
 	IF_NO_STRIP(u64 finish);
-	struct homa_rpc *rpc;
 	int nonblocking;
 	int result;
 
@@ -1189,9 +1195,9 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 			result = -EINVAL;
 			goto done;
 		}
+		homa_rpc_hold(rpc);
 		result = homa_wait_private(rpc, nonblocking);
 		if (result != 0) {
-			homa_rpc_unlock(rpc);
 			control.id = 0;
 			goto done;
 		}
@@ -1203,6 +1209,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 			 * in the RPC itself are handled below.
 			 */
 			result = PTR_ERR(rpc);
+			rpc = NULL;
 			goto done;
 		}
 	}
@@ -1258,9 +1265,6 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	 */
 	rpc->msgin.num_bpages = 0;
 
-	/* Must release the RPC lock (and potentially free the RPC) before
-	 * copying the results back to user space.
-	 */
 	if (homa_is_client(rpc->id)) {
 		homa_peer_add_ack(rpc);
 		homa_rpc_end(rpc);
@@ -1270,7 +1274,6 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		else
 			rpc->state = RPC_IN_SERVICE;
 	}
-	homa_rpc_unlock(rpc); /* Locked by homa_wait_shared/private. */
 
 	if (test_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags)) {
 		/* There are tasks waiting for tx memory, so reap
@@ -1280,6 +1283,15 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	}
 
 done:
+	/* Note: must release the RPC lock before copying results to user
+	 * space.
+	 */
+	if (rpc) {
+		homa_rpc_put(rpc);
+
+		/* Locked by homa_rpc_find_client or homa_wait_shared. */
+		homa_rpc_unlock(rpc);
+	}
 	if (unlikely(copy_to_user((__force void __user *)msg->msg_control,
 				  &control, sizeof(control)))) {
 #ifndef __UPSTREAM__ /* See strip.py */

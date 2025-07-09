@@ -2468,6 +2468,7 @@ TEST_F(homa_incoming, homa_wait_shared__rpc_already_ready)
 	EXPECT_EQ(crpc, rpc);
 	EXPECT_EQ(0, crpc->msgin.packets.qlen);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_none));
+	homa_rpc_put(rpc);
 	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_shared__multiple_rpcs_already_ready)
@@ -2487,6 +2488,7 @@ TEST_F(homa_incoming, homa_wait_shared__multiple_rpcs_already_ready)
 	rpc = homa_wait_shared(&self->hsk, 0);
 	ASSERT_FALSE(IS_ERR(rpc));
 	EXPECT_EQ(crpc, rpc);
+	homa_rpc_put(rpc);
 	homa_rpc_unlock(rpc);
 	EXPECT_SUBSTR("sk->sk_data_ready invoked", unit_log_get());
 }
@@ -2517,6 +2519,7 @@ TEST_F(homa_incoming, homa_wait_shared__signal_race_with_handoff)
 	EXPECT_EQ(crpc, rpc);
 	EXPECT_EQ(ENOENT, -rpc->error);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_block));
+	homa_rpc_put(rpc);
 	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_shared__socket_shutdown_while_blocked)
@@ -2548,6 +2551,7 @@ TEST_F(homa_incoming, homa_wait_shared__copy_to_user_fails)
 	rpc = homa_wait_shared(&self->hsk, 0);
 	EXPECT_EQ(crpc, rpc);
 	EXPECT_EQ(EFAULT, -rpc->error);
+	homa_rpc_put(rpc);
 	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_shared__rpc_has_error)
@@ -2564,6 +2568,7 @@ TEST_F(homa_incoming, homa_wait_shared__rpc_has_error)
 	rpc = homa_wait_shared(&self->hsk, 0);
 	EXPECT_EQ(crpc, rpc);
 	EXPECT_EQ(2, crpc->msgin.packets.qlen);
+	homa_rpc_put(rpc);
 	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_shared__rpc_dead)
@@ -2582,6 +2587,7 @@ TEST_F(homa_incoming, homa_wait_shared__rpc_dead)
 
 	rpc = homa_wait_shared(&self->hsk, 0);
 	EXPECT_EQ(crpc2, rpc);
+	homa_rpc_put(rpc);
 	homa_rpc_unlock(rpc);
 }
 

@@ -180,11 +180,9 @@ void homa_grant_end_rpc(struct homa_rpc *rpc)
 		homa_grant_cand_init(&cand);
 		homa_grant_unmanage_rpc(rpc, &cand);
 		if (!homa_grant_cand_empty(&cand)) {
-			homa_rpc_hold(rpc);
 			homa_rpc_unlock(rpc);
 			homa_grant_cand_check(&cand, grant);
 			homa_rpc_lock(rpc);
-			homa_rpc_put(rpc);
 		}
 	}
 
@@ -767,14 +765,12 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 			/* Sending a grant is slow, so release the RPC lock while
 			 * sending the grant to reduce contention.
 			 */
-			homa_rpc_hold(rpc);
 			homa_rpc_unlock(rpc);
 			homa_grant_send(rpc, priority);
 			if (!homa_grant_cand_empty(&cand))
 				homa_grant_cand_check(&cand, grant);
 			homa_grant_check_fifo(grant);
 			homa_rpc_lock(rpc);
-			homa_rpc_put(rpc);
 		}
 	}
 
@@ -801,11 +797,9 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		tt_record1("homa_grant_check_rpc released grant lock (id %d)",
 			   rpc->id);
 		if (!homa_grant_cand_empty(&cand)) {
-			homa_rpc_hold(rpc);
 			homa_rpc_unlock(rpc);
 			homa_grant_cand_check(&cand, grant);
 			homa_rpc_lock(rpc);
-			homa_rpc_put(rpc);
 		}
 		INC_METRIC(grant_check_others, 1);
 	}

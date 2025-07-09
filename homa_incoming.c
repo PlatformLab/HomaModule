@@ -338,7 +338,6 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		 * run out of packets); copy any available packets out to
 		 * user space.
 		 */
-		homa_rpc_hold(rpc);
 		homa_rpc_unlock(rpc);
 
 		tt_record1("starting copy to user space for id %d",
@@ -416,7 +415,6 @@ free_skbs:
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc);
 		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
-		homa_rpc_put(rpc);
 		if (error)
 			break;
 	}
@@ -506,11 +504,13 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 				 * the lock more quickly.
 				 */
 				homa_spin(100);
-				rpc = NULL;
+				homa_rpc_lock(rpc);
 			}
 		}
 
-		/* Find and lock the RPC if we haven't already done so. */
+		/* If we don't already have an RPC, find it, lock it,
+		 * and create a reference on it.
+		 */
 		if (!rpc) {
 			if (!homa_is_client(id)) {
 				/* We are the server for this RPC. */
@@ -535,6 +535,8 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 			} else {
 				rpc = homa_rpc_find_client(hsk, id);
 			}
+			if (rpc)
+				homa_rpc_hold(rpc);
 		}
 		if (unlikely(!rpc)) {
 #ifndef __STRIP__ /* See strip.py */
@@ -626,6 +628,7 @@ discard:
 	}
 	if (rpc) {
 		IF_NO_STRIP(homa_grant_check_rpc(rpc));
+		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc);
 	}
 
@@ -1045,12 +1048,10 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			/* Must temporarily release rpc's lock because
 			 * homa_rpc_acked needs to acquire RPC locks.
 			 */
-			homa_rpc_hold(rpc);
 			homa_rpc_unlock(rpc);
 			for (i = 0; i < count; i++)
 				homa_rpc_acked(hsk, &saddr, &h->acks[i]);
 			homa_rpc_lock(rpc);
-			homa_rpc_put(rpc);
 		} else {
 			for (i = 0; i < count; i++)
 				homa_rpc_acked(hsk, &saddr, &h->acks[i]);
@@ -1082,8 +1083,6 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 
 	if (!(atomic_read(&rpc->flags) & RPC_PRIVATE))
 		return -EINVAL;
-
-	homa_rpc_hold(rpc);
 
 	/* Each iteration through this loop waits until rpc needs attention
 	 * in some way (e.g. packets have arrived), then deals with that need
@@ -1138,7 +1137,6 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 	else
 		INC_METRIC(wait_fast, 1);
 #endif /* See strip.py */
-	homa_rpc_put(rpc);
 	return result;
 }
 
@@ -1150,7 +1148,8 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
  *
  * Return:    Pointer to an RPC with a complete incoming message or nonzero
  *            error field, or a negative errno (usually -EINTR). If an RPC
- *            is returned it will be locked and the caller must unlock.
+ *            is returned it will be locked and referenced; the caller
+ *            must release the lock and the reference.
  */
 struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 	__cond_acquires(rpc->bucket->lock)
@@ -1224,7 +1223,6 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc);
 		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
-		homa_rpc_put(rpc);
 		if (!rpc->error)
 			rpc->error = homa_copy_to_user(rpc);
 		if (rpc->error) {
@@ -1233,6 +1231,7 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 		} else if (rpc->msgin.bytes_remaining == 0 &&
 		    skb_queue_len(&rpc->msgin.packets) == 0)
 			break;
+		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc);
 	}
 
