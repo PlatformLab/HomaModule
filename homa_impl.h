@@ -905,6 +905,7 @@ static inline u64 homa_usecs_to_cycles(u64 usecs)
 #endif /* __UNIT_TEST__ */
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_high_priority() - Return the next-to-highest available priority
  * level.  Used in situations where we want to boost the priority of
@@ -918,6 +919,7 @@ static inline int homa_high_priority(struct homa *homa)
 {
 	return (homa->num_priorities <= 2) ? 0 : homa->num_priorities - 2;
 }
+#endif /* See strip.py */
 
 /* Homa Locking Strategy:
  *

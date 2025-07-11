@@ -934,10 +934,11 @@ int homa_drop_packet(struct homa *homa)
  */
 void homa_snapshot_get_stats(struct homa_rpc_snapshot *snap)
 {
-	int core;
+	IF_NO_STRIP(int core);
 
 	memset(snap, 0, sizeof(*snap));
 	snap->clock = homa_clock();
+#ifndef __STRIP__ /* See strip.py */
 	for (core = 0; core < nr_cpu_ids; core++) {
 		struct homa_metrics *m = &per_cpu(homa_metrics, core);
 
@@ -967,6 +968,7 @@ void homa_snapshot_get_stats(struct homa_rpc_snapshot *snap)
 				m->server_response_bytes_done;
 		snap->server_responses_done += m->server_responses_done;
 	}
+#endif /* See strip.py */
 }
 
 /**
