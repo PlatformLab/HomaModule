@@ -592,7 +592,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 	IF_NO_STRIP(struct netdev_queue *txq);
 	int length;
 
-	while (*rpc->msgout.next_xmit) {
+	while (*rpc->msgout.next_xmit && rpc->state != RPC_DEAD) {
 		struct sk_buff *skb = *rpc->msgout.next_xmit;
 		IF_NO_STRIP(int priority);
 
@@ -653,8 +653,6 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 #endif /* See strip.py */
 		force = false;
 		homa_rpc_lock(rpc);
-		if (rpc->state == RPC_DEAD)
-			break;
 	}
 }
 
