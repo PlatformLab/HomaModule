@@ -196,6 +196,7 @@ struct homa {
 	 * @unsched_bytes and @window). Set externally via sysctl.
 	 */
 	int unsched_bytes;
+#endif /* See strip.py */
 
 	/**
 	 * @link_mbps: The raw bandwidth of the network uplink, in
@@ -203,6 +204,7 @@ struct homa {
 	 */
 	int link_mbps;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @poll_usecs: Amount of time (in microseconds) that a thread
 	 * will spend busy-waiting for an incoming messages before
