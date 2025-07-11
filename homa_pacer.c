@@ -256,14 +256,12 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 		if (list_empty(&pacer->throttled_rpcs))
 			break;
 
-		/* Lock the first throttled RPC. This may not be possible
-		 * because we have to hold throttle_lock while locking
-		 * the RPC; that means we can't wait for the RPC lock because
-		 * of lock ordering constraints (see "Homa Locking Strategy" in
-		 * homa_impl.h). Thus, if the RPC lock isn't available, do
-		 * nothing. Holding the throttle lock while locking the RPC
-		 * is important because it keeps the RPC from being deleted
-		 * before it can be locked.
+		/* Select an RPC to transmit (either SRPT or FIFO) and
+		 * take a reference on it. Must do this while holding the
+		 * throttle_lock to prevent the RPC from being reaped. Then
+		 * release the throttle lock and lock the RPC (can't acquire
+		 * the RPC lock while holding the throttle lock; see "Homa
+		 * Locking Strategy" in homa_impl.h).
 		 */
 		homa_pacer_throttle_lock(pacer);
 		pacer->fifo_count -= pacer->fifo_fraction;
@@ -289,13 +287,9 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 			homa_pacer_throttle_unlock(pacer);
 			break;
 		}
-		if (!homa_rpc_try_lock(rpc)) {
-			homa_pacer_throttle_unlock(pacer);
-			INC_METRIC(pacer_skipped_rpcs, 1);
-			break;
-		}
+		homa_rpc_hold(rpc);
 		homa_pacer_throttle_unlock(pacer);
-
+		homa_rpc_lock(rpc);
 		tt_record4("pacer calling homa_xmit_data for rpc id %llu, port %d, offset %d, bytes_left %d",
 			   rpc->id, rpc->hsk->port,
 			   rpc->msgout.next_xmit_offset,
@@ -319,6 +313,7 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 			homa_pacer_unmanage_rpc(rpc);
 		}
 		homa_rpc_unlock(rpc);
+		homa_rpc_put(rpc);
 	}
 	spin_unlock_bh(&pacer->mutex);
 }

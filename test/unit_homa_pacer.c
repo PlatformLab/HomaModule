@@ -460,29 +460,6 @@ TEST_F(homa_pacer, homa_pacer_xmit__rpc_removed_from_queue_before_locked)
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 }
-TEST_F(homa_pacer, homa_pacer_xmit__rpc_locked)
-{
-	struct homa_rpc *crpc;
-
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			       self->server_ip, self->server_port,
-			       self->client_id, 5000, 1000);
-
-	homa_pacer_manage_rpc(crpc);
-	self->homa.pacer->max_nic_queue_cycles = 2000;
-	unit_log_clear();
-	mock_trylock_errors = ~1;
-	homa_pacer_xmit(self->homa.pacer);
-	EXPECT_STREQ("", unit_log_get());
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_skipped_rpcs);
-#endif /* See strip.py */
-	unit_log_clear();
-	mock_trylock_errors = 0;
-	homa_pacer_xmit(self->homa.pacer);
-	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400",
-		     unit_log_get());
-}
 TEST_F(homa_pacer, homa_pacer_xmit__remove_from_queue)
 {
 	struct homa_rpc *crpc1, *crpc2;

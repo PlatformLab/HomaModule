@@ -387,12 +387,6 @@ struct homa_metrics {
 	u64 pacer_bytes;
 
 	/**
-	 * @pacer_skipped_rpcs: total number of times that the pacer had to
-	 * abort because it couldn't lock an RPC.
-	 */
-	u64 pacer_skipped_rpcs;
-
-	/**
 	 * @pacer_needed_help: total number of times that homa_check_pacer
 	 * found that the pacer was running behind, so it actually invoked
 	 * homa_pacer_xmit.

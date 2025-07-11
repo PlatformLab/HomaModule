@@ -283,8 +283,6 @@ char *homa_metrics_print(void)
 		  m->pacer_lost_cycles);
 		M("pacer_bytes                   %15llu  Bytes transmitted when the pacer was active\n",
 		  m->pacer_bytes);
-		M("pacer_skipped_rpcs            %15llu  Pacer aborts because of locked RPCs\n",
-		  m->pacer_skipped_rpcs);
 		M("pacer_needed_help             %15llu  homa_pacer_xmit invocations from homa_check_pacer\n",
 		  m->pacer_needed_help);
 		M("throttled_cycles              %15llu  Time when the throttled queue was nonempty\n",
