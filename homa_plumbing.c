@@ -269,6 +269,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
+		.procname	= "link_mbps",
+		.data		= OFFSET(link_mbps),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "max_dead_buffs",
 		.data		= OFFSET(max_dead_buffs),
 		.maxlen		= sizeof(int),

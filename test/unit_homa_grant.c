@@ -1848,7 +1848,7 @@ TEST_F(homa_grant, homa_grant_update_sysctl_deps__fifo_interval)
 {
 	self->homa.grant->fifo_grant_increment = 20000;
 	self->homa.grant->fifo_fraction = 500;
-	self->homa.pacer->link_mbps = 8000;
+	self->homa.link_mbps = 8000;
 	homa_grant_update_sysctl_deps(self->homa.grant);
 	EXPECT_EQ(40000, self->homa.grant->fifo_grant_interval);
 }
@@ -1856,7 +1856,7 @@ TEST_F(homa_grant, homa_grant_update_sysctl_deps__fifo_interval_no_fifo_grants)
 {
 	self->homa.grant->fifo_grant_increment = 20000;
 	self->homa.grant->fifo_fraction = 0;
-	self->homa.pacer->link_mbps = 8000;
+	self->homa.link_mbps = 8000;
 	homa_grant_update_sysctl_deps(self->homa.grant);
 	EXPECT_EQ(1000000000, self->homa.grant->fifo_grant_interval);
 }

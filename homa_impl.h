@@ -198,6 +198,12 @@ struct homa {
 	int unsched_bytes;
 
 	/**
+	 * @link_mbps: The raw bandwidth of the network uplink, in
+	 * units of 1e06 bits per second.  Set externally via sysctl.
+	 */
+	int link_mbps;
+
+	/**
 	 * @poll_usecs: Amount of time (in microseconds) that a thread
 	 * will spend busy-waiting for an incoming messages before
 	 * going to sleep. Set externally via sysctl.

@@ -34,6 +34,7 @@ int homa_init(struct homa *homa)
 	memset(homa, 0, sizeof(*homa));
 
 	atomic64_set(&homa->next_outgoing_id, 2);
+	homa->link_mbps = 25000;
 	homa->pacer = homa_pacer_alloc(homa);
 	if (IS_ERR(homa->pacer)) {
 		err = PTR_ERR(homa->pacer);

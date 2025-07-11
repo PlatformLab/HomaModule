@@ -640,16 +640,16 @@ TEST_F(homa_pacer, homa_pacer_unmanage_rpc__metrics)
 TEST_F(homa_pacer, homa_pacer_update_sysctl_deps)
 {
 	self->homa.pacer->max_nic_queue_ns = 6000;
-	self->homa.pacer->link_mbps = 10000;
+	self->homa.link_mbps = 10000;
 	homa_pacer_update_sysctl_deps(self->homa.pacer);
 	EXPECT_EQ(6000, self->homa.pacer->max_nic_queue_cycles);
 	EXPECT_EQ(808000, self->homa.pacer->cycles_per_mbyte);
 
-	self->homa.pacer->link_mbps = 1000;
+	self->homa.link_mbps = 1000;
 	homa_pacer_update_sysctl_deps(self->homa.pacer);
 	EXPECT_EQ(8080000, self->homa.pacer->cycles_per_mbyte);
 
-	self->homa.pacer->link_mbps = 40000;
+	self->homa.link_mbps = 40000;
 	homa_pacer_update_sysctl_deps(self->homa.pacer);
 	EXPECT_EQ(202000, self->homa.pacer->cycles_per_mbyte);
 }

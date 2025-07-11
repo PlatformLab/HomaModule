@@ -6,7 +6,6 @@
  */
 
 #include "homa_impl.h"
-#include "homa_grant.h"
 #include "homa_pacer.h"
 #include "homa_rpc.h"
 
@@ -17,13 +16,6 @@
  */
 #define OFFSET(field) ((void *)offsetof(struct homa_pacer, field))
 static struct ctl_table pacer_ctl_table[] = {
-	{
-		.procname	= "link_mbps",
-		.data		= OFFSET(link_mbps),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_pacer_dointvec
-	},
 	{
 		.procname	= "max_nic_queue_ns",
 		.data		= OFFSET(max_nic_queue_ns),
@@ -69,7 +61,6 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa)
 	INIT_LIST_HEAD_RCU(&pacer->throttled_rpcs);
 	pacer->fifo_fraction = 50;
 	pacer->max_nic_queue_ns = 5000;
-	pacer->link_mbps = 25000;
 	pacer->throttle_min_bytes = 1000;
 	pacer->exit = false;
 	init_waitqueue_head(&pacer->wait_queue);
@@ -409,7 +400,7 @@ void homa_pacer_update_sysctl_deps(struct homa_pacer *pacer)
 
 	/* Underestimate link bandwidth (overestimate time) by 1%. */
 	tmp = 101 * 8000 * (u64)homa_clock_khz();
-	do_div(tmp, pacer->link_mbps * 100);
+	do_div(tmp, pacer->homa->link_mbps * 100);
 	pacer->cycles_per_mbyte = tmp;
 }
 
@@ -441,12 +432,8 @@ int homa_pacer_dointvec(const struct ctl_table *table, int write,
 	table_copy.data = ((char *)pacer) + (uintptr_t)table_copy.data;
 
 	result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
-	if (write) {
+	if (write)
 		homa_pacer_update_sysctl_deps(pacer);
-
-		/* Grant info depends on link speed. */
-		homa_grant_update_sysctl_deps(pacer->homa->grant);
-	}
 	return result;
 }
 

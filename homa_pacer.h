@@ -84,12 +84,6 @@ struct homa_pacer {
 	int max_nic_queue_cycles;
 
 	/**
-	 * @link_mbps: The raw bandwidth of the network uplink, in
-	 * units of 1e06 bits per second.  Set externally via sysctl.
-	 */
-	int link_mbps;
-
-	/**
 	 * @cycles_per_mbyte: the number of homa_clock() cycles that it takes to
 	 * transmit 10**6 bytes on our uplink. This is actually a slight
 	 * overestimate of the value, to ensure that we don't underestimate
@@ -220,16 +214,6 @@ static inline void homa_pacer_throttle_unlock(struct homa_pacer *pacer)
 	__releases(pacer->throttle_lock)
 {
 	spin_unlock_bh(&pacer->throttle_lock);
-}
-
-/**
- * homa_pacer_get_link_mbps() - Return the link speed for this transport.
- * @pacer:    Pacer information for a Homa transport.
- * Return:    The link speed, in units of 1e6 bits per second.
- */
-static inline int homa_pacer_get_link_mbps(struct homa_pacer *pacer)
-{
-	return pacer->link_mbps;
 }
 
 #endif /* _HOMA_PACER_H */

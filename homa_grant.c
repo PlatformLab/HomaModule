@@ -901,6 +901,7 @@ void homa_grant_find_oldest(struct homa_grant *grant)
  * the position of the RPC within the grantable lists and may promote it into
  * grant->active_rpcs. This function does not promote within grant->active_rpcs:
  * that is handled by homa_grant_fix_order.
+ * @grant:  Overall grant management information.
  * @rpc:    The RPC to consider for promotion. Must currently be managed for
  *          grants.
  */
@@ -1113,8 +1114,7 @@ void homa_grant_update_sysctl_deps(struct homa_grant *grant)
 
 	if (grant->fifo_fraction > 500)
 		grant->fifo_fraction = 500;
-	fifo_mbps = (u64)homa_pacer_get_link_mbps(grant->homa->pacer) *
-		   grant->fifo_fraction;
+	fifo_mbps = (u64)grant->homa->link_mbps * grant->fifo_fraction;
 	do_div(fifo_mbps, 1000);
 	if (fifo_mbps > 0 && grant->fifo_grant_increment > 0) {
 		clocks_per_fifo_mbit = 1000 * homa_clock_khz();
