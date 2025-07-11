@@ -198,6 +198,7 @@ void homa_timer(struct homa *homa)
 		rcu_read_lock();
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 			IF_NO_STRIP(total_rpcs++);
+
 			homa_rpc_lock(rpc);
 			if (rpc->state == RPC_IN_SERVICE) {
 				rpc->silent_ticks = 0;

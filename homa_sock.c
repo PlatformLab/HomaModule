@@ -324,6 +324,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 void homa_sock_destroy(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
+
 	IF_NO_STRIP(int i = 0);
 
 	if (!hsk->homa)

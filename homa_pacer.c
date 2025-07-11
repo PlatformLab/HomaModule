@@ -331,6 +331,7 @@ void homa_pacer_manage_rpc(struct homa_rpc *rpc)
 	struct homa_pacer *pacer = rpc->hsk->homa->pacer;
 	struct homa_rpc *candidate;
 	int bytes_left;
+
 	IF_NO_STRIP(int checks = 0);
 	IF_NO_STRIP(u64 now);
 

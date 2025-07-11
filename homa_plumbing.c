@@ -466,9 +466,6 @@ static int timer_thread_exit;
  */
 int __init homa_load(void)
 {
-	IF_NO_STRIP(bool init_metrics = false);
-	IF_NO_STRIP(bool init_offload = false);
-	IF_NO_STRIP(bool init_sysctl = false);
 	struct homa *homa = global_homa;
 	bool init_protocol6 = false;
 	bool init_protosw6 = false;
@@ -479,6 +476,10 @@ int __init homa_load(void)
 	bool init_proto = false;
 	bool init_homa = false;
 	int status;
+
+	IF_NO_STRIP(bool init_metrics = false);
+	IF_NO_STRIP(bool init_offload = false);
+	IF_NO_STRIP(bool init_sysctl = false);
 
 	/* Compile-time validations that no packet header is longer
 	 * than HOMA_MAX_HEADER.
@@ -1010,15 +1011,16 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
  */
 int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 {
-	IF_NO_STRIP(u64 start = homa_clock());
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_sendmsg_args args;
 	union sockaddr_in_union *addr;
 	struct homa_rpc *rpc = NULL;
 	int result = 0;
-#ifndef __STRIP__ /* See strip.py */
-	u64 finish;
 
+	IF_NO_STRIP(u64 start = homa_clock());
+	IF_NO_STRIP(u64 finish);
+
+#ifndef __STRIP__ /* See strip.py */
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active =
 			start;
 #endif /* See strip.py */
@@ -1182,13 +1184,14 @@ error_dont_end_rpc:
 int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		 int *addr_len)
 {
-	IF_NO_STRIP(u64 start = homa_clock());
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_recvmsg_args control;
 	struct homa_rpc *rpc = NULL;
-	IF_NO_STRIP(u64 finish);
 	int nonblocking;
 	int result;
+
+	IF_NO_STRIP(u64 start = homa_clock());
+	IF_NO_STRIP(u64 finish);
 
 	INC_METRIC(recv_calls, 1);
 #ifndef __STRIP__ /* See strip.py */
@@ -1374,12 +1377,13 @@ int homa_softirq(struct sk_buff *skb)
 {
 	struct sk_buff *packets, *other_pkts, *next;
 	struct sk_buff **prev_link, **other_link;
-	IF_NO_STRIP(struct homa *homa = homa_from_skb(skb));
 	struct homa_common_hdr *h;
 	int header_offset;
-#ifndef __STRIP__ /* See strip.py */
-	u64 start;
 
+	IF_NO_STRIP(struct homa *homa = homa_from_skb(skb));
+	IF_NO_STRIP(u64 start);
+
+#ifndef __STRIP__ /* See strip.py */
 	start = homa_clock();
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_active = start;
 #endif /* See strip.py */

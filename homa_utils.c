@@ -28,6 +28,7 @@
 int homa_init(struct homa *homa)
 {
 	int err;
+
 	IF_NO_STRIP(int i);
 
 	memset(homa, 0, sizeof(*homa));

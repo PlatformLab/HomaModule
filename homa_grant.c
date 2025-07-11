@@ -884,9 +884,8 @@ void homa_grant_find_oldest(struct homa_grant *grant)
 		rpc = grant->active_rpcs[i];
 		if (rpc->msgin.birth >= oldest_birth)
 			continue;
-		if (rpc->msgin.rec_incoming >= max_incoming) {
+		if (rpc->msgin.rec_incoming >= max_incoming)
 			continue;
-		}
 		oldest = rpc;
 		oldest_birth = rpc->msgin.birth;
 	}
@@ -950,7 +949,7 @@ done:
  * FIFO grant; if so, make the grant. FIFO grants keep long messages from
  * being starved by Homa's SRPT grant mechanism.
  * @grant:      Overall grant management information.
-*/
+ */
 void homa_grant_check_fifo(struct homa_grant *grant)
 {
 	struct homa_grant_candidates cand;
@@ -1007,7 +1006,7 @@ void homa_grant_check_fifo(struct homa_grant *grant)
 	rpc->msgin.granted += grant->fifo_grant_increment;
 	if (rpc->msgin.granted >= rpc->msgin.length) {
 		INC_METRIC(fifo_grant_bytes, grant->fifo_grant_increment +
-			                     rpc->msgin.length -
+					     rpc->msgin.length -
 					     rpc->msgin.granted);
 		rpc->msgin.granted = rpc->msgin.length;
 		homa_grant_unmanage_rpc(rpc, &cand);

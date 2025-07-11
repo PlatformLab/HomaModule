@@ -1154,11 +1154,12 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 	__cond_acquires(rpc->bucket->lock)
 {
-	IF_NO_STRIP(int avail_immediately = 1);
 	struct homa_interest interest;
-	IF_NO_STRIP(int blocked = 0);
 	struct homa_rpc *rpc;
 	int result;
+
+	IF_NO_STRIP(int avail_immediately = 1);
+	IF_NO_STRIP(int blocked = 0);
 
 	INIT_LIST_HEAD(&interest.links);
 	init_waitqueue_head(&interest.wait_queue);

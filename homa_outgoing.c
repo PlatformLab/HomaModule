@@ -446,12 +446,13 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 			struct homa_sock *hsk)
 {
-	IF_NO_STRIP(struct netdev_queue *txq);
-	IF_NO_STRIP(int priority);
 	struct homa_common_hdr *h;
 	struct sk_buff *skb;
 	int extra_bytes;
 	int result;
+
+	IF_NO_STRIP(struct netdev_queue *txq);
+	IF_NO_STRIP(int priority);
 
 	skb = homa_skb_alloc_tx(HOMA_MAX_HEADER);
 	if (unlikely(!skb))
@@ -589,11 +590,13 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
-	IF_NO_STRIP(struct netdev_queue *txq);
 	int length;
+
+	IF_NO_STRIP(struct netdev_queue *txq);
 
 	while (*rpc->msgout.next_xmit && rpc->state != RPC_DEAD) {
 		struct sk_buff *skb = *rpc->msgout.next_xmit;
+
 		IF_NO_STRIP(int priority);
 
 #ifndef __STRIP__ /* See strip.py */

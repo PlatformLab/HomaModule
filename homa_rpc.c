@@ -572,6 +572,7 @@ release:
 		homa_skb_free_many_tx(hsk->homa, skbs, num_skbs);
 		for (i = 0; i < num_rpcs; i++) {
 			IF_NO_STRIP(int tx_left);
+
 			rpc = rpcs[i];
 
 			UNIT_LOG("; ", "reaped %llu", rpc->id);
@@ -605,22 +606,22 @@ release:
 				rpc->msgout.next_xmit_offset;
 			if (homa_is_client(rpc->id)) {
 				INC_METRIC(client_response_bytes_done,
-					rpc->msgin.bytes_remaining);
+					   rpc->msgin.bytes_remaining);
 				INC_METRIC(client_responses_done,
-					rpc->msgin.bytes_remaining != 0);
+					   rpc->msgin.bytes_remaining != 0);
 				if (tx_left > 0) {
 					INC_METRIC(client_request_bytes_done,
-						tx_left);
+						   tx_left);
 					INC_METRIC(client_requests_done, 1);
 				}
 			} else {
 				INC_METRIC(server_request_bytes_done,
-					rpc->msgin.bytes_remaining);
+					  rpc->msgin.bytes_remaining);
 				INC_METRIC(server_requests_done,
-					rpc->msgin.bytes_remaining != 0);
+					   rpc->msgin.bytes_remaining != 0);
 				if (tx_left > 0) {
 					INC_METRIC(server_response_bytes_done,
-						tx_left);
+						   tx_left);
 					INC_METRIC(server_responses_done, 1);
 				}
 			}
