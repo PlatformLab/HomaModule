@@ -466,7 +466,18 @@ static int timer_thread_exit;
  */
 int __init homa_load(void)
 {
+	IF_NO_STRIP(bool init_metrics = false);
+	IF_NO_STRIP(bool init_offload = false);
+	IF_NO_STRIP(bool init_sysctl = false);
 	struct homa *homa = global_homa;
+	bool init_protocol6 = false;
+	bool init_protosw6 = false;
+	bool init_protocol = false;
+	bool init_protosw = false;
+	bool init_net_ops = false;
+	bool init_proto6 = false;
+	bool init_proto = false;
+	bool init_homa = false;
 	int status;
 
 	/* Compile-time validations that no packet header is longer
@@ -511,7 +522,7 @@ int __init homa_load(void)
 #endif /* See strip.py */
 
 	pr_err("Homa module loading\n");
-#ifndef __STRIP__ /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
 		  sizeof(struct homa_data_hdr),
 		  sizeof(struct homa_seg_hdr),
@@ -534,69 +545,87 @@ int __init homa_load(void)
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		pr_err("proto_register failed for homa_prot: %d\n", status);
-		goto proto_register_err;
+		goto error;
 	}
+	init_proto = true;
+
 	status = proto_register(&homav6_prot, 1);
 	if (status != 0) {
 		pr_err("proto_register failed for homav6_prot: %d\n", status);
-		goto proto_register_v6_err;
+		goto error;
 	}
+	init_proto6 = true;
+
 	inet_register_protosw(&homa_protosw);
+	init_protosw = true;
+
 	status = inet6_register_protosw(&homav6_protosw);
 	if (status != 0) {
 		pr_err("inet6_register_protosw failed in %s: %d\n", __func__,
 		       status);
-		goto register_protosw_v6_err;
+		goto error;
 	}
+	init_protosw6 = true;
+
 	status = inet_add_protocol(&homa_protocol, IPPROTO_HOMA);
 	if (status != 0) {
 		pr_err("inet_add_protocol failed in %s: %d\n", __func__,
 		       status);
-		goto add_protocol_err;
+		goto error;
 	}
+	init_protocol = true;
+
 	status = inet6_add_protocol(&homav6_protocol, IPPROTO_HOMA);
 	if (status != 0) {
 		pr_err("inet6_add_protocol failed in %s: %d\n",  __func__,
 		       status);
-		goto add_protocol_v6_err;
+		goto error;
 	}
+	init_protocol6 = true;
+
 	status = homa_init(homa);
 	if (status)
-		goto homa_init_err;
+		goto error;
+	init_homa = true;
 
 #ifndef __STRIP__ /* See strip.py */
 	status = homa_metrics_init();
 	if (status != 0)
-		goto metrics_err;
+		goto error;
+	init_metrics = true;
 
 	homa_ctl_header = register_net_sysctl(&init_net, "net/homa",
 					      homa_ctl_table);
 	if (!homa_ctl_header) {
 		pr_err("couldn't register Homa sysctl parameters\n");
 		status = -ENOMEM;
-		goto sysctl_err;
+		goto error;
 	}
+	init_sysctl = true;
 
 	status = homa_offload_init();
 	if (status != 0) {
 		pr_err("Homa couldn't init offloads\n");
-		goto offload_err;
+		goto error;
 	}
+	init_offload = true;
 #endif /* See strip.py */
 
 	status = register_pernet_subsys(&homa_net_ops);
 	if (status != 0) {
 		pr_err("Homa got error from register_pernet_subsys: %d\n",
 		       status);
-		goto net_err;
+		goto error;
 	}
+	init_net_ops = true;
+
 	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
 	if (IS_ERR(timer_kthread)) {
 		status = PTR_ERR(timer_kthread);
 		pr_err("couldn't create Homa timer thread: error %d\n",
 		       status);
 		timer_kthread = NULL;
-		goto timer_err;
+		goto error;
 	}
 
 #ifndef __STRIP__ /* See strip.py */
@@ -609,30 +638,36 @@ int __init homa_load(void)
 
 	return 0;
 
-timer_err:
-	unregister_pernet_subsys(&homa_net_ops);
-net_err:
+error:
+	if (timer_kthread) {
+		timer_thread_exit = 1;
+		wake_up_process(timer_kthread);
+		wait_for_completion(&timer_thread_done);
+	}
 #ifndef __STRIP__ /* See strip.py */
-	homa_offload_end();
-offload_err:
-	unregister_net_sysctl_table(homa_ctl_header);
-sysctl_err:
-	homa_metrics_end();
-metrics_err:
+	if (init_offload)
+		homa_offload_end();
+	if (init_sysctl)
+		unregister_net_sysctl_table(homa_ctl_header);
+	if (init_metrics)
+		homa_metrics_end();
 #endif /* See strip.py */
-	homa_destroy(homa);
-homa_init_err:
-	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
-add_protocol_v6_err:
-	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
-add_protocol_err:
-	inet6_unregister_protosw(&homav6_protosw);
-register_protosw_v6_err:
-	inet_unregister_protosw(&homa_protosw);
-	proto_unregister(&homav6_prot);
-proto_register_v6_err:
-	proto_unregister(&homa_prot);
-proto_register_err:
+	if (init_net_ops)
+		unregister_pernet_subsys(&homa_net_ops);
+	if (init_homa)
+		homa_destroy(homa);
+	if (init_protocol)
+		inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
+	if (init_protocol6)
+		inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
+	if (init_protosw)
+		inet_unregister_protosw(&homa_protosw);
+	if (init_protosw6)
+		inet6_unregister_protosw(&homav6_protosw);
+	if (init_proto)
+		proto_unregister(&homa_prot);
+	if (init_proto6)
+		proto_unregister(&homav6_prot);
 	return status;
 }
 
