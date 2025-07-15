@@ -790,7 +790,7 @@ static inline struct homa_metrics *homa_metrics_per_cpu(void)
 
 extern struct homa_metrics_output homa_mout;
 
-void     homa_metric_append(const char *format, ...);
+void     homa_metric_append(const char *name, u64 value, const char *format, ...);
 void     homa_metrics_end(void);
 int      homa_metrics_init(void);
 loff_t   homa_metrics_lseek(struct file *file, loff_t offset,

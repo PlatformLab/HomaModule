@@ -24,21 +24,21 @@ FIXTURE_TEARDOWN(homa_metrics)
 TEST_F(homa_metrics, homa_metric_append)
 {
 	homa_mout.length = 0;
-	homa_metric_append("x: %d, y: %d", 10, 20);
-	EXPECT_EQ(12, homa_mout.length);
-	EXPECT_STREQ("x: 10, y: 20", homa_mout.output);
+	homa_metric_append("metric1", 12345, "Description 1\n");
+	EXPECT_EQ(200, homa_mout.capacity);
+	EXPECT_EQ(66, homa_mout.length);
+	EXPECT_STREQ("metric1                                       12345 Description 1\n",
+		     homa_mout.output);
 
-	homa_metric_append(", z: %d", 12345);
-	EXPECT_EQ(22, homa_mout.length);
-	EXPECT_STREQ("x: 10, y: 20, z: 12345", homa_mout.output);
-	EXPECT_EQ(30, homa_mout.capacity);
-
-	homa_metric_append(", q: %050d", 88);
-	EXPECT_EQ(77, homa_mout.length);
-	EXPECT_STREQ("x: 10, y: 20, z: 12345, q: 00000000000000000000000000000000000000000000000088",
-			homa_mout.output);
-	EXPECT_EQ(120, homa_mout.capacity);
+	homa_metric_append("value with long name", 8, "Value %d, value 2 %08d\n",
+			    16, 44);
+	EXPECT_EQ(400, homa_mout.capacity);
+	EXPECT_EQ(145, homa_mout.length);
+	EXPECT_STREQ("metric1                                       12345 Description 1\n"
+		     "value with long name                              8 Value 16, value 2 00000044\n",
+		     homa_mout.output);
 }
+
 TEST_F(homa_metrics, homa_metrics_open)
 {
 	EXPECT_EQ(0, homa_metrics_open(NULL, NULL));
