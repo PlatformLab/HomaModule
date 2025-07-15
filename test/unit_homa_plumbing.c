@@ -919,6 +919,20 @@ TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_recvmsg__reap_because_of_SOCK_NOSPACE)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
+			self->client_ip, self->server_ip, self->server_port,
+			self->client_id, 100, 2000);
+
+	EXPECT_NE(NULL, crpc);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+
+	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
+	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, 0, &self->recvmsg_hdr.msg_namelen));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls));
+}
 TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_args)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,

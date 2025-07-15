@@ -1320,16 +1320,9 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 			rpc->state = RPC_IN_SERVICE;
 	}
 
-	if (test_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags)) {
-		/* There are tasks waiting for tx memory, so reap
-		 * immediately.
-		 */
-		homa_rpc_reap(hsk, true);
-	}
-
 done:
-	/* Note: must release the RPC lock before copying results to user
-	 * space.
+	/* Note: must release the RPC lock before calling homa_rpc_reap
+	 * or copying results to user space.
 	 */
 	if (rpc) {
 		homa_rpc_put(rpc);
@@ -1337,6 +1330,14 @@ done:
 		/* Locked by homa_rpc_find_client or homa_wait_shared. */
 		homa_rpc_unlock(rpc);
 	}
+
+	if (test_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags)) {
+		/* There are tasks waiting for tx memory, so reap
+		 * immediately.
+		 */
+		homa_rpc_reap(hsk, false);
+	}
+
 	if (unlikely(copy_to_user((__force void __user *)msg->msg_control,
 				  &control, sizeof(control)))) {
 #ifndef __UPSTREAM__ /* See strip.py */
