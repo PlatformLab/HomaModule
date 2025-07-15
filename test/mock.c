@@ -182,6 +182,8 @@ int mock_num_clock_vals = 0;
 /* Used as the return value for tt_get_cycles. */
 u64 mock_tt_cycles;
 
+unsigned int tsc_khz = 1000000;
+
 /* Indicates whether we should be simulation IPv6 or IPv4 in the
  * current test. Can be overridden by a test.
  */

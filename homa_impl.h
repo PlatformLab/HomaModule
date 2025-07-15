@@ -860,7 +860,7 @@ static inline u64 homa_clock_khz(void)
 	return 1000000;
 #else /* __UNIT_TEST__ */
 #ifdef CONFIG_X86_TSC
-	return cpu_khz;
+	return tsc_khz;
 #else
 	return 1000000;
 #endif /* CONFIG_X86_TSC */
@@ -878,15 +878,11 @@ static inline u64 homa_ns_to_cycles(u64 ns)
 #ifdef __UNIT_TEST__
 	return ns;
 #else /* __UNIT_TEST__ */
-#ifdef CONFIG_X86_TSC
 	u64 tmp;
 
-	tmp = ns * cpu_khz;
+	tmp = ns * homa_clock_khz();
 	do_div(tmp, 1000000);
 	return tmp;
-#else
-	return ns;
-#endif /* CONFIG_X86_TSC */
 #endif /* __UNIT_TEST__ */
 }
 
@@ -901,15 +897,11 @@ static inline u64 homa_usecs_to_cycles(u64 usecs)
 #ifdef __UNIT_TEST__
 	return usecs * 1000;
 #else /* __UNIT_TEST__ */
-#ifdef CONFIG_X86_TSC
 	u64 tmp;
 
-	tmp = usecs * cpu_khz;
+	tmp = usecs * homa_clock_khz();
 	do_div(tmp, 1000);
 	return tmp;
-#else
-	return usecs * 1000;
-#endif /* CONFIG_X86_TSC */
 #endif /* __UNIT_TEST__ */
 }
 

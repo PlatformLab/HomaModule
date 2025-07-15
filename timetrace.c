@@ -92,10 +92,6 @@ int tt_pf_storage = TT_PF_BUF_SIZE;
 /* Set during tests to disable "cpu_khz" line in trace output. */
 bool tt_test_no_khz;
 
-#ifdef __UNIT_TEST__
-unsigned int cpu_khz = 1000000;
-#endif
-
 /**
  * tt_init(): Enable time tracing, create /proc file for reading traces.
  * @proc_file: Name of a file in /proc; this file can be read to extract
@@ -365,7 +361,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 
 	if (!tt_test_no_khz) {
 		pf->bytes_available = snprintf(pf->msg_storage, TT_PF_BUF_SIZE,
-					       "cpu_khz: %u\n", cpu_khz);
+					       "cpu_khz: %u\n", tsc_khz);
 	}
 
 done:
@@ -605,7 +601,7 @@ void tt_print_file(char *path)
 
 	bytes_used += snprintf(buffer + bytes_used,
 			sizeof(buffer) - bytes_used,
-			"cpu_khz: %u\n", cpu_khz);
+			"cpu_khz: %u\n", tsc_khz);
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
@@ -727,7 +723,7 @@ void tt_printk(void)
 			oldest[i] = (pos[i] - 200) & (TT_BUF_SIZE - 1);
 	}
 
-	pr_err("cpu_khz: %u, start: %llu\n", cpu_khz, start_time);
+	pr_err("cpu_khz: %u, start: %llu\n", tsc_khz, start_time);
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
