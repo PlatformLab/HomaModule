@@ -45,6 +45,19 @@ static void grant_check_stalled_hook(char *id)
 	atomic_dec(&hook_grant->stalled_rank);
 }
 
+static struct homa_rpc *hook_end_rpc;
+static int hook_end_lock_count;
+static void grant_spinlock_end_hook(char *id)
+{
+	if (strcmp(id, "spin_lock") != 0)
+		return;
+	if (hook_end_lock_count > 0) {
+		hook_end_lock_count--;
+		if (hook_end_lock_count == 0)
+			homa_rpc_end(hook_end_rpc);
+	}
+}
+
 FIXTURE(homa_grant) {
 	struct in6_addr client_ip[5];
 	int client_port;
@@ -1641,6 +1654,32 @@ TEST_F(homa_grant, homa_grant_check_fifo__no_suitable_rpc)
 	homa_grant_check_fifo(self->homa.grant);
 	EXPECT_EQ(NULL, self->homa.grant->oldest_rpc);
 	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_grant, homa_grant_check_fifo__rpc_dead)
+{
+	struct homa_rpc *rpc;
+
+	mock_clock = 1000;
+	self->homa.grant->max_overcommit = 1;
+	self->homa.grant->fifo_grant_time = 0;
+	self->homa.grant->fifo_grant_increment = 20000;
+	self->homa.grant->fifo_fraction = 50;
+
+	test_rpc_init(self, 100, self->server_ip, 30000);
+	rpc = test_rpc_init(self, 102, self->server_ip, 400000);
+	EXPECT_EQ(-1, rpc->msgin.rank);
+	EXPECT_EQ(0, rpc->msgin.granted);
+	self->homa.grant->oldest_rpc = rpc;
+	homa_rpc_hold(rpc);
+	hook_end_rpc = rpc;
+	hook_end_lock_count = 2;
+	unit_hook_register(grant_spinlock_end_hook);
+
+	unit_log_clear();
+	homa_grant_check_fifo(self->homa.grant);
+	EXPECT_EQ(0, rpc->msgin.granted);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->fifo_grant_bytes);
+	EXPECT_EQ(RPC_DEAD, rpc->state);
 }
 TEST_F(homa_grant, homa_grant_check_fifo__rpc_becomes_fully_granted_so_promote_another)
 {

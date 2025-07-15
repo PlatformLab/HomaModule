@@ -1003,6 +1003,11 @@ void homa_grant_check_fifo(struct homa_grant *grant)
 	homa_rpc_hold(rpc);
 	homa_grant_unlock(grant);
 	homa_rpc_lock(rpc);
+	if (rpc->state == RPC_DEAD) {
+		homa_rpc_unlock(rpc);
+		homa_rpc_put(rpc);
+		return;
+	}
 	homa_grant_cand_init(&cand);
 	rpc->msgin.granted += grant->fifo_grant_increment;
 	if (rpc->msgin.granted >= rpc->msgin.length) {
