@@ -184,6 +184,11 @@ u64 mock_tt_cycles;
 
 unsigned int tsc_khz = 1000000;
 
+/* True means that kthread_stop has been invoked for some thread,
+ * so kthread_should_stop should return true.
+ */
+bool mock_exit_thread;
+
 /* Indicates whether we should be simulation IPv6 or IPv4 in the
  * current test. Can be overridden by a test.
  */
@@ -962,9 +967,14 @@ struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
 	return &mock_task;
 }
 
+bool kthread_should_stop(void) {
+	return mock_exit_thread;
+}
+
 int kthread_stop(struct task_struct *k)
 {
 	unit_log_printf("; ", "kthread_stop");
+	mock_exit_thread = true;
 	return 0;
 }
 
@@ -2124,6 +2134,7 @@ void mock_teardown(void)
 	mock_next_clock_val = 0;
 	mock_num_clock_vals = 0;
 	mock_tt_cycles = 0;
+	mock_exit_thread = false;
 	mock_ipv6 = mock_ipv6_default;
 	mock_dst_check_errors = 0;
 	mock_import_ubuf_errors = 0;

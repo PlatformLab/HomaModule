@@ -121,6 +121,7 @@ extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
 extern int         mock_dst_check_errors;
+extern bool        mock_exit_thread;
 extern int         mock_import_iovec_errors;
 extern int         mock_import_ubuf_errors;
 extern int         mock_ip6_xmit_errors;

@@ -111,12 +111,6 @@ struct homa_pacer {
 #endif /* See strip.py */
 
 	/**
-	 * @exit: true means that the pacer thread should exit as
-	 * soon as possible.
-	 */
-	bool exit;
-
-	/**
 	 * @wait_queue: Used to block the pacer thread when there
 	 * are no throttled RPCs.
 	 */
@@ -128,11 +122,6 @@ struct homa_pacer {
 	 * NIC.
 	 */
 	struct task_struct *kthread;
-
-	/**
-	 * @kthread_done: Used to wait for @kthread to exit.
-	 */
-	struct completion kthread_done;
 
 	/**
 	 * @link_idle_time: The homa_clock() time at which we estimate

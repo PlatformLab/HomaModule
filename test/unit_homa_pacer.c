@@ -26,14 +26,14 @@ static struct homa_pacer *hook_pacer;
 static void exit_hook(char *id) {
 	mock_clock += mock_clock_tick;
 	if (mock_clock >= hook_exit_cycles)
-		hook_pacer->exit = true;
+		mock_exit_thread = true;
 }
 
 static void exit_idle_hook(char *id) {
 	if (strcmp(id, "schedule") == 0)
 		unit_log_printf("; ", "time %llu", mock_clock);
 	if (list_empty(&hook_pacer->throttled_rpcs))
-		hook_pacer->exit = true;
+		mock_exit_thread = true;
 }
 
 static void manage_hook(char *id)

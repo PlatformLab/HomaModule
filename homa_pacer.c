@@ -62,7 +62,6 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa)
 	pacer->fifo_fraction = 50;
 	pacer->max_nic_queue_ns = 5000;
 	pacer->throttle_min_bytes = 1000;
-	pacer->exit = false;
 	init_waitqueue_head(&pacer->wait_queue);
 	pacer->kthread = kthread_run(homa_pacer_main, pacer, "homa_pacer");
 	if (IS_ERR(pacer->kthread)) {
@@ -70,7 +69,6 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa)
 		pr_err("Homa couldn't create pacer thread: error %d\n", err);
 		goto error;
 	}
-	init_completion(&pacer->kthread_done);
 	atomic64_set(&pacer->link_idle_time, homa_clock());
 
 #ifndef __STRIP__ /* See strip.py */
@@ -98,7 +96,6 @@ error:
  */
 void homa_pacer_free(struct homa_pacer *pacer)
 {
-	pacer->exit = true;
 #ifndef __STRIP__ /* See strip.py */
 	if (pacer->sysctl_header) {
 		unregister_net_sysctl_table(pacer->sysctl_header);
@@ -106,9 +103,7 @@ void homa_pacer_free(struct homa_pacer *pacer)
 	}
 #endif /* See strip.py */
 	if (pacer->kthread) {
-		wake_up(&pacer->wait_queue);
 		kthread_stop(pacer->kthread);
-		wait_for_completion(&pacer->kthread_done);
 		pacer->kthread = NULL;
 	}
 	kfree(pacer);
@@ -188,7 +183,7 @@ int homa_pacer_main(void *arg)
 	int status;
 
 	while (1) {
-		if (pacer->exit)
+		if (kthread_should_stop())
 			break;
 		pacer->wake_time = homa_clock();
 		homa_pacer_xmit(pacer);
@@ -206,12 +201,12 @@ int homa_pacer_main(void *arg)
 
 		tt_record("pacer sleeping");
 		status = wait_event_interruptible(pacer->wait_queue,
-			pacer->exit || !list_empty(&pacer->throttled_rpcs));
+				kthread_should_stop() ||
+				!list_empty(&pacer->throttled_rpcs));
 		tt_record1("pacer woke up with status %d", status);
 		if (status != 0 && status != -ERESTARTSYS)
 			break;
 	}
-	kthread_complete_and_exit(&pacer->kthread_done, 0);
 	return 0;
 }
 
