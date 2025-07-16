@@ -8,6 +8,7 @@
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_offload.h"
+#include "homa_qdisc.h"
 #endif /* See strip.py */
 #include "homa_pacer.h"
 #include "homa_peer.h"
@@ -481,6 +482,7 @@ int __init homa_load(void)
 	bool init_net_ops = false;
 	bool init_proto6 = false;
 	bool init_proto = false;
+	bool init_qdisc = false;
 	bool init_homa = false;
 	int status;
 
@@ -617,6 +619,13 @@ int __init homa_load(void)
 		goto error;
 	}
 	init_offload = true;
+
+	status = homa_qdisc_register();
+	if (status != 0) {
+		pr_err("Homa couldn't load its qdisc: error %d\n", status);
+		goto error;
+	}
+	init_qdisc = true;
 #endif /* See strip.py */
 
 	status = register_pernet_subsys(&homa_net_ops);
@@ -653,6 +662,8 @@ error:
 		wait_for_completion(&timer_thread_done);
 	}
 #ifndef __STRIP__ /* See strip.py */
+	if (init_qdisc)
+		homa_qdisc_unregister();
 	if (init_offload)
 		homa_offload_end();
 	if (init_sysctl)
@@ -695,6 +706,7 @@ void __exit homa_unload(void)
 		wake_up_process(timer_kthread);
 		wait_for_completion(&timer_thread_done);
 	}
+	homa_qdisc_unregister();
 	if (homa_offload_end() != 0)
 		pr_err("Homa couldn't stop offloads\n");
 	unregister_net_sysctl_table(homa_ctl_header);

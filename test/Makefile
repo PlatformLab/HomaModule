@@ -54,8 +54,9 @@ TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_timetrace.c
 ifeq ($(__STRIP__),)
 TEST_SRCS +=  unit_homa_grant.c \
-	      unit_homa_offload.c \
 	      unit_homa_metrics.c \
+	      unit_homa_offload.c \
+	      unit_homa_qdisc.c \
 	      unit_homa_skb.c
 endif
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
@@ -68,6 +69,7 @@ HOMA_SRCS :=  homa_devel.c \
 	      homa_peer.c \
 	      homa_pool.c \
 	      homa_plumbing.c \
+	      homa_qdisc.c \
 	      homa_rpc.c \
 	      homa_sock.c \
 	      homa_timer.c \

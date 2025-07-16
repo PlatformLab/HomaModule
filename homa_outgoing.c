@@ -188,6 +188,8 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	homa_info->data_bytes = length;
 	homa_info->seg_length = max_seg_data;
 	homa_info->offset = offset;
+	homa_info->bytes_left = rpc->msgout.length - offset;
+	homa_info->rpc = rpc;
 
 #ifndef __STRIP__ /* See strip.py */
 	if (segs > 1 && rpc->hsk->sock.sk_protocol != IPPROTO_TCP) {

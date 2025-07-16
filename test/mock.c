@@ -8,6 +8,7 @@
 #include "homa_impl.h"
 #include "homa_pool.h"
 #ifndef __STRIP__ /* See strip.py */
+#include "homa_qdisc.h"
 #include "homa_skb.h"
 #endif /* See strip.py */
 #include "ccutils.h"
@@ -34,11 +35,13 @@ extern void      *memcpy(void *dest, const void *src, size_t n);
  */
 int mock_alloc_page_errors;
 int mock_alloc_skb_errors;
+int mock_cmpxchg_errors;
 int mock_copy_data_errors;
 int mock_copy_to_iter_errors;
 int mock_copy_to_user_errors;
 int mock_cpu_idle;
 int mock_dst_check_errors;
+int mock_ethtool_ksettings_errors;
 int mock_import_ubuf_errors;
 int mock_import_iovec_errors;
 int mock_ip6_xmit_errors;
@@ -47,6 +50,7 @@ int mock_kmalloc_errors;
 int mock_kthread_create_errors;
 int mock_prepare_to_wait_errors;
 int mock_register_protosw_errors;
+int mock_register_qdisc_errors;
 int mock_register_sysctl_errors;
 int mock_rht_init_errors;
 int mock_rht_insert_errors;
@@ -120,6 +124,11 @@ static struct unit_hash *proc_files_in_use;
  * a (char *) giving the reference count for the page. Reset for each test.
  */
 static struct unit_hash *pages_in_use;
+
+/* Number of qdiscs that have been registered but not yet unregistered
+ * during the current test. Reset for each test.
+ */
+static int registered_qdiscs;
 
 /* Keeps track of all the results returned by ip_route_output_flow that
  * have not yet been freed. Reset for each test.
@@ -238,15 +247,20 @@ __u16 mock_min_default_port = 0x8000;
 static struct socket mock_socket;
 
 #define MOCK_MAX_NETS 10
-static struct net mock_nets[MOCK_MAX_NETS];
-static struct homa_net mock_hnets[MOCK_MAX_NETS];
-static int mock_num_hnets;
+struct net mock_nets[MOCK_MAX_NETS];
+struct homa_net mock_hnets[MOCK_MAX_NETS];
+int mock_num_hnets;
 
 /* Nonzero means don't generate a unit test failure when freeing peers
  * if the reference count isn't zero (log a message instead).
  */
 int mock_peer_free_no_fail;
 
+/* Link speed to return from mock_get_link_ksettings. */
+int mock_link_mbps = 10000;
+
+struct ethtool_ops mock_ethtool_ops =
+		{.get_link_ksettings = mock_get_link_ksettings};
 struct dst_ops mock_dst_ops = {
 	.mtu = mock_get_mtu,
 	.check = mock_dst_check};
@@ -255,7 +269,8 @@ struct net_device mock_net_device = {
 		.gso_max_segs = 1000,
 		.gso_max_size = 0,
 		._tx = &mock_net_queue,
-		.nd_net = {.net = &mock_nets[0]}
+		.nd_net = {.net = &mock_nets[0]},
+		.ethtool_ops = &mock_ethtool_ops
 	};
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
@@ -906,6 +921,16 @@ void __kfree_skb(struct sk_buff *skb)
 	free(skb);
 }
 
+void kfree_skb_list_reason(struct sk_buff *segs, enum skb_drop_reason reason)
+{
+	while (segs) {
+		struct sk_buff *next = segs->next;
+
+		__kfree_skb(segs);
+		segs = next;
+	}
+}
+
 void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 {
 	return mock_kmalloc(size, gfpflags);
@@ -1068,6 +1093,9 @@ int netif_receive_skb(struct sk_buff *skb)
 	return 0;
 }
 
+void __netif_schedule(struct Qdisc *q)
+{}
+
 void preempt_count_add(int val)
 {
 	int i;
@@ -1203,6 +1231,12 @@ void __lockfunc _raw_spin_lock_irq(raw_spinlock_t *lock)
 	mock_total_spin_locks++;
 }
 
+unsigned long _raw_spin_lock_irqsave(raw_spinlock_t *lock)
+{
+	mock_record_locked(lock);
+	return 1234;
+}
+
 void __raw_spin_lock_init(raw_spinlock_t *lock, const char *name,
 			  struct lock_class_key *key, short inner)
 {}
@@ -1231,6 +1265,15 @@ void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
 
 void __lockfunc _raw_spin_unlock_irq(raw_spinlock_t *lock)
 {
+	mock_record_unlocked(lock);
+}
+
+void _raw_spin_unlock_irqrestore(raw_spinlock_t *lock,
+					    unsigned long flags)
+{
+	if (flags != 1234)
+		FAIL("incorrect flags %ld returned to %sa (expected 1234)",
+		     flags, __func__);
 	mock_record_unlocked(lock);
 }
 
@@ -1283,6 +1326,14 @@ int register_pernet_subsys(struct pernet_operations *)
 	return 0;
 }
 
+int register_qdisc(struct Qdisc_ops *qops)
+{
+	if (mock_check_error(&mock_register_qdisc_errors))
+		return -EINVAL;
+	registered_qdiscs++;
+	return 0;
+}
+
 void release_sock(struct sock *sk)
 {
 	mock_active_locks--;
@@ -1292,6 +1343,25 @@ void release_sock(struct sock *sk)
 void remove_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
+
+int rtnl_is_locked(void) {
+	return 0;
+}
+
+void rtnl_kfree_skbs(struct sk_buff *head, struct sk_buff *tail)
+{
+	if (!head || !tail)
+		return;
+
+	while (true) {
+		struct sk_buff *next = head->next;
+
+		__kfree_skb(head);
+		if (head == tail)
+			break;
+		head = next;
+	}
+}
 
 void schedule(void)
 {
@@ -1505,6 +1575,11 @@ void unregister_net_sysctl_table(struct ctl_table_header *header)
 void unregister_pernet_subsys(struct pernet_operations *)
 {}
 
+void unregister_qdisc(struct Qdisc_ops *qops)
+{
+	registered_qdiscs--;
+}
+
 void vfree(const void *block)
 {
 	if (!vmallocs_in_use || unit_hash_get(vmallocs_in_use, block) == NULL) {
@@ -1616,6 +1691,17 @@ int mock_check_error(int *errorMask)
 }
 
 /**
+ * mock_cmpxchg() - Replacement for atomic64_cmpxchg_relaxed.
+ */
+s64 mock_cmpxchg(atomic64_t *target, s64 old, s64 new)
+{
+	if (mock_check_error(&mock_cmpxchg_errors))
+		return old+1;
+	atomic64_set(target, new);
+	return old;
+}
+
+/**
  * mock_clear_xmit_prios() - Remove all information from the list of
  * transmit priorities.
  */
@@ -1704,6 +1790,16 @@ void mock_get_page(struct page *page)
 		unit_hash_set(pages_in_use, page, (void *) (ref_count+1));
 }
 
+int mock_get_link_ksettings(struct net_device *dev,
+			    struct ethtool_link_ksettings *settings)
+{
+	if (mock_check_error(&mock_ethtool_ksettings_errors))
+		return -EOPNOTSUPP;
+	memset(settings, 0, sizeof(*settings));
+	settings->base.speed = mock_link_mbps;
+	return 0;
+}
+
 void *mock_net_generic(const struct net *net, unsigned int id)
 {
 	struct homa_net *hnet;
@@ -1775,6 +1871,24 @@ void mock_put_page(struct page *page)
 			unit_hash_set(pages_in_use, page, (void *) ref_count);
 		}
 	}
+}
+
+/**
+ * mock_qdisc_new() - Allocate and initialize a new Qdisc suitable for
+ * use in unit tests as a homa qdisc.
+ * Return:  The new Qdisc. The memory is dynamically allocated and must
+ * be kfree-d by the caller. homa_qdisc_init has not been invoked on
+ * this Qdisc yet.
+ */
+struct Qdisc *mock_qdisc_new(struct netdev_queue *dev_queue)
+{
+	struct Qdisc *sch;
+
+	sch = kmalloc(sizeof(struct Qdisc) + sizeof(struct homa_qdisc),
+		      GFP_ATOMIC);
+	sch->dev_queue = dev_queue;
+	mock_net_queue.dev = &mock_net_device;
+	return sch;
 }
 
 /**
@@ -2124,6 +2238,7 @@ void mock_teardown(void)
 	pcpu_hot.current_task = &mock_task;
 	mock_alloc_page_errors = 0;
 	mock_alloc_skb_errors = 0;
+	mock_cmpxchg_errors = 0;
 	mock_copy_data_errors = 0;
 	mock_copy_to_iter_errors = 0;
 	mock_copy_to_user_errors = 0;
@@ -2134,6 +2249,7 @@ void mock_teardown(void)
 	mock_next_clock_val = 0;
 	mock_num_clock_vals = 0;
 	mock_tt_cycles = 0;
+	mock_ethtool_ksettings_errors = 0;
 	mock_exit_thread = false;
 	mock_ipv6 = mock_ipv6_default;
 	mock_dst_check_errors = 0;
@@ -2145,6 +2261,7 @@ void mock_teardown(void)
 	mock_kthread_create_errors = 0;
 	mock_prepare_to_wait_errors = 0;
 	mock_register_protosw_errors = 0;
+	mock_register_qdisc_errors = 0;
 	mock_register_sysctl_errors = 0;
 	mock_rht_init_errors = 0;
 	mock_rht_insert_errors = 0;
@@ -2176,6 +2293,7 @@ void mock_teardown(void)
 	homa_net_id = 0;
 	mock_num_hnets = 0;
 	mock_peer_free_no_fail = 0;
+	mock_link_mbps = 10000;
 	mock_net_device.gso_max_size = 0;
 	mock_net_device.gso_max_segs = 1000;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
@@ -2208,6 +2326,11 @@ void mock_teardown(void)
 		FAIL(" %u pages still allocated after test", count);
 	unit_hash_free(pages_in_use);
 	pages_in_use = NULL;
+
+	if (registered_qdiscs != 0)
+		FAIL(" %d qdiscs still registered after test",
+		     registered_qdiscs);
+	registered_qdiscs = 0;
 
 	count = unit_hash_size(proc_files_in_use);
 	if (count > 0)

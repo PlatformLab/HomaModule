@@ -283,6 +283,8 @@ char *homa_metrics_print(void)
 		  "Time in homa_timer spent reaping RPCs\n");
 		M("data_pkt_reap_cycles", m->data_pkt_reap_cycles,
 		  "Time in homa_data_pkt spent reaping RPCs\n");
+		M("idle_time_conflicts", m->idle_time_conflicts,
+		  "Cache conflicts when updating link_idle_time\n");
 		M("pacer_cycles", m->pacer_cycles,
 		  "Time spent in homa_pacer_main\n");
 		M("homa_cycles",

@@ -1,0 +1,37 @@
+#!/bin/bash
+
+# Copyright (c) 2024 Homa Developers
+# SPDX-License-Identifier: BSD-1-Clause
+
+# Update qdisc modules on one or more machines, based on information
+# on the current machine.  Must run this in the root linux build directory
+#
+# Usage:
+# update_qdisc num_nodes [first]
+#
+# The "num_nodes" arguments indicates how many nodes the command should
+# be run on (starting at node1). The "first" argument is optional; it is
+# an integer identifying the first node on which installation will occur
+# (e.g. "update_qdisc 4 2" means node2 through node5 will be updated).
+# "first" defaults to 1.
+
+v=`uname -r`
+#v=5.17.7+
+
+if [ $# -eq 2 ]; then
+    first=$2
+elif [ $# -eq 1 ]; then
+    first=1
+else
+    echo "Usage: update_qdisc num_nodes [first]"
+    exit 1
+fi
+last=`expr $first + $1 - 1`
+
+for ((i = $first ; i <= $last; i++)); do
+    node=node$i
+    echo
+    echo $node
+    rsync -rtv net/sched/sch_fq_codel.ko $node:sched/
+    ssh $node 'sudo rsync -rtv sched/ /lib/modules/`uname -r`/kernel/net/sched/'
+done

@@ -53,10 +53,17 @@ enum homa_packet_type {
 #define HOMA_SKB_EXTRA MAX_TCP_HEADER
 
 /**
+ * define HOMA_ETH_FRAME_OVERHEAD - Additional overhead bytes for each
+ * Ethernet packet that are not included in the packet header (preamble,
+ * start frame delimiter, CRC, and inter-packet gap).
+ */
+#define HOMA_ETH_FRAME_OVERHEAD 24
+
+/**
  * define HOMA_ETH_OVERHEAD - Number of bytes per Ethernet packet for Ethernet
  * header, CRC, preamble, and inter-packet gap.
  */
-#define HOMA_ETH_OVERHEAD 42
+#define HOMA_ETH_OVERHEAD (18 + HOMA_ETH_FRAME_OVERHEAD)
 
 /**
  * define HOMA_MIN_PKT_LENGTH - Every Homa packet must be padded to at least

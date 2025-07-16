@@ -368,6 +368,13 @@ struct homa_metrics {
 	u64 data_pkt_reap_cycles;
 
 	/**
+	 * @idle_time_conflicts: total number of times that an update to
+	 * link_idle_time in homa_qdisc_update_link_idle failed because
+	 * of a conflicting access.
+	 */
+	__u64 idle_time_conflicts;
+
+	/**
 	 * @pacer_cycles: total time spent executing in homa_pacer_main
 	 * (not including blocked time).
 	 */

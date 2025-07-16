@@ -520,6 +520,19 @@ struct homa_net {
 	 * for this namespace. Managed by homa_peer.c under the peertab lock.
 	 */
 	int num_peers;
+
+#ifndef __STRIP__ /* See strip.py */
+	/**
+	 * @qdisc_devs: List of all homa_qdisc_dev objects that exist for
+	 * this namespace. Protected by qdisc_devs_lock.
+	 */
+	struct list_head qdisc_devs;
+
+	/**
+	 * @qdisc_dev_lock: Must hold when reading or writing @qdisc_devs.
+	 */
+	spinlock_t qdisc_devs_lock;
+#endif /* See strip.py */
 };
 
 /**
@@ -556,6 +569,31 @@ struct homa_skb_info {
 	 * this packet.
 	 */
 	int offset;
+
+	/**
+	 * @bytes_left: number of bytes in this packet and all later packets
+	 * in the same message. Used to priroitize packets for SRPT.
+	 */
+	int bytes_left;
+
+	/**
+	 * @rpc: RPC that this packet came from. Used only as a unique
+	 * identifier: it is not safe to dereference this pointer (the RPC
+	 * may no longer exist).
+	 */
+	void *rpc;
+
+	/**
+	 * @next_sibling: next packet in @rpc that has been deferred in
+	 * homa_qdisc because the NIC queue was too long, or NULL if none.
+	 */
+	struct sk_buff *next_sibling;
+
+	/**
+	 * @last_sibling: last packet in @next_sibling list. Only valid
+	 * for the "head" packet (which is in qdev->homa_deferred).
+	 */
+	struct sk_buff *last_sibling;
 };
 
 /**

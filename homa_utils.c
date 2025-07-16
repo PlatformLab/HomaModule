@@ -165,6 +165,10 @@ int homa_net_init(struct homa_net *hnet, struct net *net, struct homa *homa)
 	hnet->net = net;
 	hnet->homa = homa;
 	hnet->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
+#ifndef __STRIP__ /* See strip.py */
+	INIT_LIST_HEAD(&hnet->qdisc_devs);
+	spin_lock_init(&hnet->qdisc_devs_lock);
+#endif /* See strip.py */
 	return 0;
 }
 

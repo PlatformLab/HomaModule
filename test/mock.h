@@ -4,9 +4,13 @@
 #ifndef _HOMA_MOCK_H
 #define _HOMA_MOCK_H
 
+#include <linux/ethtool.h>
+
 /* Replace various Linux variables and functions with mocked ones. */
 #undef alloc_pages
 #define alloc_pages mock_alloc_pages
+
+#define atomic64_cmpxchg_relaxed mock_cmpxchg
 
 #undef alloc_percpu_gfp
 #define alloc_percpu_gfp(type, flags) mock_kmalloc(10 * sizeof(type), flags)
@@ -115,12 +119,14 @@ extern int         mock_bpage_size;
 extern int         mock_bpage_shift;
 extern u64         mock_clock;
 extern u64         mock_clock_tick;
+extern int         mock_cmpxchg_errors;
 extern int         mock_compound_order_mask;
 extern int         mock_copy_data_errors;
 extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
 extern int         mock_dst_check_errors;
+extern int         mock_ethtool_ksettings_errors;
 extern bool        mock_exit_thread;
 extern int         mock_import_iovec_errors;
 extern int         mock_import_ubuf_errors;
@@ -130,8 +136,10 @@ extern bool        mock_ipv6;
 extern bool        mock_ipv6_default;
 extern int         mock_kmalloc_errors;
 extern int         mock_kthread_create_errors;
+extern int         mock_link_mbps;
 extern int         mock_prepare_to_wait_errors;
 extern int         mock_register_protosw_errors;
+extern int         mock_register_qdisc_errors;
 extern int         mock_register_sysctl_errors;
 extern int         mock_wait_intr_irq_errors;
 extern char        mock_xmit_prios[];
@@ -143,6 +151,9 @@ extern __u16       mock_min_default_port;
 extern int         mock_mtu;
 extern struct net_device
 		   mock_net_device;
+extern struct netdev_queue
+		   mock_net_queue;
+extern struct net  mock_nets[];
 extern int         mock_numa_mask;
 extern int         mock_page_nid_mask;
 extern int         mock_peer_free_no_fail;
@@ -173,12 +184,15 @@ struct homa_net
 	   *mock_alloc_hnet(struct homa *homa);
 int         mock_check_error(int *errorMask);
 void        mock_clear_xmit_prios(void);
+s64         mock_cmpxchg(atomic64_t *target, s64 old, s64 new);
 unsigned int mock_compound_order(struct page *page);
 int         mock_cpu_to_node(int core);
 void        mock_data_ready(struct sock *sk);
 struct dst_entry
 	   *mock_dst_check(struct dst_entry *, __u32 cookie);
 cycles_t    mock_get_cycles(void);
+int         mock_get_link_ksettings(struct net_device *dev,
+				    struct ethtool_link_ksettings *settings);
 unsigned int
 	    mock_get_mtu(const struct dst_entry *dst);
 void        mock_get_page(struct page *page);
@@ -191,6 +205,8 @@ void        mock_preempt_disable(void);
 void        mock_preempt_enable(void);
 int         mock_processor_id(void);
 void        mock_put_page(struct page *page);
+struct Qdisc
+	   *mock_qdisc_new(struct netdev_queue *dev_queue);
 void        mock_rcu_read_lock(void);
 void        mock_rcu_read_unlock(void);
 void        mock_record_locked(void *lock);

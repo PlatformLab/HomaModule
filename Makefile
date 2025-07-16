@@ -20,6 +20,7 @@ else
 HOMA_OBJS += homa_grant.o \
 	homa_metrics.o \
 	homa_offload.o \
+	homa_qdisc.o \
 	homa_skb.o
 endif
 
