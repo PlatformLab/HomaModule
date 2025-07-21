@@ -610,8 +610,14 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		}
 #endif /* See strip.py */
 
-		if ((rpc->msgout.length - rpc->msgout.next_xmit_offset)
-				>= homa->pacer->throttle_min_bytes) {
+#ifndef __STRIP__ /* See strip.py */
+		if (rpc->msgout.length - rpc->msgout.next_xmit_offset >
+		    homa->pacer->throttle_min_bytes &&
+		    list_empty(&rpc->hsk->hnet->qdisc_devs)) {
+#else /* See strip.py */
+		if (rpc->msgout.length - rpc->msgout.next_xmit_offset >
+		    homa->pacer->throttle_min_bytes) {
+#endif /* See strip.py */
 			if (!homa_pacer_check_nic_q(homa->pacer, skb, force)) {
 				tt_record1("homa_xmit_data adding id %u to throttle queue",
 					   rpc->id);

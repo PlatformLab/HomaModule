@@ -6,6 +6,7 @@
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #ifndef __STRIP__ /* See strip.py */
+#include "homa_qdisc.h"
 #include "homa_skb.h"
 #else /* See strip.py */
 #include "homa_stub.h"
@@ -877,6 +878,30 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 	EXPECT_STREQ("request id 1234, next_offset 2800; "
 			"request id 1236, next_offset 1400", unit_log_get());
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_xmit_data__dont_throttle_because_homa_qdisc_in_use)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 2000, 1000);
+	struct homa_qdisc_dev *qdev;
+
+	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	unit_log_clear();
+	atomic64_set(&self->homa.pacer->link_idle_time, 1000000);
+	self->homa.pacer->max_nic_queue_cycles = 0;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+
+	homa_rpc_lock(crpc);
+	homa_xmit_data(crpc, false);
+	homa_rpc_unlock(crpc);
+	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 600@1400", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+	homa_qdisc_qdev_put(qdev);
+}
+#endif /* See strip.py */
 TEST_F(homa_outgoing, homa_xmit_data__throttle)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
