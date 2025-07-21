@@ -130,6 +130,9 @@ static struct unit_hash *pages_in_use;
  */
 static int registered_qdiscs;
 
+/* Registered by most recent call to register_qdisc. */
+static struct Qdisc_ops *qdisc_ops;
+
 /* Keeps track of all the results returned by ip_route_output_flow that
  * have not yet been freed. Reset for each test.
  */
@@ -266,12 +269,16 @@ struct dst_ops mock_dst_ops = {
 	.check = mock_dst_check};
 struct netdev_queue mock_net_queue = {.state = 0};
 struct net_device mock_net_device = {
-		.gso_max_segs = 1000,
-		.gso_max_size = 0,
-		._tx = &mock_net_queue,
-		.nd_net = {.net = &mock_nets[0]},
-		.ethtool_ops = &mock_ethtool_ops
-	};
+	.gso_max_segs = 1000,
+	.gso_max_size = 0,
+	._tx = &mock_net_queue,
+	.nd_net = {.net = &mock_nets[0]},
+	.ethtool_ops = &mock_ethtool_ops
+};
+
+/* Number of invocations of netif_schedule_queue. */
+int mock_netif_schedule_calls;
+
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
 struct net_offload tcp_offload;
@@ -1065,9 +1072,7 @@ ssize_t __modver_version_show(struct module_attribute *a,
 
 void __mutex_init(struct mutex *lock, const char *name,
 			 struct lock_class_key *key)
-{
-
-}
+{}
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 void mutex_lock_nested(struct mutex *lock, unsigned int subclass)
@@ -1082,6 +1087,11 @@ void mutex_unlock(struct mutex *lock)
 {
 	UNIT_HOOK("unlock");
 	mock_active_locks--;
+}
+
+void netif_schedule_queue(struct netdev_queue *txq)
+{
+	mock_netif_schedule_calls++;
 }
 
 int netif_receive_skb(struct sk_buff *skb)
@@ -1331,6 +1341,7 @@ int register_qdisc(struct Qdisc_ops *qops)
 	if (mock_check_error(&mock_register_qdisc_errors))
 		return -EINVAL;
 	registered_qdiscs++;
+	qdisc_ops = qops;
 	return 0;
 }
 
@@ -1578,6 +1589,7 @@ void unregister_pernet_subsys(struct pernet_operations *)
 void unregister_qdisc(struct Qdisc_ops *qops)
 {
 	registered_qdiscs--;
+	qdisc_ops = NULL;
 }
 
 void vfree(const void *block)
@@ -1874,21 +1886,22 @@ void mock_put_page(struct page *page)
 }
 
 /**
- * mock_qdisc_new() - Allocate and initialize a new Qdisc suitable for
+ * mock_alloc_qdisc() - Allocate and initialize a new Qdisc suitable for
  * use in unit tests as a homa qdisc.
  * Return:  The new Qdisc. The memory is dynamically allocated and must
  * be kfree-d by the caller. homa_qdisc_init has not been invoked on
  * this Qdisc yet.
  */
-struct Qdisc *mock_qdisc_new(struct netdev_queue *dev_queue)
+struct Qdisc *mock_alloc_qdisc(struct netdev_queue *dev_queue)
 {
-	struct Qdisc *sch;
+	struct Qdisc *qdisc;
 
-	sch = kmalloc(sizeof(struct Qdisc) + sizeof(struct homa_qdisc),
+	qdisc = kzalloc(sizeof(struct Qdisc) + sizeof(struct homa_qdisc),
 		      GFP_ATOMIC);
-	sch->dev_queue = dev_queue;
-	mock_net_queue.dev = &mock_net_device;
-	return sch;
+	qdisc->dev_queue = dev_queue;
+	qdisc->ops = qdisc_ops;
+	spin_lock_init(&qdisc->q.lock);
+	return qdisc;
 }
 
 /**
@@ -2296,6 +2309,7 @@ void mock_teardown(void)
 	mock_link_mbps = 10000;
 	mock_net_device.gso_max_size = 0;
 	mock_net_device.gso_max_segs = 1000;
+	mock_netif_schedule_calls = 0;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));
@@ -2331,6 +2345,7 @@ void mock_teardown(void)
 		FAIL(" %d qdiscs still registered after test",
 		     registered_qdiscs);
 	registered_qdiscs = 0;
+	qdisc_ops = NULL;
 
 	count = unit_hash_size(proc_files_in_use);
 	if (count > 0)

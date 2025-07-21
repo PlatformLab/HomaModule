@@ -137,6 +137,7 @@ extern bool        mock_ipv6_default;
 extern int         mock_kmalloc_errors;
 extern int         mock_kthread_create_errors;
 extern int         mock_link_mbps;
+extern int         mock_netif_schedule_calls;
 extern int         mock_prepare_to_wait_errors;
 extern int         mock_register_protosw_errors;
 extern int         mock_register_qdisc_errors;
@@ -182,6 +183,8 @@ struct page *
 	    mock_alloc_pages(gfp_t gfp, unsigned order);
 struct homa_net
 	   *mock_alloc_hnet(struct homa *homa);
+struct Qdisc
+	   *mock_alloc_qdisc(struct netdev_queue *dev_queue);
 int         mock_check_error(int *errorMask);
 void        mock_clear_xmit_prios(void);
 s64         mock_cmpxchg(atomic64_t *target, s64 old, s64 new);
@@ -205,8 +208,6 @@ void        mock_preempt_disable(void);
 void        mock_preempt_enable(void);
 int         mock_processor_id(void);
 void        mock_put_page(struct page *page);
-struct Qdisc
-	   *mock_qdisc_new(struct netdev_queue *dev_queue);
 void        mock_rcu_read_lock(void);
 void        mock_rcu_read_unlock(void);
 void        mock_record_locked(void *lock);

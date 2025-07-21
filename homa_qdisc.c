@@ -51,64 +51,37 @@ void homa_qdisc_unregister(void)
 }
 
 /**
- * homa_qdisc_init() - Initialize a new instance of this queuing discipline.
- * @sch:      Qdisc to initialize.
- * @opt:      Options for this qdisc; not currently used.
- * @extack:   For reporting detailed information relating to errors; not used.
- * Return:    0 for success, otherwise a negative errno.
- */
-int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
-		    struct netlink_ext_ack *extack)
-{
-        struct homa_qdisc *q = qdisc_priv(sch);
-        struct homa_qdisc_dev *qdev;
-        struct homa_net *hnet;
-        bool found = false;
-
-        hnet = homa_net_from_net(dev_net(sch->dev_queue->dev));
-	spin_lock_bh(&hnet->qdisc_devs_lock);
-        list_for_each_entry(qdev, &hnet->qdisc_devs, links) {
-                if (qdev->dev == sch->dev_queue->dev) {
-                        found = true;
-                        break;
-                }
-        }
-        if (!found) {
-                qdev = homa_qdisc_qdev_new(hnet, sch->dev_queue->dev);
-                if (IS_ERR(qdev)) {
-	                spin_unlock_bh(&hnet->qdisc_devs_lock);
-                        return PTR_ERR(qdev);
-                }
-        } else {
-                qdev->num_qdiscs++;
-        }
-	spin_unlock_bh(&hnet->qdisc_devs_lock);
-
-        q->qdev = qdev;
-        skb_queue_head_init(&q->queue);
-
-	sch->limit = 10*1024;
-        return 0;
-}
-
-/**
- * homa_qdisc_qdev_new() - Allocate and initialize a new homa_qdisc_dev.
+ * homa_qdisc_qdev_get() - Find the homa_qdisc_dev to use for a particular
+ * net_device and increment its reference count. Create a new one if there
+ * isn't an existing one to use.
  * @hnet:     Network namespace for the homa_qdisc_dev.
  * @dev:      NIC that the homa_qdisc_dev will manage.
- * Return     A pointer to the new homa_qdisc_dev, or a PTR_ERR errno.
+ * Return:     A pointer to the new homa_qdisc_dev, or a PTR_ERR errno.
  */
-struct homa_qdisc_dev *homa_qdisc_qdev_new(struct homa_net *hnet,
+struct homa_qdisc_dev *homa_qdisc_qdev_get(struct homa_net *hnet,
                                            struct net_device *dev)
-        __must_hold(hnet->qdisc_devs_lock)
 {
         struct homa_qdisc_dev *qdev;
 
+	spin_lock_bh(&hnet->qdisc_devs_lock);
+        list_for_each_entry(qdev, &hnet->qdisc_devs, links) {
+                if (qdev->dev == dev) {
+                        qdev->refs++;
+                        goto done;
+                }
+        }
+
         qdev = kzalloc(sizeof(*qdev), GFP_ATOMIC);
-        if (!qdev)
-                return ERR_PTR(-ENOMEM);
+        if (!qdev) {
+                qdev = ERR_PTR(-ENOMEM);
+                goto done;
+        }
         qdev->dev = dev;
         qdev->hnet = hnet;
-        qdev->num_qdiscs = 1;
+        qdev->refs = 1;
+	spin_lock_init(&qdev->lock);
+        qdev->pacer_qix = -1;
+        qdev->redirect_qix = -1;
         homa_qdisc_update_sysctl(qdev);
         INIT_LIST_HEAD(&qdev->links);
         skb_queue_head_init(&qdev->homa_deferred);
@@ -124,10 +97,70 @@ struct homa_qdisc_dev *homa_qdisc_qdev_new(struct homa_net *hnet,
 		pr_err("couldn't create homa qdisc pacer thread: error %d\n",
                        error);
                 kfree(qdev);
-		return ERR_PTR(error);
+                qdev = ERR_PTR(error);
+                goto done;
 	}
         list_add(&qdev->links, &hnet->qdisc_devs);
+
+done:
+        spin_unlock_bh(&hnet->qdisc_devs_lock);
         return qdev;
+}
+
+/**
+ * homa_qdisc_qdev_put() - Decrement the reference count for a homa_qdisc_qdev
+ * and free it if the count becomes zero.
+ * @qdev:       Object to unreference.
+ */
+void homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev)
+{
+        struct homa_net *hnet = qdev->hnet;
+
+	spin_lock_bh(&hnet->qdisc_devs_lock);
+        qdev->refs--;
+        if (qdev->refs == 0) {
+                kthread_stop(qdev->pacer_kthread);
+                qdev->pacer_kthread = NULL;
+
+                __list_del_entry(&qdev->links);
+                homa_qdisc_srpt_free(&qdev->homa_deferred);
+                skb_queue_purge(&qdev->tcp_deferred);
+                kfree(qdev);
+        }
+	spin_unlock_bh(&hnet->qdisc_devs_lock);
+}
+
+/**
+ * homa_qdisc_init() - Initialize a new instance of this queuing discipline.
+ * @sch:      Qdisc to initialize.
+ * @opt:      Options for this qdisc; not currently used.
+ * @extack:   For reporting detailed information relating to errors; not used.
+ * Return:    0 for success, otherwise a negative errno.
+ */
+int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
+		    struct netlink_ext_ack *extack)
+{
+        struct homa_qdisc *q = qdisc_priv(sch);
+        struct homa_qdisc_dev *qdev;
+        struct homa_net *hnet;
+        int i;
+
+        hnet = homa_net_from_net(dev_net(sch->dev_queue->dev));
+        qdev = homa_qdisc_qdev_get(hnet, sch->dev_queue->dev);
+        if (IS_ERR(qdev))
+                return PTR_ERR(qdev);
+
+        q->qdev = qdev;
+        q->ix = -1;
+        for (i = 0; i < qdev->dev->num_tx_queues; i++) {
+                if (netdev_get_tx_queue(qdev->dev, i) == sch->dev_queue) {
+                        q->ix = i;
+                        break;
+                }
+        }
+
+	sch->limit = 10*1024;
+        return 0;
 }
 
 /**
@@ -135,32 +168,52 @@ struct homa_qdisc_dev *homa_qdisc_qdev_new(struct homa_net *hnet,
  * before a qdisc is deleted.
  * @sch:      Qdisc that is being deleted.
  */
-void homa_qdisc_destroy(struct Qdisc *sch)
+void homa_qdisc_destroy(struct Qdisc *qdisc)
 {
-        struct homa_qdisc *q = qdisc_priv(sch);
-        struct homa_qdisc_dev *qdev = q->qdev;
+        struct homa_qdisc *q = qdisc_priv(qdisc);
 
-	spin_lock_bh(&qdev->hnet->qdisc_devs_lock);
-        qdev->num_qdiscs--;
-        if (qdev->num_qdiscs == 0)
-                homa_qdisc_qdev_destroy(qdev);
-	spin_unlock_bh(&qdev->hnet->qdisc_devs_lock);
+        qdisc_reset_queue(qdisc);
+        homa_qdisc_qdev_put(q->qdev);
 }
 
 /**
- * homa_qdisc_qdev_destroy() - Cleanup and release memory for a homa_qdisc_dev.
- * @qdev:       Object to destroy; its memory will be freed.
+ * homa_qdisc_set_qixs() - Recompute the @pacer_qix and @redirect_qix
+ * fields in @qdev. Upon return, both fields will be valid unless there
+ * are no Homa qdiscs associated with qdev's net_device.
+ * @qdev:    Identifies net_device containing qnetdev_queues to choose
+ *           between.
  */
-void homa_qdisc_qdev_destroy(struct homa_qdisc_dev *qdev)
-        __must_hold(qde)
+void homa_qdisc_set_qixs(struct homa_qdisc_dev *qdev)
 {
-	kthread_stop(qdev->pacer_kthread);
-	qdev->pacer_kthread = NULL;
+        int i, pacer_qix, redirect_qix;
+        struct netdev_queue *txq;
+        struct Qdisc *qdisc;
 
-        __list_del_entry(&qdev->links);
-        homa_qdisc_srpt_free(&qdev->homa_deferred);
-        skb_queue_purge(&qdev->tcp_deferred);
-        kfree(qdev);
+        /* Note: it's safe for mutliple instances of this function to
+         * execute concurrently so no synchronization is needed (other
+         * than using RCU to protect against deletion of the underlying
+         * data structures).
+         */
+
+        pacer_qix = -1;
+        redirect_qix = -1;
+        rcu_read_lock();
+        for (i = 0; i < qdev->dev->num_tx_queues; i++) {
+                txq = netdev_get_tx_queue(qdev->dev, i);
+                qdisc = rcu_dereference_bh(txq->qdisc);
+                if (!qdisc || qdisc->ops != &homa_qdisc_ops)
+                        continue;
+                if (pacer_qix == -1) {
+                        pacer_qix = i;
+                        redirect_qix = i;
+                } else {
+                        redirect_qix = i;
+                        break;
+                }
+        }
+        qdev->pacer_qix = pacer_qix;
+        qdev->redirect_qix = redirect_qix;
+        rcu_read_unlock();
 }
 
 /**
@@ -176,11 +229,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
         struct homa_qdisc_dev *qdev = q->qdev;
         struct homa *homa = qdev->hnet->homa;
         int pkt_len;
-
-        if (skb == q->qdev->pacer_skb) {
-                q->qdev->pacer_skb = NULL;
-                goto enqueue;
-        }
+        int result;
 
         /* The packet length computed by Linux didn't include overheads
          * such as inter-frame gap; add that in here.
@@ -205,11 +254,19 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
          */
         homa_qdisc_srpt_enqueue(&qdev->homa_deferred, skb);
 	wake_up(&qdev->pacer_sleep);
+        return NET_XMIT_SUCCESS;
 
 enqueue:
-	if (likely(sch->q.qlen < READ_ONCE(sch->limit)))
-		return qdisc_enqueue_tail(skb, sch);
-	return qdisc_drop(skb, sch, to_free);
+        if (q->ix != qdev->pacer_qix) {
+                if (unlikely(sch->q.qlen >= READ_ONCE(sch->limit)))
+                        return qdisc_drop(skb, sch, to_free);
+                spin_lock_bh(qdisc_lock(sch));
+                result = qdisc_enqueue_tail(skb, sch);
+                spin_unlock_bh(qdisc_lock(sch));
+        } else {
+                result = homa_qdisc_enqueue_special(skb, qdev, false);
+        }
+        return result;
 }
 
 /**
@@ -485,75 +542,62 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
                         break;
                 homa_qdisc_update_link_idle(qdev, qdisc_skb_cb(skb)->pkt_len,
                                             -1);
-
-                /* Resubmit the packet. Concentrate all of the (long)
-                 * resubmitted packets on device queue 0, in order
-                 * to reduce contention between them and short packets
-                 * on other queues.
-                 */
-                qdev->pacer_skb = skb;
-                homa_qdisc_resubmit_skb(skb, qdev->dev, 0);
-                qdev->pacer_skb = NULL;
+                homa_qdisc_enqueue_special(skb, qdev, true);
 	}
 done:
 	spin_unlock_bh(&qdev->pacer_mutex);
 }
 
 /**
- * homa_qdisc_resubmit_skb() - This function is called by the pacer to
- * restart the transmission of an skb that was deferred because of NIC
- * queue length. The packet may be dropped under various error conditions.
+ * homa_qdisc_enqueue_special() - This function is called by the pacer to
+ * enqueue a packet on one of the distinguished transmit queues and wake
+ * up the queue for transmission.
  * @skb:     Packet to resubmit.
- * @dev:     Network device to which the packet should be resubmitted.
- * @queue:   Index of desired tx queue on @dev.
- * Return:   Zero for success, otherwise a negative errno.
+ * @qdev:    Homa data about the networkd device on which the packet should
+ *           be resubmitted.
+ * @pacer:   True means queue the packet on qdev->pacer_qix, false means
+ *           qdev->redirect_qix.
+ * Return:   Standard enqueue return code (usually NET_XMIT_SUCCESS).
  */
-void homa_qdisc_resubmit_skb(struct sk_buff *skb, struct net_device *dev,
-                            int queue)
+int homa_qdisc_enqueue_special(struct sk_buff *skb,
+                               struct homa_qdisc_dev *qdev, bool pacer)
 {
-        /* The code of this function was extracted from __dev_xmit_skb
-         * (with RCU lock/unlock from __dev_queue_xmit). Ideally this
-         * module would simply invoke __dev_xmit_skb, but it isn't
-         * globally available.
-         */
-	struct sk_buff *to_free = NULL;
         struct netdev_queue *txq;
-	spinlock_t *root_lock;
-        struct Qdisc *q;
-	bool contended;
+        struct Qdisc *qdisc;
+        int result;
+        int qix;
+        int i;
 
-	rcu_read_lock_bh();
-        txq = netdev_get_tx_queue(dev, 0);
-	q = rcu_dereference_bh(txq->qdisc);
-        root_lock = qdisc_lock(q);
+	rcu_read_lock();
 
-	contended = qdisc_is_running(q) || IS_ENABLED(CONFIG_PREEMPT_RT);
-	if (unlikely(contended))
-		spin_lock(&q->busylock);
+        /* Must make sure that the queue index is still valid (refers
+         * to a Homa qdisc).
+         */
+        for (i = 0; ; i++) {
+                qix = pacer ? qdev->pacer_qix : qdev->redirect_qix;
+                if (qix >= 0 && qix < qdev->dev->num_tx_queues) {
+                        txq = netdev_get_tx_queue(qdev->dev, qix);
+                        qdisc = rcu_dereference_bh(txq->qdisc);
+                        if (qdisc->ops== &homa_qdisc_ops)
+                                break;
+                }
+                if (i > 0) {
+                        /* Couldn't find a Homa qdisc to use; drop the skb. */
+                        kfree_skb(skb);
+                        result = NET_XMIT_DROP;
+                        goto done;
+                }
+                homa_qdisc_set_qixs(qdev);
+        }
 
-	spin_lock(root_lock);
-	if (unlikely(test_bit(__QDISC_STATE_DEACTIVATED, &q->state))) {
-		__qdisc_drop(skb, &to_free);
-	} else {
-		WRITE_ONCE(q->owner, smp_processor_id());
-                q->enqueue(skb, q, &to_free);
-		WRITE_ONCE(q->owner, -1);
-		if (qdisc_run_begin(q)) {
-			if (unlikely(contended)) {
-				spin_unlock(&q->busylock);
-				contended = false;
-			}
-			// __qdisc_run(q);
-			qdisc_run_end(q);
-		}
-	}
-	spin_unlock(root_lock);
-	if (unlikely(to_free))
-		kfree_skb_list_reason(to_free,
-				      tcf_get_drop_reason(to_free));
-	if (unlikely(contended))
-		spin_unlock(&q->busylock);
-	rcu_read_unlock_bh();
+        spin_lock_bh(qdisc_lock(qdisc));
+        result = qdisc_enqueue_tail(skb, qdisc);
+        spin_unlock_bh(qdisc_lock(qdisc));
+        netif_schedule_queue(txq);
+
+done:
+	rcu_read_unlock();
+        return result;
 }
 
 /**

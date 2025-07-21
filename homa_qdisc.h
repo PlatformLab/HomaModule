@@ -24,8 +24,11 @@ struct homa_qdisc {
 	/** @dev: Info shared among all qdiscs for a net_device. */
 	struct homa_qdisc_dev *qdev;
 
-	/** @queue: Packets waiting to be transmitted. */
-	struct sk_buff_head queue;
+	/**
+	 * @ix: Index of this qdisc's transmit queue among all those for
+	 * its net_device.
+	 */
+	int ix;
 };
 
 /**
@@ -43,10 +46,47 @@ struct homa_qdisc_dev {
 	struct homa_net *hnet;
 
 	/**
-	 * @num_qdiscs: Number of homa_qdisc objects referencing this struct.
-	 * Access only when holding homa->qdisc_devs_lock.
+	 * @refs: Reference count (e.g. includes one reference for each
+	 * homa_qdisc that references this object).  Must hold
+	 * hnet->qdisc_devs_lock to access.
 	 */
-	int num_qdiscs;
+	int refs;
+
+	/**
+	 * @lock: Used to synchronize access to mutable fields within
+	 * this struct, such as @pacer_qix and @redirect_qix.
+	 */
+	spinlock_t lock;
+
+	/**
+	 * @pacer_qix: Index of a netdev_queue within dev that is reserved
+	 * for the pacer to use for transmitting packets. We segregate paced
+	 * traffic (which is almost entirely large packets) from non-paced
+	 * traffic (mostly small packets). All the paced traffic goes to a
+	 * single transmit queue, and though we try to limit the length of
+	 * this queue, there are situations where the queue can still build
+	 * up (under some scenarios it appears that NICs cannot actually
+	 * transmit at line rate). If the pacer queue is segregated, queue
+	 * buildup there will not affect non-paced packets. In order to
+	 * reserve pacer_qix for pacer traffic, short-packet traffic that
+	 * is assigned to that queue must be redirected to another queue;
+	 * redirect_qix is used for that. -1 means there currently isn't
+	 * a netdev_queue assigned for pacer traffic. Note: this field is
+	 * a hint; the value must be verified under RCU to have a Homa qdisc
+	 * before using.
+	 */
+	int pacer_qix;
+
+	/**
+	 * @redirect_qix: Index of a netdev_queue within dev; packets
+	 * originally passed to pacer_qix are redirected here, so that
+	 * pacer_qix is used only for packets sent by the pacer. -1 means
+	 * there isn't currently a netdev_queue assigned for this purpose.
+	 * This field is a hint that must be verified under RCU before using
+	 * to be sure it still refers to a Homa qdisc. May be the same as
+	 * pacer_qix if there is only one Homa qdisc associated with dev.
+	 */
+	int redirect_qix;
 
 	/** @link_mbps: Speed of the link associated with @dev, in Mbps. */
 	int link_mbps;
@@ -101,28 +141,23 @@ struct homa_qdisc_dev {
 	 * never block on this.
 	 */
 	spinlock_t pacer_mutex __aligned(L1_CACHE_BYTES);
-
-	/**
-	 * @pacer_skb: The current skb that the pacer has selected for
-	 * transmission and is pushing through __dev_xmit_skb. This skb
-	 * should be transmitted without any further delay or accounting.
-	 */
-	struct sk_buff *pacer_skb;
 };
 
 void            homa_qdisc_destroy(struct Qdisc *sch);
 int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
+int             homa_qdisc_enqueue_special(struct sk_buff *skb,
+                        		   struct homa_qdisc_dev *qdev,
+					   bool pacer);
 int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
 int             homa_qdisc_pacer_main(void *device);
-void            homa_qdisc_qdev_destroy(struct homa_qdisc_dev *qdev);
 struct homa_qdisc_dev *
-		homa_qdisc_qdev_new(struct homa_net *hnet,
+		homa_qdisc_qdev_get(struct homa_net *hnet,
 				    struct net_device *dev);
+void            homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev);
 int             homa_qdisc_register(void);
-void            homa_qdisc_resubmit_skb(struct sk_buff *skb,
-					struct net_device *dev, int queue);
+void            homa_qdisc_set_qixs(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_srpt_enqueue(struct sk_buff_head *list,
 					struct sk_buff *skb);
 struct sk_buff *
