@@ -7782,7 +7782,7 @@ class AnalyzeTimeline:
             ['softirq gets first grant',      'softirq_grant',lambda x : x[0][0]],
             ['last request packet sent',      'send_data',    lambda x : x[-1][0]],
             ['gro gets first response packet','gro_data',     lambda x : x[0][0]],
-            ['softrq gets first response pkt','softirq_data', lambda x : x[0][0]],
+            ['softirq gets first response pkt','softirq_data', lambda x : x[0][0]],
             ['sent grant',                    'send_grant',   lambda x : x[0][0]],
             ['gro gets last response packet', 'gro_data',     lambda x : x[-1][0]],
             ['homa_recvmsg returning',        'recvmsg_done', lambda x : x]
