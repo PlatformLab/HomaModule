@@ -9,9 +9,11 @@ system log, removing extraneous syslog information and printing it
 out with times in microseconds instead of clock cycles.
 
 Usage:
-ttsyslog.py [file]
+ttsyslog.py [--extra file2] [file]
 
 If no file is given, the information is read from standard input.
+If "--extra file2" is specified, all of the lines that are *not* valid
+timetrace records are output to file file2.
 """
 
 from __future__ import division, print_function
@@ -32,6 +34,11 @@ first_time = 0
 # Time in cycles of previous event.
 prev_time = 0
 
+extra = None
+if (len(sys.argv) > 2):
+    if sys.argv[1] == '--extra':
+        extra = open(sys.argv[2], 'w')
+        del sys.argv[1:3]
 f = sys.stdin
 if len(sys.argv) > 1:
     f = open(sys.argv[1])
@@ -66,6 +73,13 @@ for line in reversed(lines):
             (this_time - first_time)/(1000.0 *cpu_ghz),
             (this_time - prev_time)/(1000.0 * cpu_ghz), this_event))
     prev_time = this_time
+
+if extra:
+    for line in lines:
+        if not re.match('.* ([0-9.]+) (\[C..\] .+)', line):
+            extra.write(line)
+            extra.write('\n')
+    extra.close()
 
 if cpu_ghz == None:
     print("Couldn't find initial line with clock speed", file=sys.stderr)
