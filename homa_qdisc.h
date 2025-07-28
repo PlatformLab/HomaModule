@@ -40,7 +40,7 @@ struct homa_qdisc_dev {
 	struct net_device *dev;
 
 	/**
-	 * @homa_net: Homa's information about the network namesapce
+	 * @homa_net: Homa's information about the network namespace
 	 * this object belongs to.
 	 */
 	struct homa_net *hnet;
@@ -147,7 +147,7 @@ void            homa_qdisc_destroy(struct Qdisc *sch);
 int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
 int             homa_qdisc_enqueue_special(struct sk_buff *skb,
-                        		   struct homa_qdisc_dev *qdev,
+					   struct homa_qdisc_dev *qdev,
 					   bool pacer);
 int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
@@ -161,7 +161,7 @@ void            homa_qdisc_set_qixs(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_srpt_enqueue(struct sk_buff_head *list,
 					struct sk_buff *skb);
 struct sk_buff *
-                homa_qdisc_srpt_dequeue(struct sk_buff_head *list);
+		homa_qdisc_srpt_dequeue(struct sk_buff_head *list);
 void            homa_qdisc_srpt_free(struct sk_buff_head *list);
 void            homa_qdisc_unregister(void);
 void            homa_qdisc_update_all_sysctl(struct homa_net *hnet);

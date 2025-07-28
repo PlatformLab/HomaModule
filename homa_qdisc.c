@@ -20,15 +20,15 @@
 #include <net/pkt_sched.h>
 
 static struct Qdisc_ops homa_qdisc_ops __read_mostly = {
-        .id = "homa",
-        .priv_size = sizeof(struct homa_qdisc),
-        .enqueue = homa_qdisc_enqueue,
-        .dequeue = qdisc_dequeue_head,
-        .peek = qdisc_peek_head,
-        .init = homa_qdisc_init,
-        .reset = qdisc_reset_queue,
-        .destroy = homa_qdisc_destroy,
-        .owner = THIS_MODULE,
+	.id = "homa",
+	.priv_size = sizeof(struct homa_qdisc),
+	.enqueue = homa_qdisc_enqueue,
+	.dequeue = qdisc_dequeue_head,
+	.peek = qdisc_peek_head,
+	.init = homa_qdisc_init,
+	.reset = qdisc_reset_queue,
+	.destroy = homa_qdisc_destroy,
+	.owner = THIS_MODULE,
 };
 
 /**
@@ -38,7 +38,7 @@ static struct Qdisc_ops homa_qdisc_ops __read_mostly = {
  */
 int homa_qdisc_register(void)
 {
-        return register_qdisc(&homa_qdisc_ops);
+	return register_qdisc(&homa_qdisc_ops);
 }
 
 /**
@@ -47,7 +47,7 @@ int homa_qdisc_register(void)
  */
 void homa_qdisc_unregister(void)
 {
-        unregister_qdisc(&homa_qdisc_ops);
+	unregister_qdisc(&homa_qdisc_ops);
 }
 
 /**
@@ -59,33 +59,33 @@ void homa_qdisc_unregister(void)
  * Return:     A pointer to the new homa_qdisc_dev, or a PTR_ERR errno.
  */
 struct homa_qdisc_dev *homa_qdisc_qdev_get(struct homa_net *hnet,
-                                           struct net_device *dev)
+					   struct net_device *dev)
 {
-        struct homa_qdisc_dev *qdev;
+	struct homa_qdisc_dev *qdev;
 
 	spin_lock_bh(&hnet->qdisc_devs_lock);
-        list_for_each_entry(qdev, &hnet->qdisc_devs, links) {
-                if (qdev->dev == dev) {
-                        qdev->refs++;
-                        goto done;
-                }
-        }
+	list_for_each_entry(qdev, &hnet->qdisc_devs, links) {
+		if (qdev->dev == dev) {
+			qdev->refs++;
+			goto done;
+		}
+	}
 
-        qdev = kzalloc(sizeof(*qdev), GFP_ATOMIC);
-        if (!qdev) {
-                qdev = ERR_PTR(-ENOMEM);
-                goto done;
-        }
-        qdev->dev = dev;
-        qdev->hnet = hnet;
-        qdev->refs = 1;
+	qdev = kzalloc(sizeof(*qdev), GFP_ATOMIC);
+	if (!qdev) {
+		qdev = ERR_PTR(-ENOMEM);
+		goto done;
+	}
+	qdev->dev = dev;
+	qdev->hnet = hnet;
+	qdev->refs = 1;
 	spin_lock_init(&qdev->lock);
-        qdev->pacer_qix = -1;
-        qdev->redirect_qix = -1;
-        homa_qdisc_update_sysctl(qdev);
-        INIT_LIST_HEAD(&qdev->links);
-        skb_queue_head_init(&qdev->homa_deferred);
-        skb_queue_head_init(&qdev->tcp_deferred);
+	qdev->pacer_qix = -1;
+	qdev->redirect_qix = -1;
+	homa_qdisc_update_sysctl(qdev);
+	INIT_LIST_HEAD(&qdev->links);
+	skb_queue_head_init(&qdev->homa_deferred);
+	skb_queue_head_init(&qdev->tcp_deferred);
 	init_waitqueue_head(&qdev->pacer_sleep);
 	spin_lock_init(&qdev->pacer_mutex);
 
@@ -95,16 +95,16 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct homa_net *hnet,
 		int error = PTR_ERR(qdev->pacer_kthread);
 
 		pr_err("couldn't create homa qdisc pacer thread: error %d\n",
-                       error);
-                kfree(qdev);
-                qdev = ERR_PTR(error);
-                goto done;
+		       error);
+		kfree(qdev);
+		qdev = ERR_PTR(error);
+		goto done;
 	}
-        list_add(&qdev->links, &hnet->qdisc_devs);
+	list_add(&qdev->links, &hnet->qdisc_devs);
 
 done:
-        spin_unlock_bh(&hnet->qdisc_devs_lock);
-        return qdev;
+	spin_unlock_bh(&hnet->qdisc_devs_lock);
+	return qdev;
 }
 
 /**
@@ -114,19 +114,19 @@ done:
  */
 void homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev)
 {
-        struct homa_net *hnet = qdev->hnet;
+	struct homa_net *hnet = qdev->hnet;
 
 	spin_lock_bh(&hnet->qdisc_devs_lock);
-        qdev->refs--;
-        if (qdev->refs == 0) {
-                kthread_stop(qdev->pacer_kthread);
-                qdev->pacer_kthread = NULL;
+	qdev->refs--;
+	if (qdev->refs == 0) {
+		kthread_stop(qdev->pacer_kthread);
+		qdev->pacer_kthread = NULL;
 
-                __list_del_entry(&qdev->links);
-                homa_qdisc_srpt_free(&qdev->homa_deferred);
-                skb_queue_purge(&qdev->tcp_deferred);
-                kfree(qdev);
-        }
+		__list_del_entry(&qdev->links);
+		homa_qdisc_srpt_free(&qdev->homa_deferred);
+		skb_queue_purge(&qdev->tcp_deferred);
+		kfree(qdev);
+	}
 	spin_unlock_bh(&hnet->qdisc_devs_lock);
 }
 
@@ -140,27 +140,27 @@ void homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev)
 int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 		    struct netlink_ext_ack *extack)
 {
-        struct homa_qdisc *q = qdisc_priv(sch);
-        struct homa_qdisc_dev *qdev;
-        struct homa_net *hnet;
-        int i;
+	struct homa_qdisc *q = qdisc_priv(sch);
+	struct homa_qdisc_dev *qdev;
+	struct homa_net *hnet;
+	int i;
 
-        hnet = homa_net_from_net(dev_net(sch->dev_queue->dev));
-        qdev = homa_qdisc_qdev_get(hnet, sch->dev_queue->dev);
-        if (IS_ERR(qdev))
-                return PTR_ERR(qdev);
+	hnet = homa_net_from_net(dev_net(sch->dev_queue->dev));
+	qdev = homa_qdisc_qdev_get(hnet, sch->dev_queue->dev);
+	if (IS_ERR(qdev))
+		return PTR_ERR(qdev);
 
-        q->qdev = qdev;
-        q->ix = -1;
-        for (i = 0; i < qdev->dev->num_tx_queues; i++) {
-                if (netdev_get_tx_queue(qdev->dev, i) == sch->dev_queue) {
-                        q->ix = i;
-                        break;
-                }
-        }
+	q->qdev = qdev;
+	q->ix = -1;
+	for (i = 0; i < qdev->dev->num_tx_queues; i++) {
+		if (netdev_get_tx_queue(qdev->dev, i) == sch->dev_queue) {
+			q->ix = i;
+			break;
+		}
+	}
 
-	sch->limit = 10*1024;
-        return 0;
+	sch->limit = 10 * 1024;
+	return 0;
 }
 
 /**
@@ -170,10 +170,10 @@ int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
  */
 void homa_qdisc_destroy(struct Qdisc *qdisc)
 {
-        struct homa_qdisc *q = qdisc_priv(qdisc);
+	struct homa_qdisc *q = qdisc_priv(qdisc);
 
-        qdisc_reset_queue(qdisc);
-        homa_qdisc_qdev_put(q->qdev);
+	qdisc_reset_queue(qdisc);
+	homa_qdisc_qdev_put(q->qdev);
 }
 
 /**
@@ -185,35 +185,35 @@ void homa_qdisc_destroy(struct Qdisc *qdisc)
  */
 void homa_qdisc_set_qixs(struct homa_qdisc_dev *qdev)
 {
-        int i, pacer_qix, redirect_qix;
-        struct netdev_queue *txq;
-        struct Qdisc *qdisc;
+	int i, pacer_qix, redirect_qix;
+	struct netdev_queue *txq;
+	struct Qdisc *qdisc;
 
-        /* Note: it's safe for mutliple instances of this function to
-         * execute concurrently so no synchronization is needed (other
-         * than using RCU to protect against deletion of the underlying
-         * data structures).
-         */
+	/* Note: it's safe for mutltiple instances of this function to
+	 * execute concurrently so no synchronization is needed (other
+	 * than using RCU to protect against deletion of the underlying
+	 * data structures).
+	 */
 
-        pacer_qix = -1;
-        redirect_qix = -1;
-        rcu_read_lock();
-        for (i = 0; i < qdev->dev->num_tx_queues; i++) {
-                txq = netdev_get_tx_queue(qdev->dev, i);
-                qdisc = rcu_dereference_bh(txq->qdisc);
-                if (!qdisc || qdisc->ops != &homa_qdisc_ops)
-                        continue;
-                if (pacer_qix == -1) {
-                        pacer_qix = i;
-                        redirect_qix = i;
-                } else {
-                        redirect_qix = i;
-                        break;
-                }
-        }
-        qdev->pacer_qix = pacer_qix;
-        qdev->redirect_qix = redirect_qix;
-        rcu_read_unlock();
+	pacer_qix = -1;
+	redirect_qix = -1;
+	rcu_read_lock();
+	for (i = 0; i < qdev->dev->num_tx_queues; i++) {
+		txq = netdev_get_tx_queue(qdev->dev, i);
+		qdisc = rcu_dereference_bh(txq->qdisc);
+		if (!qdisc || qdisc->ops != &homa_qdisc_ops)
+			continue;
+		if (pacer_qix == -1) {
+			pacer_qix = i;
+			redirect_qix = i;
+		} else {
+			redirect_qix = i;
+			break;
+		}
+	}
+	qdev->pacer_qix = pacer_qix;
+	qdev->redirect_qix = redirect_qix;
+	rcu_read_unlock();
 }
 
 /**
@@ -223,50 +223,50 @@ void homa_qdisc_set_qixs(struct homa_qdisc_dev *qdev)
  * @to_free:  Used when dropping packets.
  */
 int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
-			      struct sk_buff **to_free)
+		       struct sk_buff **to_free)
 {
-        struct homa_qdisc *q = qdisc_priv(sch);
-        struct homa_qdisc_dev *qdev = q->qdev;
-        struct homa *homa = qdev->hnet->homa;
-        int pkt_len;
-        int result;
+	struct homa_qdisc *q = qdisc_priv(sch);
+	struct homa_qdisc_dev *qdev = q->qdev;
+	struct homa *homa = qdev->hnet->homa;
+	int pkt_len;
+	int result;
 
-        /* The packet length computed by Linux didn't include overheads
-         * such as inter-frame gap; add that in here.
-         */
-        pkt_len = qdisc_skb_cb(skb)->pkt_len + HOMA_ETH_FRAME_OVERHEAD;
-        if (pkt_len < homa->pacer->throttle_min_bytes) {
-                homa_qdisc_update_link_idle(q->qdev, pkt_len, -1);
-                goto enqueue;
-        }
+	/* The packet length computed by Linux didn't include overheads
+	 * such as inter-frame gap; add that in here.
+	 */
+	pkt_len = qdisc_skb_cb(skb)->pkt_len + HOMA_ETH_FRAME_OVERHEAD;
+	if (pkt_len < homa->pacer->throttle_min_bytes) {
+		homa_qdisc_update_link_idle(q->qdev, pkt_len, -1);
+		goto enqueue;
+	}
 
-        if (!is_homa_pkt(skb)) {
-                homa_qdisc_update_link_idle(q->qdev, pkt_len, -1);
-                goto enqueue;
-        }
+	if (!is_homa_pkt(skb)) {
+		homa_qdisc_update_link_idle(q->qdev, pkt_len, -1);
+		goto enqueue;
+	}
 
-        if (homa_qdisc_update_link_idle(q->qdev, pkt_len,
-                                        homa->pacer->max_nic_queue_cycles))
-                goto enqueue;
+	if (homa_qdisc_update_link_idle(q->qdev, pkt_len,
+					homa->pacer->max_nic_queue_cycles))
+		goto enqueue;
 
-        /* This packet needs to be deferred until the NIC queue has
-         * been drained a bit.
-         */
-        homa_qdisc_srpt_enqueue(&qdev->homa_deferred, skb);
+	/* This packet needs to be deferred until the NIC queue has
+	 * been drained a bit.
+	 */
+	homa_qdisc_srpt_enqueue(&qdev->homa_deferred, skb);
 	wake_up(&qdev->pacer_sleep);
-        return NET_XMIT_SUCCESS;
+	return NET_XMIT_SUCCESS;
 
 enqueue:
-        if (q->ix != qdev->pacer_qix) {
-                if (unlikely(sch->q.qlen >= READ_ONCE(sch->limit)))
-                        return qdisc_drop(skb, sch, to_free);
-                spin_lock_bh(qdisc_lock(sch));
-                result = qdisc_enqueue_tail(skb, sch);
-                spin_unlock_bh(qdisc_lock(sch));
-        } else {
-                result = homa_qdisc_enqueue_special(skb, qdev, false);
-        }
-        return result;
+	if (q->ix != qdev->pacer_qix) {
+		if (unlikely(sch->q.qlen >= READ_ONCE(sch->limit)))
+			return qdisc_drop(skb, sch, to_free);
+		spin_lock_bh(qdisc_lock(sch));
+		result = qdisc_enqueue_tail(skb, sch);
+		spin_unlock_bh(qdisc_lock(sch));
+	} else {
+		result = homa_qdisc_enqueue_special(skb, qdev, false);
+	}
+	return result;
 }
 
 /**
@@ -277,54 +277,54 @@ enqueue:
  */
 void homa_qdisc_srpt_enqueue(struct sk_buff_head *list, struct sk_buff *skb)
 {
-        struct homa_skb_info *info = homa_get_skb_info(skb);
-        struct sk_buff *other;
+	struct homa_skb_info *info = homa_get_skb_info(skb);
+	struct sk_buff *other;
 	unsigned long flags;
 
-        /* Tricky point: only one packet from an RPC may appear in
-         * qdev->homa_deferred at once (the earliest one in the message).
-         * If later packets from the same message were also in the queue,
-         * they would have higher priorities and would get transmitted
-         * first, which we don't want. So, if more than one packet from
-         * a message is waiting, only the first appears in qdev->homa_deferred;
-         * the others are queued up using links in the homa_skb_info of
-         * the first packet.
-         *
-         * This also means that we must scan the list starting at the
-         * low-priority end, so we'll notice if there is an earlier
-         * (lower priority) packet for the same RPC already in the list.
-         */
+	/* Tricky point: only one packet from an RPC may appear in
+	 * qdev->homa_deferred at once (the earliest one in the message).
+	 * If later packets from the same message were also in the queue,
+	 * they would have higher priorities and would get transmitted
+	 * first, which we don't want. So, if more than one packet from
+	 * a message is waiting, only the first appears in qdev->homa_deferred;
+	 * the others are queued up using links in the homa_skb_info of
+	 * the first packet.
+	 *
+	 * This also means that we must scan the list starting at the
+	 * low-priority end, so we'll notice if there is an earlier
+	 * (lower priority) packet for the same RPC already in the list.
+	 */
 
-        info->next_sibling = NULL;
-        info->last_sibling = NULL;
+	info->next_sibling = NULL;
+	info->last_sibling = NULL;
 	spin_lock_irqsave(&list->lock, flags);
-        if (skb_queue_empty(list)) {
-                __skb_queue_head(list, skb);
-                goto done;
-        }
-        skb_queue_reverse_walk(list, other) {
-                struct homa_skb_info *other_info = homa_get_skb_info(other);
+	if (skb_queue_empty(list)) {
+		__skb_queue_head(list, skb);
+		goto done;
+	}
+	skb_queue_reverse_walk(list, other) {
+		struct homa_skb_info *other_info = homa_get_skb_info(other);
 
-                if (other_info->rpc == info->rpc) {
-                        if (!other_info->last_sibling)
-                                other_info->next_sibling = skb;
-                        else
-                                homa_get_skb_info(other_info->last_sibling)->
-                                                next_sibling = skb;
-                        other_info->last_sibling = skb;
-                        break;
-                }
+		if (other_info->rpc == info->rpc) {
+			if (!other_info->last_sibling)
+				other_info->next_sibling = skb;
+			else
+				homa_get_skb_info(other_info->last_sibling)->
+						next_sibling = skb;
+			other_info->last_sibling = skb;
+			break;
+		}
 
-                if (other_info->bytes_left <= info->bytes_left) {
-                        __skb_queue_after(list, other, skb);
-                        break;
-                }
+		if (other_info->bytes_left <= info->bytes_left) {
+			__skb_queue_after(list, other, skb);
+			break;
+		}
 
-                if (skb_queue_is_first(list, other)) {
-                        __skb_queue_head(list, skb);
-                        break;
-                }
-        }
+		if (skb_queue_is_first(list, other)) {
+			__skb_queue_head(list, skb);
+			break;
+		}
+	}
 
 done:
 	spin_unlock_irqrestore(&list->lock, flags);
@@ -338,38 +338,38 @@ done:
  */
 struct sk_buff *homa_qdisc_srpt_dequeue(struct sk_buff_head *list)
 {
-        struct homa_skb_info *sibling_info;
-        struct sk_buff *skb, *sibling;
-        struct homa_skb_info *info;
+	struct homa_skb_info *sibling_info;
+	struct sk_buff *skb, *sibling;
+	struct homa_skb_info *info;
 	unsigned long flags;
 
-        /* The only tricky element about this function is that skb may
-         * have a sibling list. If so, we need to enqueue the next
-         * sibling.
-         */
+	/* The only tricky element about this function is that skb may
+	 * have a sibling list. If so, we need to enqueue the next
+	 * sibling.
+	 */
 	spin_lock_irqsave(&list->lock, flags);
-        if (skb_queue_empty(list)) {
-	        spin_unlock_irqrestore(&list->lock, flags);
-                return NULL;
-        }
-        skb = list->next;
-        __skb_unlink(skb, list);
-        info = homa_get_skb_info(skb);
-        if (info->next_sibling) {
-                /* This is a "compound" packet, containing multiple
-                 * packets from the same RPC. Put the next packet
-                 * back on the list at the front (it should have even
-                 * higher priority than skb, since it is later in the
-                 * message).
-                 */
-                sibling = info->next_sibling;
-                sibling_info = homa_get_skb_info(sibling);
-                sibling_info->last_sibling = info->last_sibling;
-                __skb_queue_head(list, sibling);
-        }
+	if (skb_queue_empty(list)) {
+		spin_unlock_irqrestore(&list->lock, flags);
+		return NULL;
+	}
+	skb = list->next;
+	__skb_unlink(skb, list);
+	info = homa_get_skb_info(skb);
+	if (info->next_sibling) {
+		/* This is a "compound" packet, containing multiple
+		 * packets from the same RPC. Put the next packet
+		 * back on the list at the front (it should have even
+		 * higher priority than skb, since it is later in the
+		 * message).
+		 */
+		sibling = info->next_sibling;
+		sibling_info = homa_get_skb_info(sibling);
+		sibling_info->last_sibling = info->last_sibling;
+		__skb_queue_head(list, sibling);
+	}
 
 	spin_unlock_irqrestore(&list->lock, flags);
-        return skb;
+	return skb;
 }
 
 /**
@@ -381,14 +381,14 @@ struct sk_buff *homa_qdisc_srpt_dequeue(struct sk_buff_head *list)
  */
 void homa_qdisc_srpt_free(struct sk_buff_head *list)
 {
-        struct sk_buff *skb;
+	struct sk_buff *skb;
 
-        while (1) {
-                skb = homa_qdisc_srpt_dequeue(list);
-                if (!skb)
-                        break;
-                kfree_skb(skb);
-        }
+	while (1) {
+		skb = homa_qdisc_srpt_dequeue(list);
+		if (!skb)
+			break;
+		kfree_skb(skb);
+	}
 }
 
 /**
@@ -409,33 +409,33 @@ void homa_qdisc_srpt_free(struct sk_buff_head *list)
  *                     if the queue was too long.
  */
 int homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev, int bytes,
-                                int max_queue_cycles)
+				int max_queue_cycles)
 {
 	u64 idle, new_idle, clock, cycles_for_packet;
 
 	cycles_for_packet = qdev->cycles_per_mibyte;
 	cycles_for_packet = (cycles_for_packet *
-                             (bytes + HOMA_ETH_FRAME_OVERHEAD)) >> 20;
+			     (bytes + HOMA_ETH_FRAME_OVERHEAD)) >> 20;
 
-        /* The following loop may be executed multiple times if there
-         * are conflicting udpates to qdev->link_idle_time.
-         */
+	/* The following loop may be executed multiple times if there
+	 * are conflicting updates to qdev->link_idle_time.
+	 */
 	while (1) {
 		clock = homa_clock();
 		idle = atomic64_read(&qdev->link_idle_time);
 		if (idle < clock) {
 			new_idle = clock + cycles_for_packet;
 		} else {
-                        if (max_queue_cycles >= 0 && (idle - clock) >
-                                                     max_queue_cycles)
-                                return 0;
+			if (max_queue_cycles >= 0 && (idle - clock) >
+						     max_queue_cycles)
+				return 0;
 			new_idle = idle + cycles_for_packet;
-                }
+		}
 
 		if (atomic64_cmpxchg_relaxed(&qdev->link_idle_time, idle,
 					     new_idle) == idle)
 			break;
-                INC_METRIC(idle_time_conflicts, 1);
+		INC_METRIC(idle_time_conflicts, 1);
 	}
 	return 1;
 }
@@ -450,20 +450,20 @@ int homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev, int bytes,
 int homa_qdisc_pacer_main(void *device)
 {
 	struct homa_qdisc_dev *qdev = device;
-        int status;
-        u64 start;
+	int status;
+	u64 start;
 
 	while (1) {
 		if (kthread_should_stop())
 			break;
-                start = homa_clock();
+		start = homa_clock();
 		homa_qdisc_pacer(qdev);
 		INC_METRIC(pacer_cycles, homa_clock() - start);
 
 		if (!skb_queue_empty(&qdev->homa_deferred) ||
-                    !skb_queue_empty(&qdev->tcp_deferred)) {
+		    !skb_queue_empty(&qdev->tcp_deferred)) {
 			/* There are more packets to transmit (the NIC queue
-                         * must be full); call the pacer again, but first
+			 * must be full); call the pacer again, but first
 			 * give other threads a chance to run (otherwise
 			 * low-level packet processing such as softirq could
 			 * starve).
@@ -475,8 +475,8 @@ int homa_qdisc_pacer_main(void *device)
 		tt_record("homa_qdisc pacer sleeping");
 		status = wait_event_interruptible(qdev->pacer_sleep,
 			kthread_should_stop() ||
-                        !skb_queue_empty(&qdev->homa_deferred) ||
-                        !skb_queue_empty(&qdev->tcp_deferred));
+			!skb_queue_empty(&qdev->homa_deferred) ||
+			!skb_queue_empty(&qdev->tcp_deferred));
 		tt_record1("homa_qdisc pacer woke up with status %d", status);
 		if (status != 0 && status != -ERESTARTSYS)
 			break;
@@ -516,14 +516,14 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 	 * homa_qdisc_pacer_main about interfering with softirq handlers).
 	 */
 	for (i = 0; i < 5; i++) {
-                struct sk_buff *skb;
+		struct sk_buff *skb;
 		u64 idle_time, now;
 
 		/* If the NIC queue is too long, wait until it gets shorter. */
 		now = homa_clock();
 		idle_time = atomic64_read(&qdev->link_idle_time);
 		while ((now + qdev->hnet->homa->pacer->max_nic_queue_cycles) <
-                       idle_time) {
+		       idle_time) {
 			/* If we've xmitted at least one packet then
 			 * return (this helps with testing and also
 			 * allows homa_qdisc_pacer_main to yield the core).
@@ -537,12 +537,12 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 		 * still too long because other threads have queued packets,
 		 * but we transmit anyway so the pacer thread doesn't starve.
 		 */
-                skb = homa_qdisc_srpt_dequeue(&qdev->homa_deferred);
-                if (!skb)
-                        break;
-                homa_qdisc_update_link_idle(qdev, qdisc_skb_cb(skb)->pkt_len,
-                                            -1);
-                homa_qdisc_enqueue_special(skb, qdev, true);
+		skb = homa_qdisc_srpt_dequeue(&qdev->homa_deferred);
+		if (!skb)
+			break;
+		homa_qdisc_update_link_idle(qdev, qdisc_skb_cb(skb)->pkt_len,
+					    -1);
+		homa_qdisc_enqueue_special(skb, qdev, true);
 	}
 done:
 	spin_unlock_bh(&qdev->pacer_mutex);
@@ -560,44 +560,44 @@ done:
  * Return:   Standard enqueue return code (usually NET_XMIT_SUCCESS).
  */
 int homa_qdisc_enqueue_special(struct sk_buff *skb,
-                               struct homa_qdisc_dev *qdev, bool pacer)
+			       struct homa_qdisc_dev *qdev, bool pacer)
 {
-        struct netdev_queue *txq;
-        struct Qdisc *qdisc;
-        int result;
-        int qix;
-        int i;
+	struct netdev_queue *txq;
+	struct Qdisc *qdisc;
+	int result;
+	int qix;
+	int i;
 
 	rcu_read_lock();
 
-        /* Must make sure that the queue index is still valid (refers
-         * to a Homa qdisc).
-         */
-        for (i = 0; ; i++) {
-                qix = pacer ? qdev->pacer_qix : qdev->redirect_qix;
-                if (qix >= 0 && qix < qdev->dev->num_tx_queues) {
-                        txq = netdev_get_tx_queue(qdev->dev, qix);
-                        qdisc = rcu_dereference_bh(txq->qdisc);
-                        if (qdisc->ops== &homa_qdisc_ops)
-                                break;
-                }
-                if (i > 0) {
-                        /* Couldn't find a Homa qdisc to use; drop the skb. */
-                        kfree_skb(skb);
-                        result = NET_XMIT_DROP;
-                        goto done;
-                }
-                homa_qdisc_set_qixs(qdev);
-        }
+	/* Must make sure that the queue index is still valid (refers
+	 * to a Homa qdisc).
+	 */
+	for (i = 0; ; i++) {
+		qix = pacer ? qdev->pacer_qix : qdev->redirect_qix;
+		if (qix >= 0 && qix < qdev->dev->num_tx_queues) {
+			txq = netdev_get_tx_queue(qdev->dev, qix);
+			qdisc = rcu_dereference_bh(txq->qdisc);
+			if (qdisc->ops == &homa_qdisc_ops)
+				break;
+		}
+		if (i > 0) {
+			/* Couldn't find a Homa qdisc to use; drop the skb. */
+			kfree_skb(skb);
+			result = NET_XMIT_DROP;
+			goto done;
+		}
+		homa_qdisc_set_qixs(qdev);
+	}
 
-        spin_lock_bh(qdisc_lock(qdisc));
-        result = qdisc_enqueue_tail(skb, qdisc);
-        spin_unlock_bh(qdisc_lock(qdisc));
-        netif_schedule_queue(txq);
+	spin_lock_bh(qdisc_lock(qdisc));
+	result = qdisc_enqueue_tail(skb, qdisc);
+	spin_unlock_bh(qdisc_lock(qdisc));
+	netif_schedule_queue(txq);
 
 done:
 	rcu_read_unlock();
-        return result;
+	return result;
 }
 
 /**
@@ -608,38 +608,38 @@ done:
  */
 void homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev)
 {
-        struct ethtool_link_ksettings ksettings;
-        struct homa *homa = qdev->hnet->homa;
-        const struct ethtool_ops *ops;
+	struct ethtool_link_ksettings ksettings;
+	struct homa *homa = qdev->hnet->homa;
+	const struct ethtool_ops *ops;
 	u64 tmp;
 
-        qdev->link_mbps = homa->link_mbps;
-        ops = qdev->dev->ethtool_ops;
-        if (ops && ops->get_link_ksettings) {
-                if (ops->get_link_ksettings(qdev->dev, &ksettings) == 0)
-                        qdev->link_mbps = ksettings.base.speed;
-        }
+	qdev->link_mbps = homa->link_mbps;
+	ops = qdev->dev->ethtool_ops;
+	if (ops && ops->get_link_ksettings) {
+		if (ops->get_link_ksettings(qdev->dev, &ksettings) == 0)
+			qdev->link_mbps = ksettings.base.speed;
+	}
 
-        /* Underestimate link bandwidth (overestimate time) by 1%.
-         *
-         *                                 cycles/sec
-         * cycles/mibyte =    (101/100) * -------------
-         *                                 mibytes/sec
-         *
-         *                        101 * homa_clock_khz() * 1000
-         *               =    ---------------------------------------
-         *                     100 * link_mbps * (1<<20 / 1000000) / 8
-         *
-         *                     8 * 1010 * homa_clock_khz()      1<<20
-         *               =    ----------------------------- * ---------
-         *                              link_mbps              1000000
-         */
+	/* Underestimate link bandwidth (overestimate time) by 1%.
+	 *
+	 *                                 cycles/sec
+	 * cycles/mibyte =    (101/100) * -------------
+	 *                                 mibytes/sec
+	 *
+	 *                        101 * homa_clock_khz() * 1000
+	 *               =    ---------------------------------------
+	 *                     100 * link_mbps * (1<<20 / 1000000) / 8
+	 *
+	 *                     8 * 1010 * homa_clock_khz()      1<<20
+	 *               =    ----------------------------- * ---------
+	 *                              link_mbps              1000000
+	 */
 	tmp = 8ULL * 1010;
-        tmp *= homa_clock_khz();
-        do_div(tmp, qdev->link_mbps);
-        tmp <<= 20;
-        do_div(tmp, 1000000);
-        qdev->cycles_per_mibyte = tmp;
+	tmp *= homa_clock_khz();
+	do_div(tmp, qdev->link_mbps);
+	tmp <<= 20;
+	do_div(tmp, 1000000);
+	qdev->cycles_per_mibyte = tmp;
 }
 
 /**
@@ -649,10 +649,10 @@ void homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev)
  */
 void homa_qdisc_update_all_sysctl(struct homa_net *hnet)
 {
-        struct homa_qdisc_dev *qdev;
+	struct homa_qdisc_dev *qdev;
 
 	spin_lock_bh(&hnet->qdisc_devs_lock);
-        list_for_each_entry(qdev, &hnet->qdisc_devs, links)
-                homa_qdisc_update_sysctl(qdev);
+	list_for_each_entry(qdev, &hnet->qdisc_devs, links)
+		homa_qdisc_update_sysctl(qdev);
 	spin_unlock_bh(&hnet->qdisc_devs_lock);
 }
