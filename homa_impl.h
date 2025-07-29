@@ -529,9 +529,12 @@ struct homa_net {
 	struct list_head qdisc_devs;
 
 	/**
-	 * @qdisc_dev_lock: Must hold when reading or writing @qdisc_devs.
+	 * @qdisc_devs_mutex: Used to synchronize operations on @qdisc_devs
+	 * (creation and deletion of qdiscs). Must be a mutex rather than
+	 * a spinlock because homa_qdisc_dev_get calls functions that may
+	 * blocko.
 	 */
-	spinlock_t qdisc_devs_lock;
+	struct mutex qdisc_devs_mutex;
 #endif /* See strip.py */
 };
 

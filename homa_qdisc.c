@@ -63,7 +63,7 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct homa_net *hnet,
 {
 	struct homa_qdisc_dev *qdev;
 
-	spin_lock_bh(&hnet->qdisc_devs_lock);
+	mutex_lock(&hnet->qdisc_devs_mutex);
 	list_for_each_entry(qdev, &hnet->qdisc_devs, links) {
 		if (qdev->dev == dev) {
 			qdev->refs++;
@@ -79,7 +79,6 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct homa_net *hnet,
 	qdev->dev = dev;
 	qdev->hnet = hnet;
 	qdev->refs = 1;
-	spin_lock_init(&qdev->lock);
 	qdev->pacer_qix = -1;
 	qdev->redirect_qix = -1;
 	homa_qdisc_update_sysctl(qdev);
@@ -103,7 +102,7 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct homa_net *hnet,
 	list_add(&qdev->links, &hnet->qdisc_devs);
 
 done:
-	spin_unlock_bh(&hnet->qdisc_devs_lock);
+	mutex_unlock(&hnet->qdisc_devs_mutex);
 	return qdev;
 }
 
@@ -116,7 +115,7 @@ void homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev)
 {
 	struct homa_net *hnet = qdev->hnet;
 
-	spin_lock_bh(&hnet->qdisc_devs_lock);
+	mutex_lock(&hnet->qdisc_devs_mutex);
 	qdev->refs--;
 	if (qdev->refs == 0) {
 		kthread_stop(qdev->pacer_kthread);
@@ -127,7 +126,7 @@ void homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev)
 		skb_queue_purge(&qdev->tcp_deferred);
 		kfree(qdev);
 	}
-	spin_unlock_bh(&hnet->qdisc_devs_lock);
+	mutex_unlock(&hnet->qdisc_devs_mutex);
 }
 
 /**
@@ -189,7 +188,7 @@ void homa_qdisc_set_qixs(struct homa_qdisc_dev *qdev)
 	struct netdev_queue *txq;
 	struct Qdisc *qdisc;
 
-	/* Note: it's safe for mutltiple instances of this function to
+	/* Note: it's safe for multiple instances of this function to
 	 * execute concurrently so no synchronization is needed (other
 	 * than using RCU to protect against deletion of the underlying
 	 * data structures).
@@ -228,13 +227,11 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	struct homa_qdisc *q = qdisc_priv(sch);
 	struct homa_qdisc_dev *qdev = q->qdev;
 	struct homa *homa = qdev->hnet->homa;
+	struct homa_data_hdr *h;
 	int pkt_len;
 	int result;
 
-	/* The packet length computed by Linux didn't include overheads
-	 * such as inter-frame gap; add that in here.
-	 */
-	pkt_len = qdisc_skb_cb(skb)->pkt_len + HOMA_ETH_FRAME_OVERHEAD;
+	pkt_len = qdisc_skb_cb(skb)->pkt_len;
 	if (pkt_len < homa->pacer->throttle_min_bytes) {
 		homa_qdisc_update_link_idle(q->qdev, pkt_len, -1);
 		goto enqueue;
@@ -252,19 +249,38 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	/* This packet needs to be deferred until the NIC queue has
 	 * been drained a bit.
 	 */
+	h = (struct homa_data_hdr *) skb_transport_header(skb);
+	tt_record4("homa_qdisc_enqueue deferring homa data packet for id %d, offset %d, bytes_left %d on qid %d",
+			be64_to_cpu(h->common.sender_id),
+			ntohl(h->seg.offset),
+			homa_get_skb_info(skb)->bytes_left, qdev->pacer_qix);
 	homa_qdisc_srpt_enqueue(&qdev->homa_deferred, skb);
 	wake_up(&qdev->pacer_sleep);
 	return NET_XMIT_SUCCESS;
 
 enqueue:
+	if (is_homa_pkt(skb)) {
+		h = (struct homa_data_hdr *) skb_transport_header(skb);
+		tt_record4("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d, bytes_left %d on qid %d",
+				be64_to_cpu(h->common.sender_id),
+				ntohl(h->seg.offset),
+				homa_get_skb_info(skb)->bytes_left, q->ix);
+	} else {
+		tt_record2("homa_qdisc_enqueue queuing non-homa packet, qix %d, pacer_qix %d",
+			   q->ix, qdev->pacer_qix);
+	}
 	if (q->ix != qdev->pacer_qix) {
 		if (unlikely(sch->q.qlen >= READ_ONCE(sch->limit)))
 			return qdisc_drop(skb, sch, to_free);
-		spin_lock_bh(qdisc_lock(sch));
 		result = qdisc_enqueue_tail(skb, sch);
-		spin_unlock_bh(qdisc_lock(sch));
 	} else {
+		/* homa_enqueue_special is going to lock a different qdisc,
+		 * so in order to avoid deadlocks we have to release the
+		 * lock for this qdisc.
+		 * */
+		spin_unlock(qdisc_lock(sch));
 		result = homa_qdisc_enqueue_special(skb, qdev, false);
+		spin_lock(qdisc_lock(sch));
 	}
 	return result;
 }
@@ -498,7 +514,7 @@ int homa_qdisc_pacer_main(void *device)
  * well, to increase the likelihood that we keep the link busy. Those other
  * invocations are not guaranteed to happen, so the pacer thread provides a
  * backstop.
- * @homa:    Overall data about the Homa protocol implementation.
+ * @qdev:    The device on which to transmit.
  */
 void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 {
@@ -516,6 +532,7 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 	 * homa_qdisc_pacer_main about interfering with softirq handlers).
 	 */
 	for (i = 0; i < 5; i++) {
+		struct homa_data_hdr *h;
 		struct sk_buff *skb;
 		u64 idle_time, now;
 
@@ -540,8 +557,14 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 		skb = homa_qdisc_srpt_dequeue(&qdev->homa_deferred);
 		if (!skb)
 			break;
+
 		homa_qdisc_update_link_idle(qdev, qdisc_skb_cb(skb)->pkt_len,
 					    -1);
+		h = (struct homa_data_hdr *) skb_transport_header(skb);
+		tt_record4("homa_qdisc_pacer queuing homa data packet for id %d, offset %d, bytes_left %d on qid %d",
+			   be64_to_cpu(h->common.sender_id),
+			   ntohl(h->seg.offset),
+			   homa_get_skb_info(skb)->bytes_left, qdev->pacer_qix);
 		homa_qdisc_enqueue_special(skb, qdev, true);
 	}
 done:
@@ -590,6 +613,7 @@ int homa_qdisc_enqueue_special(struct sk_buff *skb,
 		homa_qdisc_set_qixs(qdev);
 	}
 
+	skb_set_queue_mapping(skb, qix);
 	spin_lock_bh(qdisc_lock(qdisc));
 	result = qdisc_enqueue_tail(skb, qdisc);
 	spin_unlock_bh(qdisc_lock(qdisc));
@@ -651,8 +675,8 @@ void homa_qdisc_update_all_sysctl(struct homa_net *hnet)
 {
 	struct homa_qdisc_dev *qdev;
 
-	spin_lock_bh(&hnet->qdisc_devs_lock);
+	mutex_lock(&hnet->qdisc_devs_mutex);
 	list_for_each_entry(qdev, &hnet->qdisc_devs, links)
 		homa_qdisc_update_sysctl(qdev);
-	spin_unlock_bh(&hnet->qdisc_devs_lock);
+	mutex_unlock(&hnet->qdisc_devs_mutex);
 }

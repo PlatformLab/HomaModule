@@ -417,8 +417,10 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__use_special_queue)
 	skb = mock_skb_alloc(&self->addr, &self->data.common, 1500, 0);
 	unit_log_clear();
 
+	spin_lock(qdisc_lock(self->qdiscs[1]));
 	EXPECT_EQ(NET_XMIT_SUCCESS, homa_qdisc_enqueue(skb, self->qdiscs[1],
 						       &to_free));
+	spin_unlock(qdisc_lock(self->qdiscs[1]));
 	ASSERT_NE(NULL, to_free);
 	EXPECT_EQ(0, q->qdev->homa_deferred.qlen);
 	EXPECT_EQ(0, self->qdiscs[1]->q.qlen);

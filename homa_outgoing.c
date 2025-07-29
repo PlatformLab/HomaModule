@@ -9,6 +9,7 @@
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #ifndef __STRIP__ /* See strip.py */
+#include "homa_qdisc.h"
 #include "homa_skb.h"
 #endif /* See strip.py */
 #include "homa_wire.h"
@@ -325,6 +326,8 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 	overlap_xmit = rpc->msgout.length > 2 * max_gso_data;
 #ifndef __STRIP__ /* See strip.py */
+	if (homa_qdisc_active(rpc->hsk->hnet))
+		overlap_xmit = 0;
 	rpc->msgout.granted = rpc->msgout.unscheduled;
 #endif /* See strip.py */
 	homa_skb_stash_pages(rpc->hsk->homa, rpc->msgout.length);
@@ -613,7 +616,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.length - rpc->msgout.next_xmit_offset >
 		    homa->pacer->throttle_min_bytes &&
-		    list_empty(&rpc->hsk->hnet->qdisc_devs)) {
+		    !homa_qdisc_active(rpc->hsk->hnet)) {
 #else /* See strip.py */
 		if (rpc->msgout.length - rpc->msgout.next_xmit_offset >
 		    homa->pacer->throttle_min_bytes) {

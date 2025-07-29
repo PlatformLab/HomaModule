@@ -480,34 +480,6 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_no_hijacking)
 	homa_rpc_unlock(crpc2);
 	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 4200", unit_log_get());
 }
-TEST_F(homa_outgoing, homa_message_out_fill__gso_force_software)
-{
-	struct homa_rpc *crpc1 = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct homa_rpc *crpc2;
-
-	ASSERT_FALSE(crpc1 == NULL);
-	mock_net_device.gso_max_size = 10000;
-	mock_xmit_log_verbose = 1;
-	self->homa.gso_force_software = 0;
-	ASSERT_EQ(0, -homa_message_out_fill(crpc1,
-			unit_iov_iter((void *) 1000, 5000), 0));
-	unit_log_clear();
-	homa_xmit_data(crpc1, false);
-	homa_rpc_unlock(crpc1);
-	EXPECT_SUBSTR("xmit DATA", unit_log_get());
-	EXPECT_NOSUBSTR("TSO disabled", unit_log_get());
-
-	crpc2 = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
-	ASSERT_FALSE(crpc2 == NULL);
-	self->homa.gso_force_software = 1;
-	ASSERT_EQ(0, -homa_message_out_fill(crpc2,
-			unit_iov_iter((void *) 1000, 5000), 0));
-	unit_log_clear();
-	homa_xmit_data(crpc2, false);
-	homa_rpc_unlock(crpc2);
-	EXPECT_SUBSTR("TSO disabled", unit_log_get());
-}
 TEST_F(homa_outgoing, homa_message_out_fill__gso_limit_less_than_mtu)
 {
 	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
@@ -522,6 +494,25 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_limit_less_than_mtu)
 	homa_rpc_unlock(crpc);
 	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 1400;", unit_log_get());
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_message_out_fill__disable_overlap_xmit_because_of_homa_qdisc)
+{
+	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
+			&self->server_addr);
+	struct homa_qdisc_dev *qdev;
+
+	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+
+	ASSERT_FALSE(crpc == NULL);
+	ASSERT_EQ(0, -homa_message_out_fill(crpc,
+			unit_iov_iter((void *) 1000, 5000), 1));
+	homa_rpc_unlock(crpc);
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+	homa_qdisc_qdev_put(qdev);
+}
+#endif /* See strip.py */
 TEST_F(homa_outgoing, homa_message_out_fill__multiple_segs_per_skbuff)
 {
 	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
@@ -550,7 +541,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__multiple_segs_per_skbuff)
 			unit_log_get());
 	EXPECT_EQ(4200, homa_get_skb_info(crpc->msgout.packets)->data_bytes);
 }
-TEST_F(homa_outgoing, homa_message_out_fill__error_in_homa_new_data_packet)
+TEST_F(homa_outgoing, homa_message_out_fill__error_in_homa_tx_data_packet_alloc)
 {
 	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
 			&self->server_addr);

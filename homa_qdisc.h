@@ -53,12 +53,6 @@ struct homa_qdisc_dev {
 	int refs;
 
 	/**
-	 * @lock: Used to synchronize access to mutable fields within
-	 * this struct, such as @pacer_qix and @redirect_qix.
-	 */
-	spinlock_t lock;
-
-	/**
 	 * @pacer_qix: Index of a netdev_queue within dev that is reserved
 	 * for the pacer to use for transmitting packets. We segregate paced
 	 * traffic (which is almost entirely large packets) from non-paced
@@ -169,5 +163,16 @@ int             homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev,
 					    int bytes, int max_queue_ns);
 void            homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_pacer(struct homa_qdisc_dev *qdev);
+
+/**
+ * homa_qdisc_active() - Return true if homa qdiscs are enabled for @hnet
+ * (so the old pacer should not be used), false otherwise.
+ * @hnet:    Homa's information about a network namespace.
+ * Return:   See above.
+ */
+static inline bool homa_qdisc_active(struct homa_net *hnet)
+{
+	return !list_empty(&hnet->qdisc_devs);
+}
 
 #endif /* _HOMA_QDISC_H */
