@@ -279,7 +279,7 @@ enqueue:
 		 * lock for this qdisc.
 		 * */
 		spin_unlock(qdisc_lock(sch));
-		result = homa_qdisc_enqueue_special(skb, qdev, false);
+		result = homa_qdisc_redirect_skb(skb, qdev, false);
 		spin_lock(qdisc_lock(sch));
 	}
 	return result;
@@ -565,24 +565,26 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 			   be64_to_cpu(h->common.sender_id),
 			   ntohl(h->seg.offset),
 			   homa_get_skb_info(skb)->bytes_left, qdev->pacer_qix);
-		homa_qdisc_enqueue_special(skb, qdev, true);
+		homa_qdisc_redirect_skb(skb, qdev, true);
 	}
 done:
 	spin_unlock_bh(&qdev->pacer_mutex);
 }
 
 /**
- * homa_qdisc_enqueue_special() - This function is called by the pacer to
- * enqueue a packet on one of the distinguished transmit queues and wake
- * up the queue for transmission.
+ * homa_qdisc_redirect_skb() - Enqueue a packet on a different queue from
+ * the one it was originally passed to and wakeup that queue for
+ * transmission. This is used to transmit all pacer packets via a single
+ * queue and to redirect other packets originally sent to that queue to
+ * another queue.
  * @skb:     Packet to resubmit.
- * @qdev:    Homa data about the networkd device on which the packet should
+ * @qdev:    Homa data about the network device on which the packet should
  *           be resubmitted.
  * @pacer:   True means queue the packet on qdev->pacer_qix, false means
  *           qdev->redirect_qix.
  * Return:   Standard enqueue return code (usually NET_XMIT_SUCCESS).
  */
-int homa_qdisc_enqueue_special(struct sk_buff *skb,
+int homa_qdisc_redirect_skb(struct sk_buff *skb,
 			       struct homa_qdisc_dev *qdev, bool pacer)
 {
 	struct netdev_queue *txq;
@@ -605,7 +607,9 @@ int homa_qdisc_enqueue_special(struct sk_buff *skb,
 				break;
 		}
 		if (i > 0) {
-			/* Couldn't find a Homa qdisc to use; drop the skb. */
+			/* Couldn't find a Homa qdisc to use; drop the skb.
+			 * Shouldn't ever happen?
+			 */
 			kfree_skb(skb);
 			result = NET_XMIT_DROP;
 			goto done;

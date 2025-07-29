@@ -731,7 +731,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__return_after_one_packet)
 	homa_qdisc_qdev_put(qdev);
 }
 
-TEST_F(homa_qdisc, homa_qdisc_enqueue_special__use_pacer_qix)
+TEST_F(homa_qdisc, homa_qdisc_redirect_skb__use_pacer_qix)
 {
 	struct sk_buff *skb;
 	struct homa_qdisc_dev *qdev;
@@ -745,7 +745,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue_special__use_pacer_qix)
 	skb = mock_skb_alloc(&self->addr, &self->data.common, 1500, 0);
 	unit_log_clear();
 
-	status = homa_qdisc_enqueue_special(skb, qdev, true);
+	status = homa_qdisc_redirect_skb(skb, qdev, true);
 	EXPECT_EQ(NET_XMIT_SUCCESS, status);
 	EXPECT_EQ(1, self->qdiscs[1]->q.qlen);
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
@@ -754,7 +754,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue_special__use_pacer_qix)
 	homa_qdisc_destroy(self->qdiscs[1]);
 	homa_qdisc_destroy(self->qdiscs[3]);
 }
-TEST_F(homa_qdisc, homa_qdisc_enqueue_special__use_redirect_qix)
+TEST_F(homa_qdisc, homa_qdisc_redirect_skb__use_redirect_qix)
 {
 	struct sk_buff *skb;
 	struct homa_qdisc_dev *qdev;
@@ -768,7 +768,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue_special__use_redirect_qix)
 	skb = mock_skb_alloc(&self->addr, &self->data.common, 1500, 0);
 	unit_log_clear();
 
-	status = homa_qdisc_enqueue_special(skb, qdev, false);
+	status = homa_qdisc_redirect_skb(skb, qdev, false);
 	EXPECT_EQ(NET_XMIT_SUCCESS, status);
 	EXPECT_EQ(0, self->qdiscs[1]->q.qlen);
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
@@ -776,7 +776,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue_special__use_redirect_qix)
 	homa_qdisc_destroy(self->qdiscs[1]);
 	homa_qdisc_destroy(self->qdiscs[3]);
 }
-TEST_F(homa_qdisc, homa_qdisc_enqueue_special__redirect_qix_invalid)
+TEST_F(homa_qdisc, homa_qdisc_redirect_skb__redirect_qix_invalid)
 {
 	struct sk_buff *skb;
 	struct homa_qdisc_dev *qdev;
@@ -791,7 +791,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue_special__redirect_qix_invalid)
 	skb = mock_skb_alloc(&self->addr, &self->data.common, 1500, 0);
 	unit_log_clear();
 
-	status = homa_qdisc_enqueue_special(skb, qdev, false);
+	status = homa_qdisc_redirect_skb(skb, qdev, false);
 	EXPECT_EQ(NET_XMIT_SUCCESS, status);
 	EXPECT_EQ(1, self->qdiscs[1]->q.qlen);
 	EXPECT_EQ(0, qdev->pacer_qix);
@@ -800,7 +800,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue_special__redirect_qix_invalid)
 	for (i = 0; i < 4; i++)
 		homa_qdisc_destroy(self->qdiscs[i]);
 }
-TEST_F(homa_qdisc, homa_qdisc_enqueue_special__redirect_qix_not_a_homa_qdisc)
+TEST_F(homa_qdisc, homa_qdisc_redirect_skb__redirect_qix_not_a_homa_qdisc)
 {
 	struct sk_buff *skb;
 	struct homa_qdisc_dev *qdev;
@@ -816,7 +816,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue_special__redirect_qix_not_a_homa_qdisc)
 	skb = mock_skb_alloc(&self->addr, &self->data.common, 1500, 0);
 	unit_log_clear();
 
-	status = homa_qdisc_enqueue_special(skb, qdev, false);
+	status = homa_qdisc_redirect_skb(skb, qdev, false);
 	EXPECT_EQ(NET_XMIT_SUCCESS, status);
 	EXPECT_EQ(1, self->qdiscs[2]->q.qlen);
 	EXPECT_EQ(1, qdev->pacer_qix);
@@ -825,7 +825,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue_special__redirect_qix_not_a_homa_qdisc)
 	for (i = 0; i < 4; i++)
 		homa_qdisc_destroy(self->qdiscs[i]);
 }
-TEST_F(homa_qdisc, homa_qdisc_enqueue_special__no_suitable_qdisc)
+TEST_F(homa_qdisc, homa_qdisc_redirect_skb__no_suitable_qdisc)
 {
 	struct sk_buff *skb;
 	struct homa_qdisc_dev *qdev;
@@ -842,7 +842,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue_special__no_suitable_qdisc)
 	skb = mock_skb_alloc(&self->addr, &self->data.common, 1500, 0);
 	unit_log_clear();
 
-	status = homa_qdisc_enqueue_special(skb, qdev, false);
+	status = homa_qdisc_redirect_skb(skb, qdev, false);
 	EXPECT_EQ(NET_XMIT_DROP, status);
 	EXPECT_EQ(-1, qdev->pacer_qix);
 	EXPECT_EQ(-1, qdev->redirect_qix);

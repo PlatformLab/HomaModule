@@ -140,7 +140,7 @@ struct homa_qdisc_dev {
 void            homa_qdisc_destroy(struct Qdisc *sch);
 int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
-int             homa_qdisc_enqueue_special(struct sk_buff *skb,
+int             homa_qdisc_redirect_skb(struct sk_buff *skb,
 					   struct homa_qdisc_dev *qdev,
 					   bool pacer);
 int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
