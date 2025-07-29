@@ -394,7 +394,7 @@ char *homa_metrics_print(void)
 		M("buffer_alloc_failures", m->buffer_alloc_failures,
 		  "homa_pool_alloc_msg didn't find enough buffer space for an RPC\n");
 		M("linux_pkt_alloc_bytes", m->linux_pkt_alloc_bytes,
-		  "Bytes allocated in new packets by NIC driver due to cache overflows\n");
+		  "Bytes allocated for rx packets by NIC driver due to cache overflows\n");
 		M("dropped_data_no_bufs", m->dropped_data_no_bufs,
 		  "Data bytes dropped because app buffers full\n");
 		M("gen3_handoffs", m->gen3_handoffs,
