@@ -816,8 +816,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 
 			/* This segment must be retransmitted. */
 #ifndef __STRIP__ /* See strip.py */
-			new_skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr)
-					- sizeof(struct homa_seg_hdr));
+			new_skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr));
 #else /* See strip.py */
 			new_skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr)
 					+ seg_length);
@@ -845,6 +844,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			}
 
 			new_homa_info = homa_get_skb_info(new_skb);
+			new_homa_info->next_skb = NULL;
 			new_homa_info->wire_bytes = rpc->hsk->ip_header_length
 					+ sizeof(struct homa_data_hdr)
 					+ seg_length + HOMA_ETH_OVERHEAD;
