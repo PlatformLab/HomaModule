@@ -101,6 +101,7 @@ void      tt_record_buf(struct tt_buffer *buffer, u64 timestamp,
 			const char *format, u32 arg0, u32 arg1,
 			u32 arg2, u32 arg3);
 void      tt_set_temp(int *temp);
+void      tt_unfreeze(void);
 
 /* Private methods and variables: exposed so they can be accessed
  * by unit tests.

@@ -1739,6 +1739,8 @@ int homa_dointvec(const struct ctl_table *table, int write,
 					  atomic_read(&homa->grant->total_incoming));
 			} else if (homa->sysctl_action == 9) {
 				homa_rpc_stats_log();
+			} else if (homa->sysctl_action == 10) {
+				tt_unfreeze();
 			} else {
 				homa_rpc_log_active(homa, homa->sysctl_action);
 			}

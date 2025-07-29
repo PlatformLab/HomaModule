@@ -227,8 +227,20 @@ void tt_freeze(void)
 	 */
 	if (atomic_xchg(&tt_frozen, 1) == 0) {
 		tt_record("timetrace frozen");
-		pr_notice("%s invoked\n", __func__);
+		pr_err("%s invoked\n", __func__);
 		atomic_inc(&tt_freeze_count);
+	}
+}
+
+/**
+ * tt_unfreeze() - Release any freeze that may be in effect: normal
+ * timetrace recording will resume if it had stopped.
+ */
+void tt_unfreeze(void)
+{
+	if (atomic_xchg(&tt_frozen, 0) == 1) {
+		pr_err("%s invoked\n", __func__);
+		atomic_dec(&tt_freeze_count);
 	}
 }
 
@@ -697,6 +709,7 @@ void tt_printk(void)
 	 */
 	static int pos[NR_CPUS];
 	u64 start_time;
+	int events;
 	int i;
 
 	if (atomic_xchg(&active, 1)) {
@@ -706,7 +719,9 @@ void tt_printk(void)
 	if (!init)
 		return;
 	atomic_inc(&tt_freeze_count);
+	pr_err("Dumping timetrace on core %d\n", raw_smp_processor_id());
 	start_time = tt_find_oldest(oldest);
+	events = 0;
 	for (i = 0; i < nr_cpu_ids; i++) {
 		if (oldest[i] == tt_buffers[i]->next_index)
 			pos[i] = -1;
@@ -715,6 +730,7 @@ void tt_printk(void)
 			         (tt_buffer_size - 1);
 	}
 
+#if 0
 	/* Limit the number of entries logged per core (logging too many
 	 * seems to cause entries to be lost).
 	 */
@@ -722,6 +738,7 @@ void tt_printk(void)
 		if (((pos[i] - oldest[i]) & (TT_BUF_SIZE - 1)) > 200)
 			oldest[i] = (pos[i] - 200) & (TT_BUF_SIZE - 1);
 	}
+#endif
 
 	pr_err("cpu_khz: %u, start: %llu\n", tsc_khz, start_time);
 
@@ -760,8 +777,9 @@ void tt_printk(void)
 		pr_err("%lu [C%02d] %s\n",
 			  (unsigned long)event->timestamp,
 			  current_core, msg);
+		events++;
 	}
-	pr_err("Finished dumping timetrace to syslog\n");
+	pr_err("Finished dumping %d timetrace events to syslog\n", events);
 
 	atomic_dec(&tt_freeze_count);
 	atomic_set(&active, 0);
@@ -843,12 +861,11 @@ done:
  */
 void tt_dbg1(char *msg, ...)
 {
+	pr_err("tt_dbg1 starting\n");
 	if (atomic_read(&tt_frozen))
 		return;
 	tt_freeze();
-	pr_err("Dumping timetrace on core %d\n", raw_smp_processor_id());
 	tt_printk();
-	pr_err("Finished dumping timetrace\n");
 }
 
 /**

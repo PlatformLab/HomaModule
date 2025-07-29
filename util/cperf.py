@@ -747,6 +747,8 @@ def run_experiment(name, clients, options):
                     do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
         if not "no_rtt_files" in options:
             do_cmd("dump_times /dev/null %s" % (name), clients)
+        log("Unfreezing timetraces on %s" % (nodes))
+        set_sysctl_parameter(".net.homa.action", "10", nodes)
         do_cmd("log Starting measurements for %s experiment" % (name),
                 server_nodes, clients)
         log("Starting measurements")
