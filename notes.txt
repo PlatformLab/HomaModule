@@ -101,6 +101,8 @@ Notes for Homa implementation in Linux:
 * CloudLab cluster issues:
   * amd272 had a problem where all xmits from core 47 incurred a 1-2 ms
     delay; power-cycling it fixed the problem.
+  * (July 2025) amd163 was causing cp_vs_tcp to run slowly (max cluster
+    throughput only 16-18 Gbps).
 
 * Notes on performance data from buffer benchmarking 8/2023:
   * Restricting buffer space ("buffers"):
