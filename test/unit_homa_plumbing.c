@@ -1214,7 +1214,8 @@ TEST_F(homa_plumbing, homa_err_handler_v6__port_unreachable)
 	ipv6_hdr(failed)->daddr = self->server_ip[0];
 
 	icmp = mock_skb_alloc(self->server_ip, NULL, 1000, 0);
-	memcpy(skb_put(icmp, failed->len), failed->head, failed->len);
+	memcpy(skb_put(icmp, failed->len), skb_network_header(failed),
+	       failed->len);
 
 	EXPECT_EQ(0, homa_err_handler_v6(icmp, NULL, ICMPV6_DEST_UNREACH,
 					 ICMPV6_PORT_UNREACH, 0, 111));
@@ -1237,7 +1238,8 @@ TEST_F(homa_plumbing, homa_err_handler_v6__protocol_not_supported)
 	ipv6_hdr(failed)->daddr = self->server_ip[0];
 
 	icmp = mock_skb_alloc(self->server_ip, NULL, 1000, 0);
-	memcpy(skb_put(icmp, failed->len), failed->head, failed->len);
+	memcpy(skb_put(icmp, failed->len), skb_network_header(failed),
+	       failed->len);
 
 	EXPECT_EQ(0, homa_err_handler_v6(icmp, NULL, ICMPV6_PARAMPROB,
 					 ICMPV6_UNK_NEXTHDR, 0, 111));

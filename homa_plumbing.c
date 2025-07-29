@@ -1551,6 +1551,8 @@ discard:
 /**
  * homa_err_handler_v4() - Invoked by IP to handle an incoming error
  * packet, such as ICMP UNREACHABLE.
+ * @skb:    The incoming packet; skb->data points to the byte just after
+ *          the ICMP header (the first byte of the embedded packet IP header).
  * @skb:   The incoming packet.
  * @info:  Information about the error that occurred?
  *
@@ -1592,7 +1594,8 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 /**
  * homa_err_handler_v6() - Invoked by IP to handle an incoming error
  * packet, such as ICMP UNREACHABLE.
- * @skb:    The incoming packet.
+ * @skb:    The incoming packet; skb->data points to the byte just after
+ *          the ICMP header (the first byte of the embedded packet IP header).
  * @opt:    Not used.
  * @type:   Type of ICMP packet.
  * @code:   Additional information about the error.

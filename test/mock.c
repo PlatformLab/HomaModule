@@ -2072,6 +2072,11 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct homa_common_hdr *h
 	struct sk_buff *skb;
 	unsigned char *p;
 
+	/* Don't let the IP header start at the beginning of the packet
+	 * buffer: that will confuse is_homa_pkt.
+	 */
+#define IP_HDR_OFFSET 4
+
 	if (h) {
 		switch (h->type) {
 		case DATA:
@@ -2119,7 +2124,8 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct homa_common_hdr *h
 	unit_hash_set(skbs_in_use, skb, "used");
 
 	ip_size = mock_ipv6 ? sizeof(struct ipv6hdr) : sizeof(struct iphdr);
-	data_size = SKB_DATA_ALIGN(ip_size + header_size + extra_bytes);
+	data_size = SKB_DATA_ALIGN(IP_HDR_OFFSET + ip_size + header_size +
+				   extra_bytes);
 	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 	if (h) {
 		skb->head = malloc(data_size + shinfo_size);
@@ -2132,7 +2138,11 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct homa_common_hdr *h
 	skb->data = skb->head;
 	skb_reset_tail_pointer(skb);
 	skb->end = skb->tail + data_size;
-	skb_reserve(skb, ip_size);
+
+	/* Don't want IP header starting at the beginning of the packet
+	 * buffer (will confuse is_homa_pkt).
+	 */
+	skb_reserve(skb, IP_HDR_OFFSET + ip_size);
 	skb_reset_transport_header(skb);
 	if (header_size != 0) {
 		p = skb_put(skb, header_size);
@@ -2143,6 +2153,8 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct homa_common_hdr *h
 		unit_fill_data(p, extra_bytes, first_value);
 	}
 	skb->users.refs.counter = 1;
+	skb_reset_network_header(skb);
+	skb_set_network_header(skb, -ip_size);
 	if (mock_ipv6) {
 		ipv6_hdr(skb)->version = 6;
 		ipv6_hdr(skb)->saddr = *saddr;
