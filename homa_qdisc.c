@@ -165,7 +165,7 @@ int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 /**
  * homa_qdisc_destroy() - This function is invoked to perform final cleanup
  * before a qdisc is deleted.
- * @sch:      Qdisc that is being deleted.
+ * @qdisc:      Qdisc that is being deleted.
  */
 void homa_qdisc_destroy(struct Qdisc *qdisc)
 {
@@ -249,18 +249,18 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	/* This packet needs to be deferred until the NIC queue has
 	 * been drained a bit.
 	 */
-	h = (struct homa_data_hdr *) skb_transport_header(skb);
+	h = (struct homa_data_hdr *)skb_transport_header(skb);
 	tt_record4("homa_qdisc_enqueue deferring homa data packet for id %d, offset %d, bytes_left %d on qid %d",
-			be64_to_cpu(h->common.sender_id),
-			ntohl(h->seg.offset),
-			homa_get_skb_info(skb)->bytes_left, qdev->pacer_qix);
+		   be64_to_cpu(h->common.sender_id),
+		   ntohl(h->seg.offset),
+		   homa_get_skb_info(skb)->bytes_left, qdev->pacer_qix);
 	homa_qdisc_defer_homa(qdev, skb);
 	wake_up(&qdev->pacer_sleep);
 	return NET_XMIT_SUCCESS;
 
 enqueue:
 	if (is_homa_pkt(skb)) {
-		h = (struct homa_data_hdr *) skb_transport_header(skb);
+		h = (struct homa_data_hdr *)skb_transport_header(skb);
 		tt_record4("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d, bytes_left %d on qid %d",
 				be64_to_cpu(h->common.sender_id),
 				ntohl(h->seg.offset),
@@ -277,7 +277,7 @@ enqueue:
 		/* homa_enqueue_special is going to lock a different qdisc,
 		 * so in order to avoid deadlocks we have to release the
 		 * lock for this qdisc.
-		 * */
+		 */
 		spin_unlock(qdisc_lock(sch));
 		result = homa_qdisc_redirect_skb(skb, qdev, false);
 		spin_lock(qdisc_lock(sch));
@@ -575,7 +575,7 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 
 		homa_qdisc_update_link_idle(qdev, qdisc_skb_cb(skb)->pkt_len,
 					    -1);
-		h = (struct homa_data_hdr *) skb_transport_header(skb);
+		h = (struct homa_data_hdr *)skb_transport_header(skb);
 		tt_record4("homa_qdisc_pacer queuing homa data packet for id %d, offset %d, bytes_left %d on qid %d",
 			   be64_to_cpu(h->common.sender_id),
 			   ntohl(h->seg.offset),
@@ -600,7 +600,7 @@ done:
  * Return:   Standard enqueue return code (usually NET_XMIT_SUCCESS).
  */
 int homa_qdisc_redirect_skb(struct sk_buff *skb,
-			       struct homa_qdisc_dev *qdev, bool pacer)
+			    struct homa_qdisc_dev *qdev, bool pacer)
 {
 	struct netdev_queue *txq;
 	struct Qdisc *qdisc;
@@ -646,7 +646,6 @@ done:
 /**
  * homa_qdisc_update_sysctl() - Recompute information in a homa_qdisc_dev
  * that depends on sysctl parameters.
- * @homa:    Used to fetch current sysctl parameter values.
  * @qdev:    Update information here that depends on sysctl values.
  */
 void homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev)
@@ -688,7 +687,8 @@ void homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev)
 /**
  * homa_qdisc_update_all_sysctl() - Invoked whenever a sysctl value is changed;
  * updates all qdisc structures to reflect new values.
- * @homa:    Overall data about the Homa protocol implementation.
+ * @hnet:    Homa's information about a network namespace: changes will apply
+ *           to qdiscs in this namespace.
  */
 void homa_qdisc_update_all_sysctl(struct homa_net *hnet)
 {

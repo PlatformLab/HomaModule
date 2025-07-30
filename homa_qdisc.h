@@ -21,7 +21,7 @@
  * the homa queuing discipline
  */
 struct homa_qdisc {
-	/** @dev: Info shared among all qdiscs for a net_device. */
+	/** @qdev: Info shared among all qdiscs for a net_device. */
 	struct homa_qdisc_dev *qdev;
 
 	/**
@@ -40,7 +40,7 @@ struct homa_qdisc_dev {
 	struct net_device *dev;
 
 	/**
-	 * @homa_net: Homa's information about the network namespace
+	 * @hnet: Homa's information about the network namespace
 	 * this object belongs to.
 	 */
 	struct homa_net *hnet;

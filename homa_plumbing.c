@@ -482,13 +482,13 @@ int __init homa_load(void)
 	bool init_net_ops = false;
 	bool init_proto6 = false;
 	bool init_proto = false;
-	bool init_qdisc = false;
 	bool init_homa = false;
 	int status;
 
 	IF_NO_STRIP(bool init_metrics = false);
 	IF_NO_STRIP(bool init_offload = false);
 	IF_NO_STRIP(bool init_sysctl = false);
+	IF_NO_STRIP(bool init_qdisc = false);
 
 	/* Compile-time validations that no packet header is longer
 	 * than HOMA_MAX_HEADER.

@@ -1885,6 +1885,7 @@ void mock_put_page(struct page *page)
 	}
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * mock_alloc_qdisc() - Allocate and initialize a new Qdisc suitable for
  * use in unit tests as a homa qdisc.
@@ -1903,6 +1904,7 @@ struct Qdisc *mock_alloc_qdisc(struct netdev_queue *dev_queue)
 	spin_lock_init(&qdisc->q.lock);
 	return qdisc;
 }
+#endif /* See strip.py */
 
 /**
  * mock_rcu_read_lock() - Called instead of rcu_read_lock when Homa is compiled

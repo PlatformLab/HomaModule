@@ -616,7 +616,7 @@ release:
 				}
 			} else {
 				INC_METRIC(server_request_bytes_done,
-					  rpc->msgin.bytes_remaining);
+					   rpc->msgin.bytes_remaining);
 				INC_METRIC(server_requests_done,
 					   rpc->msgin.bytes_remaining != 0);
 				if (tx_left > 0) {

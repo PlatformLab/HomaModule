@@ -629,8 +629,7 @@ int homa_grant_update_granted(struct homa_rpc *rpc, struct homa_grant *grant)
 	incoming_delta = new_grant_offset - received - rpc->msgin.rec_incoming;
 	avl_incoming = grant->max_incoming - atomic_read(&grant->total_incoming);
 	if (avl_incoming < incoming_delta) {
-		tt_record4("insufficient headroom for grant for RPC id %d "
-			   "(rank %d): desired incoming %d, shortfall %d",
+		tt_record4("insufficient headroom for grant for RPC id %d (rank %d): desired incoming %d, shortfall %d",
 			   rpc->id, rank, new_grant_offset - received,
 			   incoming_delta - avl_incoming);
 		prev_stalled = atomic_read(&grant->stalled_rank);

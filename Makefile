@@ -72,7 +72,8 @@ CP_HDRS := homa_impl.h \
 	   homa_stub.h \
 	   homa_wire.h
 CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o homa_grant.o \
-		homa_metrics.o homa_offload.o homa_skb.o timetrace.o, $(HOMA_OBJS)))
+		homa_metrics.o homa_offload.o homa_qdisc.o \
+		homa_skb.o timetrace.o, $(HOMA_OBJS)))
 CP_EXTRAS := Kconfig \
 	     Makefile
 CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS) $(CP_EXTRAS))

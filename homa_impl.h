@@ -42,6 +42,9 @@
 #include <net/inet_common.h>
 #include <net/gro.h>
 #include <net/rps.h>
+#ifdef CONFIG_X86_TSC
+#include <asm/tsc.h>
+#endif
 
 #ifndef __UPSTREAM__ /* See strip.py */
 #include "homa.h"

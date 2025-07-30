@@ -91,7 +91,7 @@ void homa_metric_append(const char *name, u64 value, const char *format, ...)
 	}
 
 	new_chars = snprintf(homa_mout.output + homa_mout.length, 60,
-			      "%-30s %20llu ", name, value);
+			     "%-30s %20llu ", name, value);
 	homa_mout.length += (new_chars > 60) ? 60 : new_chars;
 	va_start(ap, format);
 	new_chars = vsnprintf(homa_mout.output + homa_mout.length, 120,
@@ -174,7 +174,7 @@ char *homa_metrics_print(void)
 		  "Server RPC requests fully received\n");
 		M("server_responses_started", m->server_responses_started,
 		  "Server RPCs for which response was initiated\n");
-		M("server_response_bytes_started",\
+		M("server_response_bytes_started",
 		  m->server_response_bytes_started,
 		  "Message bytes in all initiated server responses\n");
 		M("server_response_bytes_done", m->server_response_bytes_done,
@@ -247,7 +247,7 @@ char *homa_metrics_print(void)
 		M("send_cycles", m->send_cycles,
 		  "Time spent in homa_sendmsg for requests\n");
 		M("send_calls", m->send_calls,
-		  "Total invocations of homa_sendmsg for equests\n");
+		  "Total invocations of homa_sendmsg for requests\n");
 		// It is possible for us to get here at a time when a
 		// thread has been blocked for a long time and has
 		// recorded blocked_cycles, but hasn't finished the

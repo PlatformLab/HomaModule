@@ -999,10 +999,10 @@ void homa_snapshot_rpcs(void)
  */
 void homa_rpc_snapshot_log_tt(void)
 {
-	struct homa_rpc_snapshot *snap;
-	u64 now = homa_clock();
 	u64 creq_base, creq_bbase, cresp_base, cresp_bbase;
 	u64 sreq_base, sreq_bbase, sresp_base, sresp_bbase;
+	struct homa_rpc_snapshot *snap;
+	u64 now = homa_clock();
 	u64 usecs;
 	int i;
 

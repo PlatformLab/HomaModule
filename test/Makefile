@@ -69,7 +69,6 @@ HOMA_SRCS :=  homa_devel.c \
 	      homa_peer.c \
 	      homa_pool.c \
 	      homa_plumbing.c \
-	      homa_qdisc.c \
 	      homa_rpc.c \
 	      homa_sock.c \
 	      homa_timer.c \
@@ -79,6 +78,7 @@ ifeq ($(__STRIP__),)
 HOMA_SRCS +=  homa_grant.c \
 	      homa_metrics.c \
 	      homa_offload.c \
+	      homa_qdisc.c \
 	      homa_skb.c
 endif
 HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS)) rhashtable.o
