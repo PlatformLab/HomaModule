@@ -118,6 +118,18 @@ struct homa_qdisc_dev {
 	struct sk_buff_head tcp_deferred;
 
 	/**
+	 * @last_defer: The most recent homa_clock() time when a packet was
+	 * added to homa_deferred or tcp_deferred.
+	 */
+	u64 last_defer;
+
+	/**
+	 * @pacer_wake_time: homa_clock() time when the pacer woke up (if
+	 * the pacer is running) or 0 if the pacer is sleeping.
+	 */
+	u64 pacer_wake_time;
+
+	/**
 	 * @pacer_kthread: Kernel thread that eventually transmits packets
 	 * on homa_deferred and tcp_deferred.
 	 */
@@ -137,12 +149,14 @@ struct homa_qdisc_dev {
 	spinlock_t pacer_mutex __aligned(L1_CACHE_BYTES);
 };
 
+void            homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev,
+				      struct sk_buff *skb);
+struct sk_buff *
+		homa_qdisc_dequeue_homa(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_destroy(struct Qdisc *sch);
 int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
-int             homa_qdisc_redirect_skb(struct sk_buff *skb,
-					   struct homa_qdisc_dev *qdev,
-					   bool pacer);
+void            homa_qdisc_free_homa(struct homa_qdisc_dev *qdev);
 int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
 int             homa_qdisc_pacer_main(void *device);
@@ -150,13 +164,11 @@ struct homa_qdisc_dev *
 		homa_qdisc_qdev_get(struct homa_net *hnet,
 				    struct net_device *dev);
 void            homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev);
+int             homa_qdisc_redirect_skb(struct sk_buff *skb,
+					struct homa_qdisc_dev *qdev,
+					bool pacer);
 int             homa_qdisc_register(void);
 void            homa_qdisc_set_qixs(struct homa_qdisc_dev *qdev);
-void            homa_qdisc_srpt_enqueue(struct sk_buff_head *list,
-					struct sk_buff *skb);
-struct sk_buff *
-		homa_qdisc_srpt_dequeue(struct sk_buff_head *list);
-void            homa_qdisc_srpt_free(struct sk_buff_head *list);
 void            homa_qdisc_unregister(void);
 void            homa_qdisc_update_all_sysctl(struct homa_net *hnet);
 int             homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev,

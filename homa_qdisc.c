@@ -122,7 +122,7 @@ void homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev)
 		qdev->pacer_kthread = NULL;
 
 		__list_del_entry(&qdev->links);
-		homa_qdisc_srpt_free(&qdev->homa_deferred);
+		homa_qdisc_free_homa(qdev);
 		skb_queue_purge(&qdev->tcp_deferred);
 		kfree(qdev);
 	}
@@ -254,7 +254,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 			be64_to_cpu(h->common.sender_id),
 			ntohl(h->seg.offset),
 			homa_get_skb_info(skb)->bytes_left, qdev->pacer_qix);
-	homa_qdisc_srpt_enqueue(&qdev->homa_deferred, skb);
+	homa_qdisc_defer_homa(qdev, skb);
 	wake_up(&qdev->pacer_sleep);
 	return NET_XMIT_SUCCESS;
 
@@ -286,14 +286,15 @@ enqueue:
 }
 
 /**
- * homa_qdisc_srpt_enqueue() - Add a Homa packet to an skb queue in SRPT
- * priority order.
- * @list:    List on which to enqueue packet (usually &qdev->homa_deferred).
+ * homa_qdisc_defer_homa() - Add a Homa packet to the deferred list for
+ * a qdev.
+ * @qdev:    Network device for which the packet should be enqueued.
  * @skb:     Packet to enqueue.
  */
-void homa_qdisc_srpt_enqueue(struct sk_buff_head *list, struct sk_buff *skb)
+void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 {
 	struct homa_skb_info *info = homa_get_skb_info(skb);
+	u64 now = homa_clock();
 	struct sk_buff *other;
 	unsigned long flags;
 
@@ -313,12 +314,13 @@ void homa_qdisc_srpt_enqueue(struct sk_buff_head *list, struct sk_buff *skb)
 
 	info->next_sibling = NULL;
 	info->last_sibling = NULL;
-	spin_lock_irqsave(&list->lock, flags);
-	if (skb_queue_empty(list)) {
-		__skb_queue_head(list, skb);
+	spin_lock_irqsave(&qdev->homa_deferred.lock, flags);
+	if (skb_queue_empty(&qdev->homa_deferred)) {
+		__skb_queue_head(&qdev->homa_deferred, skb);
 		goto done;
 	}
-	skb_queue_reverse_walk(list, other) {
+	INC_METRIC(throttled_cycles, now - qdev->last_defer);
+	skb_queue_reverse_walk(&qdev->homa_deferred, other) {
 		struct homa_skb_info *other_info = homa_get_skb_info(other);
 
 		if (other_info->rpc == info->rpc) {
@@ -332,27 +334,29 @@ void homa_qdisc_srpt_enqueue(struct sk_buff_head *list, struct sk_buff *skb)
 		}
 
 		if (other_info->bytes_left <= info->bytes_left) {
-			__skb_queue_after(list, other, skb);
+			__skb_queue_after(&qdev->homa_deferred, other, skb);
 			break;
 		}
 
-		if (skb_queue_is_first(list, other)) {
-			__skb_queue_head(list, skb);
+		if (skb_queue_is_first(&qdev->homa_deferred, other)) {
+			__skb_queue_head(&qdev->homa_deferred, skb);
 			break;
 		}
 	}
 
 done:
-	spin_unlock_irqrestore(&list->lock, flags);
+	qdev->last_defer = now;
+	spin_unlock_irqrestore(&qdev->homa_deferred.lock, flags);
 }
 
 /**
- * homa_qdisc_srpt_dequeue() - Remove the frontmost packet from a list that
- * is managed with SRPT priority.
- * @list:    List from which to remove packet.
+ * homa_qdisc_dequeue_homa() - Remove the frontmost packet from the list
+ * of deferred Homa packets for a qdev.
+ * @qdev:    The homa_deferred element is the list from which a packet
+ *           will be dequeued.
  * Return:   The frontmost packet from the list, or NULL if the list was empty.
  */
-struct sk_buff *homa_qdisc_srpt_dequeue(struct sk_buff_head *list)
+struct sk_buff *homa_qdisc_dequeue_homa(struct homa_qdisc_dev *qdev)
 {
 	struct homa_skb_info *sibling_info;
 	struct sk_buff *skb, *sibling;
@@ -363,13 +367,13 @@ struct sk_buff *homa_qdisc_srpt_dequeue(struct sk_buff_head *list)
 	 * have a sibling list. If so, we need to enqueue the next
 	 * sibling.
 	 */
-	spin_lock_irqsave(&list->lock, flags);
-	if (skb_queue_empty(list)) {
-		spin_unlock_irqrestore(&list->lock, flags);
+	spin_lock_irqsave(&qdev->homa_deferred.lock, flags);
+	if (skb_queue_empty(&qdev->homa_deferred)) {
+		spin_unlock_irqrestore(&qdev->homa_deferred.lock, flags);
 		return NULL;
 	}
-	skb = list->next;
-	__skb_unlink(skb, list);
+	skb = qdev->homa_deferred.next;
+	__skb_unlink(skb, &qdev->homa_deferred);
 	info = homa_get_skb_info(skb);
 	if (info->next_sibling) {
 		/* This is a "compound" packet, containing multiple
@@ -381,26 +385,26 @@ struct sk_buff *homa_qdisc_srpt_dequeue(struct sk_buff_head *list)
 		sibling = info->next_sibling;
 		sibling_info = homa_get_skb_info(sibling);
 		sibling_info->last_sibling = info->last_sibling;
-		__skb_queue_head(list, sibling);
+		__skb_queue_head(&qdev->homa_deferred, sibling);
 	}
 
-	spin_unlock_irqrestore(&list->lock, flags);
+	if (skb_queue_empty(&qdev->homa_deferred))
+		INC_METRIC(throttled_cycles, homa_clock() - qdev->last_defer);
+	spin_unlock_irqrestore(&qdev->homa_deferred.lock, flags);
 	return skb;
 }
 
 /**
- * homa_qdisc_srpt_free() - Free all of the packets on @list,
- * including siblings that are nested inside packets on the list.
- * @list:   List containing packets to free, which is managed using
- *          by homa_qdisc_srpt_enqueue and homa_qdisc_srpt_dequeue;
- *          it will be empty on return.
+ * homa_qdisc_free_homa() - Free all of the Homa packets that have been
+ * deferred for @qdev.
+ * @qdev:   Object whose @homa_deferred list should be emptied.
  */
-void homa_qdisc_srpt_free(struct sk_buff_head *list)
+void homa_qdisc_free_homa(struct homa_qdisc_dev *qdev)
 {
 	struct sk_buff *skb;
 
 	while (1) {
-		skb = homa_qdisc_srpt_dequeue(list);
+		skb = homa_qdisc_dequeue_homa(qdev);
 		if (!skb)
 			break;
 		kfree_skb(skb);
@@ -440,6 +444,13 @@ int homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev, int bytes,
 		clock = homa_clock();
 		idle = atomic64_read(&qdev->link_idle_time);
 		if (idle < clock) {
+			if (qdev->pacer_wake_time) {
+				u64 lost = (qdev->pacer_wake_time > idle)
+						? clock - qdev->pacer_wake_time
+						: clock - idle;
+				INC_METRIC(pacer_lost_cycles, lost);
+				tt_record1("pacer lost %d cycles", lost);
+			}
 			new_idle = clock + cycles_for_packet;
 		} else {
 			if (max_queue_cycles >= 0 && (idle - clock) >
@@ -453,6 +464,8 @@ int homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev, int bytes,
 			break;
 		INC_METRIC(idle_time_conflicts, 1);
 	}
+	if (!skb_queue_empty(&qdev->homa_deferred))
+		INC_METRIC(pacer_bytes, bytes);
 	return 1;
 }
 
@@ -473,7 +486,9 @@ int homa_qdisc_pacer_main(void *device)
 		if (kthread_should_stop())
 			break;
 		start = homa_clock();
+		qdev->pacer_wake_time = start;
 		homa_qdisc_pacer(qdev);
+		qdev->pacer_wake_time = 0;
 		INC_METRIC(pacer_cycles, homa_clock() - start);
 
 		if (!skb_queue_empty(&qdev->homa_deferred) ||
@@ -554,7 +569,7 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 		 * still too long because other threads have queued packets,
 		 * but we transmit anyway so the pacer thread doesn't starve.
 		 */
-		skb = homa_qdisc_srpt_dequeue(&qdev->homa_deferred);
+		skb = homa_qdisc_dequeue_homa(qdev);
 		if (!skb)
 			break;
 

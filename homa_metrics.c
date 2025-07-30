@@ -300,7 +300,7 @@ char *homa_metrics_print(void)
 		M("pacer_needed_help", m->pacer_needed_help,
 		  "homa_pacer_xmit invocations from homa_check_pacer\n");
 		M("throttled_cycles", m->throttled_cycles,
-		  "Time when the throttled queue was nonempty\n");
+		  "Time when output was throttled because NIC was backlogged\n");
 		M("resent_packets", m->resent_packets,
 		  "DATA packets sent in response to RESENDs\n");
 		M("peer_allocs", m->peer_allocs,

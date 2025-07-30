@@ -420,18 +420,18 @@ if elapsed_secs != 0:
                 /(total_cores_used * elapsed_secs)))
     if deltas["pacer_cycles"] != 0:
         pacer_secs = float(deltas["pacer_cycles"])/(cpu_khz * 1000.0)
-        print("Pacer throughput:    %6.2f  Gbps (pacer output when pacer running)" % (
+        print("Pacer throughput:    %6.2f  Gbps (pacer output when pacer active)" % (
                 deltas["pacer_bytes"]*8e-09/pacer_secs))
     if deltas["throttled_cycles"] != 0:
         throttled_secs = float(deltas["throttled_cycles"])/(cpu_khz * 1000.0)
-        print("Throttled throughput: %5.2f  Gbps (pacer output when throttled)" % (
+        print("Throttled throughput: %5.2f  Gbps (pacer output when NIC backlogged)" % (
                 deltas["pacer_bytes"]*8e-09/throttled_secs))
     if deltas["skb_allocs"] != 0:
         print("Skb alloc time:        %4.2f  usec/skb" % (
                 float(deltas["skb_alloc_cycles"]) / (cpu_khz / 1000.0) /
                 deltas["skb_allocs"]))
     if deltas["skb_page_allocs"] != 0:
-        print("Skb page alloc time:  %5.2f  usec/skb" % (
+        print("Skb page alloc time:  %5.2f  usec/page" % (
                 float(deltas["skb_page_alloc_cycles"]) / (cpu_khz / 1000.0) /
                 deltas["skb_page_allocs"]))
 
