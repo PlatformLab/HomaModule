@@ -1,7 +1,7 @@
 #!/usr/bin/python3 -u
 
 # Copyright (c) 2023 Homa Developers
-# SPDX-License-Identifier: BSD-1-Clause
+# SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 # This cperf benchmark varies one or more aspects of Homa's configuration,
 # similar and measures Homa slowdown, but it also measures switch buffer

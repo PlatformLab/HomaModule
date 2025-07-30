@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 /* This file various utility functions for unit testing; this file
  * is implemented entirely in C, and accesses Homa and kernel internals.

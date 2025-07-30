@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 #ifndef __STRIP__ /* See strip.py */
 /* This file contains functions that handle incoming Homa messages, including

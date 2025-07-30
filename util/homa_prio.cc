@@ -1,5 +1,5 @@
 /* Copyright (c) 2020-2022 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
+ * SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
  */
 
 /* This file contains a program that dynamically adjusts Homa's allocation

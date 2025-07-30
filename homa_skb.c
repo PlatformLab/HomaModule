@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 /* This file contains functions for allocating and freeing sk_buffs for
  * outbound packets. In particular, this file implements efficient management

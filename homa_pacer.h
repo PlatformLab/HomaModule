@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause */
+/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
 
 /* This file defines structs and functions related to the Homa pacer,
  * which implements SRPT for packet output. In order to do that, it

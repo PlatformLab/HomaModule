@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 /* This file implements a special-purpose queuing discipline for Homa.
  * This queuing discipline serves the following purposes:

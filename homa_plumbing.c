@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 /* This file consists mostly of "glue" that hooks Homa into the rest of
  * the Linux kernel. The guts of the protocol are in other files.

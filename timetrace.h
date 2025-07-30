@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause */
+/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
 
 #ifndef HOMA_TIMETRACE_H
 #define HOMA_TIMETRACE_H

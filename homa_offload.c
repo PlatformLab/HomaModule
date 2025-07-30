@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 /* This file implements GSO (Generic Segmentation Offload) and GRO (Generic
  * Receive Offload) for Homa.

@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # Copyright (c) 2020-2023 Homa Developers
-# SPDX-License-Identifier: BSD-1-Clause
+# SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 # This file contains library functions used to run cluster performance
 # tests for the Linux kernel implementation of Homa.

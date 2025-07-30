@@ -1,5 +1,5 @@
 /* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
+ * SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
  */
 
 /* This file contains a collection of functions that are useful in

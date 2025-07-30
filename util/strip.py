@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 """
 This script is used to copy information from the Homa GitHub repo to

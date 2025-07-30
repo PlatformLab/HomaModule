@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # Copyright (c) 2020-2023 Homa Developers
-# SPDX-License-Identifier: BSD-1-Clause
+# SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 # This cperf benchmark measures the throughput of a single client as a
 # function of the number of sending threads

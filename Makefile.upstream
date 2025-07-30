@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 #
 # Makefile for the Linux implementation of the Homa transport protocol.
 

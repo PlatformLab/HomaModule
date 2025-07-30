@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # Copyright (c) 2018-2022 Homa Developers
-# SPDX-License-Identifier: BSD-1-Clause
+# SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 """
 This program reads 2 Homa metrics files (/proc/net/homa_metrics)

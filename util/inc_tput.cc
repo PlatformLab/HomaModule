@@ -1,5 +1,5 @@
 /* Copyright (c) 2024 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
+ * SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
  */
 
 /* This program measures the throughput of atomic increments in the face

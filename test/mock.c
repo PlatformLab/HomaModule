@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 /* This file provides simplified substitutes for many Linux variables and
  * functions in order to allow Homa unit tests to be run outside a Linux

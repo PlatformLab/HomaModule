@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # Copyright (c) 2019-2023 Homa Developers
-# SPDX-License-Identifier: BSD-1-Clause
+# SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 """
 Reads Homa metrics from the kernel and prints out anything that is changed

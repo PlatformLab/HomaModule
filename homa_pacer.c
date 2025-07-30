@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 /* This file implements the Homa pacer, which implements SRPT for packet
  * output. In order to do that, it throttles packet transmission to prevent
