@@ -61,7 +61,6 @@ struct homa_recvmsg_args {
                                               * desired RPC, which must be
                                               * private. */
     uint64_t completion_cookie;              /* Value from sendmsg for request. */
-    int flags;                               /* OR-ed combination of bits. */
     uint32_t num_bpages;                     /* Number of valid entries in
                                               * bpage_offsets. */
     uint32_t bpage_offsets[HOMA_MAX_BPAGES]; /* Tokens for buffer pages. */
