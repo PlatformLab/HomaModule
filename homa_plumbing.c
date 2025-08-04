@@ -1465,7 +1465,6 @@ int homa_softirq(struct sk_buff *skb)
 		if (unlikely(h->type == FREEZE)) {
 			if (!atomic_read(&tt_frozen)) {
 				homa_rpc_log_active_tt(homa_from_skb(skb), 0);
-				homa_rpc_snapshot_log_tt();
 				tt_record4("Freezing because of request on port %d from 0x%x:%d, id %d",
 					   ntohs(h->dport),
 					   tt_addr(skb_canonical_ipv6_saddr(skb)),
@@ -1732,7 +1731,6 @@ int homa_dointvec(const struct ctl_table *table, int write,
 				tt_freeze();
 			} else if (homa->sysctl_action == 7) {
 				homa_rpc_log_active_tt(homa, 0);
-				homa_rpc_snapshot_log_tt();
 				tt_record("Freezing cluster because of action 7");
 				homa_freeze_peers();
 				tt_record("Finished freezing cluster");
