@@ -149,6 +149,9 @@ peer_nodes = {}
 # value is a dictionary containing the following fields (some may not
 # be present, depending on which events were present in the traces):
 # xmit:         Time when ip*xmit was invoked
+# qdisc_xmit:   Time when homa_qdisc requeued a packet that was deferred
+#               because of NIC queue length (only present for deferred
+#               packets)
 # nic:          Time when packet was handed off to the NIC (if available)
 # gro:          Time when GRO received the packet
 # softirq:      Time when homa_softirq processed the packet
@@ -1588,6 +1591,19 @@ class Dispatcher:
                 '([0-9]+), offset ([0-9]+), bytes_left ([0-9]+)'
     })
 
+    def __qdisc_xmit(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        offset = int(match.group(2))
+        bytes_left = int(match.group(3))
+        for interest in interests:
+            interest.tt_qdisc_xmit(trace, time, core, id, offset, bytes_left)
+
+    patterns.append({
+        'name': 'qdisc_xmit',
+        'regexp': 'homa_qdisc_pacer queuing homa data packet for id ([0-9]+), '
+                'offset ([0-9]+), bytes_left ([0-9]+)'
+    })
+
     def __tcp_xmit(self, trace, time, core, match, interests):
         length = int(match.group(1))
         for interest in interests:
@@ -2594,10 +2610,15 @@ class AnalyzeDelay:
                     if delay > 0:
                         short_total.append([delay, p, pkt['softirq']])
             else:
-                if ('xmit' in pkt) and ('nic' in pkt):
-                    delay = pkt['nic'] - pkt['xmit']
-                    if delay > 0:
-                        long_to_nic.append([delay, p, pkt['nic']])
+                if 'tso_length' in pkt:
+                    if 'nic' in pkt:
+                        delay = -1
+                        if 'qdisc_xmit' in pkt:
+                            delay = pkt['nic'] - pkt['qdisc_xmit']
+                        elif 'xmit' in pkt:
+                            delay = pkt['nic'] - pkt['xmit']
+                        if delay > 0:
+                            long_to_nic.append([delay, p, pkt['nic']])
                 if ('nic' in pkt) and ('gro' in pkt):
                     delay = pkt['gro'] - pkt['nic']
                     if delay > 0:
@@ -2780,10 +2801,14 @@ class AnalyzeDelay:
                             [pkt['softirq'] - pkt['gro'], p, pkt['softirq']])
             else:
                 if (total < min_long) or (total > max_long):
-                    continue;
-                if ('xmit' in pkt) and ('nic' in pkt):
-                    long_to_nic.append(
-                            [pkt['nic'] - pkt['xmit'], p, pkt['nic']])
+                    continue
+                if 'tso_length' in pkt:
+                    if ('qdisc_xmit' in pkt) and ('nic' in pkt):
+                        long_to_nic.append(
+                                [pkt['nic'] - pkt['qdisc_xmit'], p, pkt['nic']])
+                    elif ('xmit' in pkt) and ('nic' in pkt):
+                        long_to_nic.append(
+                                [pkt['nic'] - pkt['xmit'], p, pkt['nic']])
                 if ('nic' in pkt) and ('gro' in pkt):
                     long_to_gro.append(
                             [pkt['gro'] - pkt['nic'], p, pkt['gro']])
@@ -6082,6 +6107,10 @@ class AnalyzePackets:
         global packets
         packets[pkt_id(id, offset)]['pacer'] = True
 
+    def tt_qdisc_xmit(self, trace, t, core, id, offset, bytes_left):
+        global packets
+        packets[pkt_id(id, offset)]['qdisc_xmit'] = t
+
     def tt_retransmit(self, trace, t, core, id, offset, length):
         global packets
         p = packets[pkt_id(id, offset)]
@@ -7603,65 +7632,57 @@ class AnalyzeTemp:
         global traces, options, packets, rpcs
         print('\n-------------------')
         print('Analyzer: temp')
-        print('-------------------')
+        print('-------------------\n')
 
-        print('Peer nodes: %s\n' % (peer_nodes))
+        mtu = get_mtu()
         delays = []
-        pkts = []
-        node3pkts = 0
-        long = 50
-        node = options.node
+        ip_delays = []
+        slow_pkts = []
+        qdisc_pkts = []
         for pkt in packets.values():
-            if pkt['id'] == 500018274:
-                print(pkt)
-            if not 'nic' in pkt:
-                continue
-            if not ('tx_node' in pkt) or (pkt['tx_node'] != 'node4'):
-                continue
-            if not ('rx_node' in pkt) or (pkt['rx_node'] != 'node1'):
-                continue
-            pkts.append(pkt)
-        if not pkts:
-            print('No data packets made it from node1 to node4 in the traces')
-            return
-        pkts.sort(key=lambda d : d['nic'])
-        print('RpcId     Offset       NIC       GRO   Delay')
-        for pkt in pkts:
-            if 'gro' in pkt:
-                delay = pkt['gro'] - pkt['nic']
-                delays.append(delay)
-                print('%9d %6d %9.3f %9.3f %7.1f' % (pkt['id'], pkt['offset'],
-                        pkt['nic'], pkt['gro'], pkt['gro'] - pkt['nic']))
-            else:
-                print('%9d %6d %9.3f N/A' % (pkt['id'], pkt['offset'],
-                        pkt['nic']))
-        delays.sort()
-        print('\nDelays: average %.1f us, P50 %.1f us, P90 %.1f us, P99 %.1f us' %
-                (sum(delays)/len(delays), delays[50*len(delays)//100],
-                delays[90*len(delays)//100], delays[99*len(delays)//100]))
+            if 'nic' in pkt and 'qdisc_xmit' in pkt:
+                qdisc_pkts.append(pkt)
+                delays.append(pkt['nic'] - pkt['qdisc_xmit'])
+            elif ('nic' in pkt and 'xmit' in pkt and 'tso_length' in pkt
+                    and pkt['msg_length'] != None and pkt['msg_length'] > mtu):
+                delay = pkt['nic'] - pkt['xmit']
+                ip_delays.append(delay)
+                if delay > 50:
+                    slow_pkts.append(pkt)
 
-    def output_long_qdisc(self):
-        global traces, options, packets
-        print('\n-------------------')
-        print('Analyzer: temp')
-        print('-------------------')
+        if not delays:
+            print('Couldn\'t find any packets that were deferred by homa_qdisc');
+        else:
+            delays.sort()
+            print('%d delays from qdisc_xmit to nic:' % (len(delays)))
+            print('Average: %6.1f' % (sum(delays) / len(delays)))
+            print('Min:     %6.1f' % (delays[0]))
+            print('P50:     %6.1f' % (delays[(50 * len(delays) // 100)]))
+            print('P90:     %6.1f' % (delays[(90 * len(delays) // 100)]))
+            print('P99:     %6.1f' % (delays[(99 * len(delays) // 100)]))
+            print('Max:     %6.1f' % (delays[-1]))
 
-        pkts = []
-        for pkt_id in self.qdisc_ids:
-            if not pkt_id in packets:
-                continue
-            pkt = packets[pkt_id]
-            if (not 'xmit' in pkt) or (not 'gro' in pkt):
-                continue
-            if not 'nic' in pkt:
-                print('Queued packet has no mlx send record: %s' % (pkt))
-                continue
-            pkts.append([pkt['nic'] - pkt['xmit'], pkt])
+        print('');
+        if not ip_delays:
+            print('Couldn\'t find any ip_queue_xmit packets');
+        else:
+            ip_delays.sort()
+            print('%d delays from ip_queue_xmit to nic:' % (len(ip_delays)))
+            print('Average: %6.1f' % (sum(ip_delays) / len(ip_delays)))
+            print('Min:     %6.1f' % (ip_delays[0]))
+            print('P50:     %6.1f' % (ip_delays[(50 * len(ip_delays) // 100)]))
+            print('P90:     %6.1f' % (ip_delays[(90 * len(ip_delays) // 100)]))
+            print('P99:     %6.1f' % (ip_delays[(99 * len(ip_delays) // 100)]))
+            print('Max:     %6.1f' % (ip_delays[-1]))
 
-        for delay, pkt in sorted(pkts, reverse=True, key=lambda t : t[0]):
-            print('RPC id %10d, offset %d, xmit %9.3f, mlx_delay %6.1f, '
-                    'gro_delay %6.1f' % (pkt['id'], pkt['offset'],
-                    pkt['xmit'], delay, pkt['gro'] - pkt['xmit']))
+        slow_pkts.sort(key=lambda d : d['nic'] - d['xmit'], reverse=True)
+        print('Packets that took a long time from ip_queue_xmit to nic:')
+        print('        Id     Offset     Node  Core      Xmit       Nic  Delay')
+        for pkt in slow_pkts:
+            print('%10d %10d %8s   %3d %9.3f %9.3f %6.1f' % (
+                    pkt['id'], pkt['offset'], pkt['tx_node'], pkt['tx_core'],
+                    pkt['xmit'], pkt['nic'], pkt['nic'] - pkt['xmit']))
+
 
     def output_snapshot(self):
         global packets, rpcs
