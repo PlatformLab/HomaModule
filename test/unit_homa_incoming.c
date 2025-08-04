@@ -2374,12 +2374,12 @@ TEST_F(homa_incoming, homa_wait_private__rpc_has_error)
 	atomic_or(RPC_PRIVATE, &crpc->flags);
 	crpc->error = -ENOENT;
 	homa_rpc_lock(crpc);
-	EXPECT_EQ(ENOENT, -homa_wait_private(crpc, 0));
+	EXPECT_EQ(0, -homa_wait_private(crpc, 0));
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags) & RPC_PKTS_READY);
 	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->wait_none));
 	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->wait_block));
-	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->wait_fast));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_fast));
 }
 TEST_F(homa_incoming, homa_wait_private__copy_to_user_fails)
 {
@@ -2392,7 +2392,8 @@ TEST_F(homa_incoming, homa_wait_private__copy_to_user_fails)
 	atomic_or(RPC_PRIVATE, &crpc->flags);
 	mock_copy_data_errors = 1;
 	homa_rpc_lock(crpc);
-	EXPECT_EQ(EFAULT, -homa_wait_private(crpc, 0));
+	EXPECT_EQ(0, -homa_wait_private(crpc, 0));
+	EXPECT_EQ(-EFAULT, crpc->error);
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_wait_private__available_immediately)
@@ -2441,10 +2442,10 @@ TEST_F(homa_incoming, homa_wait_private__signal_notify_race)
 	mock_prepare_to_wait_errors = 1;
 
 	homa_rpc_lock(crpc);
-	EXPECT_EQ(ENOENT, -homa_wait_private(crpc, 0));
+	EXPECT_EQ(0, -homa_wait_private(crpc, 0));
 	homa_rpc_unlock(crpc);
 	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->wait_none));
-	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->wait_block));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_block));
 	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->wait_fast));
 	EXPECT_EQ(0, mock_prepare_to_wait_errors);
 }

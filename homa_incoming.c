@@ -1068,8 +1068,12 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
  * @rpc:          RPC to wait for; an error will be returned if the RPC is
  *                not a client RPC or not private. Must be locked by caller.
  * @nonblocking:  Nonzero means return immediately if @rpc not ready.
- * Return:  0 if the response has been successfully received, otherwise
- *          a negative errno.
+ * Return:        0 means that @rpc is ready for attention: either its response
+ *                has been received or it has an unrecoverable error such as
+ *                ETIMEDOUT (in rpc->error). Nonzero means some other error
+ *                (such as EINTR or EINVAL) occurred before @rpc became ready
+ *                for attention; in this case the return value is a negative
+ *                errno.
  */
 int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 	__must_hold(rpc->bucket->lock)
@@ -1079,7 +1083,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 	int avail_immediately = 1;
 	int blocked = 0;
 #endif /* See strip.py */
-	int result = 0;
+	int result;
 
 	if (!(atomic_read(&rpc->flags) & RPC_PRIVATE))
 		return -EINVAL;
@@ -1090,10 +1094,10 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 	 * RPC is ready for the application.
 	 */
 	while (1) {
+		result = 0;
 		if (!rpc->error)
 			rpc->error = homa_copy_to_user(rpc);
 		if (rpc->error) {
-			result = rpc->error;
 			IF_NO_STRIP(avail_immediately = 0);
 			break;
 		}

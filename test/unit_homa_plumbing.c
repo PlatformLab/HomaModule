@@ -773,6 +773,24 @@ TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_private)
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, self->recvmsg_args.id);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_recvmsg__private_rpc_has_error)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->server_port,
+			self->client_id, 100, 2000);
+
+	EXPECT_NE(NULL, crpc);
+	atomic_or(RPC_PRIVATE, &crpc->flags);
+	crpc->error = -ETIMEDOUT;
+
+	self->recvmsg_args.id = crpc->id;
+
+	EXPECT_EQ(ETIMEDOUT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_shared)
 {
