@@ -222,15 +222,15 @@ struct homa_metrics {
 	u64 wait_none;
 
 	/**
-	 * @wait_fast: total number of times that a message arrived for
-	 * a receiving thread while it was polling (i.e. the message
-	 * wasn't immediately available, but the thread never blocked).
+	 * @wait_fast: total number of times that a thread received an
+	 * incoming message while polling (i.e. the message wasn't
+	 * immediately available, but the thread never blocked).
 	 */
 	u64 wait_fast;
 
 	/**
-	 * @wait_block: total number of times that a thread blocked at
-	 * least once while waiting for an incoming message.
+	 * @wait_block: total number of times that a thread received an
+	 * incoming message after blocking at least once.
 	 */
 	u64 wait_block;
 

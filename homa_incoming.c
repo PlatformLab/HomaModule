@@ -1094,6 +1094,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 			rpc->error = homa_copy_to_user(rpc);
 		if (rpc->error) {
 			result = rpc->error;
+			IF_NO_STRIP(avail_immediately = 0);
 			break;
 		}
 		if (rpc->msgin.length >= 0 &&
@@ -1104,12 +1105,18 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 			break;
 		}
 
+		if (nonblocking) {
+			result = -EAGAIN;
+			IF_NO_STRIP(avail_immediately = 0);
+			break;
+		}
+
 		result = homa_interest_init_private(&interest, rpc);
 		if (result != 0)
 			break;
 
 		homa_rpc_unlock(rpc);
-		result = homa_interest_wait(&interest, nonblocking);
+		result = homa_interest_wait(&interest);
 #ifndef __STRIP__ /* See strip.py */
 		avail_immediately = 0;
 		blocked |= interest.blocked;
@@ -1122,8 +1129,9 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		tt_record3("homa_wait_private found rpc id %d, pid %d via handoff, blocked %d",
 			   rpc->id, current->pid, interest.blocked);
 
-		/* If homa_interest_wait returned an error but the interest
-		 * actually got ready, then ignore the error.
+		/* Abort on error, but if the interest actually got ready
+		 * in the meantime the ignore the error (loop back around
+		 * to process the RPC).
 		 */
 		if (result != 0 && atomic_read(&interest.ready) == 0)
 			break;
@@ -1132,10 +1140,12 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 #ifndef __STRIP__ /* See strip.py */
 	if (avail_immediately)
 		INC_METRIC(wait_none, 1);
-	else if (blocked)
-		INC_METRIC(wait_block, 1);
-	else
-		INC_METRIC(wait_fast, 1);
+	else if (result == 0) {
+		if (blocked)
+			INC_METRIC(wait_block, 1);
+		else
+			INC_METRIC(wait_fast, 1);
+	}
 #endif /* See strip.py */
 	return result;
 }
@@ -1190,23 +1200,40 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 				hsk->sock.sk_data_ready(&hsk->sock);
 			}
 			homa_sock_unlock(hsk);
+		} else if (nonblocking) {
+			rpc = ERR_PTR(-EAGAIN);
+			homa_sock_unlock(hsk);
+			IF_NO_STRIP(avail_immediately = 0);
+
+			/* This is a good time to cleanup dead RPCS. */
+			homa_rpc_reap(hsk, false);
+			goto done;
 		} else {
 			homa_interest_init_shared(&interest, hsk);
 			homa_sock_unlock(hsk);
-			result = homa_interest_wait(&interest, nonblocking);
+			result = homa_interest_wait(&interest);
 #ifndef __STRIP__ /* See strip.py */
 			avail_immediately = 0;
 			blocked |= interest.blocked;
 #endif /* See strip.py */
-			homa_interest_unlink_shared(&interest);
 
 			if (result != 0) {
-				/* If homa_interest_wait returned an error
-				 * (e.g. -EAGAIN) but in the meantime the
-				 * interest received a handoff, ignore the
-				 * error.
+				int ready;
+
+				/* homa_interest_wait returned an error, so we
+				 * have to do two things. First, unlink the
+				 * interest from the socket. Second, check to
+				 * see if in the meantime the interest received
+				 * a handoff. If so, ignore the error. Very
+				 * important to hold the socket lock while
+				 * checking, in order to eliminate races with
+				 * homa_rpc_handoff.
 				 */
-				if (atomic_read(&interest.ready) == 0) {
+				homa_sock_lock(hsk);
+				homa_interest_unlink_shared(&interest);
+				ready = atomic_read(&interest.ready);
+				homa_sock_unlock(hsk);
+				if (ready == 0) {
 					rpc = ERR_PTR(result);
 					goto done;
 				}
@@ -1238,12 +1265,14 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 
 done:
 #ifndef __STRIP__ /* See strip.py */
-	if (avail_immediately)
+	if (avail_immediately) {
 		INC_METRIC(wait_none, 1);
-	else if (blocked)
-		INC_METRIC(wait_block, 1);
-	else
-		INC_METRIC(wait_fast, 1);
+	} else if (!IS_ERR(rpc)) {
+		if (blocked)
+			INC_METRIC(wait_block, 1);
+		else
+			INC_METRIC(wait_fast, 1);
+	}
 #endif /* See strip.py */
 	return rpc;
 }

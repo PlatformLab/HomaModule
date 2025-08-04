@@ -64,13 +64,11 @@ int homa_interest_init_private(struct homa_interest *interest,
  *                and linked to a socket or RPC. On return, the interest
  *                will have been unlinked if its ready flag is set; otherwise
  *                it may still be linked.
- * @nonblocking:  Nonzero means return without blocking if the interest
- *                doesn't become ready immediately.
  *
- * Return: 0 for success (there is an actionable RPC in the interest), or
- * a negative errno.
+ * Return: 0 for success (the ready flag is set in the interest), or -EINTR
+ * if the thread received an interrupt.
  */
-int homa_interest_wait(struct homa_interest *interest, int nonblocking)
+int homa_interest_wait(struct homa_interest *interest)
 {
 	struct homa_sock *hsk = interest->hsk;
 	int result = 0;
@@ -97,11 +95,6 @@ int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 		/* See if we can cleanup dead RPCs while waiting. */
 		if (homa_rpc_reap(hsk, false) != 0)
 			continue;
-
-		if (nonblocking) {
-			result = -EAGAIN;
-			goto done;
-		}
 
 #ifndef __STRIP__ /* See strip.py */
 		now = homa_clock();
