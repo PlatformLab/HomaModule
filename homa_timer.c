@@ -150,11 +150,15 @@ void homa_timer(struct homa *homa)
 		total_grants += m->packets_sent[GRANT - DATA];
 	}
 
-	tt_record4("homa_timer found total_incoming %d, num_grantable_rpcs %d, num_active_rpcs %d, new grants %d",
-		   atomic_read(&homa->grant->total_incoming),
-		   homa->grant->num_grantable_rpcs,
-		   homa->grant->num_active_rpcs,
-		   total_grants - prev_grant_count);
+	if (atomic_read(&homa->grant->total_incoming) != 0 ||
+	    homa->grant->num_grantable_rpcs != 0 ||
+	    homa->grant->num_active_rpcs != 0 ||
+	    total_grants - prev_grant_count != 0)
+		tt_record4("homa_timer found total_incoming %d, num_grantable_rpcs %d, num_active_rpcs %d, new grants %d",
+			   atomic_read(&homa->grant->total_incoming),
+			   homa->grant->num_grantable_rpcs,
+			   homa->grant->num_active_rpcs,
+			   total_grants - prev_grant_count);
 	if (total_grants == prev_grant_count &&
 	    homa->grant->num_grantable_rpcs > 20) {
 		zero_count++;
@@ -232,9 +236,10 @@ void homa_timer(struct homa *homa)
 	}
 	homa_socktab_end_scan(&scan);
 #ifndef __STRIP__ /* See strip.py */
-	tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",
-		   total_incoming_rpcs, sum_incoming, sum_incoming_rec,
-		   atomic_read(&homa->grant->total_incoming));
+	if (total_incoming_rpcs > 0)
+		tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",
+			   total_incoming_rpcs, sum_incoming, sum_incoming_rec,
+			   atomic_read(&homa->grant->total_incoming));
 #endif /* See strip.py */
 	homa_skb_release_pages(homa);
 	homa_peer_gc(homa->peertab);
