@@ -308,6 +308,9 @@ grants = GrantDict()
 #                 as of the end of the interval
 intervals = None
 
+# Dispatcher used to parse the traces.
+dispatcher = None
+
 def add_to_intervals(node, start, end, key, delta):
     """
     Find all of the intervals for node whose end times overlap the range
@@ -807,6 +810,9 @@ class Dispatcher:
         # a trace file is read
         self.parse_table = None
 
+        # Pattern name -> pattern
+        self.pattern_dict = {}
+
         # The number of initial characters of the message portion of a
         # trace record that are used to lookup in parse_table. This is
         # the largest number such that each pattern has at least this many
@@ -825,6 +831,7 @@ class Dispatcher:
 
         for pattern in self.patterns:
             pattern['matches'] = 0
+            self.pattern_dict[pattern['name']] = pattern
 
     def get_analyzer(self, name):
         """
@@ -846,6 +853,13 @@ class Dispatcher:
         """
 
         return self.objs
+
+    def pattern_matched(self, name):
+        """
+        Return True if the pattern with the given name matched at least
+        one event in the traces, False if it never matched
+        """
+        return self.pattern_dict[name]['matches'] > 0
 
     def interest(self, analyzer):
         """
@@ -990,6 +1004,8 @@ class Dispatcher:
         """
         if self.parse_table != None:
             return
+
+        # Pattern prefix -> list of patterns with that prefix
         self.parse_table = defaultdict(list)
 
         # Pass 1: first compute self.prefix_length and set the 'parser'
@@ -5630,28 +5646,14 @@ class AnalyzeNicqueues:
         self.nodes[trace['node']].append([t, length, 0, "tcp"])
 
     def output(self):
-        global options, traces, packets
+        global options, traces, packets, dispatcher
 
         for pkt in packets.values():
-            if 'tso_length' in pkt:
-                if 'nic' in pkt:
-                    t = pkt['nic']
-                elif 'qdisc_xmit' in pkt:
-                    t = pkt['qdisc_xmit']
-                elif 'xmit' in pkt:
-                    t = pkt['xmit']
-                else:
-                    continue
-                self.nodes[pkt['tx_node']].append([t, pkt['tso_length'] + 60, 0,
-                        "homa_data"])
+            if 'tso_length' in pkt and 'nic' in pkt:
+                self.nodes[pkt['tx_node']].append([pkt['nic'],
+                        pkt['tso_length'] + 60, 0, "homa_data"])
             for retrans in pkt['retransmits']:
-                if 'nic' in retrans:
-                    t = retrans['nic']
-                elif 'qdisc_xmit' in retrans:
-                    t = retrans['qdisc_xmit']
-                elif 'xmit' in retrans:
-                    t = retrans['xmit']
-                else:
+                if not 'nic' in retrans:
                     continue
                 if 'tso_length' in retrans:
                     length = retrans['tso_length']
@@ -5659,8 +5661,8 @@ class AnalyzeNicqueues:
                     length = pkt['length']
                 else:
                     continue
-                self.nodes[pkt['tx_node']].append([t, length + 60, 0,
-                        "homa_data"])
+                self.nodes[pkt['tx_node']].append([retrans['nic'],
+                        length + 60, 0, "homa_data"])
 
         print('\n-------------------')
         print('Analyzer: nicqueues')
@@ -5672,7 +5674,7 @@ class AnalyzeNicqueues:
         print('Node:        Name of node')
         print('MaxLength:   Highest estimated output queue length for NIC (bytes)')
         print('Time:        Time when worst-case queue length occurred')
-        print('Delay:       Delay (usec until fully transmitted) experienced by packet ')
+        print('Delay:       Delay (usec until fully transmitted) experienced by packet')
         print('             transmitted at Time')
         print('P50:         Median delay experienced by Homa data packets')
         print('P90:         90th percentile delay experienced by Homa data packets')
@@ -5759,7 +5761,7 @@ class AnalyzeNicqueues:
                         line += ' ' * 11
                     else:
                         line += '   %8d' % (max)
-                print(line, file=file)
+                print(line.rstrip(), file=file)
                 if interval_end > end:
                     break
                 interval_end += interval
@@ -8312,7 +8314,8 @@ class AnalyzeTxpkts:
             if sort_key == 'gro':
                 pkts = sorted(pkts, key = lambda pkt : get_max_gro(pkt))
             elif sort_key != 'xmit':
-                pkts = sorted(pkts, key = lambda pkt : pkt[sort_key])
+                pkts = sorted(pkts, key = lambda pkt :
+                        pkt[sort_key] if sort_key in pkt else 1e20)
             if len(pkts) == 0:
                 continue
 
@@ -8721,28 +8724,28 @@ if options.pkt:
         exit(1)
     options.pkt_id = int(match.group(1))
     options.pkt_offset = int(match.group(2))
-d = Dispatcher()
+dispatcher = Dispatcher()
 analyzer_classes = []
 for name in options.analyzers.split():
     class_name = 'Analyze' + name[0].capitalize() + name[1:]
     if not hasattr(sys.modules[__name__], class_name):
         print('No analyzer named "%s"' % (name), file=sys.stderr)
         exit(1)
-    d.interest(class_name)
+    dispatcher.interest(class_name)
     analyzer_classes.append(class_name)
 
 # Parse the timetrace files; this will invoke handlers in the analyzers.
 for file in tt_files:
-    d.parse(file)
+    dispatcher.parse(file)
 
-d.print_no_matches()
+dispatcher.print_no_matches()
 
 if options.verbose:
-    d.print_stats()
+    dispatcher.print_stats()
 
 # Invoke 'analyze' methods in each analyzer, if present, to perform
 # postprocessing now that all the trace data has been read.
-for analyzer in d.get_analyzers():
+for analyzer in dispatcher.get_analyzers():
     if hasattr(analyzer, 'analyze'):
         # print('Calling %s.analyze' % (type(analyzer).__name__), file=sys.stderr)
         analyzer.analyze()
@@ -8750,6 +8753,6 @@ for analyzer in d.get_analyzers():
 # Give each analyzer a chance to output its findings (includes
 # printing output and generating data files).
 for name in analyzer_classes:
-    analyzer = d.get_analyzer(name)
+    analyzer = dispatcher.get_analyzer(name)
     if hasattr(analyzer, 'output'):
         analyzer.output()
