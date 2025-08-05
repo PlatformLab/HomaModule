@@ -183,12 +183,17 @@ peer_nodes = {}
 # softirq_core: Core on which SoftIRQ processed the packet
 # free_tx_skb:  Time when NAPI released the skb on the sender, which can't
 #               happen until the packet has been fully transmitted.
-# retransmits:  If the packet was retransmitted, this will be a list of all
-#               the times when the packet was retransmiteed.
+# retransmits:  A list with one entry for each time the packet was
+#               retransmitted. The entry is a dictionary with the same
+#               fields as a packet (though many may be omitted). There will
+#               be an entry "retrans" that gives the time of the trace
+#               record declaring retransmission. If there are no retransmits,
+#               this will be an empty list.
 class PacketDict(dict):
     def __missing__(self, key):
         id_str, offset_str = key.split(':')
-        self[key] = {'id': int(id_str), 'offset': int(offset_str)}
+        self[key] = {'id': int(id_str), 'offset': int(offset_str),
+                'retransmits': []}
         return self[key]
 packets = PacketDict()
 
@@ -5628,18 +5633,34 @@ class AnalyzeNicqueues:
         global options, traces, packets
 
         for pkt in packets.values():
-            if not 'tso_length' in pkt:
-                continue
-            if 'nic' in pkt:
-                t = pkt['nic']
-            elif 'qdisc_xmit' in pkt:
-                t = pkt['qdisc_xmit']
-            elif 'xmit' in pkt:
-                t = pkt['xmit']
-            else:
-                continue
-            self.nodes[pkt['tx_node']].append([t, pkt['tso_length'] + 60, 0,
-                    "homa_data"])
+            if 'tso_length' in pkt:
+                if 'nic' in pkt:
+                    t = pkt['nic']
+                elif 'qdisc_xmit' in pkt:
+                    t = pkt['qdisc_xmit']
+                elif 'xmit' in pkt:
+                    t = pkt['xmit']
+                else:
+                    continue
+                self.nodes[pkt['tx_node']].append([t, pkt['tso_length'] + 60, 0,
+                        "homa_data"])
+            for retrans in pkt['retransmits']:
+                if 'nic' in retrans:
+                    t = retrans['nic']
+                elif 'qdisc_xmit' in retrans:
+                    t = retrans['qdisc_xmit']
+                elif 'xmit' in retrans:
+                    t = retrans['xmit']
+                else:
+                    continue
+                if 'tso_length' in retrans:
+                    length = retrans['tso_length']
+                elif 'length' in pkt:
+                    length = pkt['length']
+                else:
+                    continue
+                self.nodes[pkt['tx_node']].append([t, length + 60, 0,
+                        "homa_data"])
 
         print('\n-------------------')
         print('Analyzer: nicqueues')
@@ -5705,7 +5726,7 @@ class AnalyzeNicqueues:
 
         if options.data:
             # Print stats for each node at regular intervals
-            file = open('%s/txqueues.dat' % (options.data), 'w')
+            file = open('%s/nicqueues.dat' % (options.data), 'w')
             line = 'Interval'
             for node in get_sorted_nodes():
                 line += ' %10s' % (node)
@@ -6181,28 +6202,35 @@ class AnalyzePackets:
     def tt_ip_xmit(self, trace, t, core, id, offset):
         global packets, rpcs
         p = packets[pkt_id(id, offset)]
-        # Only record first transmission (packet might be retransmitted)
-        if not 'xmit' in p:
+        p['tx_node'] = trace['node']
+        if not p['retransmits']:
             p['xmit'] = t
-            p['tx_node'] = trace['node']
             p['tx_core'] = core
             rpcs[id]['send_data_pkts'].append(p)
+        else:
+            p['retransmits'][-1]['xmit'] = t
 
     def tt_mlx_data(self, trace, t, core, peer, id, offset, tx_queue):
         global packets
         p = packets[pkt_id(id, offset)]
-        if not 'retransmits' in p:
+        p['tx_node'] = trace['node']
+        if not p['retransmits']:
             p['nic'] = t
-            p['tx_node'] = trace['node']
             p['tx_queue'] = tx_queue
+        else:
+            p['retransmits'][-1]['nic'] = t
 
     def tt_free_tx_skb(self, trace, t, core, id, offset, qid, msg_length):
         global packets
         p = packets[pkt_id(id, offset)]
-        p['free_tx_skb'] = t
-        p['tx_qid'] = qid
         p['tx_node'] = trace['node']
-        p['msg_length'] = msg_length
+        if not p['retransmits']:
+            p['free_tx_skb'] = t
+            p['tx_qid'] = qid
+            p['msg_length'] = msg_length
+        else:
+            p = p['retransmits'][-1]
+            p['free_tx_skb'] = t
 
     def tt_gro_data(self, trace, t, core, peer, id, offset, prio):
         global packets, recv_offsets, rpcs
@@ -6243,31 +6271,32 @@ class AnalyzePackets:
     def tt_send_data(self, trace, t, core, id, offset, length):
         global packets
         p = packets[pkt_id(id, offset)]
-        if (not 'retransmits' in p) and (length > self.tso_lengths[offset]):
-            self.tso_lengths[offset] = length
-        p['id'] = id
-        # If packet has been retransmitted, don't record tso_length, since
-        # that could make a TSO segment appear to be the main TSO packet.
-        if not 'retransmits' in p:
+        if not p['retransmits']:
+            if length > self.tso_lengths[offset]:
+                self.tso_lengths[offset] = length
             p['tso_length'] = length
+        else:
+            p['retransmits'][-1]['tso_length'] = length
 
     def tt_pacer_xmit(self, trace, t, core, id, offset, port, bytes_left):
         global packets
-        packets[pkt_id(id, offset)]['pacer'] = True
+        p = packets[pkt_id(id, offset)]
+        if p['retransmits']:
+            p = p['retransmits'][-1]
+        p['pacer'] = True
 
     def tt_qdisc_xmit(self, trace, t, core, id, offset, bytes_left):
         global packets
         p = packets[pkt_id(id, offset)]
-        p['qdisc_xmit'] = t
         p['tx_node'] = trace['node']
+        if p['retransmits']:
+            p = p['retransmits'][-1]
+        p['qdisc_xmit'] = t
 
     def tt_retransmit(self, trace, t, core, id, offset, length):
         global packets
         p = packets[pkt_id(id, offset)]
-        if not 'retransmits' in p:
-            p['retransmits'] = [t]
-        else:
-            p['retransmits'].append(t)
+        p['retransmits'].append({'retrans': t})
 
     def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
         global grants, rpcs
@@ -6370,7 +6399,8 @@ class AnalyzePackets:
                     if pid in packets:
                         pkt2 = packets[pid]
                     else:
-                        pkt2 = {'offset': offset, 'length': length}
+                        pkt2 = {'offset': offset, 'length': length,
+                                'retransmits': []}
                         new_pkts.append([pid, pkt2])
                     for key in ['xmit', 'nic', 'id', 'msg_length',
                                 'priority', 'tx_node', 'tx_core',
@@ -7784,55 +7814,23 @@ class AnalyzeTemp:
         print('Analyzer: temp')
         print('-------------------\n')
 
-        mtu = get_mtu()
-        delays = []
-        ip_delays = []
-        slow_pkts = []
-        qdisc_pkts = []
+        bytes = 0
         for pkt in packets.values():
-            if 'nic' in pkt and 'qdisc_xmit' in pkt:
-                qdisc_pkts.append(pkt)
-                delays.append(pkt['nic'] - pkt['qdisc_xmit'])
-            elif ('nic' in pkt and 'xmit' in pkt and 'tso_length' in pkt
-                    and pkt['msg_length'] != None and pkt['msg_length'] > mtu):
-                delay = pkt['nic'] - pkt['xmit']
-                ip_delays.append(delay)
-                if delay > 50:
-                    slow_pkts.append(pkt)
-
-        if not delays:
-            print('Couldn\'t find any packets that were deferred by homa_qdisc');
-        else:
-            delays.sort()
-            print('%d delays from qdisc_xmit to nic:' % (len(delays)))
-            print('Average: %6.1f' % (sum(delays) / len(delays)))
-            print('Min:     %6.1f' % (delays[0]))
-            print('P50:     %6.1f' % (delays[(50 * len(delays) // 100)]))
-            print('P90:     %6.1f' % (delays[(90 * len(delays) // 100)]))
-            print('P99:     %6.1f' % (delays[(99 * len(delays) // 100)]))
-            print('Max:     %6.1f' % (delays[-1]))
-
-        print('');
-        if not ip_delays:
-            print('Couldn\'t find any ip_queue_xmit packets');
-        else:
-            ip_delays.sort()
-            print('%d delays from ip_queue_xmit to nic:' % (len(ip_delays)))
-            print('Average: %6.1f' % (sum(ip_delays) / len(ip_delays)))
-            print('Min:     %6.1f' % (ip_delays[0]))
-            print('P50:     %6.1f' % (ip_delays[(50 * len(ip_delays) // 100)]))
-            print('P90:     %6.1f' % (ip_delays[(90 * len(ip_delays) // 100)]))
-            print('P99:     %6.1f' % (ip_delays[(99 * len(ip_delays) // 100)]))
-            print('Max:     %6.1f' % (ip_delays[-1]))
-
-        slow_pkts.sort(key=lambda d : d['nic'] - d['xmit'], reverse=True)
-        print('Packets that took a long time from ip_queue_xmit to nic:')
-        print('        Id     Offset     Node  Core      Xmit       Nic  Delay')
-        for pkt in slow_pkts:
-            print('%10d %10d %8s   %3d %9.3f %9.3f %6.1f' % (
-                    pkt['id'], pkt['offset'], pkt['tx_node'], pkt['tx_core'],
-                    pkt['xmit'], pkt['nic'], pkt['nic'] - pkt['xmit']))
-
+            if pkt['retransmits']:
+                print('Packet with %d retransmissions: %s\n' % (
+                        len(pkt['retransmits']), pkt))
+            for r in pkt['retransmits']:
+                if 'tso_length' in r:
+                    bytes += r['tso_length']
+                elif 'length' in pkt:
+                    bytes += pkt['length']
+                else:
+                    print('Can\'t find length for preceding packet')
+        elapsed = 0
+        for trace in traces.values():
+            elapsed += trace['elapsed_time']
+        print('Total elapsed time %.1f ms, retransmitted bytes %d (%.3f MB/sec)'
+                % (elapsed * 1e-3, bytes, bytes / elapsed))
 
     def output_snapshot(self):
         global packets, rpcs
@@ -8404,13 +8402,10 @@ class AnalyzeTxpkts:
                     qid_string = ''
                 total_pkts += 1
 
-                rx = 0
-                if 'retransmits' in pkt:
-                    rx += len(pkt['retransmits'])
+                rx = len(pkt['retransmits'])
                 if 'segments' in pkt:
                     for seg in pkt['segments']:
-                        if 'retransmits' in seg:
-                            rx += len(seg['retransmits'])
+                        rx += len(seg['retransmits'])
                 rx_msg = str(rx) if rx > 0 else ""
 
                 gro_string = ""
