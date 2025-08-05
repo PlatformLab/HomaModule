@@ -8267,9 +8267,13 @@ class AnalyzeTxpkts:
         print('Segs:      Total number of segments (packets received by GRO) '
                 'transmitted by')
         print('           node or queue')
-        print('PSegs:     Total number of segments that were transmitted '
+        print('Gbps:      Throughput of that queue')
+        print('PTsos:     Total number of TSO frames that were transmitted '
                 'by the pacer')
-        print('Backlog:   Average KB of tx data that have been in the '
+        print('QTsos:     Total number of TSO frames that were deferred by '
+                'homa_qdisc to')
+        print('           limit NIC queue length')
+        print('Backlog:   Average KB of tx data that were in the '
                 'posession of the NIC')
         print('           (presumably without being transmitted) longer than '
                 '%d usec' % (options.threshold))
@@ -8328,9 +8332,17 @@ class AnalyzeTxpkts:
             # on that queue
             qid_segs = defaultdict(lambda: 0)
 
-            # Tx queue number -> total number of packets (segments) transmitted
+            # Tx queue number -> total number of bytes transmitted on that
+            # queue
+            qid_bytes = defaultdict(lambda: 0)
+
+            # Tx queue number -> total number of TSO frames transmitted
             # by the pacer on that queue
-            qid_pacer_segs = defaultdict(lambda: 0)
+            qid_pacer_tsos = defaultdict(lambda: 0)
+
+            # Tx queue number -> total number of TSO frames on that queue
+            # that were deferred by homa_qdisc because of NIC queue overload
+            qid_qdisc_tsos = defaultdict(lambda: 0)
 
             # Tx queue number -> integral of (excess time * KB) for TSO packets
             # that have spent "too much time" in the NIC.  Excess time is
@@ -8357,12 +8369,14 @@ class AnalyzeTxpkts:
                     (time.strftime('%I:%M %p on %m/%d/%Y')))
             f.write('# Data packets transmitted from %s:\n' % (node))
             f.write('# Xmit:       Time when packet was passed to ip*xmit\n')
+            f.write('# Qdisc:      Time when homa_qdisc requeued packet after '
+                    'deferral, if any\n')
             f.write('# RpcId:      Identifier of packet\'s RPC\n')
             f.write('# Offset:     Offset of packet within message\n')
             f.write('# Length:     Size of packet (before segmentation)\n')
             f.write('# Qid:        Transmit queue on which packet was sent\n')
             f.write('# Nic:        Time when packet was queued for NIC\n')
-            f.write('# NDelay:     Nic - Xmit\n')
+            f.write('# NDelay:     Nic - (later of Xmit and Qdisc)\n')
             f.write('# MaxGro:     Time when last fragment of packet was '
                     'received by GRO\n')
             f.write('# GDelay:     MaxGro - Nic\n')
@@ -8371,12 +8385,26 @@ class AnalyzeTxpkts:
             f.write('# Rx:         Number of times segments in the packet were '
                     'retransmitted\n\n')
 
-            f.write('#     Xmit      RpcId Offset  Length Qid')
+            f.write('#     Xmit      Qdisc      RpcId Offset  Length Qid')
             f.write('        Nic  NDelay     MaxGro  GDelay')
             f.write('       Free  FDelay Rx\n')
             for pkt in pkts:
                 xmit = pkt['xmit']
-                nic = pkt['nic'] if 'nic' in pkt else None
+                if 'qdisc_xmit' in pkt:
+                    qdisc = pkt['qdisc_xmit']
+                    qdisc_string = '%10.3f' % (qdisc)
+                else:
+                    qdisc = None
+                    qdisc_string = ''
+                nic_delay = None
+                if 'nic' in pkt:
+                    nic = pkt['nic']
+                    if qdisc != None:
+                        nic_delay = nic - qdisc
+                    elif xmit != None:
+                        nic_delay = nic - xmit
+                else:
+                    nic = None
                 max_gro = get_max_gro(pkt)
                 free = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
                 length = pkt['tso_length']
@@ -8388,8 +8416,12 @@ class AnalyzeTxpkts:
                     if 'segments' in pkt:
                         segs += len(pkt['segments'])
                     qid_segs[qid] += segs
+                    if 'tso_length' in pkt:
+                        qid_bytes[qid] += length
                     if 'pacer' in pkt:
-                        qid_pacer_segs[qid] += segs
+                        qid_pacer_tsos[qid] += 1
+                    if 'qdisc_xmit' in pkt:
+                        qid_qdisc_tsos[qid] += 1
                     if 'tx_queue' in pkt:
                         qid_tx_queue[qid] = pkt['tx_queue']
                     qid_string = str(qid)
@@ -8409,8 +8441,8 @@ class AnalyzeTxpkts:
                 rx_msg = str(rx) if rx > 0 else ""
 
                 gro_string = ""
-                if rx == 0 and qid != None and nic != None:
-                    delays[qid]['nic'].append(nic - xmit)
+                if rx == 0 and qid != None and nic_delay != None:
+                    delays[qid]['nic'].append(nic_delay)
                     if max_gro != None:
                         delays[qid]['gro'].append(max_gro - nic)
                         gro_string = '%.1f' % (max_gro - nic)
@@ -8426,19 +8458,21 @@ class AnalyzeTxpkts:
                 qid_total_bytes[qid] += length
 
 
-                f.write('%10.3f %10d %6d  %6d %3s' % (xmit, pkt['id'],
-                        pkt['offset'], pkt['tso_length'], qid_string))
+                line = '%10.3f %10s %10d %6d  %6d %3s' % (xmit, qdisc_string,
+                        pkt['id'], pkt['offset'], pkt['tso_length'],
+                        qid_string)
                 nic_delay_string = ''
-                if (nic != None) and (xmit != None):
-                    nic_delay_string = '%.1f' % (nic - xmit)
-                f.write(' %10s %7s %10s %7s' % (print_if(nic, '%.3f'),
+                if (nic_delay != None):
+                    nic_delay_string = '%.1f' % (nic_delay)
+                line += ' %10s %7s %10s %7s' % (print_if(nic, '%.3f'),
                         nic_delay_string, print_if(max_gro, '%.3f'),
-                        gro_string))
+                        gro_string)
                 free_delay_string = ''
                 if (nic != None) and (free != None):
                     free_delay_string = '%.1f' % (free - nic)
-                f.write(' %10s %7s %2s\n' % (print_if(free, '%.3f'),
-                        free_delay_string, rx_msg))
+                line += ' %10s %7s %2s' % (print_if(free, '%.3f'),
+                        free_delay_string, rx_msg)
+                f.write(line.rstrip() + '\n')
             f.close()
 
             def print_type(delays):
@@ -8453,11 +8487,11 @@ class AnalyzeTxpkts:
             if not first_node:
                 q_details += '\n'
             q_details += 'Transmit queues for %s\n' % (node)
-            q_details += 'Qid     TxQueue  Tsos  Segs PSegs Backlog BFrac  '
-            q_details += 'NicP10 NicP50 NicP90  '
+            q_details += 'Qid     TxQueue  Tsos  Segs   Gbps '
+            q_details += 'PTsos QTsos Backlog BFrac  NicP10 NicP50 NicP90  '
             q_details += 'GroP10 GroP50 GroP90  FreP10 FreP50 FreP90\n'
+            q_details += '-----------------------------------'
             q_details += '-------------------------------------------------'
-            q_details += '----------------------'
             q_details += '------------------------------------------\n'
             first_node = False
             totals = defaultdict(list)
@@ -8466,9 +8500,11 @@ class AnalyzeTxpkts:
                 q_delays = delays[qid]
                 for type, d in q_delays.items():
                     totals[type].extend(d)
-                q_details += '%4d %10s %5d %5d %5d  %6.1f %5.2f  %s  %s  %s\n' % (
+                q_details += '%4d %10s %5d %5d %6.2f ' % (
                         qid, qid_tx_queue[qid], qid_tsos[qid], qid_segs[qid],
-                        qid_pacer_segs[qid],
+                        8e-3 * qid_bytes[qid] / traces[node]['elapsed_time'])
+                q_details += '%5d %5d  %6.1f %5.2f  %s  %s  %s\n' % (
+                        qid_pacer_tsos[qid], qid_qdisc_tsos[qid],
                         1e-3*qid_backlog[qid]/total_time,
                         qid_slow_bytes[qid]/qid_total_bytes[qid],
                         print_type(q_delays['nic']),
