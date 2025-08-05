@@ -5597,6 +5597,154 @@ class AnalyzeNet:
                         core_data['max_backlog_time']))
 
 #------------------------------------------------
+# Analyzer: nicqueues
+#------------------------------------------------
+class AnalyzeNicqueues:
+    """
+    Prints estimates of the amount of outbound packet data queued in the
+    NIC of each node, assuming that the NIC transmits at full link speed.
+    The --gbps option specifies the rate at which packets are transmitted.
+    With --data option, generates detailed timelines of NIC queue lengths.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzePackets')
+
+        # Node name -> list of <time, length, queue_length, type> tuples for
+        # all transmitted packets. Length is the packet length including
+        # Homa/TCP header but not IP or Ethernet overheads. Queue_length is
+        # the # bytes in the NIC queue as of time (includes this packet).
+        # Queue_length starts off zero and is updated later. Type indicates
+        # the kind of packet: "homa_data", "homa_grant", or "tcp"
+        self.nodes = defaultdict(list)
+
+    def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
+        self.nodes[trace['node']].append([t, 34, 0, "homa_grant"])
+
+    def  tt_tcp_xmit(self, trace, t, core, length):
+        self.nodes[trace['node']].append([t, length, 0, "tcp"])
+
+    def output(self):
+        global options, traces, packets
+
+        for pkt in packets.values():
+            if not 'tso_length' in pkt:
+                continue
+            if 'nic' in pkt:
+                t = pkt['nic']
+            elif 'qdisc_xmit' in pkt:
+                t = pkt['qdisc_xmit']
+            elif 'xmit' in pkt:
+                t = pkt['xmit']
+            else:
+                continue
+            self.nodes[pkt['tx_node']].append([t, pkt['tso_length'] + 60, 0,
+                    "homa_data"])
+
+        print('\n-------------------')
+        print('Analyzer: nicqueues')
+        print('-------------------')
+
+        # Compute queue lengths, find maximum for each node.
+        print('Worst-case length of NIC tx queue for each node, assuming a link')
+        print('speed of %.1f Gbps (change with --gbps):' % (options.gbps))
+        print('Node:        Name of node')
+        print('MaxLength:   Highest estimated output queue length for NIC (bytes)')
+        print('Time:        Time when worst-case queue length occurred')
+        print('Delay:       Delay (usec until fully transmitted) experienced by packet ')
+        print('             transmitted at Time')
+        print('P50:         Median delay experienced by Homa data packets')
+        print('P90:         90th percentile delay experienced by Homa data packets')
+        print('P99:         99th percentile delay experienced by Homa data packets')
+        print('')
+        print('Node        MaxLength       Time   Delay     P50     P90     P99')
+
+        for node in get_sorted_nodes():
+            pkts = self.nodes[node]
+            if not pkts:
+                continue
+            pkts.sort()
+            max_queue = 0
+            max_time = 0
+            cur_queue = 0
+            prev_time = traces[node]['first_time']
+            for i in range(len(pkts)):
+                time, length, ignore, ignore2 = pkts[i]
+
+                # 20 bytes for IPv4 header, 42 bytes for Ethernet overhead (CRC,
+                # preamble, interpacket gap)
+                total_length = length + 62
+
+                xmit_bytes = ((time - prev_time) * (1000.0*options.gbps/8))
+                if xmit_bytes < cur_queue:
+                    cur_queue -= xmit_bytes
+                else:
+                    cur_queue = 0
+                if 0 and (node == 'node6'):
+                    if cur_queue == 0:
+                        print('%9.3f (+%4.1f): length %6d, queue empty' %
+                                (time, time - prev_time, total_length))
+                    else:
+                        print('%9.3f (+%4.1f): length %6d, xmit %5d, queue %6d -> %6d' %
+                                (time, time - prev_time, total_length,
+                                xmit_bytes, cur_queue, cur_queue + total_length))
+                cur_queue += total_length
+                if cur_queue > max_queue:
+                    max_queue = cur_queue
+                    max_time = time
+                prev_time = time
+                pkts[i][2] = cur_queue
+            data_pkts = sorted(filter(lambda t: t[3] == 'homa_data', pkts),
+                    key=lambda t: t[2])
+            print('%-10s  %9d  %9.3f %7.1f %7.1f %7.1f %7.1f' % (
+                    node, max_queue, max_time,
+                    (max_queue*8)/(options.gbps*1000),
+                    data_pkts[50*len(data_pkts)//100][2]*8/(options.gbps*1000),
+                    data_pkts[90*len(data_pkts)//100][2]*8/(options.gbps*1000),
+                    data_pkts[99*len(data_pkts)//100][2]*8/(options.gbps*1000)))
+
+        if options.data:
+            # Print stats for each node at regular intervals
+            file = open('%s/txqueues.dat' % (options.data), 'w')
+            line = 'Interval'
+            for node in get_sorted_nodes():
+                line += ' %10s' % (node)
+            print(line, file=file)
+
+            interval = options.interval
+            interval_end = get_first_interval_end()
+            end = get_last_time()
+
+            # Node name -> current index in that node's packets
+            cur = {}
+            for node in get_sorted_nodes():
+                cur[node] = 0
+
+            while True:
+                line = '%8.1f' % (interval_end)
+                for node in get_sorted_nodes():
+                    max = -1
+                    i = cur[node]
+                    xmits = self.nodes[node]
+                    while i < len(xmits):
+                        time, ignore, queue_length, type = xmits[i]
+                        if time > interval_end:
+                            break
+                        if queue_length > max:
+                            max = queue_length
+                        i += 1
+                    cur[node] = i
+                    if max == -1:
+                        line += ' ' * 11
+                    else:
+                        line += '   %8d' % (max)
+                print(line, file=file)
+                if interval_end > end:
+                    break
+                interval_end += interval
+            file.close()
+
+#------------------------------------------------
 # Analyzer: nictx
 #------------------------------------------------
 class AnalyzeNictx:
@@ -6109,7 +6257,9 @@ class AnalyzePackets:
 
     def tt_qdisc_xmit(self, trace, t, core, id, offset, bytes_left):
         global packets
-        packets[pkt_id(id, offset)]['qdisc_xmit'] = t
+        p = packets[pkt_id(id, offset)]
+        p['qdisc_xmit'] = t
+        p['tx_node'] = trace['node']
 
     def tt_retransmit(self, trace, t, core, id, offset, length):
         global packets
@@ -8346,142 +8496,6 @@ class AnalyzeTxpkts:
                     '------------------------------------------')
             print(node_info)
             print(q_details, end='')
-
-#------------------------------------------------
-# Analyzer: txqueues
-#------------------------------------------------
-class AnalyzeTxqueues:
-    """
-    Prints estimates of the amount of outbound packet data queued in the
-    NIC of each node, assuming that the NIC transmits at full link speed.
-    The --gbps option specifies the rate at which packets are transmitted.
-    With --data option, generates detailed timelines of NIC queue lengths.
-    """
-
-    def __init__(self, dispatcher):
-        # Node name -> list of <time, length, queue_length, type> tuples for
-        # all transmitted packets. Length is the packet length including
-        # Homa/TCP header but not IP or Ethernet overheads. Queue_length is
-        # the # bytes in the NIC queue as of time (includes this packet).
-        # Queue_length starts off zero and is updated later. Type indicates
-        # the kind of packet: "homa_data", "homa_grant", or "tcp"
-        self.nodes = defaultdict(list)
-
-    def tt_send_data(self, trace, t, core, id, offset, length):
-        self.nodes[trace['node']].append([t, length + 60, 0, "homa_data"])
-
-    def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
-        self.nodes[trace['node']].append([t, 34, 0, "homa_grant"])
-
-    def  tt_tcp_xmit(self, trace, t, core, length):
-        self.nodes[trace['node']].append([t, length, 0, "tcp"])
-
-    def output(self):
-        global options, traces
-
-        print('\n-------------------')
-        print('Analyzer: txqueues')
-        print('-------------------')
-
-        # Compute queue lengths, find maximum for each node.
-        print('Worst-case length of NIC tx queue for each node, assuming a link')
-        print('speed of %.1f Gbps (change with --gbps):' % (options.gbps))
-        print('Node:        Name of node')
-        print('MaxLength:   Highest estimated output queue length for NIC (bytes)')
-        print('Time:        Time when worst-case queue length occurred')
-        print('Delay:       Delay (usec until fully transmitted) experienced by packet ')
-        print('             transmitted at Time')
-        print('P50:         Median delay experienced by Homa data packets')
-        print('P90:         90th percentile delay experienced by Homa data packets')
-        print('P99:         99th percentile delay experienced by Homa data packets')
-        print('')
-        print('Node        MaxLength       Time   Delay     P50     P90     P99')
-
-        for node in get_sorted_nodes():
-            pkts = self.nodes[node]
-            if not pkts:
-                continue
-            pkts.sort()
-            max_queue = 0
-            max_time = 0
-            cur_queue = 0
-            prev_time = traces[node]['first_time']
-            for i in range(len(pkts)):
-                time, length, ignore, ignore2 = pkts[i]
-
-                # 20 bytes for IPv4 header, 42 bytes for Ethernet overhead (CRC,
-                # preamble, interpacket gap)
-                total_length = length + 62
-
-                xmit_bytes = ((time - prev_time) * (1000.0*options.gbps/8))
-                if xmit_bytes < cur_queue:
-                    cur_queue -= xmit_bytes
-                else:
-                    cur_queue = 0
-                if 0 and (node == 'node6'):
-                    if cur_queue == 0:
-                        print('%9.3f (+%4.1f): length %6d, queue empty' %
-                                (time, time - prev_time, total_length))
-                    else:
-                        print('%9.3f (+%4.1f): length %6d, xmit %5d, queue %6d -> %6d' %
-                                (time, time - prev_time, total_length,
-                                xmit_bytes, cur_queue, cur_queue + total_length))
-                cur_queue += total_length
-                if cur_queue > max_queue:
-                    max_queue = cur_queue
-                    max_time = time
-                prev_time = time
-                pkts[i][2] = cur_queue
-            data_pkts = sorted(filter(lambda t: t[3] == 'homa_data', pkts),
-                    key=lambda t: t[2])
-            print('%-10s  %9d  %9.3f %7.1f %7.1f %7.1f %7.1f' % (
-                    node, max_queue, max_time,
-                    (max_queue*8)/(options.gbps*1000),
-                    data_pkts[50*len(data_pkts)//100][2]*8/(options.gbps*1000),
-                    data_pkts[90*len(data_pkts)//100][2]*8/(options.gbps*1000),
-                    data_pkts[99*len(data_pkts)//100][2]*8/(options.gbps*1000)))
-
-        if options.data:
-            # Print stats for each node at regular intervals
-            file = open('%s/txqueues.dat' % (options.data), 'w')
-            line = 'Interval'
-            for node in get_sorted_nodes():
-                line += ' %10s' % (node)
-            print(line, file=file)
-
-            interval = options.interval
-            interval_end = get_first_interval_end()
-            end = get_last_time()
-
-            # Node name -> current index in that node's packets
-            cur = {}
-            for node in get_sorted_nodes():
-                cur[node] = 0
-
-            while True:
-                line = '%8.1f' % (interval_end)
-                for node in get_sorted_nodes():
-                    max = -1
-                    i = cur[node]
-                    xmits = self.nodes[node]
-                    while i < len(xmits):
-                        time, ignore, queue_length, type = xmits[i]
-                        if time > interval_end:
-                            break
-                        if queue_length > max:
-                            max = queue_length
-                        i += 1
-                    cur[node] = i
-                    if max == -1:
-                        line += ' ' * 11
-                    else:
-                        line += '   %8d' % (max)
-                print(line, file=file)
-                if interval_end > end:
-                    break
-                interval_end += interval
-            file.close()
-
 
 #------------------------------------------------
 # Analyzer: txsnapshot
