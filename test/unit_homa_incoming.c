@@ -1696,11 +1696,8 @@ TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &h.common, 0, 0));
 	EXPECT_STREQ("xmit DATA retrans 1400@0", unit_log_get());
 }
-TEST_F(homa_incoming, homa_resend_pkt__negative_length)
+TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend)
 {
-	/* Entire msgin has not been received yet. But we have received
-	 * everything we have granted so far.
-	 */
 	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
 			.sender_id = cpu_to_be64(self->client_id),
@@ -1716,11 +1713,10 @@ TEST_F(homa_incoming, homa_resend_pkt__negative_length)
 	srpc->msgout.next_xmit_offset = 2000;
 
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &h.common, 0, 0));
-	// The server might send a GRANT right after BUSY so just check substr
 	EXPECT_STREQ("xmit DATA retrans 1400@0; "
 		     "xmit DATA retrans 1400@1400", unit_log_get());
 }
-TEST_F(homa_incoming, homa_resend_pkt__clip_range_to_next_xmit_offset)
+TEST_F(homa_incoming, homa_resend_pkt__clip_range_to_tx_end)
 {
 	struct homa_resend_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
@@ -1783,8 +1779,7 @@ TEST_F(homa_incoming, homa_resend_pkt__update_granted_and_xmit)
 
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &h.common, 0, 0));
 	EXPECT_EQ(3400, crpc->msgout.granted);
-	EXPECT_STREQ("xmit DATA 1400@1400; "
-		     "xmit DATA 1400@2800", unit_log_get());
+	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
 }
 TEST_F(homa_incoming, homa_resend_pkt__clip_granted_to_message_length)
 {

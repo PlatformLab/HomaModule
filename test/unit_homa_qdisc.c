@@ -303,29 +303,6 @@ TEST_F(homa_qdisc, _homa_qdisc_homa_qdisc_set_qixs_object)
 	homa_qdisc_qdev_put(qdev);
 }
 
-TEST_F(homa_qdisc, homa_qdisc_enqueue__defer_homa_packet)
-{
-	struct Qdisc *qdisc = mock_alloc_qdisc(&mock_net_queue);
-	struct sk_buff *skb, *to_free;
-	struct homa_qdisc *q;
-	u64 idle;
-
-	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
-	q = qdisc_priv(qdisc);
-	idle = mock_clock + 1 + self->homa.pacer->max_nic_queue_cycles + 1;
-	atomic64_set(&q->qdev->link_idle_time, idle);
-	skb = mock_skb_alloc(&self->addr, &self->data.common, 1500, 0);
-	qdisc_skb_cb(skb)->pkt_len = 1500;
-	to_free = NULL;
-
-	EXPECT_EQ(NET_XMIT_SUCCESS, homa_qdisc_enqueue(skb, qdisc, &to_free));
-	EXPECT_EQ(NULL, to_free);
-	EXPECT_EQ(1, q->qdev->homa_deferred.qlen);
-	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
-
-	homa_qdisc_destroy(qdisc);
-	kfree(qdisc);
-}
 TEST_F(homa_qdisc, homa_qdisc_enqueue__short_packet)
 {
 	struct Qdisc *qdisc = mock_alloc_qdisc(&mock_net_queue);
@@ -376,6 +353,45 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__packet_not_homa)
 	EXPECT_EQ(1, qdisc->q.qlen);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_LT(1000000, atomic64_read(&q->qdev->link_idle_time));
+
+	homa_qdisc_destroy(qdisc);
+	kfree(qdisc);
+}
+TEST_F(homa_qdisc, homa_qdisc_enqueue__defer_homa_packet)
+{
+	struct Qdisc *qdisc = mock_alloc_qdisc(&mock_net_queue);
+	struct sk_buff *skb, *to_free;
+	struct homa_qdisc *q;
+	u64 idle;
+
+	/* First packet is deferred because the NIC queue is full. */
+	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
+	q = qdisc_priv(qdisc);
+	idle = mock_clock + 1 + self->homa.pacer->max_nic_queue_cycles + 1;
+	atomic64_set(&q->qdev->link_idle_time, idle);
+	skb = mock_skb_alloc(&self->addr, &self->data.common, 1500, 0);
+	qdisc_skb_cb(skb)->pkt_len = 1500;
+	to_free = NULL;
+
+	EXPECT_EQ(NET_XMIT_SUCCESS, homa_qdisc_enqueue(skb, qdisc, &to_free));
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_EQ(1, q->qdev->homa_deferred.qlen);
+	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
+
+	/* Second packet is deferred even though NIC not busy, because
+	 * there are other packets waiting.
+	 */
+	atomic64_set(&q->qdev->link_idle_time, 0);
+	self->data.common.sender_id = cpu_to_be64(101);
+	skb = mock_skb_alloc(&self->addr, &self->data.common, 1500, 0);
+	qdisc_skb_cb(skb)->pkt_len = 1500;
+	to_free = NULL;
+
+	unit_log_clear();
+	EXPECT_EQ(NET_XMIT_SUCCESS, homa_qdisc_enqueue(skb, qdisc, &to_free));
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_EQ(1, q->qdev->homa_deferred.qlen);
+	EXPECT_STREQ("", unit_log_get());
 
 	homa_qdisc_destroy(qdisc);
 	kfree(qdisc);

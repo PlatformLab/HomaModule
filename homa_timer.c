@@ -28,10 +28,11 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
+	int tx_end = homa_rpc_tx_end(rpc);
 
 	/* See if we need to request an ack for this RPC. */
 	if (!homa_is_client(rpc->id) && rpc->state == RPC_OUTGOING &&
-	    rpc->msgout.next_xmit_offset >= rpc->msgout.length) {
+	     tx_end == rpc->msgout.length) {
 		if (rpc->done_timer_ticks == 0) {
 			rpc->done_timer_ticks = homa->timer_ticks;
 		} else {
@@ -76,9 +77,9 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 
 	if (rpc->state == RPC_OUTGOING) {
 #ifndef __STRIP__ /* See strip.py */
-		if (rpc->msgout.next_xmit_offset < rpc->msgout.granted) {
+		if (tx_end < rpc->msgout.granted) {
 #else /* See strip.py */
-		if (rpc->msgout.next_xmit_offset < rpc->msgout.length) {
+		if (tx_end < rpc->msgout.length) {
 #endif /* See strip.py */
 			/* There are granted bytes that we haven't transmitted,
 			 * so no need to be concerned; the ball is in our court.

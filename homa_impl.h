@@ -548,8 +548,8 @@ struct homa_net {
  */
 struct homa_skb_info {
 	/**
-	 * @next_skb: used to link together all of the skb's for a Homa
-	 * message (in order of offset).
+	 * @next_skb: used to link together all of the skb's for an
+	 * outgoing Homa message (in order of offset).
 	 */
 	struct sk_buff *next_skb;
 
@@ -784,6 +784,7 @@ void     homa_request_retrans(struct homa_rpc *rpc);
 void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			 struct homa_sock *hsk);
 void     homa_rpc_handoff(struct homa_rpc *rpc);
+int      homa_rpc_tx_end(struct homa_rpc *rpc);
 int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 int      homa_setsockopt(struct sock *sk, int level, int optname,
 			 sockptr_t optval, unsigned int optlen);

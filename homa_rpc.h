@@ -61,9 +61,18 @@ struct homa_message_out {
 
 	/**
 	 * @next_xmit_offset: All bytes in the message, up to but not
-	 * including this one, have been transmitted.
+	 * including this one, have been passed to ip_queue_xmit or
+	 * ip6_xmit.
 	 */
 	int next_xmit_offset;
+
+	/**
+	 * @first_not_tx: All packets in @packets preceding this one have
+	 * been confirmed to have been transmitted by the NIC (the driver
+	 * has released its reference). NULL means all packets are known to
+	 * have been transmitted. Used by homa_rpc_tx_complete.
+	 */
+	struct sk_buff *first_not_tx;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**

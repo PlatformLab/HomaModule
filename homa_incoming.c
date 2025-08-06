@@ -802,6 +802,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	int length = ntohl(h->length);
 	int end = offset + length;
 	struct homa_busy_hdr busy;
+	int tx_end;
 
 	if (!rpc) {
 		tt_record4("resend request for unknown id %d, peer 0x%x:%d, offset %d; responding with RPC_UNKNOWN",
@@ -819,6 +820,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		   rpc->id, offset, length);
 #endif /* See strip.py */
 
+	tx_end = homa_rpc_tx_end(rpc);
 	if (!homa_is_client(rpc->id) && rpc->state != RPC_OUTGOING) {
 		/* We are the server for this RPC and don't yet have a
 		 * response message, so send BUSY to keep the client
@@ -830,16 +832,12 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		goto done;
 	}
 
-	/* First, retransmit bytes that were already sent once. */
 	if (length == -1)
-		end = rpc->msgout.next_xmit_offset;
+		end = tx_end;
 
 #ifndef __STRIP__ /* See strip.py */
-	if (end > rpc->msgout.next_xmit_offset)
-		homa_resend_data(rpc, offset, rpc->msgout.next_xmit_offset,
-				 h->priority);
-	else
-		homa_resend_data(rpc, offset, end, h->priority);
+	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end,
+			 h->priority);
 
 	if (end > rpc->msgout.granted) {
 		/* It appears that a grant packet was lost; assume that
@@ -852,23 +850,15 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		homa_xmit_data(rpc, false);
 	}
 #else /* See strip.py */
-	if (end > rpc->msgout.next_xmit_offset)
-		homa_resend_data(rpc, offset, rpc->msgout.next_xmit_offset);
-	else
-		homa_resend_data(rpc, offset, end);
+	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end);
 #endif /* See strip.py */
 
-	if (offset >= rpc->msgout.next_xmit_offset)  {
+	if (offset >= tx_end)  {
 		/* We have chosen not to transmit any of the requested data;
 		 * send BUSY so the receiver knows we are alive.
 		 */
-		tt_record3("sending BUSY from resend, id %d, offset %d, granted %d",
-			   rpc->id, rpc->msgout.next_xmit_offset,
-#ifndef __STRIP__ /* See strip.py */
-			   rpc->msgout.granted);
-#else /* See strip.py */
-			   rpc->msgout.length);
-#endif /* See strip.py */
+		tt_record3("sending BUSY from resend, id %d, offset %d, tx_end %d",
+			   rpc->id, offset, tx_end);
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 		goto done;
 	}
@@ -891,21 +881,23 @@ void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		   rpc->id, tt_addr(rpc->peer->addr), rpc->dport);
 	if (homa_is_client(rpc->id)) {
 		if (rpc->state == RPC_OUTGOING) {
+			int tx_end = homa_rpc_tx_end(rpc);
+
 			/* It appears that everything we've already transmitted
 			 * has been lost; retransmit it.
 			 */
 			tt_record4("Restarting id %d to server 0x%x:%d, lost %d bytes",
 				   rpc->id, tt_addr(rpc->peer->addr),
-				   rpc->dport, rpc->msgout.next_xmit_offset);
+				   rpc->dport, tx_end);
 #ifndef __STRIP__ /* See strip.py */
 			homa_freeze(rpc, RESTART_RPC,
 				    "Freezing because of RPC restart, id %d, peer 0x%x");
-			homa_resend_data(rpc, 0, rpc->msgout.next_xmit_offset,
+			homa_resend_data(rpc, 0, tx_end,
 					 homa_unsched_priority(rpc->hsk->homa,
 							       rpc->peer,
 							       rpc->msgout.length));
 #else /* See strip.py */
-			homa_resend_data(rpc, 0, rpc->msgout.next_xmit_offset);
+			homa_resend_data(rpc, 0, tx_end);
 #endif /* See strip.py */
 			goto done;
 		}

@@ -233,16 +233,17 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 
 	pkt_len = qdisc_skb_cb(skb)->pkt_len;
 	if (pkt_len < homa->pacer->throttle_min_bytes) {
-		homa_qdisc_update_link_idle(q->qdev, pkt_len, -1);
+		homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 		goto enqueue;
 	}
 
 	if (!is_homa_pkt(skb)) {
-		homa_qdisc_update_link_idle(q->qdev, pkt_len, -1);
+		homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 		goto enqueue;
 	}
 
-	if (homa_qdisc_update_link_idle(q->qdev, pkt_len,
+	if (skb_queue_empty(&qdev->homa_deferred) &&
+	    homa_qdisc_update_link_idle(qdev, pkt_len,
 					homa->pacer->max_nic_queue_cycles))
 		goto enqueue;
 

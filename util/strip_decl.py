@@ -44,6 +44,7 @@ symbols = [
         'int      homa_message_out_fill(',
         'void     homa_message_out_init(',
         'void     homa_resend_data(',
+        'int      homa_rpc_tx_end(',
         'struct sk_buff *homa_tx_data_pkt_alloc(',
         'int      __homa_xmit_control(',
         'void     __homa_xmit_data(',

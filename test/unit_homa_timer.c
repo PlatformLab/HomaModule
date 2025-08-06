@@ -62,11 +62,13 @@ TEST_F(homa_timer, homa_timer_check_rpc__request_ack)
 
 	/* First call: do nothing (response not fully transmitted). */
 	homa_rpc_lock(srpc);
+	homa_xmit_data(srpc, false);
+	skb_get(srpc->msgout.packets);
 	homa_timer_check_rpc(srpc);
 	EXPECT_EQ(0, srpc->done_timer_ticks);
+	kfree_skb(srpc->msgout.packets);
 
 	/* Second call: set done_timer_ticks. */
-	homa_xmit_data(srpc, false);
 	unit_log_clear();
 	homa_timer_check_rpc(srpc);
 	EXPECT_EQ(100, srpc->done_timer_ticks);

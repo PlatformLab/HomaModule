@@ -1184,3 +1184,42 @@ TEST_F(homa_outgoing, homa_resend_data__set_homa_info)
 		     "homa_info: wire_bytes 1538, data_bytes 1400, seg_length 1400, offset 8400",
 		     unit_log_get());
 }
+
+TEST_F(homa_outgoing, homa_rpc_tx_end)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skbs[5];
+	struct sk_buff *skb;
+	int i;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+		               self->server_ip, self->server_port,
+			       self->client_id, 6000, 1000);
+	ASSERT_EQ(5, crpc->msgout.num_skbs);
+
+	/* First call: no packets passed to IP stack. */
+	EXPECT_EQ(0, homa_rpc_tx_end(crpc));
+
+	/* Second call: all packets passed to IP, but no packets complete. */
+	for (skb = crpc->msgout.packets, i = 0; skb != NULL;
+	     skb = homa_get_skb_info(skb)->next_skb, i++) {
+		skbs[i] = skb;
+		skb_get(skb);
+		EXPECT_EQ(2, refcount_read(&skbs[i]->users));
+	}
+	crpc->msgout.next_xmit_offset = 6000;
+	EXPECT_EQ(0, homa_rpc_tx_end(crpc));
+
+	/* Third call: packets 0 and 3 transmitted. */
+	kfree_skb(skbs[0]);
+	kfree_skb(skbs[3]);
+	EXPECT_EQ(1400, homa_rpc_tx_end(crpc));
+	EXPECT_EQ(skbs[1], crpc->msgout.first_not_tx);
+
+	/* Fourth call: all packets transmitted. */
+	kfree_skb(skbs[1]);
+	kfree_skb(skbs[2]);
+	kfree_skb(skbs[4]);
+	EXPECT_EQ(6000, homa_rpc_tx_end(crpc));
+	EXPECT_EQ(NULL, crpc->msgout.first_not_tx);
+}

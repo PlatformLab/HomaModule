@@ -381,6 +381,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		rpc->msgout.num_skbs++;
 		rpc->msgout.skb_memory += skb->truesize;
 		rpc->msgout.copied_from_user = rpc->msgout.length - bytes_left;
+		rpc->msgout.first_not_tx = rpc->msgout.packets;
 		if (overlap_xmit && list_empty(&rpc->throttled_links) &&
 #ifndef __STRIP__ /* See strip.py */
 		    xmit && offset < rpc->msgout.granted) {
@@ -869,4 +870,43 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 
 resend_done:
 	return;
+}
+
+/**
+ * homa_rpc_tx_end() - Return the offset of the first byte in an
+ * RPC's outgoing message that has not yet been fully transmitted.
+ * "Fully transmitted" means the message has been transmitted by the
+ * NIC and the skb has been released by the driver. This is different from
+ * rpc->msgout.next_xmit_offset, which computes the first offset that
+ * hasn't yet been passed to the IP stack.
+ * @rpc:    RPC to check
+ * Return:  See above. If the message has been fully transmitted then
+ *          rpc->msgout.length is returned.
+ */
+int homa_rpc_tx_end(struct homa_rpc *rpc)
+{
+	struct sk_buff *skb = rpc->msgout.first_not_tx;
+
+	while (skb) {
+		struct homa_skb_info *homa_info = homa_get_skb_info(skb);
+
+		/* next_xmit_offset tells us whether the packet has been
+		 * passed to the IP stack. Checking the reference count tells
+		 * us whether the packet has been released by the driver
+		 * (which only happens after notification from the NIC that
+		 * transmission is complete).
+		 */
+		if (homa_info->offset >= rpc->msgout.next_xmit_offset ||
+		    refcount_read(&skb->users) > 1) {
+			tt_record3("homa_rpc_tx_complete id %d tx up to %d/%d",
+				   rpc->id, homa_info->offset,
+				   rpc->msgout.length);
+			return homa_info->offset;
+		}
+		skb = homa_info->next_skb;
+		rpc->msgout.first_not_tx = skb;
+	}
+	tt_record2("homa_rpc_tx_complete id %d fully transmitted (%d bytes)",
+		   rpc->id, rpc->msgout.length);
+	return rpc->msgout.length;
 }
