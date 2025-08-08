@@ -2,6 +2,14 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+61. (July 2025) Client responses could starve server requests. This came
+about because a server request that wakes up after waiting for buffer space
+has 0 received bytes. In contrast, a new client response will have received
+unscheduled bytes. As a result, the client responses always got priority for
+new grants and server requests could starve. The solution was to grant server
+requests an amount equal to the unscheduled bytes when they wake up after
+qwaiting for buffer space.
+
 60. (July 2025) Measured impact of new FIFO grant mechanism on xl170
 cluster using "-w starve -b 40 -s 30 -n 6" (priorities were not enabled).
 Slowdowns as a function of message length:
