@@ -897,16 +897,10 @@ int homa_rpc_tx_end(struct homa_rpc *rpc)
 		 * transmission is complete).
 		 */
 		if (homa_info->offset >= rpc->msgout.next_xmit_offset ||
-		    refcount_read(&skb->users) > 1) {
-			tt_record3("homa_rpc_tx_complete id %d tx up to %d/%d",
-				   rpc->id, homa_info->offset,
-				   rpc->msgout.length);
+		    refcount_read(&skb->users) > 1)
 			return homa_info->offset;
-		}
 		skb = homa_info->next_skb;
 		rpc->msgout.first_not_tx = skb;
 	}
-	tt_record2("homa_rpc_tx_complete id %d fully transmitted (%d bytes)",
-		   rpc->id, rpc->msgout.length);
 	return rpc->msgout.length;
 }

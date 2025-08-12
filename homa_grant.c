@@ -629,9 +629,8 @@ int homa_grant_update_granted(struct homa_rpc *rpc, struct homa_grant *grant)
 	incoming_delta = new_grant_offset - received - rpc->msgin.rec_incoming;
 	avl_incoming = grant->max_incoming - atomic_read(&grant->total_incoming);
 	if (avl_incoming < incoming_delta) {
-		tt_record4("insufficient headroom for grant for RPC id %d (rank %d): desired incoming %d, shortfall %d",
-			   rpc->id, rank, new_grant_offset - received,
-			   incoming_delta - avl_incoming);
+		tt_record4("insufficient headroom for grant for RPC id %d (rank %d): desired increment %d, available %d",
+			   rpc->id, rank, incoming_delta, avl_incoming);
 		prev_stalled = atomic_read(&grant->stalled_rank);
 		while (prev_stalled > rank)
 			prev_stalled = atomic_cmpxchg(&grant->stalled_rank,
@@ -740,8 +739,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		grant->next_recalc = now + grant->recalc_cycles;
 		needy_rank = homa_grant_fix_order(grant);
 		homa_grant_unlock(grant);
-		tt_record1("homa_grant_check_rpc released grant lock (id %d)",
-			   rpc->id);
+		tt_record2("homa_grant_check_rpc released grant lock (id %d, needy_rank %d)",
+			   rpc->id, needy_rank);
 		INC_METRIC(grant_check_recalcs, 1);
 	}
 
@@ -804,7 +803,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	}
 
 	INC_METRIC(grant_check_locked, locked);
-	tt_record1("homa_grant_check_rpc finished with id %d", rpc->id);
+	tt_record2("homa_grant_check_rpc finished with id %d, total_incoming %d",
+		   rpc->id, atomic_read(&grant->total_incoming));
 }
 
 /**
@@ -889,8 +889,10 @@ void homa_grant_find_oldest(struct homa_grant *grant)
 		oldest_birth = rpc->msgin.birth;
 	}
 
-	if (oldest)
+	if (oldest) {
 		homa_rpc_hold(oldest);
+		tt_record1("homa_grant_find_oldest chose id %d", oldest);
+	}
 	grant->oldest_rpc = oldest;
 }
 
@@ -1009,6 +1011,8 @@ void homa_grant_check_fifo(struct homa_grant *grant)
 	}
 	homa_grant_cand_init(&cand);
 	rpc->msgin.granted += grant->fifo_grant_increment;
+	tt_record2("homa_grant_check_fifo granted %d more bytes to id %d",
+		   grant->fifo_grant_increment, rpc->id);
 	if (rpc->msgin.granted >= rpc->msgin.length) {
 		INC_METRIC(fifo_grant_bytes, grant->fifo_grant_increment +
 					     rpc->msgin.length -
