@@ -891,7 +891,7 @@ void homa_grant_find_oldest(struct homa_grant *grant)
 
 	if (oldest) {
 		homa_rpc_hold(oldest);
-		tt_record1("homa_grant_find_oldest chose id %d", oldest);
+		tt_record1("homa_grant_find_oldest chose id %d", oldest->id);
 	}
 	grant->oldest_rpc = oldest;
 }
