@@ -32,7 +32,7 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 
 	/* See if we need to request an ack for this RPC. */
 	if (!homa_is_client(rpc->id) && rpc->state == RPC_OUTGOING &&
-	     tx_end == rpc->msgout.length) {
+	    tx_end == rpc->msgout.length) {
 		if (rpc->done_timer_ticks == 0) {
 			rpc->done_timer_ticks = homa->timer_ticks;
 		} else {

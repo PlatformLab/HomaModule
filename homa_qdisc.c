@@ -263,9 +263,9 @@ enqueue:
 	if (is_homa_pkt(skb)) {
 		h = (struct homa_data_hdr *)skb_transport_header(skb);
 		tt_record4("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d, bytes_left %d on qid %d",
-				be64_to_cpu(h->common.sender_id),
-				ntohl(h->seg.offset),
-				homa_get_skb_info(skb)->bytes_left, q->ix);
+			   be64_to_cpu(h->common.sender_id),
+			   ntohl(h->seg.offset),
+			   homa_get_skb_info(skb)->bytes_left, q->ix);
 	} else {
 		tt_record2("homa_qdisc_enqueue queuing non-homa packet, qix %d, pacer_qix %d",
 			   q->ix, qdev->pacer_qix);
