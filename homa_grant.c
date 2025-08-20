@@ -548,22 +548,28 @@ void homa_grant_unmanage_rpc(struct homa_rpc *rpc,
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
+	bool removed = false;
 	u64 time = homa_clock();
 
 	homa_grant_lock(grant);
 
-	INC_METRIC(grantable_rpcs_integral, grant->num_grantable_rpcs
-			* (time - grant->last_grantable_change));
-	grant->last_grantable_change = time;
-	grant->num_grantable_rpcs--;
-	tt_record2("Decremented num_grantable_rpcs to %d, id %d",
-		   grant->num_grantable_rpcs, rpc->id);
-
-	if (rpc->msgin.rank >= 0)
+	if (rpc->msgin.rank >= 0) {
 		homa_grant_remove_active(rpc, cand);
-	if (!list_empty(&rpc->grantable_links))
+		removed = true;
+	}
+	if (!list_empty(&rpc->grantable_links)) {
 		homa_grant_remove_grantable(rpc);
-	grant->window = homa_grant_window(grant);
+		removed = true;
+	}
+	if (removed) {
+		INC_METRIC(grantable_rpcs_integral, grant->num_grantable_rpcs
+				* (time - grant->last_grantable_change));
+		grant->last_grantable_change = time;
+		grant->num_grantable_rpcs--;
+		tt_record2("Decremented num_grantable_rpcs to %d, id %d",
+			   grant->num_grantable_rpcs, rpc->id);
+		grant->window = homa_grant_window(grant);
+	}
 	if (rpc == grant->oldest_rpc) {
 		homa_rpc_put(rpc);
 		grant->oldest_rpc = NULL;

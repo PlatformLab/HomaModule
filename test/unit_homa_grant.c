@@ -884,6 +884,23 @@ TEST_F(homa_grant, homa_grant_unmanage_rpc__basics)
 	EXPECT_EQ(0, self->homa.grant->num_grantable_rpcs);
 	EXPECT_EQ(60000, self->homa.grant->window);
 }
+TEST_F(homa_grant, homa_grant_unmanage_rpc__rpc_not_managed)
+{
+	struct homa_rpc *rpc;
+
+	self->homa.grant->max_rpcs_per_peer = 1;
+	self->homa.grant->window_param = 0;
+	self->homa.grant->max_incoming = 60000;
+	self->homa.grant->last_grantable_change = 100;
+	mock_clock = 250;
+	rpc = test_rpc(self, 200, self->server_ip, 30000);
+	EXPECT_EQ(0, self->homa.grant->num_grantable_rpcs);
+
+	homa_grant_unmanage_rpc(rpc, &self->cand);
+	EXPECT_EQ(0, self->homa.grant->num_grantable_rpcs);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->grantable_rpcs_integral);
+	EXPECT_EQ(100, self->homa.grant->last_grantable_change);
+}
 TEST_F(homa_grant, homa_grant_unmanage_rpc__remove_from_oldest_rpc)
 {
 	struct homa_rpc *rpc;
