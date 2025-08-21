@@ -281,7 +281,8 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	if (!rpc || rpc->state == RPC_DEAD)
 		return;
 	UNIT_LOG("; ", "homa_rpc_end invoked");
-	tt_record1("homa_rpc_end invoked for id %d", rpc->id);
+	tt_record2("homa_rpc_end invoked for id %d, port %d", rpc->id,
+		   rpc->hsk->port);
 	rpc->state = RPC_DEAD;
 	rpc->error = -EINVAL;
 
@@ -498,8 +499,8 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 		homa_sock_lock(hsk);
 		if (atomic_read(&hsk->protect_count)) {
 			INC_METRIC(disabled_reaps, 1);
-			tt_record2("homa_rpc_reap returning: protect_count %d, dead_skbs %d",
-				   atomic_read(&hsk->protect_count),
+			tt_record3("homa_rpc_reap returning for port %d: protect_count %d, dead_skbs %d",
+				   hsk->port, atomic_read(&hsk->protect_count),
 				   hsk->dead_skbs);
 			homa_sock_unlock(hsk);
 			if (reap_all)
