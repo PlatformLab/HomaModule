@@ -230,14 +230,41 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	struct homa_data_hdr *h;
 	int pkt_len;
 	int result;
+	int offset;
 
 	pkt_len = qdisc_skb_cb(skb)->pkt_len;
-	if (pkt_len < homa->pacer->throttle_min_bytes) {
+	if (!is_homa_pkt(skb)) {
 		homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 		goto enqueue;
 	}
 
-	if (!is_homa_pkt(skb)) {
+	/* For Homa packets, transmit control packets and short messages
+	 * immediately, bypassing the pacer mechanism completely. We do
+	 * this because (a) we don't want to delay control packets, (b) the
+	 * pacer's single thread doesn't have enough throughput to handle
+	 * all the short packets (whereas processing here happens concurrently
+	 * on multiple cores), and (c) there is no way to generate enough
+	 * short packets to cause NIC queue buildup, so bypassing the pacer
+	 * won't impact the SRPT mechanism significantly.
+	 *
+	 * Note: it's very important to use message length, not packet
+	 * length when deciding whether to bypass the pacer. If packet
+	 * length were used, then the short packet at the end of a long
+	 * message might be transmitted when all the earlier packets in the
+	 * message have been deferred, and the deferred packets might not be
+	 * transmitted for a long time due to SRPT. In the meantime, the
+	 * receiver will have reserved incoming for those packets. These
+	 * reservations can pile up to the point where the receiver can't
+	 * issue any grants, even though the "incoming" data isn't going to
+	 * be transmitted anytime soon.
+	 */
+
+	h = (struct homa_data_hdr *)skb_transport_header(skb);
+	offset = ntohl(h->seg.offset);
+	if (offset == -1)
+		offset = ntohl(h->common.sequence);
+	if (h->common.type != DATA || ntohl(h->message_length) <
+			homa->pacer->throttle_min_bytes) {
 		homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 		goto enqueue;
 	}
@@ -250,22 +277,20 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	/* This packet needs to be deferred until the NIC queue has
 	 * been drained a bit.
 	 */
-	h = (struct homa_data_hdr *)skb_transport_header(skb);
 	tt_record4("homa_qdisc_enqueue deferring homa data packet for id %d, offset %d, bytes_left %d on qid %d",
-		   be64_to_cpu(h->common.sender_id),
-		   ntohl(h->seg.offset),
+		   be64_to_cpu(h->common.sender_id), offset,
 		   homa_get_skb_info(skb)->bytes_left, qdev->pacer_qix);
 	homa_qdisc_defer_homa(qdev, skb);
-	wake_up(&qdev->pacer_sleep);
 	return NET_XMIT_SUCCESS;
 
 enqueue:
 	if (is_homa_pkt(skb)) {
-		h = (struct homa_data_hdr *)skb_transport_header(skb);
-		tt_record4("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d, bytes_left %d on qid %d",
-			   be64_to_cpu(h->common.sender_id),
-			   ntohl(h->seg.offset),
-			   homa_get_skb_info(skb)->bytes_left, q->ix);
+		if (h->common.type == DATA) {
+			h = (struct homa_data_hdr *)skb_transport_header(skb);
+			tt_record4("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d, bytes_left %d on qid %d",
+				be64_to_cpu(h->common.sender_id), offset,
+				homa_get_skb_info(skb)->bytes_left, q->ix);
+		}
 	} else {
 		tt_record2("homa_qdisc_enqueue queuing non-homa packet, qix %d, pacer_qix %d",
 			   q->ix, qdev->pacer_qix);
@@ -318,6 +343,7 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 	spin_lock_irqsave(&qdev->homa_deferred.lock, flags);
 	if (skb_queue_empty(&qdev->homa_deferred)) {
 		__skb_queue_head(&qdev->homa_deferred, skb);
+		wake_up(&qdev->pacer_sleep);
 		goto done;
 	}
 	INC_METRIC(throttled_cycles, now - qdev->last_defer);
@@ -450,7 +476,7 @@ int homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev, int bytes,
 						? clock - qdev->pacer_wake_time
 						: clock - idle;
 				INC_METRIC(pacer_lost_cycles, lost);
-				tt_record1("pacer lost %d cycles", lost);
+				tt_record1("homa_qdisc pacer lost %d cycles", lost);
 			}
 			new_idle = clock + cycles_for_packet;
 		} else {

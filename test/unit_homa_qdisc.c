@@ -303,31 +303,6 @@ TEST_F(homa_qdisc, _homa_qdisc_homa_qdisc_set_qixs_object)
 	homa_qdisc_qdev_put(qdev);
 }
 
-TEST_F(homa_qdisc, homa_qdisc_enqueue__short_packet)
-{
-	struct Qdisc *qdisc = mock_alloc_qdisc(&mock_net_queue);
-	struct sk_buff *skb, *to_free;
-	struct homa_qdisc *q;
-
-	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
-	q = qdisc_priv(qdisc);
-	atomic64_set(&q->qdev->link_idle_time, 1000000);
-	q->ix = 3;
-	skb = mock_skb_alloc(&self->addr, &self->data.common, 100, 0);
-	qdisc_skb_cb(skb)->pkt_len = 100;
-	to_free = NULL;
-	unit_log_clear();
-
-	EXPECT_EQ(NET_XMIT_SUCCESS, homa_qdisc_enqueue(skb, qdisc, &to_free));
-	EXPECT_EQ(NULL, to_free);
-	EXPECT_EQ(0, q->qdev->homa_deferred.qlen);
-	EXPECT_EQ(1, qdisc->q.qlen);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_LT(1000000, atomic64_read(&q->qdev->link_idle_time));
-
-	homa_qdisc_destroy(qdisc);
-	kfree(qdisc);
-}
 TEST_F(homa_qdisc, homa_qdisc_enqueue__packet_not_homa)
 {
 	struct Qdisc *qdisc = mock_alloc_qdisc(&mock_net_queue);
@@ -353,6 +328,57 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__packet_not_homa)
 	EXPECT_EQ(1, qdisc->q.qlen);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_LT(1000000, atomic64_read(&q->qdev->link_idle_time));
+
+	homa_qdisc_destroy(qdisc);
+	kfree(qdisc);
+}
+TEST_F(homa_qdisc, homa_qdisc_enqueue__short_message)
+{
+	struct Qdisc *qdisc = mock_alloc_qdisc(&mock_net_queue);
+	struct sk_buff *skb, *to_free;
+	struct homa_qdisc *q;
+
+	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
+	q = qdisc_priv(qdisc);
+	atomic64_set(&q->qdev->link_idle_time, 1000000);
+	q->ix = 3;
+	self->data.message_length = htonl(100);
+	skb = mock_skb_alloc(&self->addr, &self->data.common, 100, 0);
+	qdisc_skb_cb(skb)->pkt_len = 100;
+	to_free = NULL;
+	unit_log_clear();
+
+	EXPECT_EQ(NET_XMIT_SUCCESS, homa_qdisc_enqueue(skb, qdisc, &to_free));
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_EQ(0, q->qdev->homa_deferred.qlen);
+	EXPECT_EQ(1, qdisc->q.qlen);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_LT(1000000, atomic64_read(&q->qdev->link_idle_time));
+
+	homa_qdisc_destroy(qdisc);
+	kfree(qdisc);
+}
+TEST_F(homa_qdisc, homa_qdisc_enqueue__short_final_packet_in_long_message)
+{
+	struct Qdisc *qdisc = mock_alloc_qdisc(&mock_net_queue);
+	struct sk_buff *skb, *to_free;
+	struct homa_qdisc *q;
+
+	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
+	q = qdisc_priv(qdisc);
+	atomic64_set(&q->qdev->link_idle_time, 1000000);
+	q->ix = 3;
+	self->data.message_length = htonl(3000);
+	self->data.seg.offset = htonl(2800);
+	skb = mock_skb_alloc(&self->addr, &self->data.common, 200, 0);
+	qdisc_skb_cb(skb)->pkt_len = 100;
+	to_free = NULL;
+	unit_log_clear();
+
+	EXPECT_EQ(NET_XMIT_SUCCESS, homa_qdisc_enqueue(skb, qdisc, &to_free));
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_EQ(1, q->qdev->homa_deferred.qlen);
+	EXPECT_EQ(0, qdisc->q.qlen);
 
 	homa_qdisc_destroy(qdisc);
 	kfree(qdisc);
