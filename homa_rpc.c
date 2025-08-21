@@ -241,6 +241,13 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		tt_record1("homa_rpc_acked freeing id %d", rpc->id);
 		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
+
+		if (test_bit(SOCK_NOSPACE, &hsk2->sock.sk_socket->flags)) {
+			/* There are tasks waiting for tx memory, so reap
+			 * immediately.
+			 */
+			homa_rpc_reap(hsk, false);
+		}
 	}
 	if (hsk->port != server_port)
 		sock_put(&hsk2->sock);
