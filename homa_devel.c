@@ -410,7 +410,7 @@ void homa_freeze_peers(void)
 	int err;
 
 	/* Find a socket to use (any socket for the namespace will do). */
-	hnet = homa_net_from_net(&init_net);
+	hnet = homa_net(&init_net);
 	rcu_read_lock();
 	hsk = homa_socktab_start_scan(hnet->homa->socktab, &scan);
 	while (hsk && hsk->hnet != hnet)

@@ -457,7 +457,7 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 	int num_acks = 0;
 
 	/* Find the appropriate socket.*/
-	hnet = homa_net_from_skb(skb);
+	hnet = homa_net(dev_net(skb->dev));
 	hsk = homa_sock_find(hnet, dport);
 	if (!hsk || (!homa_is_client(id) && !hsk->is_server)) {
 		if (skb_is_ipv6(skb))

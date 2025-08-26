@@ -1165,7 +1165,7 @@ int homa_grant_dointvec(const struct ctl_table *table, int write,
 	struct homa_grant *grant;
 	int result;
 
-	grant = homa_net_from_net(current->nsproxy->net_ns)->homa->grant;
+	grant = homa_net(current->nsproxy->net_ns)->homa->grant;
 
 	/* Generate a new ctl_table that refers to a field in the
 	 * net-specific struct homa.

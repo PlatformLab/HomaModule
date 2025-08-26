@@ -144,7 +144,7 @@ int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 	struct homa_net *hnet;
 	int i;
 
-	hnet = homa_net_from_net(dev_net(sch->dev_queue->dev));
+	hnet = homa_net(dev_net(sch->dev_queue->dev));
 	qdev = homa_qdisc_qdev_get(hnet, sch->dev_queue->dev);
 	if (IS_ERR(qdev))
 		return PTR_ERR(qdev);

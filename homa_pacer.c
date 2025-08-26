@@ -418,7 +418,7 @@ int homa_pacer_dointvec(const struct ctl_table *table, int write,
 	struct homa_pacer *pacer;
 	int result;
 
-	pacer = homa_net_from_net(current->nsproxy->net_ns)->homa->pacer;
+	pacer = homa_net(current->nsproxy->net_ns)->homa->pacer;
 
 	/* Generate a new ctl_table that refers to a field in the
 	 * net-specific struct homa.

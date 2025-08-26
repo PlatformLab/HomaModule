@@ -736,7 +736,7 @@ module_exit(homa_unload);
 int homa_net_start(struct net *net)
 {
 	pr_notice("Homa attaching to net namespace\n");
-	return homa_net_init(homa_net_from_net(net), net, global_homa);
+	return homa_net_init(homa_net(net), net, global_homa);
 }
 
 /**
@@ -747,7 +747,7 @@ int homa_net_start(struct net *net)
 void homa_net_exit(struct net *net)
 {
 	pr_notice("Homa detaching from net namespace\n");
-	homa_net_destroy(homa_net_from_net(net));
+	homa_net_destroy(homa_net(net));
 }
 
 /**
@@ -1400,7 +1400,7 @@ int homa_softirq(struct sk_buff *skb)
 	struct homa_common_hdr *h;
 	int header_offset;
 
-	IF_NO_STRIP(struct homa *homa = homa_from_skb(skb));
+	IF_NO_STRIP(struct homa *homa = homa_net(dev_net(skb->dev))->homa);
 	IF_NO_STRIP(u64 start);
 
 #ifndef __STRIP__ /* See strip.py */
@@ -1464,7 +1464,8 @@ int homa_softirq(struct sk_buff *skb)
 		 */
 		if (unlikely(h->type == FREEZE)) {
 			if (!atomic_read(&tt_frozen)) {
-				homa_rpc_log_active_tt(homa_from_skb(skb), 0);
+				homa_rpc_log_active_tt(homa_net(
+						dev_net(skb->dev))->homa, 0);
 				tt_record4("Freezing because of request on port %d from 0x%x:%d, id %d",
 					   ntohs(h->dport),
 					   tt_addr(skb_canonical_ipv6_saddr(skb)),
@@ -1560,7 +1561,7 @@ discard:
 int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
 	const struct icmphdr *icmp = icmp_hdr(skb);
-	struct homa *homa = homa_from_skb(skb);
+	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
 	struct in6_addr daddr;
 	int type = icmp->type;
 	int code = icmp->code;
@@ -1607,7 +1608,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			u8 type,  u8 code,  int offset,  __be32 info)
 {
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
-	struct homa *homa = homa_from_skb(skb);
+	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
 	int error = 0;
 	int port = 0;
 
@@ -1679,7 +1680,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 int homa_dointvec(const struct ctl_table *table, int write,
 		  void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct homa *homa = homa_net_from_net(current->nsproxy->net_ns)->homa;
+	struct homa *homa = homa_net(current->nsproxy->net_ns)->homa;
 	struct ctl_table table_copy;
 	int result;
 

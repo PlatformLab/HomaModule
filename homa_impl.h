@@ -836,42 +836,14 @@ void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc);
 #endif /* See strip.py */
 
 /**
- * homa_net_from_net() - Return the struct homa_net associated with a particular
+ * homa_net() - Return the struct homa_net associated with a particular
  * struct net.
  * @net:     Get the Homa data for this net namespace.
  * Return:   see above.
  */
-static inline struct homa_net *homa_net_from_net(struct net *net)
+static inline struct homa_net *homa_net(struct net *net)
 {
 	return (struct homa_net *)net_generic(net, homa_net_id);
-}
-
-/**
- * homa_from_skb() - Return the struct homa associated with a particular
- * sk_buff.
- * @skb:     Get the struct homa for this packet buffer.
- * Return:   see above.
- */
-static inline struct homa *homa_from_skb(struct sk_buff *skb)
-{
-	struct homa_net *hnet;
-
-	hnet = net_generic(dev_net(skb->dev), homa_net_id);
-	return hnet->homa;
-}
-
-/**
- * homa_net_from_skb() - Return the struct homa_net associated with a particular
- * sk_buff.
- * @skb:     Get the struct homa for this packet buffer.
- * Return:   see above.
- */
-static inline struct homa_net *homa_net_from_skb(struct sk_buff *skb)
-{
-	struct homa_net *hnet;
-
-	hnet = net_generic(dev_net(skb->dev), homa_net_id);
-	return hnet;
 }
 
 /**
