@@ -981,9 +981,6 @@ static inline int homa_high_priority(struct homa *homa)
  *    * RPC lock
  *    * Socket lock
  *    * Other lock
- * 3. It is not safe to wait on an RPC lock while holding any other lock.
- * 4. It is safe to wait on a socket lock while holding an RPC lock, but
- *    not while holding any other lock.
  *
  * It may seem surprising that RPC locks are acquired *before* socket locks,
  * but this is essential for high performance. Homa has been designed so that
