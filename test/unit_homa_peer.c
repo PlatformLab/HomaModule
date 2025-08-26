@@ -81,17 +81,6 @@ static void stop_gc_hook(char *id)
 	unit_log_printf("; ", "gc_stop_count %d", hook_peertab->gc_stop_count);
 }
 
-static int hook_free_count;
-static void complete_rcu_hook(char *id) {
-	if (strcmp(id, "unlock") != 0)
-		return;
-	if (hook_free_count == 0)
-		return;
-	hook_free_count--;
-	if (hook_free_count == 0)
-		homa_peer_rcu_callback(&hook_peertab->rcu_head);
-}
-
 TEST_F(homa_peer, homa_peer_alloc_peertab__success)
 {
 	struct homa_peertab *peertab;
@@ -276,29 +265,6 @@ TEST_F(homa_peer, homa_peer_free_dead) {
 	unit_log_clear();
 	unit_log_dead_peers(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
-}
-
-TEST_F(homa_peer, homa_peer_wait_dead) {
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peer;
-
-	peer = homa_peer_alloc(&self->hsk, ip1111);
-	homa_peer_release(peer);
-	list_add_tail(&peer->dead_links, &peertab->dead_peers);
-	unit_log_clear();
-	unit_log_dead_peers(&self->homa);
-	EXPECT_STREQ("[1::1:1:1]", unit_log_get());
-	atomic_set(&peertab->call_rcu_pending, 1);
-
-	unit_hook_register(complete_rcu_hook);
-	hook_peertab = self->homa.peertab;
-	hook_free_count = 5;
-
-	homa_peer_wait_dead(peertab);
-	unit_log_clear();
-	unit_log_dead_peers(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(0, hook_free_count);
 }
 
 TEST_F(homa_peer, homa_peer_prefer_evict)

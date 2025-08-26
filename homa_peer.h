@@ -306,7 +306,6 @@ int      homa_peer_prefer_evict(struct homa_peertab *peertab,
 				struct homa_peer *peer1,
 				struct homa_peer *peer2);
 void     homa_peer_rcu_callback(struct rcu_head *head);
-void     homa_peer_wait_dead(struct homa_peertab *peertab);
 void     homa_peer_update_sysctl_deps(struct homa_peertab *peertab);
 #ifndef __STRIP__ /* See strip.py */
 void     homa_peer_lock_slow(struct homa_peer *peer);

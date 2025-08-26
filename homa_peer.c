@@ -243,25 +243,6 @@ void homa_peer_free_dead(struct homa_peertab *peertab)
 }
 
 /**
- * homa_peer_wait_dead() - Don't return until all of the dead peers have
- * been freed.
- * @peertab:    Overall information about peers, which includes a dead list.
- *
- */
-void homa_peer_wait_dead(struct homa_peertab *peertab)
-{
-	while (1) {
-		spin_lock_bh(&peertab->lock);
-		homa_peer_free_dead(peertab);
-		if (list_empty(&peertab->dead_peers)) {
-			spin_unlock_bh(&peertab->lock);
-			return;
-		}
-		spin_unlock_bh(&peertab->lock);
-	}
-}
-
-/**
  * homa_peer_prefer_evict() - Given two peers, determine which one is
  * a better candidate for eviction.
  * @peertab:    Overall information used to manage peers.
