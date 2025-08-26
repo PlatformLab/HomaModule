@@ -387,48 +387,6 @@ static inline void homa_peer_release(struct homa_peer *peer)
 }
 
 /**
- * homa_peer_hash() - Hash function used for @peertab->ht.
- * @data:    Pointer to key for which a hash is desired. Must actually
- *           be a struct homa_peer_key.
- * @dummy:   Not used
- * @seed:    Seed for the hash.
- * Return:   A 32-bit hash value for the given key.
- */
-static inline u32 homa_peer_hash(const void *data, u32 dummy, u32 seed)
-{
-	/* This is MurmurHash3, used instead of the jhash default because it
-	 * is faster (25 ns vs. 40 ns as of May 2025).
-	 */
-	BUILD_BUG_ON(sizeof(struct homa_peer_key) & 0x3);
-	const u32 len = sizeof(struct homa_peer_key) >> 2;
-	const u32 c1 = 0xcc9e2d51;
-	const u32 c2 = 0x1b873593;
-	const u32 *key = data;
-	u32 h = seed;
-
-	for (size_t i = 0; i < len; i++) {
-		u32 k = key[i];
-
-		k *= c1;
-		k = (k << 15) | (k >> (32 - 15));
-		k *= c2;
-
-		h ^= k;
-		h = (h << 13) | (h >> (32 - 13));
-		h = h * 5 + 0xe6546b64;
-	}
-
-	h ^= len * 4;  // Total number of input bytes
-
-	h ^= h >> 16;
-	h *= 0x85ebca6b;
-	h ^= h >> 13;
-	h *= 0xc2b2ae35;
-	h ^= h >> 16;
-	return h;
-}
-
-/**q
  * homa_peer_compare() - Comparison function for entries in @peertab->ht.
  * @arg:   Contains one of the keys to compare.
  * @obj:   homa_peer object containing the other key to compare.

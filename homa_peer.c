@@ -7,6 +7,7 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+#include "murmurhash3.h"
 
 #ifdef __UNIT_TEST__
 #undef rhashtable_init
@@ -24,7 +25,7 @@ static const struct rhashtable_params ht_params = {
 	.key_offset  = offsetof(struct homa_peer, ht_key),
 	.head_offset = offsetof(struct homa_peer, ht_linkage),
 	.nelem_hint = 10000,
-	.hashfn = homa_peer_hash,
+	.hashfn = murmurhash3,
 	.obj_cmpfn = homa_peer_compare
 };
 

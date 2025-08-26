@@ -70,7 +70,8 @@ CP_HDRS := homa_impl.h \
 	   homa_rpc.h \
 	   homa_sock.h \
 	   homa_stub.h \
-	   homa_wire.h
+	   homa_wire.h \
+	   murmurhash3.h
 CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o homa_grant.o \
 		homa_metrics.o homa_offload.o homa_qdisc.o \
 		homa_skb.o timetrace.o, $(HOMA_OBJS)))
