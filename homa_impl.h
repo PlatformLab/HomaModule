@@ -684,6 +684,7 @@ static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 	return mapped;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * is_homa_pkt() - Return true if @skb is a Homa packet, false otherwise.
  * @skb:    Packet buffer to check.
@@ -708,6 +709,7 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
 	return protocol == IPPROTO_HOMA;
 #endif /* See strip.py */
 }
+#endif /* See strip.py */
 
 /**
  * homa_make_header_avl() - Invokes pskb_may_pull to make sure that all the
@@ -726,6 +728,7 @@ static inline bool homa_make_header_avl(struct sk_buff *skb)
 	return pskb_may_pull(skb, pull_length);
 }
 
+#ifndef __UPSTREAM__ /* See strip.py */
 #ifdef __UNIT_TEST__
 void unit_log_printf(const char *separator, const char *format, ...)
 		__printf(2, 3);
@@ -736,6 +739,7 @@ void unit_hook(char *id);
 #define UNIT_LOG(...)
 #define UNIT_HOOK(...)
 #endif /* __UNIT_TEST__ */
+#endif /* See strip.py */
 
 extern unsigned int homa_net_id;
 
@@ -935,6 +939,7 @@ static inline u64 homa_ns_to_cycles(u64 ns)
 #endif /* __UNIT_TEST__ */
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_usecs_to_cycles() - Convert from units of microseconds to units of
  * homa_clock().
@@ -953,6 +958,7 @@ static inline u64 homa_usecs_to_cycles(u64 usecs)
 	return tmp;
 #endif /* __UNIT_TEST__ */
 }
+#endif /* See strip.py */
 
 #ifndef __STRIP__ /* See strip.py */
 /**
