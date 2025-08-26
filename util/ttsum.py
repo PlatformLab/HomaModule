@@ -186,8 +186,8 @@ if not options.startEvent:
         intervals.sort()
         medianTime = intervals[len(intervals)//2]
         message = '%-*s  %6.0f %6.0f %6.0f %6.0f %7d' % (nameLength,
-            event, medianTime, intervals[0], intervals[-1],
-            sum(intervals)/len(intervals), len(intervals))
+            event, medianTime * 1e03, intervals[0] * 1e03, intervals[-1] * 1e03,
+            1e03 * sum(intervals)/len(intervals), len(intervals))
         outputInfo.append([medianTime, message])
 
     # Pass 2: sort in order of median interval length, then print.
@@ -234,13 +234,14 @@ if options.startEvent:
             if options.altFormat:
                 message = '%-*s  %6.0f %6.0f %6.0f %6.0f %6.0f %7d' % (
                     nameLength, eventName, medianTime*1e03, times[0]*1e03,
-                    times[-1]*1e03, sum(times)*1e03/len(times),
-                    intervals[len(intervals)//2]*1e03, len(times))
+                    times[-1] * 1e03, sum(times) * 1e03/len(times),
+                    intervals[len(intervals)//2] * 1e03, len(times))
             else:
                 message = '%-*s  %6.0f %6.0f %6.0f %6.0f %6.0f %7d' % (
-                    nameLength, eventName, medianTime*1e03, medianInterval*1e03,
-                    intervals[0]*1e03, intervals[-1]*1e03,
-                    sum(intervals)/len(intervals)*1e03, len(intervals))
+                    nameLength, eventName, medianTime * 1e03,
+                    medianInterval * 1e03,
+                    intervals[0] * 1e03, intervals[-1] * 1e03,
+                    1e03 * sum(intervals)/len(intervals), len(intervals))
             outputInfo.append([medianTime, message])
 
     outputInfo.sort(key=lambda item: item[0])
