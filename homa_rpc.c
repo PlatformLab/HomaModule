@@ -471,11 +471,11 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 	struct homa_rpc *rpcs[BATCH_MAX];
 	struct sk_buff *skbs[BATCH_MAX];
 	int num_skbs, num_rpcs;
+	bool checked_all_rpcs;
 	struct homa_rpc *rpc;
 	struct homa_rpc *tmp;
 	int i, batch_size;
 	int skbs_to_reap;
-	int result = 0;
 	int rx_frees;
 
 	INC_METRIC(reaper_calls, 1);
@@ -485,9 +485,15 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 	 * BATCH_MAX skbs.
 	 */
 	skbs_to_reap = hsk->homa->reap_limit;
-	while (skbs_to_reap > 0 && !list_empty(&hsk->dead_rpcs)) {
+	checked_all_rpcs = list_empty(&hsk->dead_rpcs);
+	while (1) {
 		batch_size = BATCH_MAX;
-		if (!reap_all) {
+		if (reap_all) {
+			if (list_empty(&hsk->dead_rpcs))
+				break;
+		} else {
+			if (skbs_to_reap <= 0 || checked_all_rpcs)
+				break;
 			if (batch_size > skbs_to_reap)
 				batch_size = skbs_to_reap;
 			skbs_to_reap -= batch_size;
@@ -536,9 +542,23 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 			 */
 			if (rpc->msgout.length >= 0) {
 				while (rpc->msgout.packets) {
-					skbs[num_skbs] = rpc->msgout.packets;
-					rpc->msgout.packets = homa_get_skb_info(
-						rpc->msgout.packets)->next_skb;
+					struct sk_buff *skb =
+							rpc->msgout.packets;
+
+					/* This tests whether skb is still in a
+					 * transmit queue somewhere; if so,
+					 * can't reap the RPC since homa_qdisc
+					 * may try to access it via the skb's
+					 * homa_skb_info.
+					 */
+					if (refcount_read(&skb->users) > 1) {
+						INC_METRIC(reaper_active_skbs,
+							   1);
+						goto next_rpc;
+					}
+					skbs[num_skbs] = skb;
+					rpc->msgout.packets =
+						homa_get_skb_info(skb)->next_skb;
 					num_skbs++;
 					rpc->msgout.num_skbs--;
 					if (num_skbs >= batch_size)
@@ -567,15 +587,17 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 						      &hsk->sock.sk_wmem_alloc));
 			if (num_rpcs >= batch_size)
 				goto release;
+
+next_rpc:
+			continue;
 		}
+		checked_all_rpcs = true;
 
 		/* Free all of the collected resources; release the socket
 		 * lock while doing this.
 		 */
 release:
 		hsk->dead_skbs -= num_skbs + rx_frees;
-		result = !list_empty(&hsk->dead_rpcs) &&
-				(num_skbs + num_rpcs) != 0;
 		homa_sock_unlock(hsk);
 		homa_skb_free_many_tx(hsk->homa, skbs, num_skbs);
 		for (i = 0; i < num_rpcs; i++) {
@@ -641,11 +663,9 @@ release:
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
 			   num_skbs + rx_frees, num_rpcs, hsk->dead_skbs,
 			   hsk->port);
-		if (!result && !reap_all)
-			break;
 	}
 	homa_pool_check_waiting(hsk->buffer_pool);
-	return result;
+	return !checked_all_rpcs;
 }
 
 /**

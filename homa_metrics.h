@@ -653,6 +653,13 @@ struct homa_metrics {
 	u64 reaper_dead_skbs;
 
 	/**
+	 * @reaper_active_skbs: total number of times homa_rpc_reap had to skip
+	 * an RPC because one of its tx skb's was still in the transmit
+	 * pipeline.
+	 */
+	u64 reaper_active_skbs;
+
+	/**
 	 * @throttle_list_adds: total number of calls to homa_add_to_throttled.
 	 */
 	u64 throttle_list_adds;

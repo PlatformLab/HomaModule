@@ -381,6 +381,8 @@ char *homa_metrics_print(void)
 		  "Reaper invocations that were not disabled\n");
 		M("reaper_dead_skbs", m->reaper_dead_skbs,
 		  "Sum of hsk->dead_skbs across all reaper calls\n");
+		M("reaper_active_skbs", m->reaper_active_skbs,
+		  "RPCs skipped by reaper because of active tx skbs\n");
 		M("throttle_list_adds", m->throttle_list_adds,
 		  "Calls to homa_add_to_throttled\n");
 		M("throttle_list_checks", m->throttle_list_checks,
