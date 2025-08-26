@@ -249,6 +249,9 @@ __u16 mock_min_default_port = 0x8000;
 /* Used as sk_socket for all sockets created by mock_sock_init. */
 static struct socket mock_socket;
 
+/* Each of the entries in mock_hnets below is associated with the
+ * corresonding entry in mock_nets.
+ */
 #define MOCK_MAX_NETS 10
 struct net mock_nets[MOCK_MAX_NETS];
 struct homa_net mock_hnets[MOCK_MAX_NETS];
@@ -1812,17 +1815,32 @@ int mock_get_link_ksettings(struct net_device *dev,
 	return 0;
 }
 
+/**
+ * mock_net_for_hnet() - Return the struct net associated with a struct
+ * homa_net, or NULL if the struct net can't be identified.
+ * @hnet:     Find the struct net associated with this.
+ * Return:    See above.
+ */
+struct net *mock_net_for_hnet(struct homa_net *hnet)
+{
+	int i;
+
+	for (i = 0; i < mock_num_hnets; i++) {
+		if (hnet == &mock_hnets[i])
+			return &mock_nets[i];
+	}
+	return NULL;
+}
+
 void *mock_net_generic(const struct net *net, unsigned int id)
 {
-	struct homa_net *hnet;
 	int i;
 
 	if (id != homa_net_id)
 		return NULL;
-	for (i = 0; i < MOCK_MAX_NETS; i++) {
-		hnet = &mock_hnets[i];
-		if (hnet->net == net)
-			return hnet;
+	for (i = 0; i < mock_num_hnets; i++) {
+		if (net == &mock_nets[i])
+			return &mock_hnets[i];
 	}
 	return NULL;
 }
@@ -2215,7 +2233,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	sk->sk_socket = &mock_socket;
-	sk->sk_net.net = hnet->net;
+	sk->sk_net.net = mock_net_for_hnet(hnet);
 	memset(&mock_socket, 0, sizeof(mock_socket));
 	refcount_set(&sk->sk_wmem_alloc, 1);
 	init_waitqueue_head(&mock_socket.wq.wait);

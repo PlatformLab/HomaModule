@@ -200,6 +200,7 @@ unsigned int
 	    mock_get_mtu(const struct dst_entry *dst);
 void        mock_get_page(struct page *page);
 void       *mock_kmalloc(size_t size, gfp_t flags);
+struct net *mock_net_for_hnet(struct homa_net *hnet);
 void       *mock_net_generic(const struct net *net, unsigned int id);
 int         mock_page_refs(struct page *page);
 int         mock_page_refs(struct page *page);

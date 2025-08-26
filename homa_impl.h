@@ -506,9 +506,6 @@ struct homa {
  * particular network namespace.
  */
 struct homa_net {
-	/** @net: Network namespace corresponding to this structure. */
-	struct net *net;
-
 	/** @homa: Global Homa information. */
 	struct homa *homa;
 

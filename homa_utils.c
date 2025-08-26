@@ -162,7 +162,6 @@ void homa_destroy(struct homa *homa)
 int homa_net_init(struct homa_net *hnet, struct net *net, struct homa *homa)
 {
 	memset(hnet, 0, sizeof(*hnet));
-	hnet->net = net;
 	hnet->homa = homa;
 	hnet->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
 #ifndef __STRIP__ /* See strip.py */

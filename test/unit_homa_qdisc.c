@@ -97,7 +97,7 @@ FIXTURE_SETUP(homa_qdisc)
 	memset(&self->dev, 0, sizeof(self->dev));
 	self->dev._tx = self->txqs;
 	self->dev.num_tx_queues = NUM_TXQS;
-	self->dev.nd_net.net = self->hnet->net;
+	self->dev.nd_net.net = mock_net_for_hnet(self->hnet);
 	self->dev.ethtool_ops = &self->ethtool_ops;
 	memset(&self->ethtool_ops, 0, sizeof(self->ethtool_ops));
 	self->ethtool_ops.get_link_ksettings = mock_get_link_ksettings;

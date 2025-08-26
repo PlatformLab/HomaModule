@@ -138,7 +138,7 @@ TEST_F(homa_plumbing, homa_net_exit__free_peers)
 	homa_peer_release(homa_peer_get(&self->hsk, &addr3));
 
 	EXPECT_EQ(3, unit_count_peers(&self->homa));
-	homa_net_exit(self->hsk.hnet->net);
+	homa_net_exit(mock_net_for_hnet(self->hsk.hnet));
 	EXPECT_EQ(0, unit_count_peers(&self->homa));
 }
 
@@ -280,7 +280,7 @@ TEST_F(homa_plumbing, homa_socket__success)
 	struct homa_sock hsk;
 
 	memset(&hsk, 0, sizeof(hsk));
-	hsk.sock.sk_net.net = self->hnet->net;
+	hsk.sock.sk_net.net = mock_net_for_hnet(self->hnet);
 	refcount_set(&hsk.sock.sk_wmem_alloc, 1);
 	EXPECT_EQ(0, homa_socket(&hsk.sock));
 	unit_sock_destroy(&hsk);
@@ -290,7 +290,7 @@ TEST_F(homa_plumbing, homa_socket__homa_sock_init_failure)
 	struct homa_sock hsk;
 
 	memset(&hsk, 0, sizeof(hsk));
-	hsk.sock.sk_net.net = self->hnet->net;
+	hsk.sock.sk_net.net = mock_net_for_hnet(self->hnet);
 	refcount_set(&hsk.sock.sk_wmem_alloc, 1);
 	mock_kmalloc_errors = 1;
 	EXPECT_EQ(ENOMEM, -homa_socket(&hsk.sock));
