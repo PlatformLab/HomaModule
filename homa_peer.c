@@ -90,7 +90,6 @@ struct homa_peertab *homa_peer_alloc_peertab(void)
 	}
 	peertab->ht_valid = true;
 	rhashtable_walk_enter(&peertab->ht, &peertab->ht_iter);
-	INIT_LIST_HEAD(&peertab->dead_peers);
 	peertab->gc_threshold = 5000;
 	peertab->net_max = 10000;
 	peertab->idle_secs_min = 10;
@@ -143,7 +142,7 @@ void homa_peer_free_net(struct homa_net *hnet)
 			continue;
 		if (rhashtable_remove_fast(&peertab->ht, &peer->ht_linkage,
 					   ht_params) == 0) {
-			homa_peer_free(peer);
+			homa_peer_release(peer);
 			hnet->num_peers--;
 			peertab->num_peers--;
 		}
@@ -159,24 +158,21 @@ void homa_peer_free_net(struct homa_net *hnet)
 }
 
 /**
- * homa_peer_free_fn() - This function is invoked for each entry in
+ * homa_peer_release_fn() - This function is invoked for each entry in
  * the peer hash table by the rhashtable code when the table is being
  * deleted. It frees its argument.
- * @object:     struct homa_peer to free.
+ * @object:     homa_peer to free.
  * @dummy:      Not used.
  */
-void homa_peer_free_fn(void *object, void *dummy)
+void homa_peer_release_fn(void *object, void *dummy)
 {
 	struct homa_peer *peer = object;
 
-	homa_peer_free(peer);
+	homa_peer_release(peer);
 }
 
 /**
- * homa_peer_free_peertab() - Destructor for homa_peertabs. After this
- * function returns, it is unsafe to use any results from previous calls
- * to homa_peer_get, since all existing homa_peer objects will have been
- * destroyed.
+ * homa_peer_free_peertab() - Destructor for homa_peertabs.
  * @peertab:  The table to destroy.
  */
 void homa_peer_free_peertab(struct homa_peertab *peertab)
@@ -187,11 +183,9 @@ void homa_peer_free_peertab(struct homa_peertab *peertab)
 
 	if (peertab->ht_valid) {
 		rhashtable_walk_exit(&peertab->ht_iter);
-		rhashtable_free_and_destroy(&peertab->ht, homa_peer_free_fn,
+		rhashtable_free_and_destroy(&peertab->ht, homa_peer_release_fn,
 					    NULL);
 	}
-	while (!list_empty(&peertab->dead_peers))
-		homa_peer_free_dead(peertab);
 #ifndef __STRIP__ /* See strip.py */
 	if (peertab->sysctl_header) {
 		unregister_net_sysctl_table(peertab->sysctl_header);
@@ -199,48 +193,6 @@ void homa_peer_free_peertab(struct homa_peertab *peertab)
 	}
 #endif /* See strip.py */
 	kfree(peertab);
-}
-
-/**
- * homa_peer_rcu_callback() - This function is invoked as the callback
- * for an invocation of call_rcu. It just marks a peertab to indicate that
- * it was invoked.
- * @head:    Contains information used to locate the peertab.
- */
-void homa_peer_rcu_callback(struct rcu_head *head)
-{
-	struct homa_peertab *peertab;
-
-	peertab = container_of(head, struct homa_peertab, rcu_head);
-	atomic_set(&peertab->call_rcu_pending, 0);
-}
-
-/**
- * homa_peer_free_dead() - Release peers on peertab->dead_peers
- * if possible.
- * @peertab:    Check the dead peers here.
- */
-void homa_peer_free_dead(struct homa_peertab *peertab)
-	__must_hold(peertab->lock)
-{
-	struct homa_peer *peer, *tmp;
-
-	/* A dead peer can be freed only if:
-	 * (a) there are no call_rcu calls pending (if there are, it's
-	 *     possible that a new reference might get created for the
-	 *     peer)
-	 * (b) the peer's reference count is zero.
-	 */
-	if (atomic_read(&peertab->call_rcu_pending))
-		return;
-	list_for_each_entry_safe(peer, tmp, &peertab->dead_peers, dead_links) {
-		if (atomic_read(&peer->refs) == 0) {
-			tt_record1("homa_peer_free_dead freeing homa_peer 0x%x",
-				   tt_addr(peer->addr));
-			list_del_init(&peer->dead_links);
-			homa_peer_free(peer);
-		}
-	}
 }
 
 /**
@@ -369,10 +321,7 @@ void homa_peer_gc(struct homa_peertab *peertab)
 	spin_lock_bh(&peertab->lock);
 	if (peertab->gc_stop_count != 0)
 		goto done;
-	if (!list_empty(&peertab->dead_peers))
-		homa_peer_free_dead(peertab);
-	if (atomic_read(&peertab->call_rcu_pending) ||
-	    peertab->num_peers < peertab->gc_threshold)
+	if (peertab->num_peers < peertab->gc_threshold)
 		goto done;
 	num_victims = homa_peer_pick_victims(peertab, victims,
 					     EVICT_BATCH_SIZE);
@@ -384,15 +333,13 @@ void homa_peer_gc(struct homa_peertab *peertab)
 
 		if (rhashtable_remove_fast(&peertab->ht, &peer->ht_linkage,
 					   ht_params) == 0) {
-			list_add_tail(&peer->dead_links, &peertab->dead_peers);
+			homa_peer_release(peer);
 			peertab->num_peers--;
 			peer->ht_key.hnet->num_peers--;
 			tt_record1("homa_peer_gc removed homa_peer 0x%x",
 				   tt_addr(peer->addr));
 		}
 	}
-	atomic_set(&peertab->call_rcu_pending, 1);
-	call_rcu(&peertab->rcu_head, homa_peer_rcu_callback);
 done:
 	spin_unlock_bh(&peertab->lock);
 }
@@ -419,9 +366,8 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 	}
 	peer->ht_key.addr = *addr;
 	peer->ht_key.hnet = hsk->hnet;
-	atomic_set(&peer->refs, 1);
+	refcount_set(&peer->refs, 1);
 	peer->access_jiffies = jiffies;
-	INIT_LIST_HEAD(&peer->dead_links);
 	spin_lock_init(&peer->lock);
 #ifndef __STRIP__ /* See strip.py */
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
@@ -444,31 +390,16 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 
 /**
  * homa_peer_free() - Release any resources in a peer and free the homa_peer
- * struct.
- * @peer:       Structure to free. Must not currently be linked into
- *              peertab->ht.
+ * struct. Invoked by the RCU mechanism via homa_peer_release.
+ * @head:   Pointer to the rcu_head field of the peer to free.
  */
-void homa_peer_free(struct homa_peer *peer)
+void homa_peer_free(struct rcu_head *head)
 {
-	dst_release(peer->dst);
+	struct homa_peer *peer;
 
-	if (atomic_read(&peer->refs) == 0)
-		kfree(peer);
-	else {
-#ifdef __UNIT_TEST__
-		if (!mock_peer_free_no_fail)
-			FAIL(" %s found peer %s with reference count %d",
-			     __func__, homa_print_ipv6_addr(&peer->addr),
-			     atomic_read(&peer->refs));
-		else
-			UNIT_LOG("; ", "peer %s has reference count %d",
-				 homa_print_ipv6_addr(&peer->addr),
-				 atomic_read(&peer->refs));
-#else /* __UNIT_TEST__ */
-		WARN(1, "%s found peer with reference count %d",
-		     __func__, atomic_read(&peer->refs));
-#endif /* __UNIT_TEST__ */
-	}
+	peer = container_of(head, struct homa_peer, rcu_head);
+	dst_release(peer->dst);
+	kfree(peer);
 }
 
 /**
@@ -513,18 +444,17 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 	if (IS_ERR(other)) {
 		/* Couldn't insert; return the error info. */
 		homa_peer_release(peer);
-		homa_peer_free(peer);
 		peer = other;
 	} else if (other) {
 		/* Someone else already created the desired peer; use that
 		 * one instead of ours.
 		 */
 		homa_peer_release(peer);
-		homa_peer_free(peer);
+		homa_peer_hold(other);
 		peer = other;
-		homa_peer_hold(peer);
 		peer->access_jiffies = jiffies;
 	} else {
+		homa_peer_hold(peer);
 		peertab->num_peers++;
 		key.hnet->num_peers++;
 	}

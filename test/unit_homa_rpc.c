@@ -811,11 +811,11 @@ TEST_F(homa_rpc, homa_rpc_reap__release_peer_ref)
 
 	ASSERT_NE(NULL, crpc);
 	peer = crpc->peer;
-	EXPECT_EQ(1, atomic_read(&peer->refs));
+	EXPECT_EQ(2, refcount_read(&peer->refs));
 
 	homa_rpc_end(crpc);
 	homa_rpc_reap(&self->hsk, false);
-	EXPECT_EQ(0, atomic_read(&peer->refs));
+	EXPECT_EQ(1, refcount_read(&peer->refs));
 	EXPECT_EQ(NULL, crpc->peer);
 }
 #ifndef __STRIP__ /* See strip.py */

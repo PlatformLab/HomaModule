@@ -368,6 +368,7 @@ void BUG_func(void)
 void call_rcu(struct rcu_head *head, void free_func(struct rcu_head *head))
 {
 	unit_log_printf("; ", "call_rcu invoked");
+	free_func(head);
 }
 
 bool cancel_work_sync(struct work_struct *work)

@@ -319,21 +319,6 @@ void unit_log_throttled(struct homa *homa)
 }
 
 /**
- * unit_log_dead_peers() - Append to the test log the addresses of all
- * peers in peertab->dead_peers for @homa.
- * @homa:     Homa's overall state.
- */
-void unit_log_dead_peers(struct homa *homa)
-{
-	struct homa_peer *peer;
-
-	list_for_each_entry(peer, &homa->peertab->dead_peers, dead_links) {
-		unit_log_printf("; ", "%s",
-				homa_print_ipv6_addr(&peer->ht_key.addr));
-	}
-}
-
-/**
  * unit_print_gaps() - Returns a static string describing the gaps in an RPC.
  * @rpc:     Log the gaps in this RPC.
  */

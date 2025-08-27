@@ -40,24 +40,8 @@ struct homa_peertab {
 	 */
 	bool ht_valid;
 
-	/**
-	 * @dead_peers: List of peers that have been removed from ht
-	 * but can't yet be freed (because they have nonzero reference
-	 * counts or an rcu sync point hasn't been reached).
-	 */
-	struct list_head dead_peers;
-
 	/** @rcu_head: Holds state of a pending call_rcu invocation. */
 	struct rcu_head rcu_head;
-
-	/**
-	 * @call_rcu_pending: Nonzero means that call_rcu has been
-	 * invoked but it has not invoked the callback function; until the
-	 * callback has been invoked we can't free peers on dead_peers or
-	 * invoke call_rcu again (which means we can't add more peers to
-	 * dead_peers).
-	 */
-	atomic_t call_rcu_pending;
 
 	/**
 	 * @gc_stop_count: Nonzero means that peer garbage collection
@@ -146,10 +130,12 @@ struct homa_peer {
 	};
 
 	/**
-	 * @refs: Number of unmatched calls to homa_peer_hold; it's not safe
-	 * to free this object until the reference count is zero.
+	 * @refs: Number of outstanding references to this peer. Includes
+	 * one reference for the entry in peertab->ht, plus one for each
+	 * unmatched call to homa_peer_hold; the peer gets freed when
+	 * this value becomes zero.
 	 */
-	atomic_t refs;
+	refcount_t refs;
 
 	/**
 	 * @access_jiffies: Time in jiffies of most recent access to this
@@ -162,9 +148,6 @@ struct homa_peer {
 	 * peertab->ht.
 	 */
 	struct rhash_head ht_linkage;
-
-	/** @dead_links: Used to link this peer into peertab->dead_peers. */
-	struct list_head dead_links;
 
 	/**
 	 * @lock: used to synchronize access to fields in this struct, such
@@ -291,6 +274,9 @@ struct homa_peer {
 	 * in the current pass, if it still needs one.
 	 */
 	struct homa_rpc *resend_rpc;
+
+	/** @rcu_head: Holds state of a pending call_rcu invocation. */
+	struct rcu_head rcu_head;
 };
 
 void     homa_dst_refresh(struct homa_peertab *peertab,
@@ -304,9 +290,7 @@ struct homa_peertab
 	*homa_peer_alloc_peertab(void);
 int      homa_peer_dointvec(const struct ctl_table *table, int write,
 			    void *buffer, size_t *lenp, loff_t *ppos);
-void     homa_peer_free(struct homa_peer *peer);
-void     homa_peer_free_dead(struct homa_peertab *peertab);
-void     homa_peer_free_fn(void *object, void *dummy);
+void     homa_peer_free(struct rcu_head *head);
 void     homa_peer_free_net(struct homa_net *hnet);
 void     homa_peer_free_peertab(struct homa_peertab *peertab);
 void     homa_peer_gc(struct homa_peertab *peertab);
@@ -319,7 +303,7 @@ int      homa_peer_pick_victims(struct homa_peertab *peertab,
 int      homa_peer_prefer_evict(struct homa_peertab *peertab,
 				struct homa_peer *peer1,
 				struct homa_peer *peer2);
-void     homa_peer_rcu_callback(struct rcu_head *head);
+void     homa_peer_release_fn(void *object, void *dummy);
 int      homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk);
 void     homa_peer_update_sysctl_deps(struct homa_peertab *peertab);
 #ifndef __STRIP__ /* See strip.py */
@@ -369,7 +353,7 @@ static inline void homa_peer_unlock(struct homa_peer *peer)
  */
 static inline void homa_peer_hold(struct homa_peer *peer)
 {
-	atomic_inc(&peer->refs);
+	refcount_inc(&peer->refs);
 }
 
 /**
@@ -380,7 +364,8 @@ static inline void homa_peer_hold(struct homa_peer *peer)
  */
 static inline void homa_peer_release(struct homa_peer *peer)
 {
-	atomic_dec(&peer->refs);
+	if (refcount_dec_and_test(&peer->refs))
+		call_rcu(&peer->rcu_head, homa_peer_free);
 }
 
 /**
