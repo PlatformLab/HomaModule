@@ -602,6 +602,7 @@ TEST_F(homa_peer, homa_peer_alloc__route_error)
 
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_allocs);
 #endif /* See strip.py */
 }
 
@@ -635,7 +636,7 @@ TEST_F(homa_peer, homa_peer_free__nonzero_ref_count)
 	kfree(peer);
 }
 
-TEST_F(homa_peer, homa_peer_find__basics)
+TEST_F(homa_peer, homa_peer_get__basics)
 {
 	struct homa_peer *peer, *peer2;
 
@@ -674,7 +675,7 @@ TEST_F(homa_peer, homa_peer_find__basics)
 	homa_peer_release(peer);
 	homa_peer_release(peer2);
 }
-TEST_F(homa_peer, homa_peer_find__error_in_homa_peer_alloc)
+TEST_F(homa_peer, homa_peer_get__error_in_homa_peer_alloc)
 {
 	struct homa_peer *peer;
 
@@ -686,7 +687,7 @@ TEST_F(homa_peer, homa_peer_find__error_in_homa_peer_alloc)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
 #endif /* See strip.py */
 }
-TEST_F(homa_peer, homa_peer_find__insert_error)
+TEST_F(homa_peer, homa_peer_get__insert_error)
 {
 	struct homa_peer *peer;
 
@@ -695,7 +696,7 @@ TEST_F(homa_peer, homa_peer_find__insert_error)
 	EXPECT_TRUE(IS_ERR(peer));
 	EXPECT_EQ(EINVAL, -PTR_ERR(peer));
 }
-TEST_F(homa_peer, homa_peer_find__conflicting_create)
+TEST_F(homa_peer, homa_peer_get__conflicting_create)
 {
 	struct homa_peer *peer;
 
@@ -713,36 +714,132 @@ TEST_F(homa_peer, homa_peer_find__conflicting_create)
 	EXPECT_EQ(1, self->hnet->num_peers);
 }
 
-TEST_F(homa_peer, homa_dst_refresh__basics)
+TEST_F(homa_peer, homa_get_dst__normal)
 {
-	struct dst_entry *old_dst;
-	struct homa_peer *peer;
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
+	struct dst_entry *dst;
 
-	peer = homa_peer_get(&self->hsk, ip1111);
-	ASSERT_NE(NULL, peer);
-	EXPECT_EQ_IP(*ip1111, peer->addr);
-
-	old_dst = peer->dst;
-	homa_dst_refresh(self->homa.peertab, peer, &self->hsk);
-	EXPECT_NE(old_dst, peer->dst);
+	dst = homa_get_dst(peer, &self->hsk);
+	EXPECT_EQ(2, atomic_read(&dst->__rcuref.refcnt));
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->peer_dst_refreshes));
+	dst_release(dst);
 	homa_peer_release(peer);
 }
-TEST_F(homa_peer, homa_dst_refresh__routing_error)
+TEST_F(homa_peer, homa_get_dst__must_refresh_obsolete)
 {
-	struct dst_entry *old_dst;
-	struct homa_peer *peer;
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
+	struct dst_entry *old, *dst;
 
-	peer = homa_peer_get(&self->hsk, ip1111);
+	old = peer->dst;
+	peer->dst->obsolete = 1;
+	mock_dst_check_errors = 1;
+	dst = homa_get_dst(peer, &self->hsk);
+	EXPECT_EQ(2, atomic_read(&dst->__rcuref.refcnt));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes));
+	EXPECT_NE(old, dst);
+	dst_release(dst);
+	homa_peer_release(peer);
+}
+TEST_F(homa_peer, homa_get_dst__multiple_refresh_failures)
+{
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
+	struct dst_entry *old, *dst;
+
+	old = peer->dst;
+	peer->dst->obsolete = 1;
+	mock_dst_check_errors = 0xf;
+	mock_route_errors = 0xf;
+	dst = homa_get_dst(peer, &self->hsk);
+	EXPECT_EQ(2, atomic_read(&dst->__rcuref.refcnt));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes));
+	EXPECT_EQ(old, dst);
+	EXPECT_EQ(3, mock_dst_check_errors);
+	dst_release(dst);
+	homa_peer_release(peer);
+}
+
+TEST_F(homa_peer, homa_peer_reset_dst__ipv4)
+{
+	int status;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, 0);
+
+	struct homa_peer *peer = homa_peer_get(&self->hsk,
+						&self->client_ip[0]);
 	ASSERT_NE(NULL, peer);
-	EXPECT_EQ_IP(*ip1111, peer->addr);
 
-	old_dst = peer->dst;
+	status = homa_peer_reset_dst(peer, &self->hsk);
+	ASSERT_EQ(0, -status);
+	ASSERT_NE(NULL, peer->dst);
+	EXPECT_STREQ("196.168.0.1",
+				homa_print_ipv4_addr(peer->flow.u.ip4.daddr));
+	homa_peer_release(peer);
+}
+TEST_F(homa_peer, homa_peer_reset_dst__ipv4_route_error)
+{
+	struct dst_entry *old;
+	int status;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, 0);
+
+	struct homa_peer *peer = homa_peer_get(&self->hsk,
+						&self->client_ip[0]);
+	ASSERT_NE(NULL, peer);
+	old = peer->dst;
+
 	mock_route_errors = 1;
-	homa_dst_refresh(self->homa.peertab, peer, &self->hsk);
-	EXPECT_EQ(old_dst, peer->dst);
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
-#endif /* See strip.py */
+	status = homa_peer_reset_dst(peer, &self->hsk);
+	EXPECT_EQ(EHOSTUNREACH, -status);
+	EXPECT_EQ(old, peer->dst);
+	homa_peer_release(peer);
+}
+TEST_F(homa_peer, homa_peer_reset_dst__ipv6)
+{
+	char buffer[30];
+	int status;
+	u32 addr;
+
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, 0);
+
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
+	ASSERT_NE(NULL, peer);
+
+	status = homa_peer_reset_dst(peer, &self->hsk);
+	ASSERT_EQ(0, -status);
+	addr = ntohl(peer->flow.u.ip4.daddr);
+	snprintf(buffer, sizeof(buffer), "%u.%u.%u.%u", (addr >> 24) & 0xff,
+			(addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
+	EXPECT_STREQ("[1::1:1:1]",
+			homa_print_ipv6_addr(&peer->flow.u.ip6.daddr));
+	homa_peer_release(peer);
+}
+TEST_F(homa_peer, homa_peer_reset_dst__ipv6_route_error)
+{
+	struct dst_entry *old;
+	int status;
+
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, 0);
+
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
+	ASSERT_NE(NULL, peer);
+	old = peer->dst;
+
+	mock_route_errors = 1;
+	status = homa_peer_reset_dst(peer, &self->hsk);
+	EXPECT_EQ(EHOSTUNREACH, -status);
+	EXPECT_EQ(old, peer->dst);
 	homa_peer_release(peer);
 }
 
@@ -757,54 +854,7 @@ TEST_F(homa_peer, homa_unsched_priority)
 	EXPECT_EQ(4, homa_unsched_priority(&self->homa, &peer, 200));
 	EXPECT_EQ(3, homa_unsched_priority(&self->homa, &peer, 201));
 }
-#endif /* See strip.py */
 
-TEST_F(homa_peer, homa_peer_get_dst__ipv4)
-{
-	struct dst_entry *dst;
-
-	// Make sure the test uses IPv4.
-	mock_ipv6 = false;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, 0);
-
-	struct homa_peer *peer = homa_peer_get(&self->hsk,
-						&self->client_ip[0]);
-	ASSERT_NE(NULL, peer);
-
-	dst = homa_peer_get_dst(peer, &self->hsk);
-	ASSERT_NE(NULL, dst);
-	dst_release(dst);
-	EXPECT_STREQ("196.168.0.1",
-				homa_print_ipv4_addr(peer->flow.u.ip4.daddr));
-	homa_peer_release(peer);
-}
-TEST_F(homa_peer, homa_peer_get_dst__ipv6)
-{
-	struct dst_entry *dst;
-	char buffer[30];
-	u32 addr;
-
-	// Make sure the test uses IPv6.
-	mock_ipv6 = true;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, 0);
-
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
-	ASSERT_NE(NULL, peer);
-
-	dst = homa_peer_get_dst(peer, &self->hsk);
-	ASSERT_NE(NULL, dst);
-	dst_release(dst);
-	addr = ntohl(peer->flow.u.ip4.daddr);
-	snprintf(buffer, sizeof(buffer), "%u.%u.%u.%u", (addr >> 24) & 0xff,
-			(addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
-	EXPECT_STREQ("[1::1:1:1]",
-			homa_print_ipv6_addr(&peer->flow.u.ip6.daddr));
-	homa_peer_release(peer);
-}
-
-#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_peer, homa_peer_lock_slow)
 {
 	struct homa_peer *peer = homa_peer_get(&self->hsk, ip3333);
@@ -919,31 +969,4 @@ TEST_F(homa_peer, homa_peer_update_sysctl_deps)
 	homa_peer_update_sysctl_deps(peertab);
 	EXPECT_EQ(10*HZ, peertab->idle_jiffies_min);
 	EXPECT_EQ(100*HZ, peertab->idle_jiffies_max);
-}
-
-/* Functions in homa_peer.h: */
-
-TEST_F(homa_peer, homa_get_dst__normal)
-{
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
-	struct dst_entry *dst;
-
-	dst = homa_get_dst(peer, &self->hsk);
-	EXPECT_EQ(2, atomic_read(&dst->__rcuref.refcnt));
-	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->peer_dst_refreshes));
-	dst_release(dst);
-	homa_peer_release(peer);
-}
-TEST_F(homa_peer, homa_get_dst__must_refresh)
-{
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
-	struct dst_entry *dst;
-
-	peer->dst->obsolete = 1;
-	mock_dst_check_errors = 1;
-	dst = homa_get_dst(peer, &self->hsk);
-	EXPECT_EQ(2, atomic_read(&dst->__rcuref.refcnt));
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes));
-	dst_release(dst);
-	homa_peer_release(peer);
 }

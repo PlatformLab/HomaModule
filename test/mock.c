@@ -721,6 +721,13 @@ int ip6_datagram_connect(struct sock *sk, struct sockaddr *addr, int addr_len)
 	return 0;
 }
 
+struct dst_entry *ip6_dst_check(struct dst_entry *dst, u32 cookie)
+{
+	if (mock_check_error(&mock_dst_check_errors))
+		return NULL;
+	return dst;
+}
+
 struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 		struct flowi6 *fl6, const struct in6_addr *final_dst)
 {
@@ -813,6 +820,13 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 	}
 	kfree_skb(skb);
 	return 0;
+}
+
+struct dst_entry *ipv4_dst_check(struct dst_entry *dst, u32 cookie)
+{
+	if (mock_check_error(&mock_dst_check_errors))
+		return NULL;
+	return dst;
 }
 
 unsigned int ipv4_mtu(const struct dst_entry *dst)

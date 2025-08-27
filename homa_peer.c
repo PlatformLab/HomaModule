@@ -410,26 +410,20 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 				  const struct in6_addr *addr)
 {
 	struct homa_peer *peer;
-	struct dst_entry *dst;
+	int status;
 
 	peer = kzalloc(sizeof(*peer), GFP_ATOMIC);
 	if (!peer) {
 		INC_METRIC(peer_kmalloc_errors, 1);
 		return (struct homa_peer *)ERR_PTR(-ENOMEM);
 	}
+	peer->addr = *addr;
 	peer->ht_key.addr = *addr;
 	peer->ht_key.hnet = hsk->hnet;
-	INIT_LIST_HEAD(&peer->dead_links);
 	atomic_set(&peer->refs, 1);
 	peer->access_jiffies = jiffies;
-	peer->addr = *addr;
-	dst = homa_peer_get_dst(peer, hsk);
-	if (IS_ERR(dst)) {
-		INC_METRIC(peer_route_errors, 1);
-		kfree(peer);
-		return (struct homa_peer *)dst;
-	}
-	peer->dst = dst;
+	INIT_LIST_HEAD(&peer->dead_links);
+	spin_lock_init(&peer->lock);
 #ifndef __STRIP__ /* See strip.py */
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 2] = INT_MAX;
@@ -437,10 +431,15 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&peer->grantable_links);
 #endif /* See strip.py */
 	peer->current_ticks = -1;
-	spin_lock_init(&peer->ack_lock);
-	INC_METRIC(peer_allocs, 1);
+
+	status = homa_peer_reset_dst(peer, hsk);
+	if (status != 0) {
+		kfree(peer);
+		return ERR_PTR(status);
+	}
 	tt_record1("Allocated new homa_peer for node 0x%x",
 		   tt_addr(peer->addr));
+	INC_METRIC(peer_allocs, 1);
 	return peer;
 }
 
@@ -536,31 +535,122 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 }
 
 /**
- * homa_dst_refresh() - This method is called when the dst for a peer is
- * obsolete; it releases that dst and creates a new one.
- * @peertab:  Table containing the peer.
- * @peer:     Peer whose dst is obsolete.
- * @hsk:      Socket that will be used to transmit data to the peer.
+ * homa_get_dst() - Returns destination information associated with a peer,
+ * updating it if the cached information is stale.
+ * @peer:   Peer whose destination information is desired.
+ * @hsk:    Homa socket with which the dst will be used; needed by lower-level
+ *          code to recreate the dst.
+ * Return:  Up-to-date destination for peer; a reference has been taken
+ *          on this dst_entry, which the caller must eventually release.
  */
-void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
-		      struct homa_sock *hsk)
+struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
 {
 	struct dst_entry *dst;
+	int pass;
 
-	INC_METRIC(peer_dst_refreshes, 1);
-	dst = homa_peer_get_dst(peer, hsk);
-	if (IS_ERR(dst)) {
-#ifndef __STRIP__ /* See strip.py */
-		/* Retain the existing dst if we can't create a new one. */
-		if (hsk->homa->verbose)
-			pr_notice("%s couldn't recreate dst: error %ld",
-				  __func__, PTR_ERR(dst));
-		INC_METRIC(peer_route_errors, 1);
-#endif /* See strip.py */
-		return;
+	rcu_read_lock();
+	for (pass = 0; ; pass++) {
+		do {
+			/* This loop repeats only if we happen to fetch
+			 * the dst right when it is being reset.
+			 */
+			dst = rcu_dereference(peer->dst);
+		} while (!dst_hold_safe(dst));
+
+		/* After the first pass it's OK to return an obsolete dst
+		 * (we're basically giving up; continuing could result in
+		 * an infinite loop if homa_dst_refresh can't create a new dst).
+		 */
+		if (dst_check(dst, peer->dst_cookie) || pass > 0)
+			break;
+		dst_release(dst);
+		INC_METRIC(peer_dst_refreshes, 1);
+		homa_peer_reset_dst(peer, hsk);
 	}
-	dst_release(peer->dst);
-	peer->dst = dst;
+	rcu_read_unlock();
+	return dst;
+}
+
+/**
+ * homa_peer_reset_dst() - Find an appropriate dst_entry for a peer and
+ * store it in the peer's dst field. If the field is already set, the
+ * current value is assumed to be stale and will be discarded if a new
+ * dst_entry can be created.
+ * @peer:   The peer whose dst field should be reset.
+ * @hsk:    Socket that will be used for sending packets.
+ * Return:  Zero for success, or a negative errno if there was an error
+ *          (in which case the existing value for the dst field is left
+ *          in place).
+ */
+int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
+{
+	struct dst_entry *dst;
+	int result = 0;
+
+	homa_peer_lock(peer);
+	memset(&peer->flow, 0, sizeof(peer->flow));
+	if (hsk->sock.sk_family == AF_INET) {
+		struct rtable *rt;
+
+		flowi4_init_output(&peer->flow.u.ip4, hsk->sock.sk_bound_dev_if,
+				   hsk->sock.sk_mark, hsk->inet.tos,
+				   RT_SCOPE_UNIVERSE, hsk->sock.sk_protocol, 0,
+				   ipv6_to_ipv4(peer->addr),
+				   hsk->inet.inet_saddr, 0, 0,
+				   hsk->sock.sk_uid);
+		security_sk_classify_flow(&hsk->sock,
+					  &peer->flow.u.__fl_common);
+		rt = ip_route_output_flow(sock_net(&hsk->sock),
+					  &peer->flow.u.ip4, &hsk->sock);
+		if (IS_ERR(rt)) {
+			result = PTR_ERR(rt);
+			INC_METRIC(peer_route_errors, 1);
+			goto done;
+		}
+		dst = &rt->dst;
+		peer->dst_cookie = 0;
+	} else {
+		peer->flow.u.ip6.flowi6_oif = hsk->sock.sk_bound_dev_if;
+		peer->flow.u.ip6.flowi6_iif = LOOPBACK_IFINDEX;
+		peer->flow.u.ip6.flowi6_mark = hsk->sock.sk_mark;
+		peer->flow.u.ip6.flowi6_scope = RT_SCOPE_UNIVERSE;
+		peer->flow.u.ip6.flowi6_proto = hsk->sock.sk_protocol;
+		peer->flow.u.ip6.flowi6_flags = 0;
+		peer->flow.u.ip6.flowi6_secid = 0;
+		peer->flow.u.ip6.flowi6_tun_key.tun_id = 0;
+		peer->flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
+		peer->flow.u.ip6.daddr = peer->addr;
+		peer->flow.u.ip6.saddr = hsk->inet.pinet6->saddr;
+		peer->flow.u.ip6.fl6_dport = 0;
+		peer->flow.u.ip6.fl6_sport = 0;
+		peer->flow.u.ip6.mp_hash = 0;
+		peer->flow.u.ip6.__fl_common.flowic_tos = hsk->inet.tos;
+		peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos,
+							       0);
+		security_sk_classify_flow(&hsk->sock,
+					  &peer->flow.u.__fl_common);
+		dst = ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
+					  &peer->flow.u.ip6, NULL);
+		if (IS_ERR(dst)) {
+			result = PTR_ERR(dst);
+			INC_METRIC(peer_route_errors, 1);
+			goto done;
+		}
+		peer->dst_cookie = rt6_get_cookie(dst_rt6_info(dst));
+	}
+
+	/* From the standpoint of homa_get_dst, peer->dst is not updated
+	 * atomically with peer->dst_cookie, which means homa_get_dst could
+	 * use a new cookie with an old dest. Fortunately, this is benign; at
+	 * worst, it might cause an obsolete dst to be reused (resulting in
+	 * a lost packet) or a valid dst to be replaced (resulting in
+	 * unnecessary work).
+	 */
+	dst_release(rcu_replace_pointer(peer->dst, dst, true));
+
+done:
+	homa_peer_unlock(peer);
+	return result;
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -584,59 +674,7 @@ int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 	}
 	/* Can't ever get here */
 }
-#endif /* See strip.py */
 
-/**
- * homa_peer_get_dst() - Find an appropriate dst structure (either IPv4
- * or IPv6) for a peer.
- * @peer:   The peer for which a dst is needed. Note: this peer's flow
- *          struct will be overwritten.
- * @hsk:    Socket that will be used for sending packets.
- * Return:  The dst structure (or an ERR_PTR); a reference has been taken.
- */
-struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
-				    struct homa_sock *hsk)
-{
-	memset(&peer->flow, 0, sizeof(peer->flow));
-	if (hsk->sock.sk_family == AF_INET) {
-		struct rtable *rt;
-
-		flowi4_init_output(&peer->flow.u.ip4, hsk->sock.sk_bound_dev_if,
-				   hsk->sock.sk_mark, hsk->inet.tos,
-				   RT_SCOPE_UNIVERSE, hsk->sock.sk_protocol, 0,
-				   peer->addr.in6_u.u6_addr32[3],
-				   hsk->inet.inet_saddr, 0, 0,
-				   hsk->sock.sk_uid);
-		security_sk_classify_flow(&hsk->sock,
-					  &peer->flow.u.__fl_common);
-		rt = ip_route_output_flow(sock_net(&hsk->sock),
-					  &peer->flow.u.ip4, &hsk->sock);
-		if (IS_ERR(rt))
-			return (struct dst_entry *)(PTR_ERR(rt));
-		return &rt->dst;
-	}
-	peer->flow.u.ip6.flowi6_oif = hsk->sock.sk_bound_dev_if;
-	peer->flow.u.ip6.flowi6_iif = LOOPBACK_IFINDEX;
-	peer->flow.u.ip6.flowi6_mark = hsk->sock.sk_mark;
-	peer->flow.u.ip6.flowi6_scope = RT_SCOPE_UNIVERSE;
-	peer->flow.u.ip6.flowi6_proto = hsk->sock.sk_protocol;
-	peer->flow.u.ip6.flowi6_flags = 0;
-	peer->flow.u.ip6.flowi6_secid = 0;
-	peer->flow.u.ip6.flowi6_tun_key.tun_id = 0;
-	peer->flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
-	peer->flow.u.ip6.daddr = peer->addr;
-	peer->flow.u.ip6.saddr = hsk->inet.pinet6->saddr;
-	peer->flow.u.ip6.fl6_dport = 0;
-	peer->flow.u.ip6.fl6_sport = 0;
-	peer->flow.u.ip6.mp_hash = 0;
-	peer->flow.u.ip6.__fl_common.flowic_tos = hsk->inet.tos;
-	peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos, 0);
-	security_sk_classify_flow(&hsk->sock, &peer->flow.u.__fl_common);
-	return ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
-			&peer->flow.u.ip6, NULL);
-}
-
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_peer_set_cutoffs() - Set the cutoffs for unscheduled priorities in
  * a peer object. This is a convenience function used primarily by unit tests.
@@ -665,18 +703,18 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
 
 /**
  * homa_peer_lock_slow() - This function implements the slow path for
- * acquiring a peer's @ack_lock. It is invoked when the lock isn't
+ * acquiring a peer's @lock. It is invoked when the lock isn't
  * immediately available. It waits for the lock, but also records statistics
  * about the waiting time.
  * @peer:    Peer to  lock.
  */
 void homa_peer_lock_slow(struct homa_peer *peer)
-	__acquires(peer->ack_lock)
+	__acquires(peer->lock)
 {
 	u64 start = homa_clock();
 
 	tt_record("beginning wait for peer lock");
-	spin_lock_bh(&peer->ack_lock);
+	spin_lock_bh(&peer->lock);
 	tt_record("ending wait for peer lock");
 	INC_METRIC(peer_ack_lock_misses, 1);
 	INC_METRIC(peer_ack_lock_miss_cycles, homa_clock() - start);
