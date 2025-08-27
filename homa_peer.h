@@ -120,7 +120,8 @@ struct homa_peertab {
 struct homa_peer_key {
 	/**
 	 * @addr: Address of the desired host. IPv4 addresses are represented
-	 * with IPv4-mapped IPv6 addresses.
+	 * with IPv4-mapped IPv6 addresses. Must be the first variable in
+	 * the struct, because of union in homa_peer.
 	 */
 	struct in6_addr addr;
 
@@ -133,14 +134,16 @@ struct homa_peer_key {
  * have communicated with (either as client or server).
  */
 struct homa_peer {
-	/**
-	 * @addr: IPv6 address for the machine (IPv4 addresses are stored
-	 * as IPv4-mapped IPv6 addresses).
-	 */
-	struct in6_addr addr;
+	union {
+		/**
+		 * @addr: IPv6 address for the machine (IPv4 addresses are
+		 * stored as IPv4-mapped IPv6 addresses).
+		 */
+		struct in6_addr addr;
 
-	/** @ht_key: The hash table key for this peer in peertab->ht. */
-	struct homa_peer_key ht_key;
+		/** @ht_key: The hash table key for this peer in peertab->ht. */
+		struct homa_peer_key ht_key;
+	};
 
 	/**
 	 * @refs: Number of unmatched calls to homa_peer_hold; it's not safe

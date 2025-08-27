@@ -417,7 +417,6 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 		INC_METRIC(peer_kmalloc_errors, 1);
 		return (struct homa_peer *)ERR_PTR(-ENOMEM);
 	}
-	peer->addr = *addr;
 	peer->ht_key.addr = *addr;
 	peer->ht_key.hnet = hsk->hnet;
 	atomic_set(&peer->refs, 1);
