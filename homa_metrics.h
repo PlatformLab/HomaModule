@@ -433,8 +433,9 @@ struct homa_metrics {
 	u64 peer_route_errors;
 
 	/**
-	 * @peer_dst_refreshes: total number of times that homa_dst_refresh
-	 * was called to update an obsolete dst for a peer.
+	 * @peer_dst_refreshes: total number of times that the dst for a
+	 * peer had to be regenerated because the existing one had become
+	 * obsolete.
 	 */
 	u64 peer_dst_refreshes;
 
