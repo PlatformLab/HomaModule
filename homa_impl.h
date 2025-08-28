@@ -853,24 +853,24 @@ static inline struct homa_net *homa_net(struct net *net)
  */
 static inline u64 homa_clock(void)
 {
-	/* As of May 2025 there does not appear to be a portable API that
-	 * meets Homa's needs:
-	 * - The Intel X86 TSC works well but is not portable.
-	 * - sched_clock() does not guarantee monotonicity or consistency.
-	 * - ktime_get_mono_fast_ns and ktime_get_raw_fast_ns are very slow
-	 *   (27 ns to read, vs 8 ns for TSC)
-	 * Thus we use a hybrid approach that uses TSC (via get_cycles) where
-	 * available (which should be just about everywhere Homa runs).
+	/* This function exists to make it easy to switch time sources
+	 * if/when new or better sources become available.
 	 */
 #ifdef __UNIT_TEST__
 	u64 mock_get_clock(void);
 	return mock_get_clock();
 #else /* __UNIT_TEST__ */
-#ifdef CONFIG_X86_TSC
+#ifndef __UPSTREAM__ /* See strip.py */
+	/* As of August 2025, get_cycles takes only about 8 ns/call, vs.
+	 * 14 ns/call for ktime_get_ns. This saves about .04 core when
+	 * driving a 25 Gbps network at high load (see perf.txt for details).
+	 * Unfortunately, Linux reviewers will not allow get_cycles in the
+	 * upstreamed version.
+	 */
 	return get_cycles();
-#else
-	return ktime_get_mono_fast_ns();
-#endif /* CONFIG_X86_TSC */
+#else /* See strip.py */
+	return ktime_get_ns();
+#endif /* See strip.py */
 #endif /* __UNIT_TEST__ */
 }
 
@@ -884,11 +884,11 @@ static inline u64 homa_clock_khz(void)
 #ifdef __UNIT_TEST__
 	return 1000000;
 #else /* __UNIT_TEST__ */
-#ifdef CONFIG_X86_TSC
+#ifndef __UPSTREAM__ /* See strip.py */
 	return tsc_khz;
-#else
+#else /* See strip.py */
 	return 1000000;
-#endif /* CONFIG_X86_TSC */
+#endif /* See strip.py */
 #endif /* __UNIT_TEST__ */
 }
 

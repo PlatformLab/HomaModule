@@ -2,6 +2,22 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+62. (August 2025) Using ktime_get_ns (rdtscp) instead of get_cycles (rdtsc)
+in homa_clock (Linux reviewers won't allow get_cycles for upstreaming).
+rdtscp takes about 14 ns per call, vs. 8 for ktime_get_ns. Running "w4 -b20"
+on xl170s homa_clock invocations are 21 M/sec, so expect about .12 additional
+core to be used. Measurements on xl170 cluster (25 Gbps network) using "w4 -b20"
+(average across 6 nodes in experiment, then average over 5 runs):
+                                rdtsc      rdtscp    Ratio
+Gbps/sec/core:                   6.46        6.22    0.954
+Total core utilization:          6.20        6.44    1.038
+
+Same experiment but in overload ("w4 -b40"):
+                                rdtsc      rdtscp    Ratio
+Gbps/sec/core:                   5.44        5.32    0.980
+Total core utilization:          8.08        8.05    0.997
+Maximum throughput (Gbps):      21.95       21.42    0.976
+
 61. (July 2025) Client responses could starve server requests. This came
 about because a server request that wakes up after waiting for buffer space
 has 0 received bytes. In contrast, a new client response will have received
@@ -57,6 +73,7 @@ mode):
 Function                  Units        Overhead
 -----------------------------------------------
 rdtsc                     cycles         8 ns
+rdtscp                    cycles        14 ns
 sched_clock               ns             9 ns
 ktime_get_mono_fast_ns    ns            24 ns
 ktime_get_raw_fast_ns     ns            24 ns
