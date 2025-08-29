@@ -4,7 +4,7 @@ CFLAGS := -Wall -Werror -fno-strict-aliasing -O3 -I..
 
 BINS := buffer_client buffer_server cp_node dist_test dist_to_proto \
 	get_time_trace homa_prio homa_test inc_tput receive_raw scratch \
-	send_raw server smi test_time_trace use_memory
+	send_raw server smi use_memory
 
 OBJS := $(patsubst %,%.o,$(BINS))
 
