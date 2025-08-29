@@ -486,13 +486,10 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 	 */
 	skbs_to_reap = hsk->homa->reap_limit;
 	checked_all_rpcs = list_empty(&hsk->dead_rpcs);
-	while (1) {
+	while (!checked_all_rpcs) {
 		batch_size = BATCH_MAX;
-		if (reap_all) {
-			if (list_empty(&hsk->dead_rpcs))
-				break;
-		} else {
-			if (skbs_to_reap <= 0 || checked_all_rpcs)
+		if (!reap_all) {
+			if (skbs_to_reap <= 0)
 				break;
 			if (batch_size > skbs_to_reap)
 				batch_size = skbs_to_reap;
