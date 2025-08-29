@@ -115,7 +115,7 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 	return NULL;
 
 success:
-	scan->hsk =  hlist_entry(next, struct homa_sock, socktab_links);
+	scan->hsk = hlist_entry(next, struct homa_sock, socktab_links);
 	sock_hold(&scan->hsk->sock);
 	rcu_read_unlock();
 	return scan->hsk;
@@ -173,34 +173,13 @@ int homa_sock_init(struct homa_sock *hsk)
 	if (IS_ERR(buffer_pool))
 		return PTR_ERR(buffer_pool);
 
-	/* Initialize Homa-specific fields. */
+	/* Initialize Homa-specific fields. We can initialize everything
+	 * except the port and hash table links without acquiring the
+	 * socket lock.
+	 */
 	hsk->homa = homa;
 	hsk->hnet = hnet;
 	hsk->buffer_pool = buffer_pool;
-
-	/* Pick a default port. Must keep the socktab locked from now
-	 * until the new socket is added to the socktab, to ensure that
-	 * no other socket chooses the same port.
-	 */
-	spin_lock_bh(&socktab->write_lock);
-	starting_port = hnet->prev_default_port;
-	while (1) {
-		hnet->prev_default_port++;
-		if (hnet->prev_default_port < HOMA_MIN_DEFAULT_PORT)
-			hnet->prev_default_port = HOMA_MIN_DEFAULT_PORT;
-		other = homa_sock_find(hnet, hnet->prev_default_port);
-		if (!other)
-			break;
-		sock_put(&other->sock);
-		if (hnet->prev_default_port == starting_port) {
-			spin_unlock_bh(&socktab->write_lock);
-			hsk->shutdown = true;
-			hsk->homa = NULL;
-			result = -EADDRNOTAVAIL;
-			goto error;
-		}
-	}
-	hsk->port = hnet->prev_default_port;
 	hsk->inet.inet_num = hsk->port;
 	hsk->inet.inet_sport = htons(hsk->port);
 
@@ -230,6 +209,33 @@ int homa_sock_init(struct homa_sock *hsk)
 		bucket->id = i + 1000000;
 		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
+
+	/* Pick a default port. Must keep the socktab locked from now
+	 * until the new socket is added to the socktab, to ensure that
+	 * no other socket chooses the same port.
+	 */
+	spin_lock_bh(&socktab->write_lock);
+	starting_port = hnet->prev_default_port;
+	while (1) {
+		hnet->prev_default_port++;
+		if (hnet->prev_default_port < HOMA_MIN_DEFAULT_PORT)
+			hnet->prev_default_port = HOMA_MIN_DEFAULT_PORT;
+		other = homa_sock_find(hnet, hnet->prev_default_port);
+		if (!other)
+			break;
+		sock_put(&other->sock);
+		if (hnet->prev_default_port == starting_port) {
+			spin_unlock_bh(&socktab->write_lock);
+			hsk->shutdown = true;
+			hsk->homa = NULL;
+			result = -EADDRNOTAVAIL;
+			goto error;
+		}
+		spin_unlock_bh(&socktab->write_lock);
+		cond_resched();
+		spin_lock_bh(&socktab->write_lock);
+	}
+	hsk->port = hnet->prev_default_port;
 	hlist_add_head_rcu(&hsk->socktab_links,
 			   &socktab->buckets[homa_socktab_bucket(hnet,
 								 hsk->port)]);
