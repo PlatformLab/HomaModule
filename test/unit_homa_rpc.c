@@ -533,25 +533,6 @@ TEST_F(homa_rpc, homa_rpc_end__remove_from_throttled_list)
 	homa_rpc_end(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->homa.pacer->throttled_rpcs));
 }
-TEST_F(homa_rpc, homa_rpc_end__call_homa_rpc_reap)
-{
-	struct homa_rpc *srpc;
-
-	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			self->server_ip, self->client_port, self->server_id,
-			100, 3000);
-	ASSERT_NE(NULL, srpc);
-	homa_rpc_lock(srpc);
-	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
-	unit_log_clear();
-
-	homa_rpc_end(srpc);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.dead_rpcs));
-	EXPECT_STREQ("homa_rpc_end invoked; reaped 1235",
-		     unit_log_get());
-	homa_rpc_unlock(srpc);
-}
 
 TEST_F(homa_rpc, homa_rpc_reap__nothing_to_reap)
 {

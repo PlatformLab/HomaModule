@@ -939,16 +939,22 @@ TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
 }
 TEST_F(homa_plumbing, homa_recvmsg__reap_because_of_SOCK_NOSPACE)
 {
+	/* Make the tx message long enough that it takes multiple reap
+	 * passes (to ensure homa_rpc_reap was called with reap_all==true).
+	 */
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->server_port,
-			self->client_id, 100, 2000);
+			self->client_id, 20000, 2000);
 
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_TRUE(refcount_read(&self->hsk.sock.sk_wmem_alloc) > 20000);
 
 	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
+	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
+	EXPECT_EQ(0, self->hsk.dead_skbs);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls));
 }
 TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_args)

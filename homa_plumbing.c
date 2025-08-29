@@ -1347,7 +1347,7 @@ done:
 		/* There are tasks waiting for tx memory, so reap
 		 * immediately.
 		 */
-		homa_rpc_reap(hsk, false);
+		homa_rpc_reap(hsk, true);
 	}
 
 	if (unlikely(copy_to_user((__force void __user *)msg->msg_control,

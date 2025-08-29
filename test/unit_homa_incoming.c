@@ -1307,66 +1307,62 @@ TEST_F(homa_incoming, homa_dispatch_pkts__too_many_acks)
 	EXPECT_STREQ("sk->sk_data_ready invoked; ack 1237; ack 1235",
 				unit_log_get());
 }
-#if 0
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_dispatch_pkts__invoke_homa_grant_check_rpc)
 {
 	self->data.incoming = htonl(1000);
 	self->data.message_length = htonl(20000);
-	homa_dispatch_pkts(mock_skb_new(self->server_ip, &self->data.common,
+	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &self->data.common,
 			0, 0));
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_SUBSTR("id 1235", unit_log_get());
 }
 #endif /* See strip.py */
-#endif
 TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 {
 	struct homa_rpc *dead = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 20000);
 	struct homa_rpc *srpc;
-	mock_clock_tick = 10;
+	int dead_skbs;
 
+	mock_clock_tick = 10;
 	homa_rpc_end(dead);
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(31, self->hsk.dead_skbs);
-#else /* See strip.py */
-	EXPECT_EQ(30, self->hsk.dead_skbs);
-#endif /* See strip.py */
+	dead_skbs = self->hsk.dead_skbs;
+	EXPECT_TRUE(dead_skbs >= 30);
 	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			10000, 5000);
 	ASSERT_NE(NULL, srpc);
 	self->homa.dead_buffs_limit = 16;
 
-	/* First packet: below the threshold for reaps. */
+	/* First packet: criteria for reaps not met. */
 	self->data.common.dport = htons(self->hsk.port);
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &self->data.common,
 			1400, 0));
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(31, self->hsk.dead_skbs);
-#else /* See strip.py */
-	EXPECT_EQ(30, self->hsk.dead_skbs);
-#endif /* See strip.py */
+	EXPECT_EQ(dead_skbs, self->hsk.dead_skbs);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(0, homa_metrics_per_cpu()->data_pkt_reap_cycles);
 #endif /* See strip.py */
 
-	/* Second packet: must reap. */
+	/* Second packet: must reap because of dead_buffs_limit (should only
+	 * reaps a few skbs).
+	 */
 	self->homa.dead_buffs_limit = 15;
-	self->homa.reap_limit = 10;
+	self->homa.reap_limit = 5;
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &self->data.common,
 			1400, 0));
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(21, self->hsk.dead_skbs);
-#else /* See strip.py */
-	EXPECT_EQ(20, self->hsk.dead_skbs);
-#endif /* See strip.py */
+	EXPECT_EQ(dead_skbs - 5, self->hsk.dead_skbs);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_NE(0, homa_metrics_per_cpu()->data_pkt_reap_cycles);
 #endif /* See strip.py */
+
+	/* Third packet: must reap all dead skbs (SOCK_NO_SPACE). */
+	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
+	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &self->data.common,
+			1400, 0));
+	EXPECT_EQ(0, self->hsk.dead_skbs);
 }
 
 TEST_F(homa_incoming, homa_data_pkt__basics)

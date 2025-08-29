@@ -637,18 +637,25 @@ discard:
 		homa_rpc_acked(hsk, &saddr, &acks[num_acks]);
 	}
 
-	if (hsk->dead_skbs >= 2 * hsk->homa->dead_buffs_limit) {
-		/* We get here if other approaches are not keeping up with
-		 * reaping dead RPCs. See "RPC Reaping Strategy" in
-		 * homa_rpc_reap code for details.
-		 */
-#ifndef __STRIP__ /* See strip.py */
-		u64 start = homa_clock();
-#endif /* See strip.py */
+	/* We need to reap dead RPCs here under two conditions:
+	 * 1. The socket has hit its limit on tx buffer space and threads are
+	 *    blocked waiting for skbs to be released.
+	 * 2. A large number of dead RPCs have accumulated, and it seems
+	 *    that the reaper isn't keeping up when invoked only at
+	 *    "convenient" times (see "RPC Reaping Strategy" in homa_rpc_reap
+	 *    code for details).
+	 */
+	if (hsk->dead_skbs > 0) {
+		int waiting_for_wmem = test_bit(SOCK_NOSPACE,
+						&hsk->sock.sk_socket->flags);
+		if (waiting_for_wmem ||
+		    hsk->dead_skbs >= 2 * hsk->homa->dead_buffs_limit) {
+			IF_NO_STRIP(u64 start = homa_clock());
 
-		tt_record("homa_data_pkt calling homa_rpc_reap");
-		homa_rpc_reap(hsk, false);
-		INC_METRIC(data_pkt_reap_cycles, homa_clock() - start);
+			tt_record("homa_dispatch_pkts calling homa_rpc_reap");
+			homa_rpc_reap(hsk, waiting_for_wmem);
+			INC_METRIC(data_pkt_reap_cycles, homa_clock() - start);
+		}
 	}
 	sock_put(&hsk->sock);
 }

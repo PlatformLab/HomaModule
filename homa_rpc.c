@@ -323,13 +323,6 @@ void homa_rpc_end(struct homa_rpc *rpc)
 
 	homa_sock_unlock(rpc->hsk);
 	homa_pacer_unmanage_rpc(rpc);
-
-	if (test_bit(SOCK_NOSPACE, &rpc->hsk->sock.sk_socket->flags)) {
-		/* There are tasks waiting for tx memory so reap immediately. */
-		homa_rpc_unlock(rpc);
-		homa_rpc_reap(rpc->hsk, false);
-		homa_rpc_lock(rpc);
-	}
 }
 
 /**
