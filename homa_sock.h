@@ -76,7 +76,7 @@ struct homa_rpc_bucket {
 	 *    it has been looked up and before it has been locked.
 	 * 3. The lookup mechanism does not use RCU.  This is important because
 	 *    RPCs are created rapidly and typically live only a few tens of
-	 *    microseconds.  As of May 2027 RCU introduces a lag of about
+	 *    microseconds.  As of May 2025 RCU introduces a lag of about
 	 *    25 ms before objects can be deleted; for RPCs this would result
 	 *    in hundreds or thousands of RPCs accumulating before RCU allows
 	 *    them to be deleted.
@@ -165,7 +165,9 @@ struct homa_sock {
 	/**
 	 * @shutdown: True means the socket is no longer usable (either
 	 * shutdown has already been invoked, or the socket was never
-	 * properly initialized).
+	 * properly initialized). Note: can't use the SOCK_DEAD flag for
+	 * this because that flag doesn't get set until much later in the
+	 * process of closing a socket.
 	 */
 	bool shutdown;
 
@@ -350,8 +352,8 @@ static inline struct homa_rpc_bucket
 	/* We can use a really simple hash function here because RPC ids
 	 * are allocated sequentially.
 	 */
-	return &hsk->client_rpc_buckets[(id >> 1)
-			& (HOMA_CLIENT_RPC_BUCKETS - 1)];
+	return &hsk->client_rpc_buckets[(id >> 1) &
+	       (HOMA_CLIENT_RPC_BUCKETS - 1)];
 }
 
 /**
