@@ -533,7 +533,7 @@ int __init homa_load(void)
 
 	pr_err("Homa module loading\n");
 #ifndef __UPSTREAM__ /* See strip.py */
-	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
+	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu skb_shared_info %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
 		  sizeof(struct homa_data_hdr),
 		  sizeof(struct homa_seg_hdr),
 		  sizeof(struct homa_ack),
@@ -545,6 +545,7 @@ int __init homa_load(void)
 		  sizeof(struct tcp_sock),
 		  sizeof(struct homa_rpc),
 		  sizeof(struct sk_buff),
+		  sizeof(struct skb_shared_info),
 		  sizeof(struct homa_recvmsg_args),
 		  sizeof(union sockaddr_in_union),
 		  HOMA_MAX_BPAGES,
