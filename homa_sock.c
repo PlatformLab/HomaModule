@@ -504,6 +504,10 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 	long timeo = hsk->sock.sk_sndtimeo;
 	int result;
 
+	/* Note: we can't use sock_wait_for_wmem because that function
+	 * is not available to modules (as of August 2025  it's static).
+	 */
+
 	if (nonblocking)
 		timeo = 0;
 	set_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags);
