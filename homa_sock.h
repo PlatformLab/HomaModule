@@ -438,6 +438,10 @@ static inline bool homa_sock_wmem_avl(struct homa_sock *hsk)
  */
 static inline void homa_sock_wakeup_wmem(struct homa_sock *hsk)
 {
+	/* Note: can't use sk_stream_write_space for this functionality
+	 * because it uses a different test to determine whether enough
+	 * memory is available.
+	 */
 	if (test_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags) &&
 	    homa_sock_wmem_avl(hsk)) {
 		tt_record2("homa_sock_wakeup_wmem waking up port %d, wmem %d",
