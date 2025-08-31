@@ -443,7 +443,9 @@ static inline void homa_sock_wakeup_wmem(struct homa_sock *hsk)
 		tt_record2("homa_sock_wakeup_wmem waking up port %d, wmem %d",
 			   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
 		clear_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags);
+		rcu_read_lock();
 		wake_up_interruptible_poll(sk_sleep(&hsk->sock), EPOLLOUT);
+		rcu_read_unlock();
 	}
 }
 
