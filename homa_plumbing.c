@@ -122,7 +122,6 @@ static struct proto homav6_prot = {
 	.unhash		   = homa_unhash,
 	.obj_size	   = sizeof(struct homa_v6_sock),
 	.ipv6_pinfo_offset = offsetof(struct homa_v6_sock, inet6),
-
 	.no_autobind       = 1,
 };
 
@@ -523,8 +522,8 @@ int __init homa_load(void)
 	BUILD_BUG_ON(sizeof(struct homa_abort_args) != 32);
 #endif /* See strip.py */
 
-	pr_err("Homa module loading\n");
 #ifndef __UPSTREAM__ /* See strip.py */
+	pr_err("Homa module loading\n");
 	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu skb_shared_info %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
 		  sizeof(struct homa_data_hdr),
 		  sizeof(struct homa_seg_hdr),
@@ -545,6 +544,12 @@ int __init homa_load(void)
 		  nr_cpu_ids,
 		  MAX_NUMNODES);
 #endif /* See strip.py */
+
+	status = homa_init(homa);
+	if (status)
+		goto error;
+	init_homa = true;
+
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		pr_err("proto_register failed for homa_prot: %d\n", status);
@@ -585,11 +590,6 @@ int __init homa_load(void)
 		goto error;
 	}
 	init_protocol6 = true;
-
-	status = homa_init(homa);
-	if (status)
-		goto error;
-	init_homa = true;
 
 #ifndef __STRIP__ /* See strip.py */
 	status = homa_metrics_init();
@@ -706,13 +706,13 @@ void __exit homa_unload(void)
 	homa_metrics_end();
 #endif /* See strip.py */
 	unregister_pernet_subsys(&homa_net_ops);
-	homa_destroy(homa);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
 	inet6_unregister_protosw(&homav6_protosw);
 	proto_unregister(&homa_prot);
 	proto_unregister(&homav6_prot);
+	homa_destroy(homa);
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_destroy();
 #endif /* See strip.py */
