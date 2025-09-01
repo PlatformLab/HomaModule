@@ -260,15 +260,12 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	 *                   in a GSO packet (before segmentation).
 	 */
 	int mtu, max_seg_data, max_gso_data;
-
 	struct sk_buff **last_link;
 	struct dst_entry *dst;
 	u64 segs_per_gso;
 	IF_NO_STRIP(int overlap_xmit);
-
 	/* Bytes of the message that haven't yet been copied into skbs. */
 	int bytes_left;
-
 	int gso_size;
 	int err;
 
@@ -831,8 +828,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 #ifndef __STRIP__ /* See strip.py */
 			new_skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr));
 #else /* See strip.py */
-			new_skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr)
-					+ seg_length);
+			new_skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr) +
+						    seg_length);
 #endif /* See strip.py */
 			if (unlikely(!new_skb)) {
 				UNIT_LOG("; ", "skb allocation error");
