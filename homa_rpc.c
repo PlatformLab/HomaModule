@@ -458,7 +458,7 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 #ifdef __UNIT_TEST__
 #define BATCH_MAX 3
 #else /* __UNIT_TEST__ */
-#define BATCH_MAX 20
+#define BATCH_MAX 10
 #endif /* __UNIT_TEST__ */
 	struct homa_rpc *rpcs[BATCH_MAX];
 	struct sk_buff *skbs[BATCH_MAX];
