@@ -589,6 +589,7 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 			 */
 			if (i != 0)
 				goto done;
+			cpu_relax();
 			now = homa_clock();
 		}
 

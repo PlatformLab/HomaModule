@@ -231,6 +231,5 @@ void homa_spin(int ns)
 
 	end = homa_clock() + homa_ns_to_cycles(ns);
 	while (homa_clock() < end)
-		/* Empty loop body.*/
-		;
+		cpu_relax();
 }
