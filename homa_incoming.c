@@ -442,19 +442,10 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
 	u64 id = homa_local_id(h->common.sender_id);
 	int dport = ntohs(h->common.dport);
-
-	/* Used to collect acks from data packets so we can process them
-	 * all at the end (can't process them inline because that may
-	 * require locking conflicting RPCs). If we run out of space just
-	 * ignore the extra acks; they'll be regenerated later through the
-	 * explicit mechanism.
-	 */
-	struct homa_ack acks[MAX_ACKS];
 	struct homa_rpc *rpc = NULL;
 	struct homa_sock *hsk;
 	struct homa_net *hnet;
 	struct sk_buff *next;
-	int num_acks = 0;
 
 	/* Find the appropriate socket.*/
 	hnet = homa_net(dev_net(skb->dev));
@@ -569,15 +560,6 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 
 		switch (h->common.type) {
 		case DATA:
-			if (h->ack.client_id) {
-				/* Save the ack for processing later, when we
-				 * have released the RPC lock.
-				 */
-				if (num_acks < MAX_ACKS) {
-					acks[num_acks] = h->ack;
-					num_acks++;
-				}
-			}
 			homa_data_pkt(skb, rpc);
 			INC_METRIC(packets_received[DATA - DATA], 1);
 			break;
@@ -632,11 +614,6 @@ discard:
 		homa_rpc_unlock(rpc);
 	}
 
-	while (num_acks > 0) {
-		num_acks--;
-		homa_rpc_acked(hsk, &saddr, &acks[num_acks]);
-	}
-
 	/* We need to reap dead RPCs here under two conditions:
 	 * 1. The socket has hit its limit on tx buffer space and threads are
 	 *    blocked waiting for skbs to be released.
@@ -679,6 +656,16 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		   homa_local_id(h->common.sender_id),
 		   tt_addr(rpc->peer->addr), ntohl(h->seg.offset),
 		   ntohl(h->message_length));
+
+	if (h->ack.client_id) {
+		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
+
+		homa_rpc_unlock(rpc);
+		homa_rpc_acked(rpc->hsk, &saddr, &h->ack);
+		homa_rpc_lock(rpc);
+		if (rpc->state == RPC_DEAD)
+			goto discard;
+	}
 
 	if (rpc->state != RPC_INCOMING && homa_is_client(rpc->id)) {
 		if (unlikely(rpc->state != RPC_OUTGOING))

@@ -216,7 +216,7 @@ error:
  * @hsk:     Socket on which the ack was received. May or may not correspond
  *           to the RPC, but can sometimes be used to avoid a socket lookup.
  * @saddr:   Source address from which the act was received (the client
- *           note for the RPC)
+ *           node for the RPC)
  * @ack:     Information about an RPC from @saddr that may now be deleted
  *           safely.
  */
