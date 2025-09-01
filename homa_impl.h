@@ -701,13 +701,10 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
 		return true;
 	protocol = (skb_is_ipv6(skb)) ? ipv6_hdr(skb)->nexthdr :
 					ip_hdr(skb)->protocol;
-#ifndef __STRIP__ /* See strip.py */
 	return (protocol == IPPROTO_HOMA ||
 		(protocol == IPPROTO_TCP &&
 		 tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT)));
-#else /* See strip.py */
 	return protocol == IPPROTO_HOMA;
-#endif /* See strip.py */
 }
 #endif /* See strip.py */
 
