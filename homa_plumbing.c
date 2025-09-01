@@ -28,20 +28,11 @@ static struct pernet_operations homa_net_ops = {
 	.size = sizeof(struct homa_net)
 };
 
-/* Global data for Homa. Never reference homa_data directly. Always use
- * the global_homa variable instead (or, even better, a homa pointer
- * stored in a struct or passed via a parameter); this allows overriding
- * during unit tests.
+/* Global data for Homa. Avoid referencing directly except when there is
+ * no alternative (instead, use a homa pointer stored in a struct or
+ * passed via a parameter). This allows overriding during unit tests.
  */
 static struct homa homa_data;
-
-/* This variable contains the address of the statically-allocated struct homa
- * used throughout Homa. This variable should almost never be used directly:
- * it should be passed as a parameter to functions that need it. This
- * variable is used only by a few functions called from Linux where there
- * is no struct homa* available.
- */
-static struct homa *global_homa = &homa_data;
 
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
@@ -475,7 +466,7 @@ static int timer_thread_exit;
  */
 int __init homa_load(void)
 {
-	struct homa *homa = global_homa;
+	struct homa *homa = &homa_data;
 	bool init_protocol6 = false;
 	bool init_protosw6 = false;
 	bool init_protocol = false;
@@ -697,7 +688,7 @@ error:
  */
 void __exit homa_unload(void)
 {
-	struct homa *homa = global_homa;
+	struct homa *homa = &homa_data;
 
 	pr_notice("Homa module unloading\n");
 
@@ -738,7 +729,7 @@ module_exit(homa_unload);
 int homa_net_start(struct net *net)
 {
 	pr_notice("Homa attaching to net namespace\n");
-	return homa_net_init(homa_net(net), net, global_homa);
+	return homa_net_init(homa_net(net), net, &homa_data);
 }
 
 /**
