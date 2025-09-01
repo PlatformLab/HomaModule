@@ -16,6 +16,12 @@
 #include "homa_offload.h"
 #endif /* See strip.py */
 
+#ifndef __STRIP__ /* See strip.py */
+#define XMIT_DATA(rpc, force) homa_xmit_data(rpc, force)
+#else /* See strip.py */
+#define XMIT_DATA(rpc, force) homa_xmit_data(rpc)
+#endif /* See strip.py */
+
 static struct homa_rpc *hook_rpc;
 static int delete_count;
 static int lock_delete_count;
@@ -94,10 +100,8 @@ FIXTURE_SETUP(homa_incoming)
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.num_priorities = 1;
 	self->homa.poll_cycles = 0;
-#endif /* See strip.py */
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.pacer->fifo_fraction = 0;
-#ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
 #endif /* See strip.py */
@@ -1571,7 +1575,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 
 	ASSERT_NE(NULL, srpc);
 	homa_rpc_lock(srpc);
-	homa_xmit_data(srpc, false);
+	XMIT_DATA(srpc, false);
 	homa_rpc_unlock(srpc);
 	unit_log_clear();
 
@@ -1671,6 +1675,26 @@ TEST_F(homa_incoming, homa_resend_pkt__rpc_incoming_server_sends_busy)
 	// The server might send a GRANT right after BUSY so just check substr
 	EXPECT_SUBSTR("xmit BUSY", unit_log_get());
 }
+TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend)
+{
+	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
+			.dport = htons(self->server_port),
+			.sender_id = cpu_to_be64(self->client_id),
+			.type = RESEND},
+			.offset = htonl(0),
+			.length = htonl(-1)};
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 2000, 20000);
+
+	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
+	srpc->msgout.next_xmit_offset = 2000;
+
+	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &h.common, 0, 0));
+	EXPECT_STREQ("xmit DATA retrans 1400@0; "
+		     "xmit DATA retrans 1400@1400", unit_log_get());
+}
 TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 {
 	/* Important to respond to resends even if client thinks the
@@ -1691,26 +1715,6 @@ TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &h.common, 0, 0));
 	EXPECT_STREQ("xmit DATA retrans 1400@0", unit_log_get());
-}
-TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend)
-{
-	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
-			.dport = htons(self->server_port),
-			.sender_id = cpu_to_be64(self->client_id),
-			.type = RESEND},
-			.offset = htonl(0),
-			.length = htonl(-1)};
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id, 2000, 20000);
-
-	ASSERT_NE(NULL, srpc);
-	unit_log_clear();
-	srpc->msgout.next_xmit_offset = 2000;
-
-	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &h.common, 0, 0));
-	EXPECT_STREQ("xmit DATA retrans 1400@0; "
-		     "xmit DATA retrans 1400@1400", unit_log_get());
 }
 TEST_F(homa_incoming, homa_resend_pkt__clip_range_to_tx_end)
 {
@@ -1768,7 +1772,7 @@ TEST_F(homa_incoming, homa_resend_pkt__update_granted_and_xmit)
 	ASSERT_NE(NULL, crpc);
 	crpc->msgout.granted = 1400;
 	homa_rpc_lock(crpc);
-	homa_xmit_data(crpc, false);
+	XMIT_DATA(crpc, false);
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	EXPECT_EQ(1400, crpc->msgout.next_xmit_offset);
@@ -1808,6 +1812,7 @@ TEST_F(homa_incoming, homa_resend_pkt__requested_data_hasnt_been_sent_yet)
 			self->server_port, self->client_id, 2000, 100);
 
 	ASSERT_NE(NULL, crpc);
+	unit_reset_tx(crpc);
 	unit_log_clear();
 
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &h.common, 0, 0));
@@ -1826,7 +1831,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_all)
 
 	ASSERT_NE(NULL, crpc);
 	homa_rpc_lock(crpc);
-	homa_xmit_data(crpc, false);
+	XMIT_DATA(crpc, false);
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 
@@ -1858,7 +1863,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_part)
 	crpc->msgout.granted = 1400;
 #endif /* See strip.py */
 	homa_rpc_lock(crpc);
-	homa_xmit_data(crpc, false);
+	XMIT_DATA(crpc, false);
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 

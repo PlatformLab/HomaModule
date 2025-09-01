@@ -4,7 +4,6 @@ HOMA_OBJS := homa_devel.o \
 	homa_incoming.o \
 	homa_interest.o \
 	homa_outgoing.o \
-	homa_pacer.o \
 	homa_peer.o \
 	homa_pool.o \
 	homa_plumbing.o \
@@ -20,6 +19,7 @@ else
 HOMA_OBJS += homa_grant.o \
 	homa_metrics.o \
 	homa_offload.o \
+	homa_pacer.o \
 	homa_qdisc.o \
 	homa_skb.o
 endif
@@ -64,7 +64,6 @@ checkpatch:
 HOMA_TARGET ?= $(LINUX_SRC_DIR)/net/homa
 CP_HDRS := homa_impl.h \
 	   homa_interest.h \
-	   homa_pacer.h \
 	   homa_peer.h \
 	   homa_pool.h \
 	   homa_rpc.h \
@@ -73,7 +72,7 @@ CP_HDRS := homa_impl.h \
 	   homa_wire.h \
 	   murmurhash3.h
 CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o homa_grant.o \
-		homa_metrics.o homa_offload.o homa_qdisc.o \
+		homa_metrics.o homa_offload.o homa_pacer.o homa_qdisc.o \
 		homa_skb.o timetrace.o, $(HOMA_OBJS)))
 CP_EXTRAS := Kconfig \
 	     Makefile

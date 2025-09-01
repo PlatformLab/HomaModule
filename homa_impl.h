@@ -111,12 +111,12 @@ struct homa {
 	 */
 	atomic64_t next_outgoing_id;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @pacer:  Information related to the pacer; managed by homa_pacer.c.
 	 */
 	struct homa_pacer *pacer;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @grant: Contains information used by homa_grant.c to manage
 	 * grants for incoming messages.
@@ -808,7 +808,6 @@ int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			   size_t length, struct homa_rpc *rpc);
 int      __homa_xmit_control(void *contents, size_t length,
 			     struct homa_peer *peer, struct homa_sock *hsk);
-void     homa_xmit_data(struct homa_rpc *rpc, bool force);
 void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
 #ifndef __STRIP__ /* See strip.py */
@@ -827,11 +826,13 @@ int      homa_sysctl_softirq_cores(const struct ctl_table *table,
 				   loff_t *ppos);
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			       int length);
+void     homa_xmit_data(struct homa_rpc *rpc, bool force);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			  int priority);
 #else /* See strip.py */
 int      homa_message_in_init(struct homa_rpc *rpc, int unsched);
 void     homa_resend_data(struct homa_rpc *rpc, int start, int end);
+void     homa_xmit_data(struct homa_rpc *rpc);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc);
 #endif /* See strip.py */
 

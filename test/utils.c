@@ -301,6 +301,7 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
 	}
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * unit_log_throttled() - Append to the test log information about all of
  * the messages in homa->throttle_rpcs.
@@ -317,6 +318,7 @@ void unit_log_throttled(struct homa *homa)
 				rpc->msgout.next_xmit_offset);
 	}
 }
+#endif /* See strip.py */
 
 /**
  * unit_print_gaps() - Returns a static string describing the gaps in an RPC.
@@ -340,6 +342,21 @@ const char *unit_print_gaps(struct homa_rpc *rpc)
 					 ", time %llu", gap->time);
 	}
 	return buffer;
+}
+
+/**
+ * unit_reset_tx() - Reset the state of an RPC so that it appears no packets
+ * have been transmitted.
+ */
+void unit_reset_tx(struct homa_rpc *rpc)
+{
+	struct sk_buff *skb;
+
+	for (skb = rpc->msgout.packets; skb != NULL;
+	     skb = homa_get_skb_info(skb)->next_skb)
+		skb_dst_drop(skb);
+	rpc->msgout.next_xmit = &rpc->msgout.packets;
+	rpc->msgout.next_xmit_offset = 0;
 }
 
 /**

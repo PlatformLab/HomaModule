@@ -56,7 +56,6 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 	homa->unsched_cutoffs[6] = c6;
 	homa->unsched_cutoffs[7] = c7;
 }
-#endif /* See strip.py */
 
 TEST_F(homa_utils, homa_init__pacer_alloc_failure)
 {
@@ -68,7 +67,6 @@ TEST_F(homa_utils, homa_init__pacer_alloc_failure)
 	EXPECT_EQ(NULL, homa2.pacer);
 	homa_destroy(&homa2);
 }
-#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_utils, homa_init__grant_alloc_failure)
 {
 	struct homa homa2;
@@ -87,7 +85,7 @@ TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 #ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 4;
 #else /* See strip.py */
-	mock_kmalloc_errors = 2;
+	mock_kmalloc_errors = 1;
 #endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
@@ -101,7 +99,7 @@ TEST_F(homa_utils, homa_init__cant_allocate_port_map)
 #ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 0x10;
 #else /* See strip.py */
-	mock_kmalloc_errors = 8;
+	mock_kmalloc_errors = 4;
 #endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));

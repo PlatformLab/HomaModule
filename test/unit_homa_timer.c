@@ -62,7 +62,11 @@ TEST_F(homa_timer, homa_timer_check_rpc__request_ack)
 
 	/* First call: do nothing (response not fully transmitted). */
 	homa_rpc_lock(srpc);
+#ifndef __STRIP__ /* See strip.py */
 	homa_xmit_data(srpc, false);
+#else /* See strip.py */
+	homa_xmit_data(srpc);
+#endif /* See strip.py */
 	skb_get(srpc->msgout.packets);
 	homa_timer_check_rpc(srpc);
 	EXPECT_EQ(0, srpc->done_timer_ticks);
@@ -145,6 +149,7 @@ TEST_F(homa_timer, homa_timer_check_rpc__granted_bytes_not_sent)
 			self->server_port, self->client_id, 5000, 200);
 
 	ASSERT_NE(NULL, crpc);
+	crpc->msgout.next_xmit_offset = 0;
 	unit_log_clear();
 	crpc->silent_ticks = 10;
 	homa_rpc_lock(crpc);

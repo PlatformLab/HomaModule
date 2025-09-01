@@ -521,6 +521,7 @@ TEST_F(homa_rpc, homa_rpc_end__dead_buffs)
 	EXPECT_EQ(14, self->homa.max_dead_buffs);
 	EXPECT_EQ(14, self->hsk.dead_skbs);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_end__remove_from_throttled_list)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -533,6 +534,7 @@ TEST_F(homa_rpc, homa_rpc_end__remove_from_throttled_list)
 	homa_rpc_end(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->homa.pacer->throttled_rpcs));
 }
+#endif /* See strip.py */
 
 TEST_F(homa_rpc, homa_rpc_reap__nothing_to_reap)
 {

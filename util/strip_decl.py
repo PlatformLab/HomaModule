@@ -32,12 +32,10 @@ symbols = [
     ['peer',
         'int      homa_xmit_control('
     ],
-    ['pacer',
-        'void     homa_xmit_data('
-    ],
     ['rpc',
         'int      homa_message_in_init(',
         'void     homa_rpc_handoff(',
+        'void     homa_xmit_data('
     ],
     ['outgoing',
         'int      homa_fill_data_interleaved(',

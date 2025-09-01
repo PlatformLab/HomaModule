@@ -46,16 +46,13 @@ int          unit_list_length(struct list_head *head);
 void         unit_log_active_ids(struct homa_sock *hsk);
 void         unit_log_filled_skbs(struct sk_buff *skb, int verbose);
 void         unit_log_frag_list(struct sk_buff *skb, int verbose);
-#ifndef __STRIP__ /* See strip.py */
-void         unit_log_grantables(struct homa *homa);
-#endif /* See strip.py */
 void         unit_log_hashed_rpcs(struct homa_sock *hsk);
 void         unit_log_message_out_packets(struct homa_message_out *message,
 				      int verbose);
 void         unit_log_skb_list(struct sk_buff_head *packets,
 			       int verbose);
-void         unit_log_throttled(struct homa *homa);
 const char  *unit_print_gaps(struct homa_rpc *rpc);
+void         unit_reset_tx(struct homa_rpc *rpc);
 struct homa_rpc
 	    *unit_server_rpc(struct homa_sock *hsk,
 			     enum unit_rpc_state state,
@@ -65,6 +62,11 @@ struct homa_rpc
 			     int resp_length);
 void         unit_sock_destroy(struct homa_sock *hsk);
 void         unit_teardown(void);
+
+#ifndef __STRIP__ /* See strip.py */
+void         unit_log_grantables(struct homa *homa);
+void         unit_log_throttled(struct homa *homa);
+#endif /* See strip.py */
 
 /* Kludge to avoid including arpa/inet.h, which causes definition
  * conflicts with kernel header files.

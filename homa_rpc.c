@@ -4,15 +4,14 @@
 
 #include "homa_impl.h"
 #include "homa_interest.h"
-#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
+
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
+#include "homa_pacer.h"
 #include "homa_skb.h"
-#endif /* See strip.py */
-
-#ifdef __STRIP__ /* See strip.py */
+#else /* See strip.py */
 #include "homa_stub.h"
 #endif /* See strip.py */
 
@@ -322,7 +321,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
 
 	homa_sock_unlock(rpc->hsk);
-	homa_pacer_unmanage_rpc(rpc);
+	IF_NO_STRIP(homa_pacer_unmanage_rpc(rpc));
 }
 
 /**

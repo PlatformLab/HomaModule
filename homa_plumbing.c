@@ -5,14 +5,15 @@
  */
 
 #include "homa_impl.h"
+#include "homa_peer.h"
+#include "homa_pool.h"
+
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_offload.h"
+#include "homa_pacer.h"
 #include "homa_qdisc.h"
 #endif /* See strip.py */
-#include "homa_pacer.h"
-#include "homa_peer.h"
-#include "homa_pool.h"
 
 /* Identifier for retrieving Homa-specific data for a struct net. */
 unsigned int homa_net_id;

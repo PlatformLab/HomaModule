@@ -43,7 +43,6 @@ CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
 TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_interest.c \
 	      unit_homa_outgoing.c \
-	      unit_homa_pacer.c \
 	      unit_homa_peer.c \
 	      unit_homa_pool.c \
 	      unit_homa_plumbing.c \
@@ -56,6 +55,7 @@ ifeq ($(__STRIP__),)
 TEST_SRCS +=  unit_homa_grant.c \
 	      unit_homa_metrics.c \
 	      unit_homa_offload.c \
+	      unit_homa_pacer.c \
 	      unit_homa_qdisc.c \
 	      unit_homa_skb.c
 endif
@@ -65,7 +65,6 @@ HOMA_SRCS :=  homa_devel.c \
 	      homa_interest.c \
 	      homa_incoming.c \
 	      homa_outgoing.c \
-	      homa_pacer.c \
 	      homa_peer.c \
 	      homa_pool.c \
 	      homa_plumbing.c \
@@ -78,6 +77,7 @@ ifeq ($(__STRIP__),)
 HOMA_SRCS +=  homa_grant.c \
 	      homa_metrics.c \
 	      homa_offload.c \
+	      homa_pacer.c \
 	      homa_qdisc.c \
 	      homa_skb.c
 endif

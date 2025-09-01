@@ -5,16 +5,15 @@
  */
 
 #include "homa_impl.h"
-#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
-#ifndef __STRIP__ /* See strip.py */
-#include "homa_qdisc.h"
-#include "homa_skb.h"
-#endif /* See strip.py */
 #include "homa_wire.h"
 
-#ifdef __STRIP__ /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
+#include "homa_pacer.h"
+#include "homa_qdisc.h"
+#include "homa_skb.h"
+#else /* See strip.py */
 #include "homa_stub.h"
 #endif /* See strip.py */
 
@@ -265,7 +264,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	struct sk_buff **last_link;
 	struct dst_entry *dst;
 	u64 segs_per_gso;
-	int overlap_xmit;
+	IF_NO_STRIP(int overlap_xmit);
 
 	/* Bytes of the message that haven't yet been copied into skbs. */
 	int bytes_left;
@@ -324,8 +323,8 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	UNIT_LOG("; ", "mtu %d, max_seg_data %d, max_gso_data %d",
 		 mtu, max_seg_data, max_gso_data);
 
-	overlap_xmit = rpc->msgout.length > 2 * max_gso_data;
 #ifndef __STRIP__ /* See strip.py */
+	overlap_xmit = rpc->msgout.length > 2 * max_gso_data;
 	if (homa_qdisc_active(rpc->hsk->hnet))
 		overlap_xmit = 0;
 	rpc->msgout.granted = rpc->msgout.unscheduled;
@@ -382,22 +381,24 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		rpc->msgout.skb_memory += skb->truesize;
 		rpc->msgout.copied_from_user = rpc->msgout.length - bytes_left;
 		rpc->msgout.first_not_tx = rpc->msgout.packets;
-		if (overlap_xmit && list_empty(&rpc->throttled_links) &&
 #ifndef __STRIP__ /* See strip.py */
+		if (overlap_xmit && list_empty(&rpc->throttled_links) &&
 		    xmit && offset < rpc->msgout.granted) {
-#else /* See strip.py */
-		    xmit) {
-#endif /* See strip.py */
 			tt_record1("waking up pacer for id %d", rpc->id);
 			homa_pacer_manage_rpc(rpc);
 		}
+#endif /* See strip.py */
 	}
 	tt_record2("finished copy from user space for id %d, length %d",
 		   rpc->id, rpc->msgout.length);
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
 	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
+#ifndef __STRIP__ /* See strip.py */
 	if (!overlap_xmit && xmit)
 		homa_xmit_data(rpc, false);
+#else /* See strip.py */
+	homa_xmit_data(rpc);
+#endif /* See strip.py */
 	return 0;
 
 error:
@@ -577,6 +578,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	homa_peer_release(peer);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_xmit_data() - If an RPC has outbound data packets that are permitted
  * to be transmitted according to the scheduling mechanism, arrange for
@@ -585,7 +587,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
  * @rpc:       RPC to check for transmittable packets. Must be locked by
  *             caller. Note: this function will release the RPC lock while
  *             passing packets through the RPC stack, then reacquire it
- *             before returning. It is possible that the RPC gets freed
+ *             before returning. It is possible that the RPC gets terminated
  *             when the lock isn't held, in which case the state will
  *             be RPC_DEAD on return.
  * @force:     True means send at least one packet, even if the NIC queue
@@ -593,11 +595,25 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
  *             the NIC queue is sufficiently long.
  */
 void homa_xmit_data(struct homa_rpc *rpc, bool force)
+#else /* See strip.py */
+/**
+ * homa_xmit_data() - If an RPC has outbound data packets that are permitted
+ * to be transmitted according to the scheduling mechanism, arrange for
+ * them to be sent.
+ * @rpc:       RPC to check for transmittable packets. Must be locked by
+ *             caller. Note: this function will release the RPC lock while
+ *             passing packets through the RPC stack, then reacquire it
+ *             before returning. It is possible that the RPC gets terminated
+ *             when the lock isn't held, in which case the state will
+ *             be RPC_DEAD on return.
+ */
+void homa_xmit_data(struct homa_rpc *rpc)
+#endif /* See strip.py */
 	__must_hold(rpc->bucket->lock)
 {
-	struct homa *homa = rpc->hsk->homa;
 	int length;
 
+	IF_NO_STRIP(struct homa *homa = rpc->hsk->homa);
 	IF_NO_STRIP(struct netdev_queue *txq);
 
 	while (*rpc->msgout.next_xmit && rpc->state != RPC_DEAD) {
@@ -612,16 +628,10 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 				   rpc->msgout.granted);
 			break;
 		}
-#endif /* See strip.py */
 
-#ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.length - rpc->msgout.next_xmit_offset >
 		    homa->pacer->throttle_min_bytes &&
 		    !homa_qdisc_active(rpc->hsk->hnet)) {
-#else /* See strip.py */
-		if (rpc->msgout.length - rpc->msgout.next_xmit_offset >
-		    homa->pacer->throttle_min_bytes) {
-#endif /* See strip.py */
 			if (!homa_pacer_check_nic_q(homa->pacer, skb, force)) {
 				tt_record1("homa_xmit_data adding id %u to throttle queue",
 					   rpc->id);
@@ -630,7 +640,6 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 			}
 		}
 
-#ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.next_xmit_offset < rpc->msgout.unscheduled)
 			priority = homa_unsched_priority(homa, rpc->peer,
 							 rpc->msgout.length);
@@ -663,10 +672,10 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 			tt_record4("homa_xmit_data found stopped txq for id %d, qid %d, num_queued %d, limit %d",
 				   rpc->id, skb->queue_mapping,
 				   txq->dql.num_queued, txq->dql.adj_limit);
+		force = false;
 #else /* See strip.py */
 		__homa_xmit_data(skb, rpc);
 #endif /* See strip.py */
-		force = false;
 		homa_rpc_lock(rpc);
 	}
 }
@@ -857,9 +866,9 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			new_homa_info->offset = offset;
 			tt_record3("retransmitting offset %d, length %d, id %d",
 				   offset, seg_length, rpc->id);
+#ifndef __STRIP__ /* See strip.py */
 			homa_pacer_check_nic_q(rpc->hsk->homa->pacer, new_skb,
 					       true);
-#ifndef __STRIP__ /* See strip.py */
 			__homa_xmit_data(new_skb, rpc, priority);
 #else /* See strip.py */
 			__homa_xmit_data(new_skb, rpc);

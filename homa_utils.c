@@ -5,15 +5,14 @@
  */
 
 #include "homa_impl.h"
-#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
+#include "homa_pacer.h"
 #include "homa_skb.h"
-#endif /* See strip.py */
-
-#ifdef __STRIP__ /* See strip.py */
+#else /* See strip.py */
 #include "homa_stub.h"
 #endif /* See strip.py */
 
@@ -35,13 +34,13 @@ int homa_init(struct homa *homa)
 
 	atomic64_set(&homa->next_outgoing_id, 2);
 	homa->link_mbps = 25000;
+#ifndef __STRIP__ /* See strip.py */
 	homa->pacer = homa_pacer_alloc(homa);
 	if (IS_ERR(homa->pacer)) {
 		err = PTR_ERR(homa->pacer);
 		homa->pacer = NULL;
 		return err;
 	}
-#ifndef __STRIP__ /* See strip.py */
 	homa->grant = homa_grant_alloc(homa);
 	if (IS_ERR(homa->grant)) {
 		err = PTR_ERR(homa->grant);
@@ -137,11 +136,11 @@ void homa_destroy(struct homa *homa)
 		homa_grant_free(homa->grant);
 		homa->grant = NULL;
 	}
-#endif /* See strip.py */
 	if (homa->pacer) {
 		homa_pacer_free(homa->pacer);
 		homa->pacer = NULL;
 	}
+#endif /* See strip.py */
 	if (homa->peertab) {
 		homa_peer_free_peertab(homa->peertab);
 		homa->peertab = NULL;
