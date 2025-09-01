@@ -4,6 +4,8 @@ Notes for Homa implementation in Linux:
 * Move interest cleanup code from homa_sock to a new function in
   homa_interest. Also move wakeup code from homa_rpc_handoff.
 
+* Use skb_attempt_defer_free once it has been properly exported.
+
 * Thoughts on making TCP and Homa play better together:
   * Goals:
     * Keep the NIC tx queue from growing long.
