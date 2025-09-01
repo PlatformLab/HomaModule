@@ -45,6 +45,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->bucket = bucket;
 	crpc->state = RPC_OUTGOING;
+	refcount_set(&crpc->refs, 1);
 	crpc->peer = homa_peer_get(hsk, &dest_addr_as_ipv6);
 	if (IS_ERR(crpc->peer)) {
 		tt_record("error in homa_peer_get");
@@ -149,6 +150,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->hsk = hsk;
 	srpc->bucket = bucket;
 	srpc->state = RPC_INCOMING;
+	refcount_set(&srpc->refs, 1);
 	srpc->peer = homa_peer_get(hsk, source);
 	if (IS_ERR(srpc->peer)) {
 		err = PTR_ERR(srpc->peer);
@@ -509,18 +511,18 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 			int refs;
 
 			/* Make sure that all outstanding uses of the RPC have
-			 * completed. We can only be sure if the reference
-			 * count is zero when we're holding the lock. Note:
-			 * it isn't safe to block while locking the RPC here,
-			 * since we hold the socket lock.
+			 * completed. We can read the reference count safely
+			 * only when we're holding the lock. Note: it isn't
+			 * safe to block while locking the RPC here, since we
+			 * hold the socket lock.
 			 */
 			if (homa_rpc_try_lock(rpc)) {
-				refs = atomic_read(&rpc->refs);
+				refs = refcount_read(&rpc->refs);
 				homa_rpc_unlock(rpc);
 			} else {
-				refs = 1;
+				refs = 2;
 			}
-			if (refs != 0) {
+			if (refs > 1) {
 				INC_METRIC(deferred_rpc_reaps, 1);
 				continue;
 			}

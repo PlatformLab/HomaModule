@@ -2024,15 +2024,15 @@ void *mock_rht_walk_next(struct rhashtable_iter *iter)
 void mock_rpc_hold(struct homa_rpc *rpc)
 {
 	mock_rpc_holds++;
-	atomic_inc(&rpc->refs);
+	refcount_inc(&rpc->refs);
 }
 
 void mock_rpc_put(struct homa_rpc *rpc)
 {
-	if (atomic_read(&rpc->refs) == 0)
+	if (refcount_read(&rpc->refs) < 2)
 		FAIL("homa_rpc_put invoked when RPC has no active holds");
 	mock_rpc_holds--;
-	atomic_dec(&rpc->refs);
+	refcount_dec(&rpc->refs);
 }
 
 /**

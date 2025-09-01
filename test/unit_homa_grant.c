@@ -909,11 +909,11 @@ TEST_F(homa_grant, homa_grant_unmanage_rpc__remove_from_oldest_rpc)
 	homa_grant_manage_rpc(rpc);
 	self->homa.grant->oldest_rpc = rpc;
 	homa_rpc_hold(rpc);
-	EXPECT_EQ(1, rpc->refs.counter);
+	EXPECT_EQ(2, refcount_read(&rpc->refs));
 
 	homa_grant_unmanage_rpc(rpc, &self->cand);
 	EXPECT_EQ(NULL, self->homa.grant->oldest_rpc);
-	EXPECT_EQ(0, rpc->refs.counter);
+	EXPECT_EQ(1, refcount_read(&rpc->refs));
 }
 
 TEST_F(homa_grant, homa_grant_update_incoming)
@@ -1471,11 +1471,11 @@ TEST_F(homa_grant, homa_grant_find_oldest__take_reference)
 
 	rpc = test_rpc(self, 100, self->server_ip, 40000);
 	homa_grant_insert_grantable(rpc);
-	ASSERT_EQ(0, rpc->refs.counter);
+	EXPECT_EQ(1, refcount_read(&rpc->refs));
 
 	homa_grant_find_oldest(self->homa.grant);
-	ASSERT_EQ(rpc, self->homa.grant->oldest_rpc);
-	ASSERT_EQ(1, rpc->refs.counter);
+	EXPECT_EQ(rpc, self->homa.grant->oldest_rpc);
+	EXPECT_EQ(2, refcount_read(&rpc->refs));
 }
 
 TEST_F(homa_grant, homa_grant_promote_rpc__rpc_is_active)
@@ -1767,7 +1767,7 @@ TEST_F(homa_grant, homa_grant_cand_add__basics)
 	EXPECT_EQ(0, cand.removes);
 	EXPECT_EQ(rpc2, cand.rpcs[0]);
 	EXPECT_EQ(rpc1, cand.rpcs[1]);
-	EXPECT_EQ(1, atomic_read(&rpc1->refs));
+	EXPECT_EQ(2, refcount_read(&rpc1->refs));
 	homa_grant_cand_check(&cand, self->homa.grant);
 }
 TEST_F(homa_grant, homa_grant_cand_add__wrap_around)
@@ -1818,9 +1818,9 @@ TEST_F(homa_grant, homa_grant_cand_check__basics)
 	unit_log_clear();
 	homa_grant_cand_check(&cand, self->homa.grant);
 	EXPECT_STREQ("xmit GRANT 10000@2; xmit GRANT 10000@0", unit_log_get());
-	EXPECT_EQ(0, atomic_read(&rpc1->refs));
-	EXPECT_EQ(0, atomic_read(&rpc2->refs));
-	EXPECT_EQ(0, atomic_read(&rpc3->refs));
+	EXPECT_EQ(1, refcount_read(&rpc1->refs));
+	EXPECT_EQ(1, refcount_read(&rpc2->refs));
+	EXPECT_EQ(1, refcount_read(&rpc3->refs));
 }
 TEST_F(homa_grant, homa_grant_cand_check__rpc_dead)
 {
@@ -1838,7 +1838,7 @@ TEST_F(homa_grant, homa_grant_cand_check__rpc_dead)
 	unit_log_clear();
 	homa_grant_cand_check(&cand, self->homa.grant);
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(0, atomic_read(&rpc->refs));
+	EXPECT_EQ(1, refcount_read(&rpc->refs));
 	rpc->state = saved_state;
 }
 TEST_F(homa_grant, homa_grant_cand_check__rpc_becomes_fully_granted)

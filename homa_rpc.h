@@ -280,10 +280,11 @@ struct homa_rpc {
 #define RPC_PRIVATE           8
 
 	/**
-	 * @refs: Number of unmatched calls to homa_rpc_hold; it's not safe
-	 * to free the RPC until this is zero.
+	 * @refs: Number of references to this RPC, including one for each
+	 * unmatched call to homa_rpc_hold plus one for the socket's reference
+	 * in either active_rpcs or dead_rpcs.
 	 */
-	atomic_t refs;
+	refcount_t refs;
 
 	/**
 	 * @peer: Information about the other machine (the server, if
@@ -528,7 +529,7 @@ static inline void homa_unprotect_rpcs(struct homa_sock *hsk)
  */
 static inline void homa_rpc_hold(struct homa_rpc *rpc)
 {
-	atomic_inc(&rpc->refs);
+	refcount_inc(&rpc->refs);
 }
 
 /**
@@ -538,7 +539,7 @@ static inline void homa_rpc_hold(struct homa_rpc *rpc)
  */
 static inline void homa_rpc_put(struct homa_rpc *rpc)
 {
-	atomic_dec(&rpc->refs);
+	refcount_dec(&rpc->refs);
 }
 #endif /* __UNIT_TEST__ */
 
