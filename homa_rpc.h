@@ -137,7 +137,8 @@ struct homa_message_in {
 
 	/**
 	 * @packets: DATA packets for this message that have been received but
-	 * not yet copied to user space (no particular order).
+	 * not yet copied to user space (ordered by increasing offset). The
+	 * lock in this structure is not used (the RPC lock is used instead).
 	 */
 	struct sk_buff_head packets;
 

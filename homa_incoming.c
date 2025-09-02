@@ -48,7 +48,7 @@ int homa_message_in_init(struct homa_rpc *rpc, int length)
 		return -EINVAL;
 
 	rpc->msgin.length = length;
-	skb_queue_head_init(&rpc->msgin.packets);
+	__skb_queue_head_init(&rpc->msgin.packets);
 	INIT_LIST_HEAD(&rpc->msgin.gaps);
 	rpc->msgin.bytes_remaining = length;
 	IF_NO_STRIP(rpc->msgin.birth = homa_clock());
