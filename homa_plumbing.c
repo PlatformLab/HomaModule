@@ -1088,7 +1088,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		homa_rpc_hold(rpc);
 		if (args.flags & HOMA_SENDMSG_PRIVATE)
-			atomic_or(RPC_PRIVATE, &rpc->flags);
+			set_bit(RPC_PRIVATE, &rpc->flags);
 		INC_METRIC(send_calls, 1);
 		tt_record4("homa_sendmsg request, target 0x%x:%d, id %u, length %d",
 			   (addr->in6.sin6_family == AF_INET)

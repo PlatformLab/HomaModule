@@ -258,9 +258,9 @@ struct homa_rpc {
 	 * manipulated with atomic operations because some of the manipulations
 	 * occur without holding the RPC lock.
 	 */
-	atomic_t flags;
+	unsigned long flags;
 
-	/* Valid bits for @flags:
+	/* Valid bit numbers for @flags:
 	 * RPC_PKTS_READY -        The RPC has input packets ready to be
 	 *                         copied to user space.
 	 * APP_NEEDS_LOCK -        Means that code in the application thread
@@ -276,9 +276,9 @@ struct homa_rpc {
 	 *                         where the app explicitly requests the
 	 *                         response from this particular RPC.
 	 */
-#define RPC_PKTS_READY        1
-#define APP_NEEDS_LOCK        4
-#define RPC_PRIVATE           8
+#define RPC_PKTS_READY        0
+#define APP_NEEDS_LOCK        1
+#define RPC_PRIVATE           2
 
 	/**
 	 * @refs: Number of references to this RPC, including one for each
@@ -564,7 +564,7 @@ static inline bool homa_is_client(u64 id)
  */
 static inline bool homa_rpc_needs_attention(struct homa_rpc *rpc)
 {
-	return (rpc->error != 0 || atomic_read(&rpc->flags) & RPC_PKTS_READY);
+	return (rpc->error != 0 || test_bit(RPC_PKTS_READY, &rpc->flags));
 }
 
 #endif /* _HOMA_RPC_H */

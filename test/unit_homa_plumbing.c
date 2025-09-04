@@ -766,7 +766,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_private)
 			self->client_id, 100, 2000);
 
 	EXPECT_NE(NULL, crpc);
-	atomic_or(RPC_PRIVATE, &crpc->flags);
+	set_bit(RPC_PRIVATE, &crpc->flags);
 
 	self->recvmsg_args.id = crpc->id;
 
@@ -782,7 +782,7 @@ TEST_F(homa_plumbing, homa_recvmsg__private_rpc_has_error)
 			self->client_id, 100, 2000);
 
 	EXPECT_NE(NULL, crpc);
-	atomic_or(RPC_PRIVATE, &crpc->flags);
+	set_bit(RPC_PRIVATE, &crpc->flags);
 	crpc->error = -ETIMEDOUT;
 
 	self->recvmsg_args.id = crpc->id;

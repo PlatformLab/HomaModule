@@ -195,7 +195,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
 	homa_sock_unlock(hsk);
 	if (ntohl(h->seg.offset) == 0 && srpc->msgin.num_bpages > 0) {
-		atomic_or(RPC_PKTS_READY, &srpc->flags);
+		set_bit(RPC_PKTS_READY, &srpc->flags);
 		homa_rpc_handoff(srpc);
 	}
 	INC_METRIC(requests_received, 1);

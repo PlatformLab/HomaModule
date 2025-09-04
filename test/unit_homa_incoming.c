@@ -754,7 +754,7 @@ TEST_F(homa_incoming, homa_copy_to_user__basics)
 	self->data.seg.offset = htonl(2800);
 	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
 			1200, 201800), crpc);
-	EXPECT_NE(0, atomic_read(&crpc->flags) & RPC_PKTS_READY);
+	EXPECT_NE(0, test_bit(RPC_PKTS_READY, &crpc->flags));
 
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
@@ -767,7 +767,7 @@ TEST_F(homa_incoming, homa_copy_to_user__basics)
 			"skb_copy_datagram_iter: 1200 bytes to 0x1000af0: 201800-202999",
 			unit_log_get());
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
-	EXPECT_EQ(0, atomic_read(&crpc->flags) & RPC_PKTS_READY);
+	EXPECT_EQ(0, test_bit(RPC_PKTS_READY, &crpc->flags));
 }
 TEST_F(homa_incoming, homa_copy_to_user__rpc_freed)
 {
@@ -1543,7 +1543,7 @@ TEST_F(homa_incoming, homa_data_pkt__handoff)
 	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
 			1400, 0), crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
-	EXPECT_TRUE(atomic_read(&crpc->flags) & RPC_PKTS_READY);
+	EXPECT_TRUE(test_bit(RPC_PKTS_READY, &crpc->flags));
 	EXPECT_EQ(1600, crpc->msgin.bytes_remaining);
 	EXPECT_EQ(1, skb_queue_len(&crpc->msgin.packets));
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
@@ -2401,13 +2401,13 @@ TEST_F(homa_incoming, homa_wait_private__rpc_has_error)
 			self->server_port, self->client_id, 20000, 1600);
 
 	ASSERT_NE(NULL, crpc);
-	ASSERT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags));
-	atomic_or(RPC_PRIVATE, &crpc->flags);
+	ASSERT_EQ(1, test_bit(RPC_PKTS_READY, &crpc->flags));
+	set_bit(RPC_PRIVATE, &crpc->flags);
 	crpc->error = -ENOENT;
 	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, -homa_wait_private(crpc, 0));
 	homa_rpc_unlock(crpc);
-	EXPECT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags) & RPC_PKTS_READY);
+	EXPECT_EQ(1, test_bit(RPC_PKTS_READY, &crpc->flags));
 	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->wait_none));
 	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->wait_block));
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_fast));
@@ -2419,8 +2419,8 @@ TEST_F(homa_incoming, homa_wait_private__copy_to_user_fails)
 			self->server_port, self->client_id, 20000, 1600);
 
 	ASSERT_NE(NULL, crpc);
-	ASSERT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags));
-	atomic_or(RPC_PRIVATE, &crpc->flags);
+	ASSERT_EQ(1, test_bit(RPC_PKTS_READY, &crpc->flags));
+	set_bit(RPC_PRIVATE, &crpc->flags);
 	mock_copy_data_errors = 1;
 	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, -homa_wait_private(crpc, 0));
@@ -2434,12 +2434,12 @@ TEST_F(homa_incoming, homa_wait_private__available_immediately)
 			self->server_port, self->client_id, 20000, 1600);
 
 	ASSERT_NE(NULL, crpc);
-	ASSERT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags));
-	atomic_or(RPC_PRIVATE, &crpc->flags);
+	ASSERT_EQ(1, test_bit(RPC_PKTS_READY, &crpc->flags));
+	set_bit(RPC_PRIVATE, &crpc->flags);
 	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, homa_wait_private(crpc, 0));
 	homa_rpc_unlock(crpc);
-	ASSERT_EQ(RPC_PRIVATE, atomic_read(&crpc->flags));
+	EXPECT_EQ(1, test_bit(RPC_PRIVATE, &crpc->flags));
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_none));
 }
 TEST_F(homa_incoming, homa_wait_private__nonblocking)
@@ -2449,7 +2449,7 @@ TEST_F(homa_incoming, homa_wait_private__nonblocking)
 			self->server_port, self->client_id, 20000, 1600);
 
 	ASSERT_NE(NULL, crpc);
-	atomic_or(RPC_PRIVATE, &crpc->flags);
+	set_bit(RPC_PRIVATE, &crpc->flags);
 
 	homa_rpc_lock(crpc);
 	EXPECT_EQ(EAGAIN, -homa_wait_private(crpc, 1));
@@ -2465,7 +2465,7 @@ TEST_F(homa_incoming, homa_wait_private__signal_notify_race)
 			self->server_port, self->client_id, 20000, 1000);
 
 	ASSERT_NE(NULL, crpc);
-	atomic_or(RPC_PRIVATE, &crpc->flags);
+	set_bit(RPC_PRIVATE, &crpc->flags);
 	IF_NO_STRIP(self->homa.poll_cycles = 0);
 	unit_hook_register(handoff_hook);
 	hook_rpc = crpc;
@@ -2500,7 +2500,7 @@ TEST_F(homa_incoming, homa_wait_shared__rpc_already_ready)
 	struct homa_rpc *rpc;
 
 	ASSERT_NE(NULL, crpc);
-	ASSERT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags));
+	ASSERT_EQ(1, test_bit(RPC_PKTS_READY, &crpc->flags));
 
 	rpc = homa_wait_shared(&self->hsk, 0);
 	ASSERT_FALSE(IS_ERR(rpc));
@@ -2605,7 +2605,7 @@ TEST_F(homa_incoming, homa_wait_shared__copy_to_user_fails)
 	struct homa_rpc *rpc;
 
 	ASSERT_NE(NULL, crpc);
-	ASSERT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags));
+	ASSERT_EQ(1, test_bit(RPC_PKTS_READY, &crpc->flags));
 	mock_copy_data_errors = 1;
 
 	rpc = homa_wait_shared(&self->hsk, 0);
@@ -2659,7 +2659,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__private_rpc)
 			self->server_port, self->client_id, 20000, 1600);
 
 	ASSERT_NE(NULL, crpc);
-	atomic_or(RPC_PRIVATE, &crpc->flags);
+	set_bit(RPC_PRIVATE, &crpc->flags);
 	homa_interest_init_private(&interest, crpc);
 	mock_log_wakeups = 1;
 	unit_log_clear();

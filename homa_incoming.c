@@ -330,7 +330,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 				continue;
 		}
 		if (n == 0) {
-			atomic_andnot(RPC_PKTS_READY, &rpc->flags);
+			clear_bit(RPC_PKTS_READY, &rpc->flags);
 			break;
 		}
 
@@ -412,9 +412,9 @@ free_skbs:
 		tt_record2("finished freeing %d skbs for id %d",
 			   n, rpc->id);
 		n = 0;
-		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
+		set_bit(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc);
-		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
+		clear_bit(APP_NEEDS_LOCK, &rpc->flags);
 		if (error)
 			break;
 	}
@@ -479,11 +479,10 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 		 * elsewhere.
 		 */
 		if (rpc) {
-			int flags = atomic_read(&rpc->flags);
-
-			if (flags & APP_NEEDS_LOCK) {
+			if (test_bit(APP_NEEDS_LOCK, &rpc->flags)) {
 				homa_rpc_unlock(rpc);
-				tt_record2("softirq released lock for id %d, flags 0x%x", rpc->id, flags);
+				tt_record2("softirq released lock for id %d, flags 0x%x",
+					   rpc->id, rpc->flags);
 
 				/* This short spin is needed to ensure that the
 				 * other thread gets the lock before this thread
@@ -712,8 +711,8 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	homa_add_packet(rpc, skb);
 
 	if (skb_queue_len(&rpc->msgin.packets) != 0 &&
-	    !(atomic_read(&rpc->flags) & RPC_PKTS_READY)) {
-		atomic_or(RPC_PKTS_READY, &rpc->flags);
+	    !test_bit(RPC_PKTS_READY, &rpc->flags)) {
+		set_bit(RPC_PKTS_READY, &rpc->flags);
 		homa_rpc_handoff(rpc);
 	}
 
@@ -1071,7 +1070,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 #endif /* See strip.py */
 	int result;
 
-	if (!(atomic_read(&rpc->flags) & RPC_PRIVATE))
+	if (!test_bit(RPC_PRIVATE, &rpc->flags))
 		return -EINVAL;
 
 	/* Each iteration through this loop waits until rpc needs attention
@@ -1112,9 +1111,9 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		blocked |= interest.blocked;
 #endif /* See strip.py */
 
-		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
+		set_bit(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc);
-		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
+		clear_bit(APP_NEEDS_LOCK, &rpc->flags);
 		homa_interest_unlink_private(&interest);
 		tt_record3("homa_wait_private found rpc id %d, pid %d via handoff, blocked %d",
 			   rpc->id, current->pid, interest.blocked);
@@ -1238,9 +1237,9 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 				   rpc->id, current->pid, interest.blocked);
 		}
 
-		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
+		set_bit(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc);
-		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
+		clear_bit(APP_NEEDS_LOCK, &rpc->flags);
 		if (!rpc->error)
 			rpc->error = homa_copy_to_user(rpc);
 		if (rpc->error) {
@@ -1279,7 +1278,7 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 	struct homa_sock *hsk = rpc->hsk;
 	struct homa_interest *interest;
 
-	if (atomic_read(&rpc->flags) & RPC_PRIVATE) {
+	if (test_bit(RPC_PRIVATE, &rpc->flags)) {
 		homa_interest_notify_private(rpc);
 		return;
 	}
