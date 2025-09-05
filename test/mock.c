@@ -378,6 +378,10 @@ bool cancel_work_sync(struct work_struct *work)
 
 void __check_object_size(const void *ptr, unsigned long n, bool to_user) {}
 
+void consume_skb(struct sk_buff *skb) {
+	kfree_skb(skb);
+}
+
 size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 {
 	size_t bytes_left = bytes;

@@ -470,7 +470,7 @@ void homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs, int count)
 			/* This sk_buff is still in use somewhere, so can't
 			 * reclaim its pages.
 			 */
-			kfree_skb(skb);
+			consume_skb(skb);
 			continue;
 		}
 
@@ -492,7 +492,7 @@ void homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs, int count)
 			}
 		}
 		shinfo->nr_frags = 0;
-		kfree_skb(skb);
+		consume_skb(skb);
 	}
 	if (num_pages > 0)
 		homa_skb_cache_pages(homa, pages_to_cache, num_pages);

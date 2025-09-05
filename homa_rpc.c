@@ -565,7 +565,8 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 			if (rpc->msgin.length >= 0 &&
 			    !skb_queue_empty_lockless(&rpc->msgin.packets)) {
 				rx_frees += skb_queue_len(&rpc->msgin.packets);
-				__skb_queue_purge(&rpc->msgin.packets);
+				__skb_queue_purge_reason(&rpc->msgin.packets,
+							 SKB_CONSUMED);
 			}
 
 			/* If we get here, it means all packets have been

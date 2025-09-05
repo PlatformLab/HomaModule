@@ -1390,6 +1390,7 @@ int homa_softirq(struct sk_buff *skb)
 {
 	struct sk_buff *packets, *other_pkts, *next;
 	struct sk_buff **prev_link, **other_link;
+	enum skb_drop_reason reason;
 	struct homa_common_hdr *h;
 	int header_offset;
 
@@ -1427,6 +1428,7 @@ int homa_softirq(struct sk_buff *skb)
 				pr_notice("Homa can't handle fragmented packet (no space for header); discarding\n");
 #endif /* See strip.py */
 			UNIT_LOG("", "pskb discard");
+			reason = SKB_DROP_REASON_HDR_TRUNC;
 			goto discard;
 		}
 		header_offset = skb_transport_header(skb) - skb->data;
@@ -1448,6 +1450,7 @@ int homa_softirq(struct sk_buff *skb)
 					skb->len - header_offset);
 #endif /* See strip.py */
 			INC_METRIC(short_packets, 1);
+			reason = SKB_DROP_REASON_PKT_TOO_SMALL;
 			goto discard;
 		}
 
@@ -1466,6 +1469,7 @@ int homa_softirq(struct sk_buff *skb)
 					   homa_local_id(h->sender_id));
 				tt_freeze();
 			}
+			reason = SKB_CONSUMED;
 			goto discard;
 		}
 #endif /* See strip.py */
@@ -1487,7 +1491,7 @@ int homa_softirq(struct sk_buff *skb)
 
 discard:
 		*prev_link = skb->next;
-		kfree_skb(skb);
+		kfree_skb_reason(skb, reason);
 	}
 
 	/* Now process the longer packets. Each iteration of this loop

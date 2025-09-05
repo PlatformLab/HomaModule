@@ -167,11 +167,13 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	struct homa_gap *gap, *dummy, *gap2;
 	int start = ntohl(h->seg.offset);
 	int length = homa_data_len(skb);
+	enum skb_drop_reason reason;
 	int end = start + length;
 
 	if ((start + length) > rpc->msgin.length) {
 		tt_record3("Packet extended past message end; id %d, offset %d, length %d",
 			   rpc->id, start, length);
+		reason = SKB_DROP_REASON_PKT_TOO_BIG;
 		goto discard;
 	}
 
@@ -187,6 +189,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				    rpc->msgin.recv_end, start)) {
 			tt_record2("Couldn't allocate gap for id %d (start %d): no memory",
 				   rpc->id, start);
+			reason = SKB_DROP_REASON_NOMEM;
 			goto discard;
 		}
 		rpc->msgin.recv_end = end;
@@ -204,11 +207,13 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			if (start < gap->start) {
 				tt_record4("Packet overlaps gap start: id %d, start %d, end %d, gap_start %d",
 					   rpc->id, start, end, gap->start);
+				reason = SKB_DROP_REASON_DUP_FRAG;
 				goto discard;
 			}
 			if (end > gap->end) {
 				tt_record4("Packet overlaps gap end: id %d, start %d, end %d, gap_end %d",
 					   rpc->id, start, end, gap->start);
+				reason = SKB_DROP_REASON_DUP_FRAG;
 				goto discard;
 			}
 			gap->start = end;
@@ -228,6 +233,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			if (end > gap->end) {
 				tt_record4("Packet overlaps gap end: id %d, start %d, end %d, gap_end %d",
 					   rpc->id, start, end, gap->start);
+				reason = SKB_DROP_REASON_DUP_FRAG;
 				goto discard;
 			}
 			gap->end = start;
@@ -239,6 +245,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		if (!gap2) {
 			tt_record2("Couldn't allocate gap for split for id %d (start %d): no memory",
 				   rpc->id, end);
+			reason = SKB_DROP_REASON_NOMEM;
 			goto discard;
 		}
 		gap2->time = gap->time;
@@ -255,7 +262,7 @@ discard:
 #endif /* See strip.py */
 	tt_record4("homa_add_packet discarding packet for id %d, offset %d, length %d, retransmit %d",
 		   rpc->id, start, length, h->retransmit);
-	kfree_skb(skb);
+	kfree_skb_reason(skb, reason);
 	return;
 
 keep:
@@ -406,7 +413,7 @@ free_skbs:
 		start = homa_clock();
 #endif /* See strip.py */
 		for (i = 0; i < n; i++)
-			kfree_skb(skbs[i]);
+			consume_skb(skbs[i]);
 		INC_METRIC(skb_free_cycles, homa_clock() - start);
 		INC_METRIC(skb_frees, n);
 		tt_record2("finished freeing %d skbs for id %d",
@@ -771,7 +778,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(rpc, false);
 	}
-	kfree_skb(skb);
+	consume_skb(skb);
 }
 #endif /* See strip.py */
 
@@ -855,7 +862,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	}
 
 done:
-	kfree_skb(skb);
+	consume_skb(skb);
 }
 
 /**
@@ -915,7 +922,7 @@ void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 #endif /* See strip.py */
 	}
 done:
-	kfree_skb(skb);
+	consume_skb(skb);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -940,7 +947,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 		peer->cutoff_version = h->cutoff_version;
 		homa_peer_release(peer);
 	}
-	kfree_skb(skb);
+	consume_skb(skb);
 }
 #endif /* See strip.py */
 
@@ -1001,7 +1008,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	homa_peer_release(peer);
 
 done:
-	kfree_skb(skb);
+	consume_skb(skb);
 }
 
 /**
@@ -1042,7 +1049,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	}
 	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
 		   homa_local_id(h->common.sender_id), tt_addr(saddr), count);
-	kfree_skb(skb);
+	consume_skb(skb);
 }
 
 /**

@@ -434,7 +434,7 @@ void homa_qdisc_free_homa(struct homa_qdisc_dev *qdev)
 		skb = homa_qdisc_dequeue_homa(qdev);
 		if (!skb)
 			break;
-		kfree_skb(skb);
+		kfree_skb_reason(skb, SKB_DROP_REASON_QUEUE_PURGE);
 	}
 }
 
@@ -653,7 +653,7 @@ int homa_qdisc_redirect_skb(struct sk_buff *skb,
 			/* Couldn't find a Homa qdisc to use; drop the skb.
 			 * Shouldn't ever happen?
 			 */
-			kfree_skb(skb);
+			kfree_skb_reason(skb, SKB_DROP_REASON_QDISC_DROP);
 			result = NET_XMIT_DROP;
 			goto done;
 		}

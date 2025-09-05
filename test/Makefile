@@ -35,7 +35,7 @@ ifneq ($(__STRIP__),)
 DEFS +=      -D__STRIP__
 endif
 
-WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare \
+WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
 CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
