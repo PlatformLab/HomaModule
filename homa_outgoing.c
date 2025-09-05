@@ -475,7 +475,6 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	priority = hsk->homa->num_priorities - 1;
 #endif /* See strip.py */
 	skb->ooo_okay = 1;
-	skb_get(skb);
 #ifndef __STRIP__ /* See strip.py */
 	if (hsk->inet.sk.sk_family == AF_INET6) {
 		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
@@ -493,38 +492,8 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	else
 		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
 #endif /* See strip.py */
-	if (unlikely(result != 0)) {
+	if (unlikely(result != 0))
 		INC_METRIC(control_xmit_errors, 1);
-
-		/* It appears that ip*_xmit frees skbuffs after
-		 * errors; the following code is to raise an alert if
-		 * this isn't actually the case. The extra skb_get above
-		 * and kfree_skb call below are needed to do the check
-		 * accurately (otherwise the buffer could be freed and
-		 * its memory used for some other purpose, resulting in
-		 * a bogus "reference count").
-		 */
-		if (refcount_read(&skb->users) > 1) {
-#ifndef __STRIP__ /* See strip.py */
-			if (hsk->inet.sk.sk_family == AF_INET6) {
-				pr_notice("ip6_xmit didn't free Homa control packet (type %d) after error %d\n",
-					  h->type, result);
-			} else {
-				pr_notice("ip_queue_xmit didn't free Homa control packet (type %d) after error %d\n",
-					  h->type, result);
-				tt_record2("ip_queue_xmit didn't free Homa control packet (type %d) after error %d\n",
-					   h->type, result);
-			}
-#else /* See strip.py */
-			if (hsk->inet.sk.sk_family == AF_INET6)
-				pr_notice("ip6_xmit didn't free Homa control packet (type %d) after error %d\n",
-					  h->type, result);
-			else
-				pr_notice("ip_queue_xmit didn't free Homa control packet (type %d) after error %d\n",
-					  h->type, result);
-#endif /* See strip.py */
-		}
-	}
 #ifndef __STRIP__ /* See strip.py */
 	txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
 	if (netif_tx_queue_stopped(txq))
@@ -535,7 +504,6 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	INC_METRIC(packets_sent[h->type - DATA], 1);
 	INC_METRIC(priority_bytes[priority], skb->len);
 	INC_METRIC(priority_packets[priority], 1);
-	kfree_skb(skb);
 	return result;
 }
 
