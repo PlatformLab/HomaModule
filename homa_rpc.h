@@ -469,6 +469,19 @@ static inline int homa_rpc_try_lock(struct homa_rpc *rpc)
 }
 
 /**
+ * homa_rpc_lock_preempt() - Same as homa_rpc_lock, except sets the
+ * APP_NEEDS_LOCK flags while waiting to encourage the existing lock
+ * owner to relinquish the lock.
+ */
+static inline void homa_rpc_lock_preempt(struct homa_rpc *rpc)
+	__acquires(rpc->bucket->lock)
+{
+	set_bit(APP_NEEDS_LOCK, &rpc->flags);
+	homa_bucket_lock(rpc->bucket, rpc->id);
+	clear_bit(APP_NEEDS_LOCK, &rpc->flags);
+}
+
+/**
  * homa_rpc_unlock() - Release the lock for an RPC.
  * @rpc:   RPC to unlock.
  */

@@ -412,9 +412,7 @@ free_skbs:
 		tt_record2("finished freeing %d skbs for id %d",
 			   n, rpc->id);
 		n = 0;
-		set_bit(APP_NEEDS_LOCK, &rpc->flags);
-		homa_rpc_lock(rpc);
-		clear_bit(APP_NEEDS_LOCK, &rpc->flags);
+		homa_rpc_lock_preempt(rpc);
 		if (error)
 			break;
 	}
@@ -1111,9 +1109,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		blocked |= interest.blocked;
 #endif /* See strip.py */
 
-		set_bit(APP_NEEDS_LOCK, &rpc->flags);
-		homa_rpc_lock(rpc);
-		clear_bit(APP_NEEDS_LOCK, &rpc->flags);
+		homa_rpc_lock_preempt(rpc);
 		homa_interest_unlink_private(&interest);
 		tt_record3("homa_wait_private found rpc id %d, pid %d via handoff, blocked %d",
 			   rpc->id, current->pid, interest.blocked);
@@ -1237,9 +1233,7 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 				   rpc->id, current->pid, interest.blocked);
 		}
 
-		set_bit(APP_NEEDS_LOCK, &rpc->flags);
-		homa_rpc_lock(rpc);
-		clear_bit(APP_NEEDS_LOCK, &rpc->flags);
+		homa_rpc_lock_preempt(rpc);
 		if (!rpc->error)
 			rpc->error = homa_copy_to_user(rpc);
 		if (rpc->error) {
