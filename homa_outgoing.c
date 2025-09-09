@@ -188,7 +188,6 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	homa_info->data_bytes = length;
 	homa_info->seg_length = max_seg_data;
 	homa_info->offset = offset;
-	homa_info->bytes_left = rpc->msgout.length - offset;
 	homa_info->rpc = rpc;
 
 #ifndef __STRIP__ /* See strip.py */
@@ -829,6 +828,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			new_homa_info->data_bytes = seg_length;
 			new_homa_info->seg_length = seg_length;
 			new_homa_info->offset = offset;
+			new_homa_info->rpc = rpc;
 			tt_record3("retransmitting offset %d, length %d, id %d",
 				   offset, seg_length, rpc->id);
 #ifndef __STRIP__ /* See strip.py */

@@ -570,30 +570,8 @@ struct homa_skb_info {
 	 */
 	int offset;
 
-	/**
-	 * @bytes_left: number of bytes in this packet and all later packets
-	 * in the same message. Used to priroitize packets for SRPT.
-	 */
-	int bytes_left;
-
-	/**
-	 * @rpc: RPC that this packet came from. Used only as a unique
-	 * identifier: it is not safe to dereference this pointer (the RPC
-	 * may no longer exist).
-	 */
+	/** @rpc: RPC that this packet belongs to. */
 	void *rpc;
-
-	/**
-	 * @next_sibling: next packet in @rpc that has been deferred in
-	 * homa_qdisc because the NIC queue was too long, or NULL if none.
-	 */
-	struct sk_buff *next_sibling;
-
-	/**
-	 * @last_sibling: last packet in @next_sibling list. Only valid
-	 * for the "head" packet (which is in qdev->homa_deferred).
-	 */
-	struct sk_buff *last_sibling;
 };
 
 /**

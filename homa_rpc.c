@@ -56,6 +56,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	crpc->dport = ntohs(dest->in6.sin6_port);
 	crpc->msgin.length = -1;
 	crpc->msgout.length = -1;
+	homa_qdisc_rpc_init(&crpc->qrpc);
 	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->buf_links);
 	INIT_LIST_HEAD(&crpc->dead_links);
@@ -161,6 +162,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->id = id;
 	srpc->msgin.length = -1;
 	srpc->msgout.length = -1;
+	homa_qdisc_rpc_init(&srpc->qrpc);
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->buf_links);
 	INIT_LIST_HEAD(&srpc->dead_links);

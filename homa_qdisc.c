@@ -14,6 +14,7 @@
 #include "homa_impl.h"
 #include "homa_pacer.h"
 #include "homa_qdisc.h"
+#include "homa_rpc.h"
 #include "timetrace.h"
 
 #include <linux/ethtool.h>
@@ -83,8 +84,9 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct homa_net *hnet,
 	qdev->redirect_qix = -1;
 	homa_qdisc_update_sysctl(qdev);
 	INIT_LIST_HEAD(&qdev->links);
-	skb_queue_head_init(&qdev->homa_deferred);
+	qdev->deferred_rpcs = RB_ROOT_CACHED;
 	skb_queue_head_init(&qdev->tcp_deferred);
+	spin_lock_init(&qdev->defer_lock);
 	init_waitqueue_head(&qdev->pacer_sleep);
 	spin_lock_init(&qdev->pacer_mutex);
 
@@ -269,7 +271,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		goto enqueue;
 	}
 
-	if (skb_queue_empty(&qdev->homa_deferred) &&
+	if (!homa_qdisc_any_deferred(qdev) &&
 	    homa_qdisc_update_link_idle(qdev, pkt_len,
 					homa->pacer->max_nic_queue_cycles))
 		goto enqueue;
@@ -277,9 +279,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	/* This packet needs to be deferred until the NIC queue has
 	 * been drained a bit.
 	 */
-	tt_record4("homa_qdisc_enqueue deferring homa data packet for id %d, offset %d, bytes_left %d on qid %d",
-		   be64_to_cpu(h->common.sender_id), offset,
-		   homa_get_skb_info(skb)->bytes_left, qdev->pacer_qix);
+	tt_record3("homa_qdisc_enqueue deferring homa data packet for id %d, offset %d on qid %d",
+		   be64_to_cpu(h->common.sender_id), offset, qdev->pacer_qix);
 	homa_qdisc_defer_homa(qdev, skb);
 	return NET_XMIT_SUCCESS;
 
@@ -287,9 +288,9 @@ enqueue:
 	if (is_homa_pkt(skb)) {
 		if (h->common.type == DATA) {
 			h = (struct homa_data_hdr *)skb_transport_header(skb);
-			tt_record4("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d, bytes_left %d on qid %d",
+			tt_record3("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d on qid %d",
 				be64_to_cpu(h->common.sender_id), offset,
-				homa_get_skb_info(skb)->bytes_left, q->ix);
+				q->ix);
 		}
 	} else {
 		tt_record2("homa_qdisc_enqueue queuing non-homa packet, qix %d, pacer_qix %d",
@@ -320,104 +321,122 @@ enqueue:
 void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 {
 	struct homa_skb_info *info = homa_get_skb_info(skb);
+	struct homa_rpc *rpc = info->rpc;
+	struct rb_node *prev_deferred;
 	u64 now = homa_clock();
-	struct sk_buff *other;
 	unsigned long flags;
 
-	/* Tricky point: only one packet from an RPC may appear in
-	 * qdev->homa_deferred at once (the earliest one in the message).
-	 * If later packets from the same message were also in the queue,
-	 * they would have higher priorities and would get transmitted
-	 * first, which we don't want. So, if more than one packet from
-	 * a message is waiting, only the first appears in qdev->homa_deferred;
-	 * the others are queued up using links in the homa_skb_info of
-	 * the first packet.
-	 *
-	 * This also means that we must scan the list starting at the
-	 * low-priority end, so we'll notice if there is an earlier
-	 * (lower priority) packet for the same RPC already in the list.
-	 */
+	spin_lock_irqsave(&qdev->defer_lock, flags);
+	prev_deferred = rb_first_cached(&qdev->deferred_rpcs);
+	__skb_queue_tail(&rpc->qrpc.packets, skb);
+	if (skb_queue_len(&rpc->qrpc.packets) == 1) {
+		int bytes_left;
 
-	info->next_sibling = NULL;
-	info->last_sibling = NULL;
-	spin_lock_irqsave(&qdev->homa_deferred.lock, flags);
-	if (skb_queue_empty(&qdev->homa_deferred)) {
-		__skb_queue_head(&qdev->homa_deferred, skb);
+		bytes_left = rpc->msgout.length - info->offset;
+		if (bytes_left < rpc->qrpc.tx_left)
+			rpc->qrpc.tx_left = bytes_left;
+		homa_qdisc_insert_rb(qdev, rpc);
+	}
+	if (prev_deferred)
+		INC_METRIC(throttled_cycles, now - qdev->last_defer);
+	else
 		wake_up(&qdev->pacer_sleep);
-		goto done;
-	}
-	INC_METRIC(throttled_cycles, now - qdev->last_defer);
-	skb_queue_reverse_walk(&qdev->homa_deferred, other) {
-		struct homa_skb_info *other_info = homa_get_skb_info(other);
-
-		if (other_info->rpc == info->rpc) {
-			if (!other_info->last_sibling)
-				other_info->next_sibling = skb;
-			else
-				homa_get_skb_info(other_info->last_sibling)->
-						next_sibling = skb;
-			other_info->last_sibling = skb;
-			break;
-		}
-
-		if (other_info->bytes_left <= info->bytes_left) {
-			__skb_queue_after(&qdev->homa_deferred, other, skb);
-			break;
-		}
-
-		if (skb_queue_is_first(&qdev->homa_deferred, other)) {
-			__skb_queue_head(&qdev->homa_deferred, skb);
-			break;
-		}
-	}
-
-done:
 	qdev->last_defer = now;
-	spin_unlock_irqrestore(&qdev->homa_deferred.lock, flags);
+	spin_unlock_irqrestore(&qdev->defer_lock, flags);
 }
 
 /**
- * homa_qdisc_dequeue_homa() - Remove the frontmost packet from the list
- * of deferred Homa packets for a qdev.
- * @qdev:    The homa_deferred element is the list from which a packet
- *           will be dequeued.
- * Return:   The frontmost packet from the list, or NULL if the list was empty.
+ * homa_qdisc_insert_rb() - Insert an RPC into the deferred_rpcs red-black
+ * tree.
+ * @qdev:    Network device for the RPC.
+ * @rpc:     RPC to insert.
+ */
+void homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev, struct homa_rpc *rpc)
+{
+	struct rb_node **new = &(qdev->deferred_rpcs.rb_root.rb_node);
+	struct rb_node *parent = NULL;
+	bool leftmost = true;
+
+	while (*new) {
+		struct homa_qdisc_rpc *qrpc;
+		struct homa_rpc *rpc2;
+
+		qrpc = container_of(*new, struct homa_qdisc_rpc, rb_node);
+		rpc2 = container_of(qrpc, struct homa_rpc, qrpc);
+
+		parent = *new;
+		/* To sort RPCs, first use bytes left to transmit; settle
+		 * ties in favor of oldest RPC. If still tied (highly unlikely),
+		 * use RPC address to provide deterministic ordering.
+		 */
+		if (rpc->qrpc.tx_left < rpc2->qrpc.tx_left) {
+			new = &((*new)->rb_left);
+		} else if (rpc->qrpc.tx_left > rpc2->qrpc.tx_left) {
+			new = &((*new)->rb_right);
+			leftmost = false;
+		} else if (rpc->msgout.init_time < rpc2->msgout.init_time) {
+			new = &((*new)->rb_left);
+		} else if (rpc->msgout.init_time < rpc2->msgout.init_time) {
+			new = &((*new)->rb_right);
+			leftmost = false;
+		} else if (rpc < rpc2) {
+			new = &((*new)->rb_left);
+		} else {
+			new = &((*new)->rb_right);
+			leftmost = false;
+		}
+	}
+
+	/* Add new node and rebalance tree. */
+	rb_link_node(&rpc->qrpc.rb_node, parent, new);
+	rb_insert_color_cached(&rpc->qrpc.rb_node, &qdev->deferred_rpcs,
+			       leftmost);
+}
+
+/**
+ * homa_qdisc_dequeue_homa() - Return the highest-priority deferred Homa packet
+ * and dequeue it from the structures that manage deferred packets.
+ * @qdev:    Info about deferred packets is stored here.
+ * Return:   The next packet to transmit, or NULL if there are no deferred
+ *           Homa packets.
  */
 struct sk_buff *homa_qdisc_dequeue_homa(struct homa_qdisc_dev *qdev)
 {
-	struct homa_skb_info *sibling_info;
-	struct sk_buff *skb, *sibling;
+	struct homa_qdisc_rpc *qrpc;
 	struct homa_skb_info *info;
+	struct homa_rpc *rpc;
+	struct rb_node *node;
+	struct sk_buff *skb;
 	unsigned long flags;
+	int bytes_left;
 
-	/* The only tricky element about this function is that skb may
-	 * have a sibling list. If so, we need to enqueue the next
-	 * sibling.
-	 */
-	spin_lock_irqsave(&qdev->homa_deferred.lock, flags);
-	if (skb_queue_empty(&qdev->homa_deferred)) {
-		spin_unlock_irqrestore(&qdev->homa_deferred.lock, flags);
+	spin_lock_irqsave(&qdev->defer_lock, flags);
+	node = rb_first_cached(&qdev->deferred_rpcs);
+	if (!node) {
+		spin_unlock_irqrestore(&qdev->defer_lock, flags);
 		return NULL;
 	}
-	skb = qdev->homa_deferred.next;
-	__skb_unlink(skb, &qdev->homa_deferred);
-	info = homa_get_skb_info(skb);
-	if (info->next_sibling) {
-		/* This is a "compound" packet, containing multiple
-		 * packets from the same RPC. Put the next packet
-		 * back on the list at the front (it should have even
-		 * higher priority than skb, since it is later in the
-		 * message).
-		 */
-		sibling = info->next_sibling;
-		sibling_info = homa_get_skb_info(sibling);
-		sibling_info->last_sibling = info->last_sibling;
-		__skb_queue_head(&qdev->homa_deferred, sibling);
+	qrpc = container_of(node, struct homa_qdisc_rpc, rb_node);
+	skb = skb_dequeue(&qrpc->packets);
+	if (skb_queue_len(&qrpc->packets) == 0) {
+		rb_erase_cached(node, &qdev->deferred_rpcs);
 	}
 
-	if (skb_queue_empty(&qdev->homa_deferred))
+	/* Update qrpc->bytes_left. This can change the priority of the RPC
+	 * in qdev->deferred_rpcs, but the RPC was already the highest-
+	 * priority one and its priority only gets higher, so its position
+	 * in the rbtree won't change (thus we don't need to remove and
+	 * reinsert it).
+	 */
+	rpc = container_of(qrpc, struct homa_rpc, qrpc);
+	info = homa_get_skb_info(skb);
+	bytes_left = rpc->msgout.length - (info->offset + info->data_bytes);
+	if (bytes_left < qrpc->tx_left)
+		qrpc->tx_left = bytes_left;
+
+	if (!rb_first_cached(&qdev->deferred_rpcs))
 		INC_METRIC(throttled_cycles, homa_clock() - qdev->last_defer);
-	spin_unlock_irqrestore(&qdev->homa_deferred.lock, flags);
+	spin_unlock_irqrestore(&qdev->defer_lock, flags);
 	return skb;
 }
 
@@ -491,7 +510,7 @@ int homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev, int bytes,
 			break;
 		INC_METRIC(idle_time_conflicts, 1);
 	}
-	if (!skb_queue_empty(&qdev->homa_deferred))
+	if (rb_first_cached(&qdev->deferred_rpcs))
 		INC_METRIC(pacer_bytes, bytes);
 	return 1;
 }
@@ -518,8 +537,7 @@ int homa_qdisc_pacer_main(void *device)
 		qdev->pacer_wake_time = 0;
 		INC_METRIC(pacer_cycles, homa_clock() - start);
 
-		if (!skb_queue_empty(&qdev->homa_deferred) ||
-		    !skb_queue_empty(&qdev->tcp_deferred)) {
+		if (homa_qdisc_any_deferred(qdev)) {
 			/* There are more packets to transmit (the NIC queue
 			 * must be full); call the pacer again, but first
 			 * give other threads a chance to run (otherwise
@@ -532,9 +550,7 @@ int homa_qdisc_pacer_main(void *device)
 
 		tt_record("homa_qdisc pacer sleeping");
 		status = wait_event_interruptible(qdev->pacer_sleep,
-			kthread_should_stop() ||
-			!skb_queue_empty(&qdev->homa_deferred) ||
-			!skb_queue_empty(&qdev->tcp_deferred));
+			kthread_should_stop() || homa_qdisc_any_deferred(qdev));
 		tt_record1("homa_qdisc pacer woke up with status %d", status);
 		if (status != 0 && status != -ERESTARTSYS)
 			break;
@@ -595,7 +611,8 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 
 		/* Note: when we get here, it's possible that the NIC queue is
 		 * still too long because other threads have queued packets,
-		 * but we transmit anyway so the pacer thread doesn't starve.
+		 * but we transmit anyway (don't want this thread to get
+		 * starved by others).
 		 */
 		skb = homa_qdisc_dequeue_homa(qdev);
 		if (!skb)
@@ -604,10 +621,9 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 		homa_qdisc_update_link_idle(qdev, qdisc_skb_cb(skb)->pkt_len,
 					    -1);
 		h = (struct homa_data_hdr *)skb_transport_header(skb);
-		tt_record4("homa_qdisc_pacer queuing homa data packet for id %d, offset %d, bytes_left %d on qid %d",
+		tt_record3("homa_qdisc_pacer queuing homa data packet for id %d, offset %d on qid %d",
 			   be64_to_cpu(h->common.sender_id),
-			   ntohl(h->seg.offset),
-			   homa_get_skb_info(skb)->bytes_left, qdev->pacer_qix);
+			   ntohl(h->seg.offset), qdev->pacer_qix);
 		homa_qdisc_redirect_skb(skb, qdev, true);
 	}
 done:

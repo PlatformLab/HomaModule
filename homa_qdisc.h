@@ -13,6 +13,8 @@
 #pragma GCC diagnostic pop
 #endif /* __UNIT_TEST__*/
 
+#include <linux/rbtree.h>
+
 #ifndef _HOMA_QDISC_H
 #define _HOMA_QDISC_H
 
@@ -105,10 +107,10 @@ struct homa_qdisc_dev {
 	struct list_head links;
 
 	/**
-	 * @homa_deferred: Homa packets whose transmission was deferred
-	 * because the NIC queue was too long. The queue is in SRPT order.
+	 * @deferred_rpcs: Contains all homa_rpc's with deferred packets, in
+	 * SRPT order.
 	 */
-	struct sk_buff_head homa_deferred;
+	struct rb_root_cached deferred_rpcs;
 
 	/**
 	 * @tcp_deferred: TCP packets whose transmission was deferred
@@ -122,6 +124,12 @@ struct homa_qdisc_dev {
 	 * added to homa_deferred or tcp_deferred.
 	 */
 	u64 last_defer;
+
+	/**
+	 * @defer_lock: Sychronizes access to information about deferred
+	 * packets, including deferred_rpcs, tcp_deferred, and last_defer.
+	 */
+	spinlock_t defer_lock;
 
 	/**
 	 * @pacer_wake_time: homa_clock() time when the pacer woke up (if
@@ -149,6 +157,34 @@ struct homa_qdisc_dev {
 	spinlock_t pacer_mutex __aligned(L1_CACHE_BYTES);
 };
 
+/**
+ * struct homa_qdisc_rpc - One of these structs exists in each homa_rpc, with
+ * information needed by homa_qidsc.
+ */
+struct homa_qdisc_rpc {
+	/**
+	 * @deferred: List of tx skbs from this RPC that have been deferred
+	 * by homa_qdisc. Non-empty means this RPC is currently linked into
+	 * homa_qdisc_dev->deferred_rpcs.
+	 */
+	struct sk_buff_head packets;
+
+	/**
+	 * @rb_node: Used to link this struct into
+	 * homa_qdisc_dev->deferred_rpcs.
+	 */
+	struct rb_node rb_node;
+
+	/**
+	 * @tx_left: The number of (trailing) bytes of the tx message
+	 * that have not been transmitted by homa_qdisc yet. Only updated
+	 * when packets are added to or removed from the deferred list;
+	 * may be out of date (too high) if packets have been transmitted
+	 * without being deferred.
+	 */
+	int tx_left;
+};
+
 void            homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev,
 				      struct sk_buff *skb);
 struct sk_buff *
@@ -159,6 +195,8 @@ int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 void            homa_qdisc_free_homa(struct homa_qdisc_dev *qdev);
 int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
+void            homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev,
+				     struct homa_rpc *rpc);
 int             homa_qdisc_pacer_main(void *device);
 struct homa_qdisc_dev *
 		homa_qdisc_qdev_get(struct homa_net *hnet,
@@ -185,6 +223,28 @@ void            homa_qdisc_pacer(struct homa_qdisc_dev *qdev);
 static inline bool homa_qdisc_active(struct homa_net *hnet)
 {
 	return !list_empty(&hnet->qdisc_devs);
+}
+
+/**
+ * homa_qdisc_rpc_init() - Initialize a homa_qdisc_rpc struct.
+ * @qrpc:  Struct to initialize
+ */
+static inline void homa_qdisc_rpc_init(struct homa_qdisc_rpc *qrpc)
+{
+	skb_queue_head_init(&qrpc->packets);
+	qrpc->tx_left = HOMA_MAX_MESSAGE_LENGTH;
+}
+
+/**
+ * homa_qdisc_any_deferred() - Returns true if there are currently any
+ * deferred packets in a homa_qdisc_dev, false if there are none.
+ * @qdev:      Holds info about deferred packets.
+ * Return:     See above.
+ */
+static inline bool homa_qdisc_any_deferred(struct homa_qdisc_dev *qdev)
+{
+	return rb_first_cached(&qdev->deferred_rpcs) ||
+	       !skb_queue_empty(&qdev->tcp_deferred);
 }
 
 #endif /* _HOMA_QDISC_H */

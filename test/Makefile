@@ -81,7 +81,7 @@ HOMA_SRCS +=  homa_grant.c \
 	      homa_qdisc.c \
 	      homa_skb.c
 endif
-HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS)) rhashtable.o
+HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS)) rbtree.o rhashtable.o
 
 OTHER_SRCS := ccutils.cc \
 	      main.c \

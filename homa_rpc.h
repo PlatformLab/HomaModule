@@ -12,6 +12,10 @@
 #include "homa_sock.h"
 #include "homa_wire.h"
 
+#ifndef __STRIP__ /* See strip.py */
+#include "homa_qdisc.h"
+#endif /* See strip.py */
+
 /* Forward references. */
 struct homa_ack;
 
@@ -331,6 +335,11 @@ struct homa_rpc {
 	 * response).
 	 */
 	struct homa_message_out msgout;
+
+#ifndef __STRIP__ /* See strip.py */
+	/** @qrpc: Information managed by homa_qdisc for this RPC. */
+	struct homa_qdisc_rpc qrpc;
+#endif /* See strip.py */
 
 	/**
 	 * @hash_links: Used to link this object into a hash bucket for
