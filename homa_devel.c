@@ -1063,6 +1063,7 @@ void homa_rpc_snapshot_log_tt(void)
 			i = 0;
 	} while (i != next_snapshot);
 }
+
 /**
  * homa_rpc_stats_log() - Print statistics on RPC progress to the system log.
  */
@@ -1103,4 +1104,26 @@ void homa_rpc_stats_log(void)
 		  snap.server_response_bytes_done,
 		  snap.server_response_bytes_started -
 		  snap.server_response_bytes_done);
+}
+
+/**
+ * homa_rpcs_deferred() - Return true if there are any RPCs with packets
+ * that have been deferred by homa_qdisc, false if there are none.
+ * @hnet:      Consider only RPCs associatged with this network namespace.
+ * Return:     See above.
+ */
+bool homa_rpcs_deferred(struct homa_net *hnet)
+{
+	struct homa_qdisc_dev *qdev;
+	bool result = false;
+
+	mutex_lock(&hnet->qdisc_devs_mutex);
+	list_for_each_entry(qdev, &hnet->qdisc_devs, links) {
+		if (homa_qdisc_any_deferred(qdev)) {
+			result = true;
+			break;
+		}
+	}
+	mutex_unlock(&hnet->qdisc_devs_mutex);
+	return result;
 }

@@ -128,6 +128,7 @@ void     homa_rpc_log_tt(struct homa_rpc *rpc);
 void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
 void     homa_rpc_snapshot_log_tt(void);
 void     homa_rpc_stats_log(void);
+bool     homa_rpcs_deferred(struct homa_net *hnet);
 void     homa_snapshot_get_stats(struct homa_rpc_snapshot *snap);
 void     homa_snapshot_rpcs(void);
 int      homa_snprintf(char *buffer, int size, int used,
