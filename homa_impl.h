@@ -521,7 +521,7 @@ struct homa_net {
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @qdisc_devs: List of all homa_qdisc_dev objects that exist for
-	 * this namespace. Protected by qdisc_devs_lock.
+	 * this namespace. Protected by qdisc_devs_mutex.
 	 */
 	struct list_head qdisc_devs;
 
