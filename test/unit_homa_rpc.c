@@ -14,34 +14,6 @@
 #define n(x) htons(x)
 #define N(x) htonl(x)
 
-static struct homa_sock *hook_hsk;
-void unprotect_hsk_hook(char *id)
-{
-	if (strcmp(id, "unlock") != 0)
-		return;
-	if (hook_hsk) {
-		homa_unprotect_rpcs(hook_hsk);
-		hook_hsk = NULL;
-	}
-}
-
-#if 0
-static struct homa_rpc *hook_rpc;
-static int hook_count;
-static void unlink_rpc_hook(char *id)
-{
-	if (strcmp(id, "spin_lock")!= 0)
-		return;
-	if (hook_count == 0)
-		return;
-	hook_count--;
-	if (hook_count == 0) {
-		list_del_init(&hook_rpc->ready_links);
-		homa_rpc_put(hook_rpc);
-	}
-}
-#endif
-
 FIXTURE(homa_rpc) {
 	struct in6_addr client_ip[1];
 	int client_port;
@@ -605,22 +577,6 @@ TEST_F(homa_rpc, homa_rpc_reap__protected)
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
 	homa_unprotect_rpcs(&self->hsk);
 	EXPECT_STREQ("", unit_log_get());
-}
-TEST_F(homa_rpc, homa_rpc_reap__protected_and_reap_all)
-{
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 5000, 2000);
-
-	ASSERT_NE(NULL, crpc1);
-	homa_rpc_end(crpc1);
-	unit_log_clear();
-	homa_protect_rpcs(&self->hsk);
-	hook_hsk = &self->hsk;
-	unit_hook_register(unprotect_hsk_hook);
-	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, true));
-	EXPECT_STREQ("reaped 1234", unit_log_get());
-	EXPECT_EQ(0, self->hsk.dead_skbs);
 }
 TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_locked)
 {

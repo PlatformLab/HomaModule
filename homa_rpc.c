@@ -502,8 +502,6 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 				   hsk->port, atomic_read(&hsk->protect_count),
 				   hsk->dead_skbs);
 			homa_sock_unlock(hsk);
-			if (reap_all)
-				continue;
 			return 0;
 		}
 
