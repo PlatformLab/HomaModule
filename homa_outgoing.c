@@ -454,7 +454,6 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	int extra_bytes;
 	int result;
 
-	IF_NO_STRIP(struct netdev_queue *txq);
 	IF_NO_STRIP(int priority);
 
 	skb = homa_skb_alloc_tx(HOMA_MAX_HEADER);
@@ -494,11 +493,15 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	if (unlikely(result != 0))
 		INC_METRIC(control_xmit_errors, 1);
 #ifndef __STRIP__ /* See strip.py */
-	txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
-	if (netif_tx_queue_stopped(txq))
-		tt_record4("__homa_xmit_control found stopped txq for id %d, qid %u, num_queued %u, limit %d",
-			   be64_to_cpu(h->sender_id), skb->queue_mapping,
-			   txq->dql.num_queued, txq->dql.adj_limit);
+	if (skb->dev) {
+		struct netdev_queue *txq;
+
+		txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
+		if (netif_tx_queue_stopped(txq))
+			tt_record4("__homa_xmit_control found stopped txq for id %d, qid %u, num_queued %u, limit %d",
+				be64_to_cpu(h->sender_id), skb->queue_mapping,
+				txq->dql.num_queued, txq->dql.adj_limit);
+	}
 #endif /* See strip.py */
 	INC_METRIC(packets_sent[h->type - DATA], 1);
 	INC_METRIC(priority_bytes[priority], skb->len);
