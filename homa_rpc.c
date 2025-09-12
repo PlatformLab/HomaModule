@@ -10,6 +10,7 @@
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_pacer.h"
+#include "homa_qdisc.h"
 #include "homa_skb.h"
 #else /* See strip.py */
 #include "homa_stub.h"

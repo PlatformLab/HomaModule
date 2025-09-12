@@ -4,6 +4,8 @@
  * queuing discipline
  */
 
+#include "homa_rpc.h"
+
 #ifdef __UNIT_TEST__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -157,34 +159,6 @@ struct homa_qdisc_dev {
 	spinlock_t pacer_mutex __aligned(L1_CACHE_BYTES);
 };
 
-/**
- * struct homa_qdisc_rpc - One of these structs exists in each homa_rpc, with
- * information needed by homa_qidsc.
- */
-struct homa_qdisc_rpc {
-	/**
-	 * @deferred: List of tx skbs from this RPC that have been deferred
-	 * by homa_qdisc. Non-empty means this RPC is currently linked into
-	 * homa_qdisc_dev->deferred_rpcs.
-	 */
-	struct sk_buff_head packets;
-
-	/**
-	 * @rb_node: Used to link this struct into
-	 * homa_qdisc_dev->deferred_rpcs.
-	 */
-	struct rb_node rb_node;
-
-	/**
-	 * @tx_left: The number of (trailing) bytes of the tx message
-	 * that have not been transmitted by homa_qdisc yet. Only updated
-	 * when packets are added to or removed from the deferred list;
-	 * may be out of date (too high) if packets have been transmitted
-	 * without being deferred.
-	 */
-	int tx_left;
-};
-
 void            homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev,
 				      struct sk_buff *skb);
 struct sk_buff *
@@ -226,10 +200,10 @@ static inline bool homa_qdisc_active(struct homa_net *hnet)
 }
 
 /**
- * homa_qdisc_rpc_init() - Initialize a homa_qdisc_rpc struct.
+ * homa_qdisc_rpc_init() - Initialize a homa_rpc_qdisc struct.
  * @qrpc:  Struct to initialize
  */
-static inline void homa_qdisc_rpc_init(struct homa_qdisc_rpc *qrpc)
+static inline void homa_qdisc_rpc_init(struct homa_rpc_qdisc *qrpc)
 {
 	skb_queue_head_init(&qrpc->packets);
 	qrpc->tx_left = HOMA_MAX_MESSAGE_LENGTH;
@@ -245,6 +219,32 @@ static inline bool homa_qdisc_any_deferred(struct homa_qdisc_dev *qdev)
 {
 	return rb_first_cached(&qdev->deferred_rpcs) ||
 	       !skb_queue_empty(&qdev->tcp_deferred);
+}
+
+/**
+ * homa_qdisc_precedes() - Return true if @rpc1 is considered "less"
+ * than @rpc2 for the purposes of qdev->deferred_rpcs, or false if @rpc1
+ * is consdered "greater" (ties not allowed).
+ * @rpc1:    RPC to compare
+ * @rpc2:    RPC to compare; must be different from rpc1.
+ */
+static inline bool homa_qdisc_precedes(struct homa_rpc *rpc1,
+				       struct homa_rpc *rpc2)
+{
+	/* The primary metric for comparison is bytes left to transmit;
+	 * in case of ties, use RPC age as secondar metric (oldest RPC
+	 * is "less"), and if still tied (highly unlikely) use the
+	 * addresses of the RPCs as a tie-breaker.
+	 */
+	if (rpc1->qrpc.tx_left < rpc2->qrpc.tx_left)
+		return true;
+	else if (rpc2->qrpc.tx_left < rpc1->qrpc.tx_left)
+		return false;
+	if (rpc1->msgout.init_time < rpc2->msgout.init_time)
+		return true;
+	else if (rpc2->msgout.init_time < rpc1->msgout.init_time)
+		return false;
+	return rpc1 < rpc2;
 }
 
 #endif /* _HOMA_QDISC_H */

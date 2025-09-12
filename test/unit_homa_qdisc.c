@@ -661,7 +661,7 @@ TEST_F(homa_qdisc, homa_qdisc_defer_homa__wake_up_pacer)
         homa_qdisc_qdev_put(qdev);
 }
 
-TEST_F(homa_qdisc, homa_qdisc_insert_rb__bytes_left)
+TEST_F(homa_qdisc, homa_qdisc_insert_rb__basics)
 {
 	struct homa_rpc *srpc1, *srpc2, *srpc3;
 	struct homa_qdisc_dev *qdev;
@@ -689,86 +689,6 @@ TEST_F(homa_qdisc, homa_qdisc_insert_rb__bytes_left)
 	EXPECT_STREQ("[id 1237, offsets 7000]; "
 		     "[id 1235, offsets 5000]; "
 		     "[id 1239, offsets 3000]",
-		     unit_log_get());
-        homa_qdisc_qdev_put(qdev);
-}
-TEST_F(homa_qdisc, homa_qdisc_insert_rb__init_time)
-{
-	struct homa_rpc *srpc1, *srpc2, *srpc3;
-	struct homa_qdisc_dev *qdev;
-
-	srpc1 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id, 10000, 10000);
-	srpc1->msgout.init_time = 1000;
-	srpc2 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id + 2, 10000, 10000);
-	srpc2->msgout.init_time = 500;
-	srpc3 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id + 4, 10000, 10000);
-	srpc3->msgout.init_time = 2000;
-
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
-
-	homa_qdisc_defer_homa(qdev,
-			      new_test_skb(srpc1, &self->addr, 5000, 1500));
-	homa_qdisc_defer_homa(qdev,
-			      new_test_skb(srpc2, &self->addr, 5000, 1500));
-	homa_qdisc_defer_homa(qdev,
-			      new_test_skb(srpc3, &self->addr, 5000, 1500));
-	unit_log_clear();
-	log_deferred(qdev);
-	EXPECT_STREQ("[id 1237, offsets 5000]; "
-		     "[id 1235, offsets 5000]; "
-		     "[id 1239, offsets 5000]",
-		     unit_log_get());
-        homa_qdisc_qdev_put(qdev);
-}
-TEST_F(homa_qdisc, homa_qdisc_insert_rb__rpc_struct_address)
-{
-	struct homa_rpc *srpc1, *srpc2, *srpc3, *tmp;
-	struct homa_qdisc_dev *qdev;
-
-	srpc1 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id, 10000, 10000);
-	srpc2 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id + 2, 10000, 10000);
-	srpc3 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id + 4, 10000, 10000);
-	/* Swap RPCs if needed to ensure a particular ordering of addresses. */
-	if (srpc1 < srpc2) {
-		tmp = srpc1;
-		srpc1 = srpc2;
-		srpc2 = tmp;
-		srpc1->id = 1235;
-		srpc2->id = 1237;
-	}
-	if (srpc1 > srpc3) {
-		tmp = srpc1;
-		srpc1 = srpc3;
-		srpc3 = tmp;
-		srpc1->id = 1235;
-		srpc3->id = 1239;
-	}
-
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
-
-	homa_qdisc_defer_homa(qdev,
-			      new_test_skb(srpc1, &self->addr, 5000, 1500));
-	homa_qdisc_defer_homa(qdev,
-			      new_test_skb(srpc2, &self->addr, 5000, 1500));
-	homa_qdisc_defer_homa(qdev,
-			      new_test_skb(srpc3, &self->addr, 5000, 1500));
-	unit_log_clear();
-	log_deferred(qdev);
-	EXPECT_STREQ("[id 1237, offsets 5000]; "
-		     "[id 1235, offsets 5000]; "
-		     "[id 1239, offsets 5000]",
 		     unit_log_get());
         homa_qdisc_qdev_put(qdev);
 }
@@ -1468,4 +1388,71 @@ TEST_F(homa_qdisc, homa_qdisc_update_all_sysctl)
 	kfree(qdisc);
 	homa_qdisc_destroy(qdisc2);
 	kfree(qdisc2);
+}
+
+TEST_F(homa_qdisc, homa_qdisc_precedes__bytes_left)
+{
+	struct homa_rpc *srpc1, *srpc2, *srpc3;
+
+	srpc1 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id, 10000, 10000);
+	srpc2 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id + 2, 10000, 10000);
+	srpc3 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id + 4, 10000, 10000);
+
+	srpc1->qrpc.tx_left = 5000;
+	srpc2->qrpc.tx_left = 3000;
+	srpc3->qrpc.tx_left = 7000;
+	EXPECT_EQ(0, homa_qdisc_precedes(srpc1, srpc2));
+	EXPECT_EQ(1, homa_qdisc_precedes(srpc1, srpc3));
+}
+TEST_F(homa_qdisc, homa_qdisc_precedes__init_time)
+{
+	struct homa_rpc *srpc1, *srpc2, *srpc3;
+
+	srpc1 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id, 10000, 10000);
+	srpc1->msgout.init_time = 1000;
+	srpc2 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id + 2, 10000, 10000);
+	srpc2->msgout.init_time = 500;
+	srpc3 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id + 4, 10000, 10000);
+	srpc3->msgout.init_time = 2000;
+
+	EXPECT_EQ(0, homa_qdisc_precedes(srpc1, srpc2));
+	EXPECT_EQ(1, homa_qdisc_precedes(srpc1, srpc3));
+}
+TEST_F(homa_qdisc, homa_qdisc_precedes__rpc_struct_address)
+{
+	struct homa_rpc *srpc1, *srpc2, *srpc3;
+	int result;
+
+	srpc1 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id, 10000, 10000);
+	srpc2 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id + 2, 10000, 10000);
+	srpc3 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id + 4, 10000, 10000);
+
+	if (srpc1 > srpc2)
+		result = homa_qdisc_precedes(srpc1, srpc2);
+	else
+		result = homa_qdisc_precedes(srpc2, srpc1);
+	EXPECT_EQ(0, result);
+	if (srpc1 < srpc3)
+		result = homa_qdisc_precedes(srpc1, srpc3);
+	else
+		result = homa_qdisc_precedes(srpc3, srpc1);
+	EXPECT_EQ(1, result);
 }

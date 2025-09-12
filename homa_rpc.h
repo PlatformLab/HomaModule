@@ -12,10 +12,6 @@
 #include "homa_sock.h"
 #include "homa_wire.h"
 
-#ifndef __STRIP__ /* See strip.py */
-#include "homa_qdisc.h"
-#endif /* See strip.py */
-
 /* Forward references. */
 struct homa_ack;
 
@@ -213,6 +209,34 @@ struct homa_message_in {
 };
 
 /**
+ * struct homa_rpc_qdisc - Information that homa_qdisc needs to store in
+ * each RPC. Managed entirely by homa_qdisc.
+ */
+struct homa_rpc_qdisc {
+	/**
+	 * @deferred: List of tx skbs from this RPC that have been deferred
+	 * by homa_qdisc. Non-empty means this RPC is currently linked into
+	 * homa_qdisc_dev->deferred_rpcs.
+	 */
+	struct sk_buff_head packets;
+
+	/**
+	 * @rb_node: Used to link this struct into
+	 * homa_qdisc_dev->deferred_rpcs.
+	 */
+	struct rb_node rb_node;
+
+	/**
+	 * @tx_left: The number of (trailing) bytes of the tx message
+	 * that have not been transmitted by homa_qdisc yet. Only updated
+	 * when packets are added to or removed from the deferred list;
+	 * may be out of date (too high) if packets have been transmitted
+	 * without being deferred.
+	 */
+	int tx_left;
+};
+
+/**
  * struct homa_rpc - One of these structures exists for each active
  * RPC. The same structure is used to manage both outgoing RPCs on
  * clients and incoming RPCs on servers.
@@ -338,7 +362,7 @@ struct homa_rpc {
 
 #ifndef __STRIP__ /* See strip.py */
 	/** @qrpc: Information managed by homa_qdisc for this RPC. */
-	struct homa_qdisc_rpc qrpc;
+	struct homa_rpc_qdisc qrpc;
 #endif /* See strip.py */
 
 	/**

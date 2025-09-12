@@ -355,31 +355,13 @@ void homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev, struct homa_rpc *rpc)
 {
 	struct rb_node **new = &(qdev->deferred_rpcs.rb_root.rb_node);
 	struct rb_node *parent = NULL;
+	struct homa_rpc *rpc2;
 	bool leftmost = true;
 
 	while (*new) {
-		struct homa_qdisc_rpc *qrpc;
-		struct homa_rpc *rpc2;
-
-		qrpc = container_of(*new, struct homa_qdisc_rpc, rb_node);
-		rpc2 = container_of(qrpc, struct homa_rpc, qrpc);
-
 		parent = *new;
-		/* To sort RPCs, first use bytes left to transmit; settle
-		 * ties in favor of oldest RPC. If still tied (highly unlikely),
-		 * use RPC address to provide deterministic ordering.
-		 */
-		if (rpc->qrpc.tx_left < rpc2->qrpc.tx_left) {
-			new = &((*new)->rb_left);
-		} else if (rpc->qrpc.tx_left > rpc2->qrpc.tx_left) {
-			new = &((*new)->rb_right);
-			leftmost = false;
-		} else if (rpc->msgout.init_time < rpc2->msgout.init_time) {
-			new = &((*new)->rb_left);
-		} else if (rpc->msgout.init_time < rpc2->msgout.init_time) {
-			new = &((*new)->rb_right);
-			leftmost = false;
-		} else if (rpc < rpc2) {
+		rpc2 = container_of(*new, struct homa_rpc, qrpc.rb_node);
+		if (homa_qdisc_precedes(rpc, rpc2)) {
 			new = &((*new)->rb_left);
 		} else {
 			new = &((*new)->rb_right);
@@ -402,7 +384,7 @@ void homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev, struct homa_rpc *rpc)
  */
 struct sk_buff *homa_qdisc_dequeue_homa(struct homa_qdisc_dev *qdev)
 {
-	struct homa_qdisc_rpc *qrpc;
+	struct homa_rpc_qdisc *qrpc;
 	struct homa_skb_info *info;
 	struct homa_rpc *rpc;
 	struct rb_node *node;
@@ -416,7 +398,7 @@ struct sk_buff *homa_qdisc_dequeue_homa(struct homa_qdisc_dev *qdev)
 		spin_unlock_irqrestore(&qdev->defer_lock, flags);
 		return NULL;
 	}
-	qrpc = container_of(node, struct homa_qdisc_rpc, rb_node);
+	qrpc = container_of(node, struct homa_rpc_qdisc, rb_node);
 	skb = skb_dequeue(&qrpc->packets);
 	if (skb_queue_len(&qrpc->packets) == 0) {
 		rb_erase_cached(node, &qdev->deferred_rpcs);
