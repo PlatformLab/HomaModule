@@ -262,7 +262,7 @@ void unit_log_message_out_packets(struct homa_message_out *message, int verbose)
  * unit_log_filled_skbs() - Append to the test log a human-readable description
  * of a list of packet buffers created by homa_fill_packets.
  * @skb:         First in list of sk_buffs to print; the list is linked
- *               using homa_next_skb.
+ *               using homa_skb_info->next_skb.
  * @verbose:     If non-zero, use homa_print_packet for each packet;
  *               otherwise use homa_print_packet_short.
  */

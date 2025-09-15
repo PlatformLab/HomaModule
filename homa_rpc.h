@@ -44,17 +44,17 @@ struct homa_message_out {
 
 	/**
 	 * @packets: Singly-linked list of all packets in message, linked
-	 * using homa_next_skb. The list is in order of offset in the message
-	 * (offset 0 first); each sk_buff can potentially contain multiple
-	 * data_segments, which will be split into separate packets by GSO.
-	 * This list grows gradually as data is copied in from user space,
-	 * so it may not be complete.
+	 * using homa_skb_info->next_skb. The list is in order of offset in
+	 * the message (offset 0 first); each sk_buff can potentially contain
+	 * multiple data_segments, which will be split into separate packets
+	 * by GSO. This list grows gradually as data is copied in from user\
+	 * space, so it may not be complete.
 	 */
 	struct sk_buff *packets;
 
 	/**
 	 * @next_xmit: Pointer to pointer to next packet to transmit (will
-	 * either refer to @packets or homa_next_skb(skb) for some skb
+	 * either refer to @packets or homa_skb_info->next_skb for some skb
 	 * in @packets).
 	 */
 	struct sk_buff **next_xmit;
@@ -70,7 +70,7 @@ struct homa_message_out {
 	 * @first_not_tx: All packets in @packets preceding this one have
 	 * been confirmed to have been transmitted by the NIC (the driver
 	 * has released its reference). NULL means all packets are known to
-	 * have been transmitted. Used by homa_rpc_tx_complete.
+	 * have been transmitted. Used by homa_rpc_tx_end.
 	 */
 	struct sk_buff *first_not_tx;
 
