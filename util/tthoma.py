@@ -1635,14 +1635,13 @@ class Dispatcher:
     def __qdisc_xmit(self, trace, time, core, match, interests):
         id = int(match.group(1))
         offset = int(match.group(2))
-        bytes_left = int(match.group(3))
         for interest in interests:
-            interest.tt_qdisc_xmit(trace, time, core, id, offset, bytes_left)
+            interest.tt_qdisc_xmit(trace, time, core, id, offset)
 
     patterns.append({
         'name': 'qdisc_xmit',
         'regexp': 'homa_qdisc_pacer queuing homa data packet for id ([0-9]+), '
-                'offset ([0-9]+), bytes_left ([0-9]+)'
+                'offset ([0-9]+)'
     })
 
     def __tcp_xmit(self, trace, time, core, match, interests):
@@ -6319,7 +6318,7 @@ class AnalyzePackets:
             p = p['retransmits'][-1]
         p['qdisc_defer'] = t
 
-    def tt_qdisc_xmit(self, trace, t, core, id, offset, bytes_left):
+    def tt_qdisc_xmit(self, trace, t, core, id, offset):
         global packets
         p = packets[pkt_id(id, offset)]
         p['tx_node'] = trace['node']
@@ -6580,6 +6579,7 @@ class AnalyzeRpcs:
         of the trace, or None if there doesn't appear to be any tx activity
         for RPC during the traces.
         """
+        global rpcs, traces
 
         if not 'sent' in rpc and (not rpc['send_data']):
             return None
@@ -6588,10 +6588,23 @@ class AnalyzeRpcs:
         if 'end' in rpc:
             ceiling = rpc['end']
         if not (rpc['id'] & 1):
-            if rpc['gro_data']:
+            rx_id = rpc['id']^1
+            if rx_id in rpcs:
+                rx_rpc = rpcs[rx_id]
+            else:
+                rx_rpc = {}
+            if 'recvmsg_done' in rx_rpc:
+                ceiling = rx_rpc['recvmsg_done']
+            elif 'sendmsg' in rx_rpc:
+                ceiling = rx_rpc['sendmsg']
+            elif 'send_data_pkts' in rx_rpc and rx_rpc['send_data_pkts']:
+                ceiling = rx_rpc['send_data_pkts'][0]['xmit']
+            elif rpc['gro_data']:
                 ceiling = rpc['gro_data'][0][0]
             elif 'recvmsg_done' in rpc:
                 ceiling = rpc['recvmsg_done']
+            elif 'sent' in rx_rpc:
+                ceiling = traces[rx_rpc['node']]['first_time']
         if rpc['send_data']:
             if ceiling != None:
                 return rpc['send_data'][-1][0]
@@ -7613,6 +7626,9 @@ class AnalyzeRxsnapshot:
         print('Length:    Length of incoming message, if known')
         print('Gxmit:     Highest offset for which grant has been passed '
                 'to ip_*xmit')
+        print('RxRem:     Bytes in message that haven\'t yet been received '
+                '(Length - Gro);')
+        print('           smaller means higher SRPT priority for grants')
         print('GGro:      Highest offset in grant that has been received by GRO')
         print('GSoft:     Highest offset in grant that has been processed '
                 'by SoftIRQ')
@@ -7626,14 +7642,12 @@ class AnalyzeRxsnapshot:
         print('Copied:    Offset just after last data byte that has been '
                 'copied to user space')
         print('Incoming:  Gxmit - SoftIrq')
-        print('Rank:      Rank among RPCs receiving grants. Smaller means '
-                'higher priority,')
-        print('           blank means not grantable')
         print('Lost:      Packets that appear to have been dropped in the network')
-        print('        Id  Peer       Length   GXmit    GGro   GSoft ', end='')
-        print('   Xmit     Gro SoftIrq  Copied Incoming Rank Lost')
-        print('------------------------------------------------------', end='')
-        print('--------------------------------------------------')
+        print('        Id  Peer       Length   RxRem   GXmit    GGro   GSoft ',
+                end='')
+        print('   Xmit     Gro SoftIrq  Copied Incoming Lost')
+        print('--------------------------------------------------------------', end='')
+        print('---------------------------------------------')
 
         for id in sorted_ids:
             rx_rpc = rpcs[id^1]
@@ -7647,14 +7661,14 @@ class AnalyzeRxsnapshot:
             incoming = live_rpc['pre_grant_xmit'] - received
             if incoming <= 0:
                 incoming = ''
-            rank = ''
-            if 'rank' in rx_rpc:
-                rank = rx_rpc['rank']
-                if rank < 0:
-                    rank = ''
-            print('%10d %-10s %7s %7s %7s %7s ' % (id^1,
+            if rx_rpc['in_length']:
+                rx_rem = rx_rpc['in_length'] - live_rpc['pre_gro']
+            else:
+                rx_rem = ""
+            print('%10d %-10s %7s %7s %7s %7s %7s ' % (id^1,
                     rpcs[id]['node'] if id in rpcs else "",
                     rx_rpc['in_length'] if rx_rpc['in_length'] != None else "",
+                    rx_rem,
                     str(live_rpc['pre_grant_xmit'])
                     if live_rpc['pre_grant_xmit'] > live_rpc['unsched'] else "",
                     str(live_rpc['pre_grant_gro'])
@@ -7662,9 +7676,9 @@ class AnalyzeRxsnapshot:
                     str(live_rpc['pre_grant_softirq'])
                     if live_rpc['pre_grant_softirq'] > live_rpc['unsched']
                     else ""), end='')
-            print('%7d %7d %7d %7d  %7s %4s %4d' % (live_rpc['pre_xmit2'],
+            print('%7d %7d %7d %7d  %7s %4d' % (live_rpc['pre_xmit2'],
                     live_rpc['pre_gro'], live_rpc['pre_softirq'],
-                    live_rpc['pre_copied'], incoming, rank, live_rpc['lost']))
+                    live_rpc['pre_copied'], incoming, live_rpc['lost']))
 
         print('\nFields in the tables below:')
         print('Id:        Packet\'s RPC identifier on the receiver side')
@@ -8696,6 +8710,9 @@ class AnalyzeTxsnapshot:
         print('Length:    Length of outgoing message, if known')
         print('Window:    Bytes that have been granted but not transmitted '
                 '(Gsoft - Xmit)')
+        print('TxRem:     Bytes in message that have not yet been transmitted '
+                '(Length - Xmit);')
+        print('           smaller means higher SRPT priority for transmission')
         print('Gxmit:     Highest offset for which grant has been passed '
                 'to ip_*xmit')
         print('GGro:      Highest offset in grant that has been received by GRO')
@@ -8712,12 +8729,12 @@ class AnalyzeTxsnapshot:
                 'copied to user space')
         print('Incoming:  Gxmit - SoftIrq')
         print('Lost:      Packets that appear to have been dropped in the network')
-        print('        Id Peer        Length  Window   GXmit    GGro   GSoft ',
+        print('        Id Peer        Length  Window   TxRem   GXmit    ',
                 end='')
-        print('   Xmit     Gro SoftIrq  Copied Incoming Lost')
-        print('--------------------------------------------------------------',
+        print('GGro   GSoft    Xmit     Gro SoftIrq  Copied Incoming Lost')
+        print('---------------------------------------------------------',
                 end='')
-        print('---------------------------------------------')
+        print('----------------------------------------------------------')
 
         for id in sorted_ids:
             tx_rpc = rpcs[id]
@@ -8729,16 +8746,19 @@ class AnalyzeTxsnapshot:
                 window = str(window)
             else:
                 window = ""
-            print('%10d %-10s %7s %7s %7s %7s %7s ' % (id, get_rpc_node(id^1),
+            print('%10d %-10s %7s %7s %7s %7s ' % (id, get_rpc_node(id^1),
                     tx_rpc['out_length'] if tx_rpc['out_length'] != None else "",
                     window,
+                    tx_rpc['out_length'] - live_rpc['pre_xmit2']
+                    if tx_rpc['out_length'] != None else "",
                     str(live_rpc['pre_grant_xmit'])
-                    if live_rpc['pre_grant_xmit'] > 0 else "",
+                    if live_rpc['pre_grant_xmit'] > 0 else ""), end='')
+            print('%7s %7s %7d %7d %7d %7d  %7d %4d' % (
                     str(live_rpc['pre_grant_gro'])
                     if live_rpc['pre_grant_gro'] > 0 else "",
                     str(live_rpc['pre_grant_softirq'])
-                    if live_rpc['pre_grant_softirq'] > 0 else ""), end='')
-            print('%7d %7d %7d %7d  %7d %4d' % (live_rpc['pre_xmit2'],
+                    if live_rpc['pre_grant_softirq'] > 0 else "",
+                    live_rpc['pre_xmit2'],
                     live_rpc['pre_gro'], live_rpc['pre_softirq'],
                     live_rpc['pre_copied'], incoming, live_rpc['lost']))
 
