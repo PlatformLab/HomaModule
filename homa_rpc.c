@@ -527,7 +527,6 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 				INC_METRIC(deferred_rpc_reaps, 1);
 				continue;
 			}
-			rpc->magic = 0;
 
 			/* For Tx sk_buffs, collect them here but defer
 			 * freeing until after releasing the socket lock.
@@ -659,6 +658,7 @@ release:
 			}
 #endif /* See strip.py */
 			rpc->state = 0;
+			rpc->magic = 0;
 			kfree(rpc);
 		}
 		homa_sock_wakeup_wmem(hsk);
