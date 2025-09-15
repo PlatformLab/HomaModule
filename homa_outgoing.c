@@ -824,7 +824,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			}
 
 			new_homa_info = homa_get_skb_info(new_skb);
-			new_homa_info->next_skb = NULL;
+			new_homa_info->next_skb = rpc->msgout.to_free;
 			new_homa_info->wire_bytes = rpc->hsk->ip_header_length
 					+ sizeof(struct homa_data_hdr)
 					+ seg_length + HOMA_ETH_OVERHEAD;
@@ -832,6 +832,9 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			new_homa_info->seg_length = seg_length;
 			new_homa_info->offset = offset;
 			new_homa_info->rpc = rpc;
+
+			rpc->msgout.to_free = new_skb;
+			skb_get(new_skb);
 			tt_record3("retransmitting offset %d, length %d, id %d",
 				   offset, seg_length, rpc->id);
 #ifndef __STRIP__ /* See strip.py */

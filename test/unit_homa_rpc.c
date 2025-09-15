@@ -656,7 +656,7 @@ TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_of_skb_refcount)
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_active_skbs));
 	EXPECT_EQ(4, self->hsk.dead_skbs);
 
-	kfree_skb(crpc1->msgout.packets);
+	kfree_skb(crpc1->msgout.to_free);
 	unit_log_clear();
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
 	EXPECT_STREQ("reaped 1234", unit_log_get());

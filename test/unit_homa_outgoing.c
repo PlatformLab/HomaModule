@@ -1180,9 +1180,11 @@ TEST_F(homa_outgoing, homa_resend_data__error_copying_data)
 			unit_log_get());
 }
 #endif /* See strip.py */
-TEST_F(homa_outgoing, homa_resend_data__set_homa_info)
+TEST_F(homa_outgoing, homa_resend_data__add_to_to_free_and_set_homa_info)
 {
 	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	struct homa_skb_info *homa_info;
 
 	mock_set_ipv6(&self->hsk);
 	mock_net_device.gso_max_size = 5000;
@@ -1190,11 +1192,17 @@ TEST_F(homa_outgoing, homa_resend_data__set_homa_info)
 			self->server_ip, self->server_port, self->client_id,
 			16000, 1000);
 	unit_log_clear();
-	mock_xmit_log_homa_info = 1;
 	homa_resend_data(crpc, 8400, 8800, 2);
-	EXPECT_STREQ("xmit DATA retrans 1400@8400; "
-		     "homa_info: wire_bytes 1538, data_bytes 1400, seg_length 1400, offset 8400",
-		     unit_log_get());
+	skb = crpc->msgout.to_free;
+	ASSERT_NE(NULL, skb);
+	homa_info = homa_get_skb_info(skb);
+	EXPECT_EQ(NULL, homa_info->next_skb);
+	EXPECT_EQ(1538, homa_info->wire_bytes);
+	EXPECT_EQ(1400, homa_info->data_bytes);
+	EXPECT_EQ(1400, homa_info->seg_length);
+	EXPECT_EQ(8400, homa_info->offset);
+	EXPECT_EQ(crpc, homa_info->rpc);
+	EXPECT_EQ(1, refcount_read(&skb->users));
 }
 
 TEST_F(homa_outgoing, homa_rpc_tx_end)

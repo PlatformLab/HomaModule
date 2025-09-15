@@ -47,7 +47,7 @@ struct homa_message_out {
 	 * using homa_skb_info->next_skb. The list is in order of offset in
 	 * the message (offset 0 first); each sk_buff can potentially contain
 	 * multiple data_segments, which will be split into separate packets
-	 * by GSO. This list grows gradually as data is copied in from user\
+	 * by GSO. This list grows gradually as data is copied in from user
 	 * space, so it may not be complete.
 	 */
 	struct sk_buff *packets;
@@ -73,6 +73,21 @@ struct homa_message_out {
 	 * have been transmitted. Used by homa_rpc_tx_end.
 	 */
 	struct sk_buff *first_not_tx;
+
+	/**
+	 * @to_free: Singly-linked list of packets that must be freed by
+	 * homa_rpc_reap. Initially holds retransmitted packets, but
+	 * eventually includes the packets in @packets. homa_rpc_reap uses
+	 * this list to ensure that all tx packets have been freed by the
+	 * IP stack before it frees the homa_rpc (otherwise homa_qdisc might
+	 * try to access the RPC via a packet's homa_skb_info). Note: I
+	 * considered using skb->destructor to release a reference on the RPC,
+	 * but this does not appear to be reliable because (a) skb->destructor
+	 * may be overwritten and (b) it may be called before the skb has
+	 * cleared the tx pipeline (via skb_orphan?). Also, need to retain
+	 * @packets in case they are needed for retransmission.
+	 */
+	struct sk_buff *to_free;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**

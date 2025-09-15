@@ -76,11 +76,6 @@ struct task_struct mock_task;
  */
 int mock_xmit_log_verbose;
 
-/* If a test sets this variable to nonzero, ip_queue_xmit will log
- * the contents of the homa_info from packets.
- */
-int mock_xmit_log_homa_info;
-
 /* If a test sets this variable to nonzero, calls to wake_up and
  * wake_up_all will be logged.
  */
@@ -781,14 +776,6 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 	else
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
 	unit_log_printf("; ", "xmit %s", buffer);
-	if (mock_xmit_log_homa_info) {
-		struct homa_skb_info *homa_info;
-
-		homa_info = homa_get_skb_info(skb);
-		unit_log_printf("; ", "homa_info: wire_bytes %d, data_bytes %d, seg_length %d, offset %d",
-				homa_info->wire_bytes, homa_info->data_bytes,
-				homa_info->seg_length, homa_info->offset);
-	}
 	kfree_skb(skb);
 	return 0;
 }
@@ -816,13 +803,6 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 	else
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
 	unit_log_printf("; ", "xmit %s", buffer);
-	if (mock_xmit_log_homa_info) {
-		struct homa_skb_info *homa_info;
-
-		homa_info = homa_get_skb_info(skb);
-		unit_log_printf("; ", "homa_info: wire_bytes %d, data_bytes %d",
-				homa_info->wire_bytes, homa_info->data_bytes);
-	}
 	kfree_skb(skb);
 	return 0;
 }
@@ -2343,7 +2323,6 @@ void mock_teardown(void)
 	mock_prepare_to_wait_status = -ERESTARTSYS;
 	mock_signal_pending = 0;
 	mock_xmit_log_verbose = 0;
-	mock_xmit_log_homa_info = 0;
 	mock_log_wakeups = 0;
 	mock_mtu = 0;
 	mock_max_skb_frags = MAX_SKB_FRAGS;

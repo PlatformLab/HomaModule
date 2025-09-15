@@ -175,7 +175,6 @@ extern int         mock_trylock_errors;
 extern u64         mock_tt_cycles;
 extern int         mock_vmalloc_errors;
 extern int         mock_xmit_log_verbose;
-extern int         mock_xmit_log_homa_info;
 
 extern struct task_struct *current_task;
 

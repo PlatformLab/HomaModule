@@ -533,15 +533,23 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 			 * freeing until after releasing the socket lock.
 			 */
 			if (rpc->msgout.length >= 0) {
-				while (rpc->msgout.packets) {
-					struct sk_buff *skb =
-							rpc->msgout.packets;
+				while (1) {
+					struct sk_buff *skb;
+
+					skb = rpc->msgout.to_free;
+					if (!skb) {
+						skb = rpc->msgout.packets;
+						if (!skb)
+							break;
+						rpc->msgout.to_free = skb;
+						rpc->msgout.packets = NULL;
+					}
 
 					/* This tests whether skb is still in a
 					 * transmit queue somewhere; if so,
 					 * can't reap the RPC since homa_qdisc
-					 * may try to access it via the skb's
-					 * homa_skb_info.
+					 * may try to access the RPC via the
+					 * skb's homa_skb_info.
 					 */
 					if (refcount_read(&skb->users) > 1) {
 						INC_METRIC(reaper_active_skbs,
@@ -549,12 +557,13 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 						goto next_rpc;
 					}
 					skbs[num_skbs] = skb;
-					rpc->msgout.packets =
+					rpc->msgout.to_free =
 						homa_get_skb_info(skb)->next_skb;
 					num_skbs++;
 					rpc->msgout.num_skbs--;
 					if (num_skbs >= batch_size)
 						goto release;
+
 				}
 			}
 
