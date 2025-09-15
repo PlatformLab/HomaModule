@@ -137,5 +137,6 @@ char    *homa_symbol_for_type(uint8_t type);
 char    *homa_symbol_for_state(struct homa_rpc *rpc);
 int      homa_validate_incoming(struct homa *homa, int verbose,
 				int *link_errors);
+void     homa_validate_rbtree(struct rb_node *node, int depth, char *message);
 
 #endif /* _HOMA_DEVEL_H */

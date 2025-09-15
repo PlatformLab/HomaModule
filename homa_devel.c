@@ -17,6 +17,8 @@
 #endif /* See strip.py */
 #include "homa_wire.h"
 
+#include <linux/rbtree_augmented.h>
+
 #ifndef __STRIP__ /* See strip.py */
 /* homa_drop_packet will accept this many more packets before it drops some. */
 static int accept_count;
@@ -1127,4 +1129,145 @@ bool homa_rpcs_deferred(struct homa_net *hnet)
 	}
 	mutex_unlock(&hnet->qdisc_devs_mutex);
 	return result;
+}
+
+/**
+ * homa_validate_rbtree() -  Scan the structure of a red-black tree and
+ * abort the kernel (dumping the timetrace) if the internal structure
+ * does not satisfy the required invariants.
+ * @node:     Node whose subtree should be scanned.
+ * @depth:    Depth of node (number of black nodes above this node, 0 for
+ *            root).
+ * @message:  Textual message identifying the point where this function
+ *            was invoked (used when reporting errors).
+ */
+void homa_validate_rbtree(struct rb_node *node, int depth, char *message)
+{
+	struct homa_rpc *rpc, *child_rpc;
+	struct rb_node *child;
+	static int max_depth;
+	int black, new_depth;
+
+	if (depth == 0) {
+		if (!node)
+			return;
+		if (!rb_is_black(node)) {
+#ifdef __UNIT_TEST__
+			FAIL("rbtree root is red");
+#else
+			tt_record("freezing because rbtree root is red");
+#endif /* __UNIT_TEST__ */
+			goto error;
+		}
+		max_depth = -1;
+	}
+
+	rpc = container_of(node, struct homa_rpc, qrpc.rb_node);
+	if (rpc->magic != HOMA_RPC_MAGIC) {
+#ifdef __UNIT_TEST__
+		FAIL("rpc id %llu (0x%px) in rbtree has bad magic 0x%x",
+			rpc->id, rpc, rpc->magic);
+#else
+		tt_record4("freezing because rpc id %d (0x%x%08x) in rbtree has bad magic 0x%x",
+			   rpc->id, tt_hi(rpc), tt_lo(rpc), rpc->magic);
+#endif /* __UNIT_TEST__ */
+		goto error;
+
+	}
+
+	black = rb_is_black(node);
+	new_depth = depth + black;
+	if (!node->rb_left || !node->rb_right) {
+		if (max_depth < 0) {
+			max_depth = new_depth;
+		} else if (max_depth != new_depth) {
+#ifdef __UNIT_TEST__
+			FAIL("inconsistent rbtree depths: %d and %d",
+			     max_depth, new_depth);
+#else
+			tt_record2("freezing because of inconsistent rbtree depths: %d and %d",
+				   max_depth, depth);
+#endif /* __UNIT_TEST__ */
+			goto error;
+		}
+		goto done;
+	}
+
+	child = node->rb_left;
+	if (child) {
+		child_rpc = container_of(child, struct homa_rpc, qrpc.rb_node);
+		if (__rb_parent(child->__rb_parent_color) != node) {
+#ifdef __UNIT_TEST__
+			FAIL("rbtree left child has bad parent, rpc id %llu",
+			     child_rpc->id);
+#else
+			tt_record1("freezing because rbtree left child has bad parent, rpc id %llu",
+				   child_rpc->id);
+#endif /* __UNIT_TEST__ */
+			goto error;
+		}
+		if (!black && !rb_is_black(child)) {
+#ifdef __UNIT_TEST__
+			FAIL("rbtree red parent has red left child");
+#else
+			tt_record("rbtree red parent has red left child");
+#endif /* __UNIT_TEST__ */
+			goto error;
+		}
+		if (!homa_qdisc_precedes(child_rpc, rpc)) {
+#ifdef __UNIT_TEST__
+			FAIL("rbtree contained out-of-order left child");
+#else
+			tt_record("freezing because rbtree contained out-of-order left child");
+#endif /* __UNIT_TEST__ */
+			goto error;
+		}
+		homa_validate_rbtree(child, depth + black, message);
+	}
+
+	child = node->rb_right;
+	if (child) {
+		if (__rb_parent(child->__rb_parent_color) != node) {
+#ifdef __UNIT_TEST__
+			FAIL("rbtree right child has bad parent, rpc id %llu",
+			     child_rpc->id);
+#else
+			tt_record1("freezing because rbtree right child has bad parent, rpc id %llu",
+				   child_rpc->id);
+#endif /* __UNIT_TEST__ */
+			goto error;
+		}
+		if (!black && !rb_is_black(child)) {
+#ifdef __UNIT_TEST__
+			FAIL("rbtree red parent has red right child");
+#else
+			tt_record("freezing because rbtree red parent has red right child");
+#endif /* __UNIT_TEST__ */
+			goto error;
+		}
+		child_rpc = container_of(child, struct homa_rpc, qrpc.rb_node);
+		if (!homa_qdisc_precedes(rpc, child_rpc)) {
+#ifdef __UNIT_TEST__
+			FAIL("rbtree contained out-of-order right child");
+#else
+			tt_record("freezing because rbtree rbtree contained out-of-order right child");
+#endif /* __UNIT_TEST__ */
+			goto error;
+		}
+		homa_validate_rbtree(child, depth + black, message);
+	}
+
+done:
+	return;
+
+error:
+#ifndef __UNIT_TEST__
+	tt_record(message);
+	if (!atomic_read(&tt_frozen)) {
+		tt_freeze();
+		pr_err("rbtree consistency error at %s\n", message);
+		tt_printk();
+		BUG_ON(1);
+	}
+#endif /* __UNIT_TEST__ */
 }
