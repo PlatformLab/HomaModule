@@ -216,6 +216,8 @@ int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
 void            homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev,
 				     struct homa_rpc *rpc);
+void            homa_qdisc_pacer(struct homa_qdisc_dev *qdev);
+void            homa_qdisc_pacer_check(struct homa *homa);
 int             homa_qdisc_pacer_main(void *device);
 struct homa_qdisc_dev *
 		homa_qdisc_qdev_get(struct net_device *dev);
@@ -230,7 +232,6 @@ void            homa_qdisc_update_all_sysctl(struct homa_net *hnet);
 int             homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev,
 					    int bytes, int max_queue_ns);
 void            homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev);
-void            homa_qdisc_pacer(struct homa_qdisc_dev *qdev);
 void            homa_rcu_kfree(void *object);
 void            homa_rcu_kfree_callback(struct rcu_head *head);
 

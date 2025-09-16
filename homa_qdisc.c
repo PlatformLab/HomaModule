@@ -817,6 +817,45 @@ done:
 }
 
 /**
+ * homa_qdisc_pacer_check() - Check whether any of the homa_qdisc pacer
+ * threads associated with @homa have fallen behind (e.g. because they
+ * got descheduled by Linux). If so, call the pacer directly to transmit
+ * deferred packets.
+ * @homa:       Overall information about the Homa transport; used to find
+ *              homa_qdisc_devs to check.
+ */
+void homa_qdisc_pacer_check(struct homa *homa) {
+	struct homa_qdisc_qdevs *qdevs;
+	struct homa_qdisc_dev *qdev;
+	u64 now = homa_clock();
+	int num_qdevs, i;
+	int max_cycles;
+
+	max_cycles = homa->pacer->max_nic_queue_cycles;
+	qdevs = homa->qdevs;
+	rcu_read_lock();
+	num_qdevs = READ_ONCE(qdevs->num_qdevs);
+	for (i = 0; i < num_qdevs; i++) {
+		qdev = qdevs->qdevs[i];
+		if (!homa_qdisc_any_deferred(qdev))
+			continue;
+
+		/* The ">> 1" means that we only help out if the NIC queue has
+		 * dropped below half of its maximum allowed capacity. This
+		 * gives the pacer thread the first shot at queuting new
+		 * packets.
+		 */
+		if (now + (max_cycles >> 1) <
+		    atomic64_read(&qdev->link_idle_time))
+			continue;
+		tt_record("homa_qdisc_pacer_check calling homa_qdisc_pacer");
+		homa_qdisc_pacer(qdev);
+		INC_METRIC(pacer_needed_help, 1);
+	}
+	rcu_read_unlock();
+}
+
+/**
  * homa_qdisc_update_sysctl() - Recompute information in a homa_qdisc_dev
  * that depends on sysctl parameters.
  * @qdev:    Update information here that depends on sysctl values.
