@@ -64,7 +64,7 @@ FIXTURE_SETUP(homa_pacer)
 	self->client_id = 1234;
 	self->server_id = 1235;
 	homa_init(&self->homa);
-	self->hnet = mock_alloc_hnet(&self->homa);
+	self->hnet = mock_hnet(0, &self->homa);
 	self->homa.pacer->cycles_per_mbyte = 1000000;
 	self->homa.pacer->throttle_min_bytes = 0;
 #ifndef __STRIP__ /* See strip.py */

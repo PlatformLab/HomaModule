@@ -249,8 +249,8 @@ static struct socket mock_socket;
  */
 #define MOCK_MAX_NETS 10
 struct net mock_nets[MOCK_MAX_NETS];
-struct homa_net mock_hnets[MOCK_MAX_NETS];
-int mock_num_hnets;
+struct homa_net *mock_hnets[MOCK_MAX_NETS];
+struct net_device mock_devices[MOCK_MAX_NETS];
 
 /* Nonzero means don't generate a unit test failure when freeing peers
  * if the reference count isn't zero (log a message instead).
@@ -266,13 +266,6 @@ struct dst_ops mock_dst_ops = {
 	.mtu = mock_get_mtu,
 	.check = mock_dst_check};
 struct netdev_queue mock_net_queue = {.state = 0};
-struct net_device mock_net_device = {
-	.gso_max_segs = 1000,
-	.gso_max_size = 0,
-	._tx = &mock_net_queue,
-	.nd_net = {.net = &mock_nets[0]},
-	.ethtool_ops = &mock_ethtool_ops
-};
 
 /* Number of invocations of netif_schedule_queue. */
 int mock_netif_schedule_calls;
@@ -347,7 +340,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	skb->_skb_refdst = 0;
 	ip_hdr(skb)->saddr = 0;
 	skb->truesize = SKB_TRUESIZE(size);
-	skb->dev = &mock_net_device;
+	skb->dev = &mock_devices[0];
 	return skb;
 }
 
@@ -742,7 +735,7 @@ struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 	}
 	atomic_set(&route->dst.__rcuref.refcnt, 1);
 	route->dst.ops = &mock_dst_ops;
-	route->dst.dev = &mock_net_device;
+	route->dst.dev = &mock_devices[0];
 	route->dst.obsolete = 0;
 	if (!routes_in_use)
 		routes_in_use = unit_hash_new();
@@ -833,7 +826,7 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 	}
 	atomic_set(&route->dst.__rcuref.refcnt, 1);
 	route->dst.ops = &mock_dst_ops;
-	route->dst.dev = &mock_net_device;
+	route->dst.dev = &mock_devices[0];
 	route->dst.obsolete = 0;
 	if (!routes_in_use)
 		routes_in_use = unit_hash_new();
@@ -1652,26 +1645,6 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned int mode,
 }
 
 /**
- * mock_alloc_hnet: Allocate a new struct homa_net.
- * @homa:   struct homa that the homa_net will be associated with.
- * Return:  The new homa_net.
- */
-struct homa_net *mock_alloc_hnet(struct homa *homa)
-{
-	struct homa_net *hnet;
-
-	if (mock_num_hnets >= MOCK_MAX_NETS) {
-		FAIL("Max number of network namespaces (%d) exceeded",
-		     MOCK_MAX_NETS);
-		return &mock_hnets[0];
-	}
-	hnet = &mock_hnets[mock_num_hnets];
-	homa_net_init(hnet, &mock_nets[mock_num_hnets], homa);
-	mock_num_hnets++;
-	return hnet;
-}
-
-/**
  * mock_alloc_pages() - Called instead of alloc_pages when Homa is compiled
  * for unit testing.
  */
@@ -1763,6 +1736,38 @@ void mock_data_ready(struct sock *sk)
 	unit_log_printf("; ", "sk->sk_data_ready invoked");
 }
 
+/**
+ * mock_dev() - Return a net_device suitable for use in unit tests.
+ * @index:  Index of the desired device among all those available; must
+ *          be < MOCK_MAX_NETS.
+ * @homa:   struct homa that the device will be associated with; may be
+ *          needed for hnet initialization.
+ * Return:  The specified net_device. If this is the first call for @index
+ *          in this unit test, the device will be initialized. It will be
+ *          associated with mock_hnet(index), which will also be initialized
+ *          if it wasn't already initialized.
+ */
+struct net_device *mock_dev(int index, struct homa *homa)
+{
+	struct net_device *dev;
+
+	if (index >= MOCK_MAX_NETS) {
+		FAIL("Index %d exceeds maximum number of network namespaces (%d)",
+		     index, MOCK_MAX_NETS);
+		index = 0;
+	}
+	dev = &mock_devices[index];
+	if (!dev->ethtool_ops) {
+		dev->gso_max_segs = 1000;
+		dev->gso_max_size = mock_mtu;
+		dev->_tx = &mock_net_queue;
+		dev->nd_net.net = &mock_nets[0];
+		dev->ethtool_ops = &mock_ethtool_ops;
+		mock_hnet(index, homa);
+	}
+	return dev;
+}
+
 struct dst_entry *mock_dst_check(struct dst_entry *dst, __u32 cookie)
 {
 	if (mock_check_error(&mock_dst_check_errors))
@@ -1815,6 +1820,35 @@ int mock_get_link_ksettings(struct net_device *dev,
 }
 
 /**
+ * mock_hnet() - Return a struct homa_net suitable for use in tests.
+ * @index:  Index of this homa_net among those available for unit tests (must
+ *          be < MOCK_MAX_NETS)
+ * @homa:   struct homa that the homa_net will be associated with.
+ * Return:  The requested homa_net. If this is the first time that @index
+ *          has been specified during this unit test, the hnet will be
+ *          initialized.
+ */
+struct homa_net *mock_hnet(int index, struct homa *homa)
+{
+	struct homa_net *hnet;
+
+	if (index >= MOCK_MAX_NETS) {
+		FAIL("Index %d exceeds maximum number of network namespaces (%d)",
+		     index, MOCK_MAX_NETS);
+		index = 0;
+	}
+	hnet = mock_hnets[index];
+	if (!hnet) {
+		hnet = malloc(sizeof(*hnet));
+		mock_hnets[index] = hnet;
+		homa_net_init(hnet, &mock_nets[index], homa);
+		if (index == 0)
+			mock_dev(0, homa);
+	}
+	return hnet;
+}
+
+/**
  * mock_net_for_hnet() - Return the struct net associated with a struct
  * homa_net, or NULL if the struct net can't be identified.
  * @hnet:     Find the struct net associated with this.
@@ -1824,8 +1858,8 @@ struct net *mock_net_for_hnet(struct homa_net *hnet)
 {
 	int i;
 
-	for (i = 0; i < mock_num_hnets; i++) {
-		if (hnet == &mock_hnets[i])
+	for (i = 0; i <  MOCK_MAX_NETS; i++) {
+		if (hnet == mock_hnets[i])
 			return &mock_nets[i];
 	}
 	return NULL;
@@ -1837,9 +1871,9 @@ void *mock_net_generic(const struct net *net, unsigned int id)
 
 	if (id != homa_net_id)
 		return NULL;
-	for (i = 0; i < mock_num_hnets; i++) {
+	for (i = 0; i <  MOCK_MAX_NETS; i++) {
 		if (net == &mock_nets[i])
-			return &mock_hnets[i];
+			return mock_hnets[i];
 	}
 	return NULL;
 }
@@ -2187,7 +2221,7 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct homa_common_hdr *h
 	skb->_skb_refdst = 0;
 	skb->hash = 3;
 	skb->next = NULL;
-	skb->dev = &mock_net_device;
+	skb->dev = &mock_devices[0];
 	return skb;
 }
 
@@ -2251,7 +2285,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	hsk->inet.pinet6 = &hsk_pinfo;
 	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
 		+ sizeof(struct homa_data_hdr);
-	mock_net_device.gso_max_size = mock_mtu;
+	mock_devices[0].gso_max_size = mock_mtu;
 	err = homa_pool_set_region(hsk, (void *) 0x1000000,
 				   100*HOMA_BPAGE_SIZE);
 	return err;
@@ -2276,7 +2310,7 @@ void mock_spin_unlock(spinlock_t *lock)
  */
 void mock_teardown(void)
 {
-	int count;
+	int count, i;
 
 	pcpu_hot.cpu_number = 1;
 	pcpu_hot.current_task = &mock_task;
@@ -2334,11 +2368,15 @@ void mock_teardown(void)
 	mock_rht_num_walk_results = 0;
 	mock_min_default_port = 0x8000;
 	homa_net_id = 0;
-	mock_num_hnets = 0;
+	for (i = 0; i < MOCK_MAX_NETS; i++) {
+		if (mock_hnets[i]) {
+			free(mock_hnets[i]);
+			mock_hnets[i] = NULL;
+		}
+	}
+	memset(mock_devices, 0, sizeof(mock_devices));
 	mock_peer_free_no_fail = 0;
 	mock_link_mbps = 10000;
-	mock_net_device.gso_max_size = 0;
-	mock_net_device.gso_max_segs = 1000;
 	mock_netif_schedule_calls = 0;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;

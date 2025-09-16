@@ -59,7 +59,7 @@ FIXTURE_SETUP(homa_plumbing)
 	homa_init(&self->homa);
 	if (self->homa.wmem_max == 0)
 		printf("homa_plumbing fixture found wmem_max 0\n");
-	self->hnet = mock_alloc_hnet(&self->homa);
+	self->hnet = mock_hnet(0, &self->homa);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->client_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;

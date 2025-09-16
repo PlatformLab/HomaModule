@@ -83,7 +83,7 @@ FIXTURE(homa_qdisc) {
 	struct homa homa;
 	struct homa_net *hnet;
 	struct in6_addr addr;
-	struct net_device dev;
+	struct net_device *dev;
 #define NUM_TXQS 4
 	struct netdev_queue txqs[NUM_TXQS];
 	struct Qdisc *qdiscs[NUM_TXQS];
@@ -103,13 +103,13 @@ FIXTURE_SETUP(homa_qdisc)
 
 	homa_qdisc_register();
 	homa_init(&self->homa);
-	self->hnet = mock_alloc_hnet(&self->homa);
+	self->hnet = mock_hnet(0, &self->homa);
 	self->addr = unit_get_in_addr("1.2.3.4");
-	memset(&self->dev, 0, sizeof(self->dev));
-	self->dev._tx = self->txqs;
-	self->dev.num_tx_queues = NUM_TXQS;
-	self->dev.nd_net.net = mock_net_for_hnet(self->hnet);
-	self->dev.ethtool_ops = &self->ethtool_ops;
+	self->dev = mock_dev(0, &self->homa);
+	self->dev->_tx = self->txqs;
+	self->dev->num_tx_queues = NUM_TXQS;
+	self->dev->nd_net.net = mock_net_for_hnet(self->hnet);
+	self->dev->ethtool_ops = &self->ethtool_ops;
 	memset(&self->ethtool_ops, 0, sizeof(self->ethtool_ops));
 	self->ethtool_ops.get_link_ksettings = mock_get_link_ksettings;
 
@@ -117,11 +117,11 @@ FIXTURE_SETUP(homa_qdisc)
 	memset(&self->qdiscs, 0, sizeof(self->qdiscs));
 	for (i = 0; i < NUM_TXQS; i++) {
 		self->txqs[i].state = 0;
-		self->txqs[i].dev = &self->dev;
+		self->txqs[i].dev = self->dev;
 		self->qdiscs[i] = mock_alloc_qdisc(&self->txqs[i]);
 		self->txqs[i].qdisc = self->qdiscs[i];
 	}
-	mock_net_queue.dev = &mock_net_device;
+	mock_net_queue.dev = self->dev;
 
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->server_ip = unit_get_in_addr("1.2.3.4");
@@ -157,7 +157,7 @@ TEST_F(homa_qdisc, homa_qdisc_qdev_get__create_new)
 {
 	struct homa_qdisc_dev *qdev;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_FALSE(IS_ERR(qdev));
 	EXPECT_EQ(1, qdev->refs);
 
@@ -167,11 +167,11 @@ TEST_F(homa_qdisc, homa_qdisc_get__use_existing)
 {
 	struct homa_qdisc_dev *qdev;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_FALSE(IS_ERR(qdev));
 	EXPECT_EQ(1, qdev->refs);
 
-	EXPECT_EQ(qdev, homa_qdisc_qdev_get(self->hnet, &mock_net_device));
+	EXPECT_EQ(qdev, homa_qdisc_qdev_get(self->hnet, self->dev));
 	EXPECT_EQ(2, qdev->refs);
 
 	homa_qdisc_qdev_put(qdev);
@@ -182,7 +182,7 @@ TEST_F(homa_qdisc, homa_qdisc_qdev_get__kmalloc_failure)
 	struct homa_qdisc_dev *qdev;
 
 	mock_kmalloc_errors = 1;
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_TRUE(IS_ERR(qdev));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(qdev));
 }
@@ -191,7 +191,7 @@ TEST_F(homa_qdisc, homa_qdisc_qdev_get__cant_create_thread)
 	struct homa_qdisc_dev *qdev;
 
 	mock_kthread_create_errors = 1;
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_TRUE(IS_ERR(qdev));
 	EXPECT_EQ(EACCES, -PTR_ERR(qdev));
 }
@@ -200,9 +200,9 @@ TEST_F(homa_qdisc, homa_qdisc_qdev_put)
 {
 	struct homa_qdisc_dev *qdev, *qdev2;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_FALSE(IS_ERR(qdev));
-	homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_EQ(2, qdev->refs);
 
 	homa_qdisc_qdev_put(qdev);
@@ -288,7 +288,7 @@ TEST_F(homa_qdisc, _homa_qdisc_homa_qdisc_set_qixs_object)
 {
 	struct homa_qdisc_dev *qdev;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	/* Simple working case. */
 	homa_qdisc_set_qixs(qdev);
@@ -541,7 +541,7 @@ TEST_F(homa_qdisc, homa_qdisc_defer_homa__basics)
 				&self->server_ip, self->client_port,
 				self->server_id + 6, 10000, 10000);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	homa_qdisc_defer_homa(qdev,
 			      new_test_skb(srpc1, &self->addr, 5000, 1500));
@@ -575,7 +575,7 @@ TEST_F(homa_qdisc, homa_qdisc_defer_homa__multiple_pkts_for_rpc)
 				&self->server_ip, self->client_port,
 				self->server_id + 2, 10000, 10000);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	homa_qdisc_defer_homa(qdev,
 			      new_test_skb(srpc1, &self->addr, 1000, 1500));
@@ -604,7 +604,7 @@ TEST_F(homa_qdisc, homa_qdisc_defer_homa__dont_update_tx_left)
 				self->server_id, 10000, 10000);
 	srpc->qrpc.tx_left = 2000;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 5000, 500));
 	EXPECT_EQ(2000, srpc->qrpc.tx_left);
@@ -622,7 +622,7 @@ TEST_F(homa_qdisc, homa_qdisc_defer_homa__throttled_cycles_metric)
 				&self->server_ip, self->client_port,
 				self->server_id + 2, 10000, 10000);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	mock_clock = 5000;
 	homa_qdisc_defer_homa(qdev,
@@ -648,7 +648,7 @@ TEST_F(homa_qdisc, homa_qdisc_defer_homa__wake_up_pacer)
 				&self->server_ip, self->client_port,
 				self->server_id, 10000, 10000);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	skb = new_test_skb(srpc, &self->addr, 5000, 1500);
 	unit_log_clear();
@@ -676,7 +676,7 @@ TEST_F(homa_qdisc, homa_qdisc_insert_rb__basics)
 				&self->server_ip, self->client_port,
 				self->server_id + 4, 10000, 10000);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	homa_qdisc_defer_homa(qdev,
 			      new_test_skb(srpc1, &self->addr, 5000, 1500));
@@ -710,7 +710,7 @@ TEST_F(homa_qdisc, homa_qdisc_insert_rb__long_left_chain)
 				&self->server_ip, self->client_port,
 				self->server_id + 6, 10000, 10000);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	homa_qdisc_defer_homa(qdev,
 			      new_test_skb(srpc1, &self->addr, 5000, 1500));
@@ -747,7 +747,7 @@ TEST_F(homa_qdisc, homa_qdisc_insert_rb__long_right_chain)
 				&self->server_ip, self->client_port,
 				self->server_id +6 , 10000, 10000);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	homa_qdisc_defer_homa(qdev,
 			      new_test_skb(srpc1, &self->addr, 5000, 1500));
@@ -771,7 +771,7 @@ TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__no_deferred_rpcs)
 {
 	struct homa_qdisc_dev *qdev;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
 
 	EXPECT_EQ(NULL, homa_qdisc_dequeue_homa(qdev));
@@ -788,7 +788,7 @@ TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__multiple_packets_for_rpc)
 				self->server_id, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	skb = new_test_skb(srpc, &self->addr, 2000, 500);
 	homa_qdisc_defer_homa(qdev, skb);
@@ -820,7 +820,7 @@ TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__last_packet_for_rpc)
 				self->server_id + 2, 10000, 10000);
 	ASSERT_NE(NULL, srpc2);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	skb = new_test_skb(srpc1, &self->addr, 5000, 500);
 	homa_qdisc_defer_homa(qdev, skb);
@@ -848,7 +848,7 @@ TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__update_tx_left)
 				self->server_id, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 3000, 500));
 	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 4000, 500));
@@ -874,7 +874,7 @@ TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__throttled_cycles_metric)
 				self->server_id, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	mock_clock = 5000;
 	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 2000, 500));
@@ -903,7 +903,7 @@ TEST_F(homa_qdisc, homa_qdisc_free_homa)
 				self->server_id, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 1000, 500));
 	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 2000, 500));
@@ -1017,7 +1017,7 @@ TEST_F(homa_qdisc, homa_qdisc_update_link_idle__pacer_bytes_metric)
 				self->server_id, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	ASSERT_FALSE(IS_ERR(qdev));
 
 	/* No deferred packets. */
@@ -1037,7 +1037,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_main__basics)
 {
 	struct homa_qdisc_dev *qdev;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_FALSE(IS_ERR(qdev));
 
 	unit_hook_register(pacer_sleep_hook);
@@ -1055,7 +1055,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__queue_empty)
 {
 	struct homa_qdisc_dev *qdev;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	unit_log_clear();
 
 	homa_qdisc_pacer(qdev);
@@ -1075,7 +1075,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__pacer_lock_unavailable)
 				self->server_id, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	link_idle = atomic64_read(&qdev->link_idle_time);
 	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
 	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
@@ -1104,7 +1104,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__enqueue_packet)
 				self->server_id, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	link_idle = atomic64_read(&qdev->link_idle_time);
 	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
 	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
@@ -1131,7 +1131,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__spin_until_link_idle)
 				self->server_id, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
 	qdev->pacer_qix = 3;
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
@@ -1172,7 +1172,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__return_after_one_packet)
 				self->server_id + 2, 10000, 10000);
 	ASSERT_NE(NULL, srpc2);
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &self->dev);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
 	qdev->pacer_qix = 3;
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
@@ -1325,7 +1325,7 @@ TEST_F(homa_qdisc, homa_qdisc_update_sysctl__basics)
 {
 	struct homa_qdisc_dev *qdev;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_FALSE(IS_ERR(qdev));
 
 	self->homa.link_mbps = 25000;
@@ -1340,7 +1340,7 @@ TEST_F(homa_qdisc, homa_qdisc_update_sysctl__cant_get_link_speed_from_dev)
 {
 	struct homa_qdisc_dev *qdev;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	EXPECT_FALSE(IS_ERR(qdev));
 
 	self->homa.link_mbps = 16000;

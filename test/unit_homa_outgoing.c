@@ -74,6 +74,7 @@ FIXTURE(homa_outgoing) {
 	u64 server_id;
 	struct homa homa;
 	struct homa_net *hnet;
+	struct net_device *dev;
 	struct homa_sock hsk;
 	union sockaddr_in_union server_addr;
 	struct homa_peer *peer;
@@ -87,7 +88,8 @@ FIXTURE_SETUP(homa_outgoing)
 	self->client_id = 1234;
 	self->server_id = 1235;
 	homa_init(&self->homa);
-	self->hnet = mock_alloc_hnet(&self->homa);
+	self->hnet = mock_hnet(0, &self->homa);
+	self->dev = mock_dev(0, &self->homa);
 	mock_clock = 10000;
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.pacer->cycles_per_mbyte = 1000000;
@@ -441,7 +443,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)
 	self->hsk.sock.sk_protocol = IPPROTO_TCP;
 
 	/* First try: not quite enough space for 3 packets in GSO. */
-	mock_net_device.gso_max_size = mock_mtu - 1 +
+	self->dev->gso_max_size = mock_mtu - 1 +
 			2 * UNIT_TEST_DATA_PER_PACKET;
 	homa_rpc_lock(crpc1);
 	ASSERT_EQ(0, -homa_message_out_fill(crpc1,
@@ -450,7 +452,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)
 	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 2800", unit_log_get());
 
 	/* Second try: just barely enough space for 3 packets in GSO. */
-	mock_net_device.gso_max_size += 1;
+	self->dev->gso_max_size += 1;
 	unit_log_clear();
 	homa_rpc_lock(crpc2);
 	ASSERT_EQ(0, -homa_message_out_fill(crpc2,
@@ -468,7 +470,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_no_hijacking)
         mock_set_ipv6(&self->hsk);
 
 	/* First try: not quite enough space for 3 packets in GSO. */
-	mock_net_device.gso_max_size = mock_mtu - 1 +
+	self->dev->gso_max_size = mock_mtu - 1 +
 			2 * (UNIT_TEST_DATA_PER_PACKET +
 			     sizeof(struct homa_seg_hdr));
 	ASSERT_EQ(0, -homa_message_out_fill(crpc1,
@@ -479,7 +481,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_no_hijacking)
 	/* Second try: just barely enough space for 3 packets in GSO. */
 	crpc2 = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
 	ASSERT_FALSE(crpc2 == NULL);
-	mock_net_device.gso_max_size += 1;
+	self->dev->gso_max_size += 1;
 	unit_log_clear();
 	ASSERT_EQ(0, -homa_message_out_fill(crpc2,
 			unit_iov_iter((void *) 1000, 10000), 0));
@@ -493,7 +495,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_limit_less_than_mtu)
 
 	ASSERT_FALSE(crpc == NULL);
 	unit_log_clear();
-	mock_net_device.gso_max_size = 10000;
+	self->dev->gso_max_size = 10000;
 	self->homa.max_gso_size = 1000;
 	ASSERT_EQ(0, -homa_message_out_fill(crpc,
 			unit_iov_iter((void *) 1000, 5000), 0));
@@ -507,7 +509,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__disable_overlap_xmit_because_of_hom
 			&self->server_addr);
 	struct homa_qdisc_dev *qdev;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 
 	ASSERT_FALSE(crpc == NULL);
 	ASSERT_EQ(0, -homa_message_out_fill(crpc,
@@ -525,7 +527,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__multiple_segs_per_skbuff)
 			&self->server_addr);
 
 	ASSERT_FALSE(crpc == NULL);
-	mock_net_device.gso_max_size = 5000;
+	self->dev->gso_max_size = 5000;
 	unit_log_clear();
 	ASSERT_EQ(0, -homa_message_out_fill(crpc,
 			unit_iov_iter((void *) 1000, 10000), 0));
@@ -886,7 +888,7 @@ TEST_F(homa_outgoing, homa_xmit_data__dont_throttle_because_homa_qdisc_in_use)
 			self->server_port, self->client_id, 2000, 1000);
 	struct homa_qdisc_dev *qdev;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, &mock_net_device);
+	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 1000000);
 	self->homa.pacer->max_nic_queue_cycles = 0;
@@ -1067,7 +1069,7 @@ TEST_F(homa_outgoing, homa_resend_data__basics)
 {
 	struct homa_rpc *crpc;
 
-	mock_net_device.gso_max_size = 5000;
+	self->dev->gso_max_size = 5000;
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			16000, 1000);
@@ -1138,7 +1140,7 @@ TEST_F(homa_outgoing, homa_resend_data__cant_allocate_skb)
 {
 	struct homa_rpc *crpc;
 
-	mock_net_device.gso_max_size = 5000;
+	self->dev->gso_max_size = 5000;
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			16000, 1000);
@@ -1154,7 +1156,7 @@ TEST_F(homa_outgoing, homa_resend_data__set_incoming)
 {
 	struct homa_rpc *crpc;
 
-	mock_net_device.gso_max_size = 5000;
+	self->dev->gso_max_size = 5000;
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			16000, 1000);
@@ -1168,7 +1170,7 @@ TEST_F(homa_outgoing, homa_resend_data__error_copying_data)
 {
 	struct homa_rpc *crpc;
 
-	mock_net_device.gso_max_size = 5000;
+	self->dev->gso_max_size = 5000;
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			16000, 1000);
@@ -1187,7 +1189,7 @@ TEST_F(homa_outgoing, homa_resend_data__add_to_to_free_and_set_homa_info)
 	struct homa_skb_info *homa_info;
 
 	mock_set_ipv6(&self->hsk);
-	mock_net_device.gso_max_size = 5000;
+	self->dev->gso_max_size = 5000;
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			16000, 1000);

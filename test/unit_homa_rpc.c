@@ -42,7 +42,7 @@ FIXTURE_SETUP(homa_rpc)
 	self->server_addr.in6.sin6_addr = *self->server_ip;
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
 	homa_init(&self->homa);
-	self->hnet = mock_alloc_hnet(&self->homa);
+	self->hnet = mock_hnet(0, &self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;

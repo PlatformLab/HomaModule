@@ -21,7 +21,7 @@ FIXTURE(homa_pool) {
 FIXTURE_SETUP(homa_pool)
 {
 	homa_init(&self->homa);
-	self->hnet = mock_alloc_hnet(&self->homa);
+	self->hnet = mock_hnet(0, &self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;

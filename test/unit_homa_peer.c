@@ -27,7 +27,7 @@ FIXTURE(homa_peer) {
 FIXTURE_SETUP(homa_peer)
 {
 	homa_init(&self->homa);
-	self->hnet = mock_alloc_hnet(&self->homa);
+	self->hnet = mock_hnet(0, &self->homa);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
 	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
@@ -130,7 +130,7 @@ TEST_F(homa_peer, homa_peer_free_net__basics)
 	struct homa_sock hsk2;
 	struct homa_net *hnet2;
 
-	hnet2 = mock_alloc_hnet(&self->homa);
+	hnet2 = mock_hnet(1, &self->homa);
 	mock_sock_init(&hsk2, hnet2, 44);
 
 	peer = homa_peer_get(&self->hsk, ip1111);
@@ -208,7 +208,7 @@ TEST_F(homa_peer, homa_peer_prefer_evict)
 	struct homa_net *hnet2;
 	struct homa_sock hsk2;
 
-	hnet2 = mock_alloc_hnet(&self->homa);
+	hnet2 = mock_hnet(1, &self->homa);
 	mock_sock_init(&hsk2, hnet2, 44);
 
 	peer1 = homa_peer_get(&self->hsk, ip1111);
@@ -312,7 +312,7 @@ TEST_F(homa_peer, homa_peer_pick_victims__filter_idle_jiffies_max)
 	struct homa_net *hnet2;
 	struct homa_sock hsk2;
 
-	hnet2 = mock_alloc_hnet(&self->homa);
+	hnet2 = mock_hnet(1, &self->homa);
 	mock_sock_init(&hsk2, hnet2, 44);
 	hnet2->num_peers = peertab->net_max + 1;
 

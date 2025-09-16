@@ -150,8 +150,6 @@ extern int         mock_max_grants;
 extern int         mock_max_skb_frags;
 extern __u16       mock_min_default_port;
 extern int         mock_mtu;
-extern struct net_device
-		   mock_net_device;
 extern struct netdev_queue
 		   mock_net_queue;
 extern struct net  mock_nets[];
@@ -180,8 +178,6 @@ extern struct task_struct *current_task;
 
 struct page *
 	    mock_alloc_pages(gfp_t gfp, unsigned order);
-struct homa_net
-	   *mock_alloc_hnet(struct homa *homa);
 struct Qdisc
 	   *mock_alloc_qdisc(struct netdev_queue *dev_queue);
 int         mock_check_error(int *errorMask);
@@ -190,6 +186,8 @@ s64         mock_cmpxchg(atomic64_t *target, s64 old, s64 new);
 unsigned int mock_compound_order(struct page *page);
 int         mock_cpu_to_node(int core);
 void        mock_data_ready(struct sock *sk);
+struct net_device
+	   *mock_dev(int index, struct homa *homa);
 struct dst_entry
 	   *mock_dst_check(struct dst_entry *, __u32 cookie);
 cycles_t    mock_get_cycles(void);
@@ -198,6 +196,8 @@ int         mock_get_link_ksettings(struct net_device *dev,
 unsigned int
 	    mock_get_mtu(const struct dst_entry *dst);
 void        mock_get_page(struct page *page);
+struct homa_net
+	   *mock_hnet(int index, struct homa *homa);
 void       *mock_kmalloc(size_t size, gfp_t flags);
 struct net *mock_net_for_hnet(struct homa_net *hnet);
 void       *mock_net_generic(const struct net *net, unsigned int id);

@@ -20,7 +20,7 @@ FIXTURE(homa_utils) {
 FIXTURE_SETUP(homa_utils)
 {
 	homa_init(&self->homa);
-	self->hnet = mock_alloc_hnet(&self->homa);
+	self->hnet = mock_hnet(0, &self->homa);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	unit_log_clear();
 }
@@ -132,7 +132,7 @@ TEST_F(homa_utils, homa_net_destroy__delete_sockets)
 	struct homa_sock hsk1, hsk2, hsk3;
 	struct homa_net *hnet;
 
-	hnet = mock_alloc_hnet(&self->homa);
+	hnet = mock_hnet(1, &self->homa);
 	mock_sock_init(&hsk1, hnet, 100);
 	mock_sock_init(&hsk2, hnet, 101);
 	mock_sock_init(&hsk3, self->hnet, 100);
@@ -151,7 +151,7 @@ TEST_F(homa_utils, homa_net_destroy__delete_peers)
 	struct homa_sock hsk2;
 	struct in6_addr addr;
 
-	hnet = mock_alloc_hnet(&self->homa);
+	hnet = mock_hnet(1, &self->homa);
 	mock_sock_init(&hsk2, hnet, 44);
 
 	addr = unit_get_in_addr("1.2.3.4");

@@ -42,7 +42,7 @@ FIXTURE_SETUP(homa_offload)
 	int i;
 
 	homa_init(&self->homa);
-	self->hnet = mock_alloc_hnet(&self->homa);
+	self->hnet = mock_hnet(0, &self->homa);
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.unsched_bytes = 10000;
 	mock_sock_init(&self->hsk, self->hnet, 99);

@@ -56,7 +56,7 @@ FIXTURE(homa_interest) {
 FIXTURE_SETUP(homa_interest)
 {
 	homa_init(&self->homa);
-	self->hnet = mock_alloc_hnet(&self->homa);
+	self->hnet = mock_hnet(0, &self->homa);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->client_port = 40000;
