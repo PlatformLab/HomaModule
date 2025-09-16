@@ -34,7 +34,7 @@ static struct Qdisc_ops homa_qdisc_ops __read_mostly = {
 
 /**
  * homa_qdisc_register() - Invoked when the Homa module is loaded; makes
- * the homa qdisk known to Linux.
+ * the homa qdisc known to Linux.
  * Return:  0 for success or a negative errno if an error occurred.
  */
 int homa_qdisc_register(void)
@@ -52,34 +52,145 @@ void homa_qdisc_unregister(void)
 }
 
 /**
- * homa_qdisc_qdev_get() - Find the homa_qdisc_dev to use for a particular
- * net_device and increment its reference count. Create a new one if there
- * isn't an existing one to use.
- * @hnet:     Network namespace for the homa_qdisc_dev.
- * @dev:      NIC that the homa_qdisc_dev will manage.
- * Return:     A pointer to the new homa_qdisc_dev, or a PTR_ERR errno.
+ * homa_rcu_kfree() - Call kfree on a block of memory when it is safe to
+ * do so from an RCU standpoint. If possible, the freeing is done
+ * asynchronously.
+ * @object:     Eventually invoke kfree on this.
  */
-struct homa_qdisc_dev *homa_qdisc_qdev_get(struct homa_net *hnet,
-					   struct net_device *dev)
+void homa_rcu_kfree(void *object)
+{
+	struct homa_rcu_kfreer *freer;
+
+	freer = kmalloc(sizeof *freer, GFP_KERNEL);
+	if (!freer) {
+		/* Can't allocate memory needed for asynchronous freeing,
+		 * so free synchronously.
+		 */
+		UNIT_LOG("; ", "homa_rcu_kfree kmalloc failed");
+		synchronize_rcu();
+		kfree(object);
+	} else {
+		freer->object = object;
+		call_rcu(&freer->rcu_head, homa_rcu_kfree_callback);
+	}
+}
+
+/**
+ * homa_rcu_kfree_callback() - This function is invoked by the RCU subsystem
+ * when it safe to free an object previously passed to homa_rcu_kfree.
+ * @head:     Points to the rcu_head member of a struct homa_rcu_kfreer.
+ */
+void homa_rcu_kfree_callback(struct rcu_head *head)
+{
+	struct homa_rcu_kfreer *freer;
+
+	freer = container_of(head, struct homa_rcu_kfreer, rcu_head);
+	kfree(freer->object);
+	kfree(freer);
+}
+
+/**
+ * homa_qdisc_alloc_devs() - Allocate and initialize a new homa_qdisc_qdevs
+ * object.
+ * Return:   The new object, or an ERR_PTR if an error occurred.
+ */
+struct homa_qdisc_qdevs *homa_qdisc_qdevs_alloc(void)
+{
+	struct homa_qdisc_qdevs *qdevs;
+
+	qdevs = kzalloc(sizeof(*qdevs), GFP_KERNEL);
+	if (!qdevs)
+		return ERR_PTR(-ENOMEM);
+
+	mutex_init(&qdevs->mutex);
+	return qdevs;
+}
+
+/**
+ * homa_qdisc_qdevs_free() - Invoked when a struct homa is being freed;
+ * releases information related to all the assoiciated homa_qdiscs.
+ * @qdevs:    Information about homa_qdisc_devs associated with a
+ *            particular struct homa.
+ */
+void homa_qdisc_qdevs_free(struct homa_qdisc_qdevs *qdevs)
 {
 	struct homa_qdisc_dev *qdev;
 
-	mutex_lock(&hnet->qdisc_devs_mutex);
-	list_for_each_entry(qdev, &hnet->qdisc_devs, links) {
-		if (qdev->dev == dev) {
-			qdev->refs++;
+	/* At this point this object no-one else besides us should
+	 * ever access this object again, but lock it just to be safe.
+	 */
+	mutex_lock(&qdevs->mutex);
+	if (qdevs->num_qdevs > 0) {
+		pr_err("homa_qdisc_devs_free found %d live qdevs (should have been none)\n",
+		       qdevs->num_qdevs);
+
+		/* We can't safely free the stranded qdevs, but at least
+		 * stop their pacer threads to reduce the likelihood
+		 * of derefernceing dangling pointers.
+		 */
+		while (qdevs->num_qdevs > 0) {
+			qdevs->num_qdevs--;
+			qdev = qdevs->qdevs[qdevs->num_qdevs];
+			qdevs->qdevs[qdevs->num_qdevs] = NULL;
+			kthread_stop(qdev->pacer_kthread);
+			qdev->pacer_kthread = NULL;
+		}
+	}
+	mutex_unlock(&qdevs->mutex);
+	homa_rcu_kfree(qdevs->qdevs);
+	homa_rcu_kfree(qdevs);
+}
+
+/**
+ * homa_qdisc_qdev_get() - Find the homa_qdisc_dev to use for a particular
+ * net_device and increment its reference count. Create a new one if there
+ * isn't an existing one to use. Do this in an RCU-safe fashion.
+ * @dev:      NIC that the homa_qdisc_dev will manage.
+ * Return:    A pointer to the new homa_qdisc_dev, or a PTR_ERR errno.
+ */
+struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
+{
+	struct homa_qdisc_dev **new_qdevs, **old_qdevs;
+	struct homa_qdisc_qdevs *qdevs;
+	struct homa_qdisc_dev *qdev;
+	struct homa_net *hnet;
+	int num_qdevs, i;
+
+	rcu_read_lock();
+	hnet = homa_net(dev_net(dev));
+	qdevs = hnet->homa->qdevs;
+	qdevs = homa_net(dev_net(dev))->homa->qdevs;
+	num_qdevs = READ_ONCE(qdevs->num_qdevs);
+	for (i = 0; i < num_qdevs; i++) {
+		qdev = READ_ONCE(qdevs->qdevs[i]);
+		if (qdev->dev == dev && refcount_inc_not_zero(&qdev->refs)) {
+			rcu_read_unlock();
+			return qdev;
+		}
+	}
+	rcu_read_unlock();
+
+	/* Must allocate a new homa_qdisc_dev (but must check again,
+	 * after acquiring the mutex, in case someone else already
+	 * created it).
+	 */
+	mutex_lock(&qdevs->mutex);
+	for (i = 0; i < qdevs->num_qdevs; i++) {
+		qdev = READ_ONCE(qdevs->qdevs[i]);
+		if (qdev->dev == dev && refcount_inc_not_zero(&qdev->refs)) {
+			UNIT_LOG("; ", "race in homa_qdisc_qdev_get");
 			goto done;
 		}
 	}
 
-	qdev = kzalloc(sizeof(*qdev), GFP_ATOMIC);
+	qdev = kzalloc(sizeof(*qdev), GFP_KERNEL);
 	if (!qdev) {
 		qdev = ERR_PTR(-ENOMEM);
 		goto done;
 	}
 	qdev->dev = dev;
 	qdev->hnet = hnet;
-	qdev->refs = 1;
+	refcount_set(&qdev->refs, 1);
 	qdev->pacer_qix = -1;
 	qdev->redirect_qix = -1;
 	homa_qdisc_update_sysctl(qdev);
@@ -101,10 +212,21 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct homa_net *hnet,
 		qdev = ERR_PTR(error);
 		goto done;
 	}
-	list_add(&qdev->links, &hnet->qdisc_devs);
+
+	/* Note: the order below matters, because there could be concurrent
+	 * scans of qdevs->qdevs.
+	 */
+	new_qdevs = kzalloc((qdevs->num_qdevs + 1) * sizeof(*new_qdevs),
+			    GFP_KERNEL);
+	old_qdevs = qdevs->qdevs;
+	memcpy(new_qdevs, old_qdevs, qdevs->num_qdevs * sizeof(*new_qdevs));
+	new_qdevs[qdevs->num_qdevs] = qdev;
+	smp_store_release(&qdevs->qdevs, new_qdevs);
+	qdevs->num_qdevs++;
+	homa_rcu_kfree(old_qdevs);
 
 done:
-	mutex_unlock(&hnet->qdisc_devs_mutex);
+	mutex_unlock(&qdevs->mutex);
 	return qdev;
 }
 
@@ -115,20 +237,48 @@ done:
  */
 void homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev)
 {
-	struct homa_net *hnet = qdev->hnet;
+	struct homa_qdisc_qdevs *qdevs;
+	int i;
 
-	mutex_lock(&hnet->qdisc_devs_mutex);
-	qdev->refs--;
-	if (qdev->refs == 0) {
-		kthread_stop(qdev->pacer_kthread);
-		qdev->pacer_kthread = NULL;
+	if (!refcount_dec_and_test(&qdev->refs))
+		return;
 
-		__list_del_entry(&qdev->links);
-		homa_qdisc_free_homa(qdev);
-		skb_queue_purge(&qdev->tcp_deferred);
-		kfree(qdev);
+	/* Make this homa_qdisc_dev inaccessible, then schedule an RCU-safe
+	 * free. Think carefully before you modify this code, to ensure that
+	 * concurrent RCU scans of qdevs->qdevs are safe.
+	 */
+	qdevs = qdev->hnet->homa->qdevs;
+	mutex_lock(&qdevs->mutex);
+	for (i = 0; i < qdevs->num_qdevs; i++) {
+		if (qdevs->qdevs[i] == qdev)
+			break;
 	}
-	mutex_unlock(&hnet->qdisc_devs_mutex);
+	if (i < qdevs->num_qdevs) {
+		WRITE_ONCE(qdevs->qdevs[i], qdevs->qdevs[qdevs->num_qdevs - 1]);
+		smp_store_release(&qdevs->num_qdevs, qdevs->num_qdevs - 1);
+	} else {
+		pr_err("homa_qdisc_qdev_put couldn't find qdev to delete\n");
+	}
+
+	kthread_stop(qdev->pacer_kthread);
+	qdev->pacer_kthread = NULL;
+	call_rcu(&qdev->rcu_head, homa_qdisc_dev_callback);
+	mutex_unlock(&qdevs->mutex);
+}
+
+/**
+ * homa_qdisc_dev_callback() - Invoked by the RCU subsystem when it is
+ * safe to finish deleting a homa_qdisc_dev.
+ * @head:    Pointer to the rcu_head field in a homa_qdisc_qdev.
+ */
+void homa_qdisc_dev_callback(struct rcu_head *head)
+{
+	struct homa_qdisc_dev *qdev;
+
+	qdev = container_of(head, struct homa_qdisc_dev, rcu_head);
+	homa_qdisc_free_homa(qdev);
+	skb_queue_purge(&qdev->tcp_deferred);
+	kfree(qdev);
 }
 
 /**
@@ -143,11 +293,9 @@ int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 {
 	struct homa_qdisc *q = qdisc_priv(sch);
 	struct homa_qdisc_dev *qdev;
-	struct homa_net *hnet;
 	int i;
 
-	hnet = homa_net(dev_net(sch->dev_queue->dev));
-	qdev = homa_qdisc_qdev_get(hnet, sch->dev_queue->dev);
+	qdev = homa_qdisc_qdev_get(sch->dev_queue->dev);
 	if (IS_ERR(qdev))
 		return PTR_ERR(qdev);
 
@@ -400,9 +548,8 @@ struct sk_buff *homa_qdisc_dequeue_homa(struct homa_qdisc_dev *qdev)
 	}
 	qrpc = container_of(node, struct homa_rpc_qdisc, rb_node);
 	skb = skb_dequeue(&qrpc->packets);
-	if (skb_queue_len(&qrpc->packets) == 0) {
+	if (skb_queue_len(&qrpc->packets) == 0)
 		rb_erase_cached(node, &qdev->deferred_rpcs);
-	}
 
 	/* Update qrpc->bytes_left. This can change the priority of the RPC
 	 * in qdev->deferred_rpcs, but the RPC was already the highest-
@@ -718,10 +865,18 @@ void homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev)
  */
 void homa_qdisc_update_all_sysctl(struct homa_net *hnet)
 {
+	struct homa_qdisc_qdevs *qdevs;
 	struct homa_qdisc_dev *qdev;
+	int num_qdevs, i;
 
-	mutex_lock(&hnet->qdisc_devs_mutex);
-	list_for_each_entry(qdev, &hnet->qdisc_devs, links)
+	rcu_read_lock();
+	qdevs = hnet->homa->qdevs;
+	num_qdevs = READ_ONCE(qdevs->num_qdevs);
+	for (i = 0; i < num_qdevs; i++) {
+		qdev = qdevs->qdevs[i];
+		if (qdev->hnet != hnet)
+			continue;
 		homa_qdisc_update_sysctl(qdev);
-	mutex_unlock(&hnet->qdisc_devs_mutex);
+	}
+	rcu_read_unlock();
 }

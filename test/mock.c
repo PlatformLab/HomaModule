@@ -1075,6 +1075,7 @@ void mutex_lock_nested(struct mutex *lock, unsigned int subclass)
 void mutex_lock(struct mutex *lock)
 #endif
 {
+	UNIT_HOOK("mutex_lock");
 	mock_active_locks++;
 }
 
@@ -1562,6 +1563,9 @@ int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 {
 	return 0;
 }
+
+void synchronize_rcu(void)
+{}
 
 void __tasklet_hi_schedule(struct tasklet_struct *t)
 {}

@@ -505,11 +505,11 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_limit_less_than_mtu)
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, homa_message_out_fill__disable_overlap_xmit_because_of_homa_qdisc)
 {
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
 	struct homa_qdisc_dev *qdev;
+	struct homa_rpc *crpc;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
+	qdev = homa_qdisc_qdev_get(self->dev);
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
 
 	ASSERT_FALSE(crpc == NULL);
 	ASSERT_EQ(0, -homa_message_out_fill(crpc,
@@ -883,12 +883,13 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 }
 TEST_F(homa_outgoing, homa_xmit_data__dont_throttle_because_homa_qdisc_in_use)
 {
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 2000, 1000);
 	struct homa_qdisc_dev *qdev;
+	struct homa_rpc *crpc;
 
-	qdev = homa_qdisc_qdev_get(self->hnet, self->dev);
+	qdev = homa_qdisc_qdev_get(self->dev);
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 2000, 1000);
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 1000000);
 	self->homa.pacer->max_nic_queue_cycles = 0;

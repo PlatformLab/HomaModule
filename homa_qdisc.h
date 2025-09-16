@@ -54,7 +54,7 @@ struct homa_qdisc_dev {
 	 * homa_qdisc that references this object).  Must hold
 	 * hnet->qdisc_devs_lock to access.
 	 */
-	int refs;
+	refcount_t refs;
 
 	/**
 	 * @pacer_qix: Index of a netdev_queue within dev that is reserved
@@ -157,6 +157,47 @@ struct homa_qdisc_dev {
 	 * never block on this.
 	 */
 	spinlock_t pacer_mutex __aligned(L1_CACHE_BYTES);
+
+	/**
+	 * @rcu_head: Holds state of a pending call_rcu invocation when
+	 * this struct is deleted.
+	 */
+	struct rcu_head rcu_head;
+};
+
+/**
+ * struct homa_qdisc_qdevs - There is one of these structs for each
+ * struct homa. Used to manage all of the homa_qdisc_devs for the
+ * struct homa.
+ */
+struct homa_qdisc_qdevs {
+	/**
+	 * @mutex: Must hold when modifying qdevs. Can scan qdevs
+	 * without locking using RCU.
+	 */
+	struct mutex mutex;
+
+	/** @num_devs: Number of entries currently in use in @qdevs. */
+	int num_qdevs;
+
+	/**
+	 * @qdevs: Pointers to all homa_qdisc_devs that exist for this
+	 * struct homa. Scan and/or retrieve pointers using RCU. Storage
+	 * for this is dynamically allocated, must be kfreed.
+	 */
+	struct homa_qdisc_dev **qdevs;
+};
+
+/**
+ * struct homa_rcu_kfreer - Used by homa_rcu_kfree to defer kfree-ing
+ * an object until it is RCU-safe.
+ */
+struct homa_rcu_kfreer {
+	/** @rcu_head: Holds state of a pending call_rcu invocation. */
+	struct rcu_head rcu_head;
+
+	/** object: Kfree this after waiting until RCU has synced. */
+	void *object;
 };
 
 void            homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev,
@@ -164,6 +205,10 @@ void            homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev,
 struct sk_buff *
 		homa_qdisc_dequeue_homa(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_destroy(struct Qdisc *sch);
+void            homa_qdisc_dev_callback(struct rcu_head *head);
+struct homa_qdisc_qdevs *
+		homa_qdisc_qdevs_alloc(void);
+void            homa_qdisc_qdevs_free(struct homa_qdisc_qdevs *qdevs);
 int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
 void            homa_qdisc_free_homa(struct homa_qdisc_dev *qdev);
@@ -173,8 +218,7 @@ void            homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev,
 				     struct homa_rpc *rpc);
 int             homa_qdisc_pacer_main(void *device);
 struct homa_qdisc_dev *
-		homa_qdisc_qdev_get(struct homa_net *hnet,
-				    struct net_device *dev);
+		homa_qdisc_qdev_get(struct net_device *dev);
 void            homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev);
 int             homa_qdisc_redirect_skb(struct sk_buff *skb,
 					struct homa_qdisc_dev *qdev,
@@ -187,16 +231,18 @@ int             homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev,
 					    int bytes, int max_queue_ns);
 void            homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_pacer(struct homa_qdisc_dev *qdev);
+void            homa_rcu_kfree(void *object);
+void            homa_rcu_kfree_callback(struct rcu_head *head);
 
 /**
  * homa_qdisc_active() - Return true if homa qdiscs are enabled for @hnet
  * (so the old pacer should not be used), false otherwise.
- * @hnet:    Homa's information about a network namespace.
+ * @homa:    Information about the Homa transport.
  * Return:   See above.
  */
-static inline bool homa_qdisc_active(struct homa_net *hnet)
+static inline bool homa_qdisc_active(struct homa *homa)
 {
-	return !list_empty(&hnet->qdisc_devs);
+	return homa->qdevs->num_qdevs > 0;
 }
 
 /**

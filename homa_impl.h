@@ -119,6 +119,12 @@ struct homa {
 	 * grants for incoming messages.
 	 */
 	struct homa_grant *grant;
+
+	/**
+	 * @qdevs: Contains information used by homa_qdisc.c to manage
+	 * homa_qdisc_qdevs for this struct homa.
+	 */
+	struct homa_qdisc_qdevs *qdevs;
 #endif /* See strip.py */
 
 	/**
@@ -517,22 +523,6 @@ struct homa_net {
 	 * for this namespace. Managed by homa_peer.c under the peertab lock.
 	 */
 	int num_peers;
-
-#ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @qdisc_devs: List of all homa_qdisc_dev objects that exist for
-	 * this namespace. Protected by qdisc_devs_mutex.
-	 */
-	struct list_head qdisc_devs;
-
-	/**
-	 * @qdisc_devs_mutex: Used to synchronize operations on @qdisc_devs
-	 * (creation and deletion of qdiscs). Must be a mutex rather than
-	 * a spinlock because homa_qdisc_dev_get calls functions that may
-	 * blocko.
-	 */
-	struct mutex qdisc_devs_mutex;
-#endif /* See strip.py */
 };
 
 /**

@@ -1112,22 +1112,24 @@ void homa_rpc_stats_log(void)
 /**
  * homa_rpcs_deferred() - Return true if there are any RPCs with packets
  * that have been deferred by homa_qdisc, false if there are none.
- * @hnet:      Consider only RPCs associatged with this network namespace.
+ * @homa:      Overall information about the Homa protocol.
  * Return:     See above.
  */
-bool homa_rpcs_deferred(struct homa_net *hnet)
+bool homa_rpcs_deferred(struct homa *homa)
 {
-	struct homa_qdisc_dev *qdev;
+	struct homa_qdisc_qdevs *qdevs = homa->qdevs;
 	bool result = false;
+	int num_qdevs, i;
 
-	mutex_lock(&hnet->qdisc_devs_mutex);
-	list_for_each_entry(qdev, &hnet->qdisc_devs, links) {
-		if (homa_qdisc_any_deferred(qdev)) {
+	rcu_read_lock();
+	num_qdevs = READ_ONCE(qdevs->num_qdevs);
+	for (i = 0; i < num_qdevs; i++) {
+		if (homa_qdisc_any_deferred(qdevs->qdevs[i])) {
 			result = true;
 			break;
 		}
 	}
-	mutex_unlock(&hnet->qdisc_devs_mutex);
+	rcu_read_unlock();
 	return result;
 }
 

@@ -11,6 +11,7 @@
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_pacer.h"
+#include "homa_qdisc.h"
 #include "homa_skb.h"
 #else /* See strip.py */
 #include "homa_stub.h"
@@ -45,6 +46,12 @@ int homa_init(struct homa *homa)
 	if (IS_ERR(homa->grant)) {
 		err = PTR_ERR(homa->grant);
 		homa->grant = NULL;
+		return err;
+	}
+	homa->qdevs = homa_qdisc_qdevs_alloc();
+	if (IS_ERR(homa->qdevs)) {
+		err = PTR_ERR(homa->qdevs);
+		homa->qdevs = NULL;
 		return err;
 	}
 #endif /* See strip.py */
@@ -132,6 +139,10 @@ void homa_destroy(struct homa *homa)
 		homa->socktab = NULL;
 	}
 #ifndef __STRIP__ /* See strip.py */
+	if (homa->qdevs) {
+		homa_qdisc_qdevs_free(homa->qdevs);
+		homa->qdevs = NULL;
+	}
 	if (homa->grant) {
 		homa_grant_free(homa->grant);
 		homa->grant = NULL;
@@ -163,10 +174,6 @@ int homa_net_init(struct homa_net *hnet, struct net *net, struct homa *homa)
 	memset(hnet, 0, sizeof(*hnet));
 	hnet->homa = homa;
 	hnet->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
-#ifndef __STRIP__ /* See strip.py */
-	INIT_LIST_HEAD(&hnet->qdisc_devs);
-	mutex_init(&hnet->qdisc_devs_mutex);
-#endif /* See strip.py */
 	return 0;
 }
 

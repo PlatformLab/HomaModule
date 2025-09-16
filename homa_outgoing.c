@@ -321,7 +321,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 #ifndef __STRIP__ /* See strip.py */
 	overlap_xmit = rpc->msgout.length > 2 * max_gso_data;
-	if (homa_qdisc_active(rpc->hsk->hnet))
+	if (homa_qdisc_active(rpc->hsk->homa))
 		overlap_xmit = 0;
 	rpc->msgout.granted = rpc->msgout.unscheduled;
 #endif /* See strip.py */
@@ -598,7 +598,7 @@ void homa_xmit_data(struct homa_rpc *rpc)
 
 		if (rpc->msgout.length - rpc->msgout.next_xmit_offset >
 		    homa->pacer->throttle_min_bytes &&
-		    !homa_qdisc_active(rpc->hsk->hnet)) {
+		    !homa_qdisc_active(rpc->hsk->homa)) {
 			if (!homa_pacer_check_nic_q(homa->pacer, skb, force)) {
 				tt_record1("homa_xmit_data adding id %u to throttle queue",
 					   rpc->id);
