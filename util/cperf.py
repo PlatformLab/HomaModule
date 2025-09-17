@@ -1447,15 +1447,18 @@ def get_digest(experiment):
     digests[experiment] = digest
     return digest
 
-def start_slowdown_plot(title, max_y, x_experiment, size=10,
+def start_plot_vs_msg_length(title, y_range, x_experiment, size=10,
         show_top_label=True, show_bot_label=True, figsize=[6,4],
         y_label="Slowdown", show_upper_x_axis=True):
     """
-    Create a pyplot graph that will be used for slowdown data. Returns the
-    Axes object for the plot.
+    Create a pyplot graph that will be used to display some value as a
+    function of message size, with the x-axis scaled so that distance
+    corresponds to cumulative number of messages.
 
     title:             Title for the plot; may be empty
-    max_y:             Maximum y-coordinate
+    y_range:           Either a single value giving maximum y-coordinate
+                       (min will be 1) or a list containing min and max
+                       values. The y-axis will be log-scale.
     x_experiment:      Name of experiment whose rtt distribution will be used to
                        label the x-axis of the plot. None means don't label the
                        x-axis (caller will presumably invoke cdf_xaxis to do it).
@@ -1473,11 +1476,16 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
         ax.set_title(title, size=size)
     ax.set_xlim(0, 1.0)
     ax.set_yscale("log")
-    ax.set_ylim(1, max_y)
+    if isinstance(y_range, list):
+        min_y, max_y = y_range
+    else:
+        min_y = 1
+        max_y = y_range
+    ax.set_ylim(min_y, max_y)
     ax.tick_params(right=True, which="both", direction="in", length=5)
     ticks = []
     labels = []
-    y = 1
+    y = 10 ** (math.ceil(math.log10(min_y)))
     while y <= max_y:
         ticks.append(y)
         labels.append("%d" % (y))
@@ -1607,7 +1615,7 @@ def plot_slowdown(ax, experiment, percentile, label, **kwargs):
 
     ax:            matplotlib Axes object: info will be plotted here.
     experiment:    Name of the experiment whose data should be graphed.
-    percentile:    While percentile of slowdown to graph: must be "p50", "p99",
+    percentile:    Which percentile of slowdown to graph: must be "p50", "p99",
                    or "p999"
     label:         Text to display in the graph legend for this curve
     kwargs:        Additional keyword arguments to pass through to plt.plot
@@ -1626,6 +1634,23 @@ def plot_slowdown(ax, experiment, percentile, label, **kwargs):
     else:
         raise Exception("Bad percentile selector %s; must be p50, p99, or p999"
                 % (percentile))
+    ax.plot(x, y, label=label, **kwargs)
+
+def plot_histogram(ax, experiment, metric, label, **kwargs):
+    """
+    Add a histogram to a plot created by start_plot_vs_msg_length().
+
+    ax:            matplotlib Axes object: info will be plotted here.
+    experiment:    Name of the experiment whose data should be graphed.
+    percentile:    Metric from experiment to graph, such as "p50" for 50th
+                   percentile latency or "slow_99" for 99th percentile
+                   slowdown
+    label:         Text to display in the graph legend for this curve
+    kwargs:        Additional keyword arguments to pass through to plt.plot
+    """
+    digest = get_digest(experiment)
+    x, y = make_histogram(digest["cum_frac"], digest[metric],
+            init=[0, digest[metric][0]], after=False)
     ax.plot(x, y, label=label, **kwargs)
 
 def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,

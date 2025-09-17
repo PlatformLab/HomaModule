@@ -163,7 +163,7 @@ for workload, bw, seconds in load_info:
     title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
             options.num_nodes, bw)
     exp_name = "%s_%s" % (options.protocol, workload)
-    ax = start_slowdown_plot(title, 1000, exp_name, y_label=" Slowdown")
+    ax = start_plot_vs_msg_length(title, 1000, exp_name, y_label=" Slowdown")
     for exp in data:
         plot_slowdown(ax, exp["name"], "p99", "%.1f MB P99" % exp["buf_size"])
     ax.legend(loc="upper left", prop={'size': 9})

@@ -81,7 +81,7 @@ for workload, bw in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
             options.num_nodes, bw)
-    ax = start_slowdown_plot(title, 1000, exp)
+    ax = start_plot_vs_msg_length(title, 1000, exp)
     plot_slowdown(ax, exp, "p99", "%s P99" % (prot))
     plot_slowdown(ax, exp, "p50", "%s P50" % (prot))
     ax.legend()

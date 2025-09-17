@@ -116,7 +116,7 @@ for workload, bw, seconds in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
             options.num_nodes, bw)
-    ax = start_slowdown_plot(title, 1000, homa_exp)
+    ax = start_plot_vs_msg_length(title, 1000, homa_exp)
     if options.tcp:
         plot_slowdown(ax, tcp_exp, "p99", "TCP P99", color=tcp_color)
         plot_slowdown(ax, tcp_exp, "p50", "TCP P50", color=tcp_color2)
@@ -127,7 +127,25 @@ for workload, bw, seconds in load_info:
     plot_slowdown(ax, homa_exp, "p50", "Homa P50", color=homa_color2)
     ax.legend(loc="upper right", prop={'size': 9})
     plt.tight_layout()
-    plt.savefig("%s/reports/vs_tcp_%s.pdf" % (options.log_dir, workload))
+    plt.savefig("%s/reports/slowdown_%s.pdf" % (options.log_dir, workload))
+
+    # Generate latency plot.
+    log("Generating RTT latency plot for %s" % (workload))
+    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, bw)
+    ax = start_plot_vs_msg_length(title, [30, 30000], homa_exp,
+            y_label=r'RTT (µsec)')
+    if options.tcp:
+        plot_histogram(ax, tcp_exp, "p99", "TCP P99", color=tcp_color)
+        plot_histogram(ax, tcp_exp, "p50", "TCP P50", color=tcp_color2)
+    if options.dctcp:
+        plot_histogram(ax, dctcp_exp, "p99", "DCTCP P99", color=dctcp_color)
+        plot_histogram(ax, dctcp_exp, "p50", "DCTCP P50", color=dctcp_color2)
+    plot_histogram(ax, homa_exp, "p99", "Homa P99", color=homa_color)
+    plot_histogram(ax, homa_exp, "p50", "Homa P50", color=homa_color2)
+    ax.legend(loc="upper right", prop={'size': 9})
+    plt.tight_layout()
+    plt.savefig("%s/reports/rtt_%s.pdf" % (options.log_dir, workload))
 
     # Generate CDF of small-message RTTs.
     log("Generating short message CDF for %s" % (workload))

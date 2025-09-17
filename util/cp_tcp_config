@@ -111,7 +111,7 @@ for workload, bw in load_info:
     if options.tcp:
         title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
                 options.num_nodes, bw)
-        ax = start_slowdown_plot(title, 1000,
+        ax = start_plot_vs_msg_length(title, 1000,
                 "tcp_%s_%s" % (specs[0]['exp_name'], workload),
                 y_label="TCP Slowdown")
         for spec in specs:
@@ -128,7 +128,7 @@ for workload, bw in load_info:
     if options.dctcp:
         title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
                 options.num_nodes, bw)
-        ax = start_slowdown_plot(title, 10000,
+        ax = start_plot_vs_msg_length(title, 10000,
                 "dctcp_%s_%s" % (specs[0]['exp_name'], workload),
                 y_label="DCTCP Slowdown")
         for spec in specs:

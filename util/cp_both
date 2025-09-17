@@ -61,7 +61,7 @@ log("Generating slowdown plot for %s" % (options.workload))
 title = "TCP (%.1f Gbps) and Homa (%.1f Gbps) together, %s %d nodes" % (
         options.gbps - options.homa_gbps, options.homa_gbps,
         options.workload.capitalize(), options.num_nodes)
-ax = start_slowdown_plot(title, 1000, homa_exp)
+ax = start_plot_vs_msg_length(title, 1000, homa_exp)
 plot_slowdown(ax, tcp_exp, "p99", "TCP P99", color=tcp_color)
 plot_slowdown(ax, tcp_exp, "p50", "TCP P50", color=tcp_color2)
 plot_slowdown(ax, homa_exp, "p99", "Homa P99", color=homa_color)

@@ -89,7 +89,7 @@ set_unloaded(unloaded_exp)
 log("Generating slowdown plot for %s" % (options.workload))
 title = "%s %d nodes, %.2f GB/s" % (options.workload.capitalize(),
         options.num_nodes, options.gbps)
-ax = start_slowdown_plot(title, 1000, "homa1.0_%s" % (options.workload))
+ax = start_plot_vs_msg_length(title, 1000, "homa1.0_%s" % (options.workload))
 if options.dctcp:
     plot_slowdown(ax, "dctcp%3.1f_%s" % (fractions[0], options.workload),
             "p99", "DCTCP %4.2f Gbps" % (fractions[0] * options.gbps),
