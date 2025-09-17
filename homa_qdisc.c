@@ -103,6 +103,7 @@ struct homa_qdisc_qdevs *homa_qdisc_qdevs_alloc(void)
 		return ERR_PTR(-ENOMEM);
 
 	mutex_init(&qdevs->mutex);
+	INIT_LIST_HEAD(&qdevs->qdevs);
 	return qdevs;
 }
 
@@ -115,29 +116,34 @@ struct homa_qdisc_qdevs *homa_qdisc_qdevs_alloc(void)
 void homa_qdisc_qdevs_free(struct homa_qdisc_qdevs *qdevs)
 {
 	struct homa_qdisc_dev *qdev;
+	int stranded = 0;
 
 	/* At this point this object no-one else besides us should
 	 * ever access this object again, but lock it just to be safe.
 	 */
 	mutex_lock(&qdevs->mutex);
-	if (qdevs->num_qdevs > 0) {
-		pr_err("homa_qdisc_devs_free found %d live qdevs (should have been none)\n",
-		       qdevs->num_qdevs);
+	while (1) {
+		qdev = list_first_or_null_rcu(&qdevs->qdevs,
+					      struct homa_qdisc_dev, links);
+		if (!qdev)
+			break;
 
-		/* We can't safely free the stranded qdevs, but at least
-		 * stop their pacer threads to reduce the likelihood
-		 * of derefernceing dangling pointers.
+		/* This code should never execute (all the qdevs should
+		 * already have been deleted). We can't safely free the
+		 * stranded qdevs, but at least stop their pacer threads to
+		 * reduce the likelihood of dereferencing dangling pointers.
 		 */
-		while (qdevs->num_qdevs > 0) {
-			qdevs->num_qdevs--;
-			qdev = qdevs->qdevs[qdevs->num_qdevs];
-			qdevs->qdevs[qdevs->num_qdevs] = NULL;
-			kthread_stop(qdev->pacer_kthread);
-			qdev->pacer_kthread = NULL;
-		}
+		stranded++;
+		list_del_rcu(&qdev->links);
+		INIT_LIST_HEAD(&qdev->links);
+		kthread_stop(qdev->pacer_kthread);
+		qdev->pacer_kthread = NULL;
 	}
+
+	if (stranded != 0)
+		pr_err("homa_qdisc_devs_free found %d live qdevs (should have been none)\n",
+		       stranded);
 	mutex_unlock(&qdevs->mutex);
-	homa_rcu_kfree(qdevs->qdevs);
 	homa_rcu_kfree(qdevs);
 }
 
@@ -150,19 +156,14 @@ void homa_qdisc_qdevs_free(struct homa_qdisc_qdevs *qdevs)
  */
 struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 {
-	struct homa_qdisc_dev **new_qdevs, **old_qdevs;
 	struct homa_qdisc_qdevs *qdevs;
 	struct homa_qdisc_dev *qdev;
 	struct homa_net *hnet;
-	int num_qdevs, i;
 
 	rcu_read_lock();
 	hnet = homa_net(dev_net(dev));
 	qdevs = hnet->homa->qdevs;
-	qdevs = homa_net(dev_net(dev))->homa->qdevs;
-	num_qdevs = READ_ONCE(qdevs->num_qdevs);
-	for (i = 0; i < num_qdevs; i++) {
-		qdev = READ_ONCE(qdevs->qdevs[i]);
+	list_for_each_entry_rcu(qdev, &qdevs->qdevs, links) {
 		if (qdev->dev == dev && refcount_inc_not_zero(&qdev->refs)) {
 			rcu_read_unlock();
 			return qdev;
@@ -175,8 +176,7 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 	 * created it).
 	 */
 	mutex_lock(&qdevs->mutex);
-	for (i = 0; i < qdevs->num_qdevs; i++) {
-		qdev = READ_ONCE(qdevs->qdevs[i]);
+	list_for_each_entry_rcu(qdev, &qdevs->qdevs, links) {
 		if (qdev->dev == dev && refcount_inc_not_zero(&qdev->refs)) {
 			UNIT_LOG("; ", "race in homa_qdisc_qdev_get");
 			goto done;
@@ -212,18 +212,7 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 		qdev = ERR_PTR(error);
 		goto done;
 	}
-
-	/* Note: the order below matters, because there could be concurrent
-	 * scans of qdevs->qdevs.
-	 */
-	new_qdevs = kzalloc((qdevs->num_qdevs + 1) * sizeof(*new_qdevs),
-			    GFP_KERNEL);
-	old_qdevs = qdevs->qdevs;
-	memcpy(new_qdevs, old_qdevs, qdevs->num_qdevs * sizeof(*new_qdevs));
-	new_qdevs[qdevs->num_qdevs] = qdev;
-	smp_store_release(&qdevs->qdevs, new_qdevs);
-	qdevs->num_qdevs++;
-	homa_rcu_kfree(old_qdevs);
+	list_add_rcu(&qdev->links, &qdevs->qdevs);
 
 done:
 	mutex_unlock(&qdevs->mutex);
@@ -238,7 +227,6 @@ done:
 void homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev)
 {
 	struct homa_qdisc_qdevs *qdevs;
-	int i;
 
 	if (!refcount_dec_and_test(&qdev->refs))
 		return;
@@ -249,17 +237,7 @@ void homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev)
 	 */
 	qdevs = qdev->hnet->homa->qdevs;
 	mutex_lock(&qdevs->mutex);
-	for (i = 0; i < qdevs->num_qdevs; i++) {
-		if (qdevs->qdevs[i] == qdev)
-			break;
-	}
-	if (i < qdevs->num_qdevs) {
-		WRITE_ONCE(qdevs->qdevs[i], qdevs->qdevs[qdevs->num_qdevs - 1]);
-		smp_store_release(&qdevs->num_qdevs, qdevs->num_qdevs - 1);
-	} else {
-		pr_err("homa_qdisc_qdev_put couldn't find qdev to delete\n");
-	}
-
+	list_del_rcu(&qdev->links);
 	kthread_stop(qdev->pacer_kthread);
 	qdev->pacer_kthread = NULL;
 	call_rcu(&qdev->rcu_head, homa_qdisc_dev_callback);
@@ -825,18 +803,13 @@ done:
  *              homa_qdisc_devs to check.
  */
 void homa_qdisc_pacer_check(struct homa *homa) {
-	struct homa_qdisc_qdevs *qdevs;
 	struct homa_qdisc_dev *qdev;
 	u64 now = homa_clock();
-	int num_qdevs, i;
 	int max_cycles;
 
 	max_cycles = homa->pacer->max_nic_queue_cycles;
-	qdevs = homa->qdevs;
 	rcu_read_lock();
-	num_qdevs = READ_ONCE(qdevs->num_qdevs);
-	for (i = 0; i < num_qdevs; i++) {
-		qdev = qdevs->qdevs[i];
+	list_for_each_entry_rcu(qdev, &homa->qdevs->qdevs, links) {
 		if (!homa_qdisc_any_deferred(qdev))
 			continue;
 
@@ -904,15 +877,10 @@ void homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev)
  */
 void homa_qdisc_update_all_sysctl(struct homa_net *hnet)
 {
-	struct homa_qdisc_qdevs *qdevs;
 	struct homa_qdisc_dev *qdev;
-	int num_qdevs, i;
 
 	rcu_read_lock();
-	qdevs = hnet->homa->qdevs;
-	num_qdevs = READ_ONCE(qdevs->num_qdevs);
-	for (i = 0; i < num_qdevs; i++) {
-		qdev = qdevs->qdevs[i];
+	list_for_each_entry_rcu(qdev, &hnet->homa->qdevs->qdevs, links) {
 		if (qdev->hnet != hnet)
 			continue;
 		homa_qdisc_update_sysctl(qdev);

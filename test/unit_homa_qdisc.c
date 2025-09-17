@@ -197,8 +197,7 @@ TEST_F(homa_qdisc, homa_qdisc_qdevs_alloc__success)
 
 	qdevs = homa_qdisc_qdevs_alloc();
 	ASSERT_FALSE(IS_ERR(qdevs));
-	EXPECT_EQ(0, qdevs->num_qdevs);
-	EXPECT_EQ(NULL, qdevs->qdevs);
+	EXPECT_EQ(0, unit_list_length(&qdevs->qdevs));
 	kfree(qdevs);
 }
 TEST_F(homa_qdisc, homa_qdisc_qdevs_alloc__kmalloc_failure)
@@ -230,7 +229,7 @@ TEST_F(homa_qdisc, homa_qdisc_qdevs_free__unfreed_qdevs)
 	saved_qdevs = self->homa.qdevs;
 	self->homa.qdevs = qdevs;
 	qdev = homa_qdisc_qdev_get(self->dev);
-	EXPECT_EQ(1, qdevs->num_qdevs);
+	EXPECT_EQ(1, unit_list_length(&qdevs->qdevs));
 	self->homa.qdevs = saved_qdevs;
 	mock_printk_output[0] = 0;
 	homa_qdisc_qdevs_free(qdevs);
@@ -246,7 +245,7 @@ TEST_F(homa_qdisc, homa_qdisc_qdev_get__basics)
 	qdev = homa_qdisc_qdev_get(self->dev);
 	EXPECT_FALSE(IS_ERR(qdev));
 	EXPECT_EQ(1, refcount_read(&qdev->refs));
-	EXPECT_EQ(1, self->homa.qdevs->num_qdevs);
+	EXPECT_EQ(1, unit_list_length(&self->homa.qdevs->qdevs));
 
 	homa_qdisc_qdev_put(qdev);
 }
@@ -254,12 +253,14 @@ TEST_F(homa_qdisc, homa_qdisc_get__use_existing)
 {
 	struct homa_qdisc_dev *qdev, *qdev2;
 
-
+	/* Arrange for the desired qdev not to be first on this list, to
+	 * exercise list traversal.
+	 */
+	qdev = homa_qdisc_qdev_get(self->dev);
 	qdev2 = homa_qdisc_qdev_get(mock_dev(1, &self->homa));
 
-	qdev = homa_qdisc_qdev_get(self->dev);
 	EXPECT_FALSE(IS_ERR(qdev));
-	EXPECT_EQ(2, self->homa.qdevs->num_qdevs);
+	EXPECT_EQ(2, unit_list_length(&self->homa.qdevs->qdevs));
 	EXPECT_EQ(1, refcount_read(&qdev->refs));
 
 	EXPECT_EQ(qdev, homa_qdisc_qdev_get(self->dev));
@@ -279,7 +280,7 @@ TEST_F(homa_qdisc, homa_qdisc_qdev_get__race_when_creating)
 	unit_log_clear();
 	qdev = homa_qdisc_qdev_get(self->dev);
 	EXPECT_FALSE(IS_ERR(qdev));
-	EXPECT_EQ(1, self->homa.qdevs->num_qdevs);
+	EXPECT_EQ(1, unit_list_length(&self->homa.qdevs->qdevs));
 	EXPECT_EQ(2, refcount_read(&qdev->refs));
 	EXPECT_SUBSTR("race in homa_qdisc_qdev_get", unit_log_get());
 
@@ -304,30 +305,8 @@ TEST_F(homa_qdisc, homa_qdisc_qdev_get__cant_create_thread)
 	EXPECT_TRUE(IS_ERR(qdev));
 	EXPECT_EQ(EACCES, -PTR_ERR(qdev));
 }
-TEST_F(homa_qdisc, homa_qdisc_get__fillin_qdevs_array)
-{
-	struct homa_qdisc_dev *qdev1, *qdev2, *qdev3;
 
-	qdev1 = homa_qdisc_qdev_get(self->dev);
-	qdev2 = homa_qdisc_qdev_get(mock_dev(1, &self->homa));
-	qdev3 = homa_qdisc_qdev_get(mock_dev(2, &self->homa));
-
-	EXPECT_EQ(3, self->homa.qdevs->num_qdevs);
-	EXPECT_EQ(1, refcount_read(&qdev1->refs));
-	EXPECT_EQ(qdev1, self->homa.qdevs->qdevs[0]);
-	EXPECT_EQ(qdev2, self->homa.qdevs->qdevs[1]);
-	EXPECT_EQ(qdev3, self->homa.qdevs->qdevs[2]);
-
-	EXPECT_EQ(qdev3, homa_qdisc_qdev_get(mock_dev(2, &self->homa)));
-	EXPECT_EQ(2, refcount_read(&qdev3->refs));
-
-	homa_qdisc_qdev_put(qdev1);
-	homa_qdisc_qdev_put(qdev2);
-	homa_qdisc_qdev_put(qdev3);
-	homa_qdisc_qdev_put(qdev3);
-}
-
-TEST_F(homa_qdisc, homa_qdisc_qdev_put__basics)
+TEST_F(homa_qdisc, homa_qdisc_qdev_put)
 {
 	struct homa_qdisc_dev *qdev1, *qdev2, *qdev3;
 
@@ -344,27 +323,15 @@ TEST_F(homa_qdisc, homa_qdisc_qdev_put__basics)
 	/* First call: refcount doesn't hit zero. */
 	homa_qdisc_qdev_put(qdev2);
 	EXPECT_EQ(1, refcount_read(&qdev2->refs));
-	EXPECT_EQ(3, self->homa.qdevs->num_qdevs);
+	EXPECT_EQ(3, unit_list_length(&self->homa.qdevs->qdevs));
 
 	/* Second call: refcount hits zero. */
 	homa_qdisc_qdev_put(qdev2);
-	EXPECT_EQ(2, self->homa.qdevs->num_qdevs);
-	EXPECT_EQ(qdev3, self->homa.qdevs->qdevs[1]);
+	EXPECT_EQ(2, unit_list_length(&self->homa.qdevs->qdevs));
 
 	homa_qdisc_qdev_put(qdev3);
 	homa_qdisc_qdev_put(qdev1);
-	EXPECT_EQ(0, self->homa.qdevs->num_qdevs);
-}
-TEST_F(homa_qdisc, homa_qdisc_qdev_put__cant_find_qdev_in_array)
-{
-	struct homa_qdisc_dev *qdev;
-
-	qdev = homa_qdisc_qdev_get(self->dev);
-	self->homa.qdevs->num_qdevs = 0;
-	mock_printk_output[0] = 0;
-	homa_qdisc_qdev_put(qdev);
-	EXPECT_STREQ("homa_qdisc_qdev_put couldn't find qdev to delete",
-		     mock_printk_output);
+	EXPECT_EQ(0, unit_list_length(&self->homa.qdevs->qdevs));
 }
 
 TEST_F(homa_qdisc, homa_qdisc_dev_callback)
@@ -391,7 +358,7 @@ TEST_F(homa_qdisc, homa_qdisc_dev_callback)
 
 	/* If skbs aren't freed, test infrastructure will complain. */
         homa_qdisc_qdev_put(qdev);
-	EXPECT_EQ(0, self->homa.qdevs->num_qdevs);
+	EXPECT_EQ(0, unit_list_length(&self->homa.qdevs->qdevs));
 }
 
 TEST_F(homa_qdisc, homa_qdisc_init__basics)
@@ -401,7 +368,8 @@ TEST_F(homa_qdisc, homa_qdisc_init__basics)
 	struct homa_qdisc *q;
 
 	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
-	qdev = self->homa.qdevs->qdevs[0];
+	qdev = list_first_or_null_rcu(&self->homa.qdevs->qdevs,
+				      struct homa_qdisc_dev, links);
 	ASSERT_NE(NULL, qdev);
 	EXPECT_EQ(1, refcount_read(&qdev->refs));
 	EXPECT_EQ(10000, qdev->link_mbps);
@@ -417,8 +385,7 @@ TEST_F(homa_qdisc, homa_qdisc_init__cant_create_new_qdisc_dev)
 
 	mock_kmalloc_errors = 1;
 	EXPECT_EQ(ENOMEM, -homa_qdisc_init(qdisc, NULL, NULL));
-	EXPECT_EQ(0, self->homa.qdevs->num_qdevs);
-	EXPECT_EQ(NULL, self->homa.qdevs->qdevs);
+	EXPECT_EQ(0, unit_list_length(&self->homa.qdevs->qdevs));
 	kfree(qdisc);
 }
 TEST_F(homa_qdisc, homa_qdisc_init__set_qix)
@@ -442,7 +409,8 @@ TEST_F(homa_qdisc, homa_qdisc_destroy)
 	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
 	qdisc2 = mock_alloc_qdisc(&mock_net_queue);
 	EXPECT_EQ(0, homa_qdisc_init(qdisc2, NULL, NULL));
-	qdev = self->homa.qdevs->qdevs[0];
+	qdev = list_first_or_null_rcu(&self->homa.qdevs->qdevs,
+				      struct homa_qdisc_dev, links);
 	EXPECT_NE(NULL, qdev);
 	EXPECT_EQ(2, refcount_read(&qdev->refs));
 
@@ -450,7 +418,7 @@ TEST_F(homa_qdisc, homa_qdisc_destroy)
 	EXPECT_EQ(1, refcount_read(&qdev->refs));
 
 	homa_qdisc_destroy(qdisc);
-	EXPECT_EQ(0, self->homa.qdevs->num_qdevs);
+	EXPECT_EQ(0, unit_list_length(&self->homa.qdevs->qdevs));
 	kfree(qdisc);
 	kfree(qdisc2);
 }

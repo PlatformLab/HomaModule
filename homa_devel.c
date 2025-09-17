@@ -1118,13 +1118,12 @@ void homa_rpc_stats_log(void)
 bool homa_rpcs_deferred(struct homa *homa)
 {
 	struct homa_qdisc_qdevs *qdevs = homa->qdevs;
+	struct homa_qdisc_dev *qdev;
 	bool result = false;
-	int num_qdevs, i;
 
 	rcu_read_lock();
-	num_qdevs = READ_ONCE(qdevs->num_qdevs);
-	for (i = 0; i < num_qdevs; i++) {
-		if (homa_qdisc_any_deferred(qdevs->qdevs[i])) {
+	list_for_each_entry_rcu(qdev, &qdevs->qdevs, links) {
+		if (homa_qdisc_any_deferred(qdev)) {
 			result = true;
 			break;
 		}

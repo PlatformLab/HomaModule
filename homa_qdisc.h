@@ -99,14 +99,17 @@ struct homa_qdisc_dev {
 	int cycles_per_mibyte;
 
 	/**
+	 * @links: Used to link this object into the qdevs list in a
+	 * homa_qdisc_qdevs struct.
+	 */
+	struct list_head links;
+
+	/**
 	 * @link_idle_time: The time, measured by homa_clock, at which we
 	 * estimate that all of the packets passed to @dev will have been
 	 * transmitted. May be in the past.
 	 */
 	atomic64_t link_idle_time __aligned(L1_CACHE_BYTES);
-
-	/** @links: Used to link this struct into homa->qdisc_devs. */
-	struct list_head links;
 
 	/**
 	 * @deferred_rpcs: Contains all homa_rpc's with deferred packets, in
@@ -177,15 +180,11 @@ struct homa_qdisc_qdevs {
 	 */
 	struct mutex mutex;
 
-	/** @num_devs: Number of entries currently in use in @qdevs. */
-	int num_qdevs;
-
 	/**
-	 * @qdevs: Pointers to all homa_qdisc_devs that exist for this
-	 * struct homa. Scan and/or retrieve pointers using RCU. Storage
-	 * for this is dynamically allocated, must be kfreed.
+	 * @qdevs: RCU list of all homa_qdisc_devs that currently
+	 * exist for this struct homa.
 	 */
-	struct homa_qdisc_dev **qdevs;
+	struct list_head qdevs;
 };
 
 /**
@@ -243,7 +242,8 @@ void            homa_rcu_kfree_callback(struct rcu_head *head);
  */
 static inline bool homa_qdisc_active(struct homa *homa)
 {
-	return homa->qdevs->num_qdevs > 0;
+	return list_first_or_null_rcu(&homa->qdevs->qdevs,
+				      struct homa_qdisc_dev, links) != NULL;
 }
 
 /**
