@@ -123,7 +123,8 @@ for symbol in symbols:
         total_cur += core[symbol]
     total_prev = 0
     for core in prev:
-        total_prev += core[symbol]
+        if symbol in core:
+            total_prev += core[symbol]
     delta = total_cur - total_prev
     deltas[symbol] = delta
 
