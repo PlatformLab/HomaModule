@@ -2,6 +2,22 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+63. (September 2025) Compared CPU utilization against TCP. Measured with
+top, running cp_vs_tcp -w w4 -b20 on a 6-node xl170 cluster (20 cores):
+
+                                   Homa        TCP    Homa no polling
+us (user)                           9.8       15.7         11.0
+sy (system)                        31.5       11.8         17.3
+ni (nice)                           0.0        0.0          0.0
+id (idle)                          38.0       49.2         51.9
+wa (iowait)                         0.0        0.0          0.0
+hi (hardware interrupts)            0.0        0.0          0.0
+si (software interrupts)           19.3       22.2         19.5
+st (hypervisor steal)               0.0        0.0          0.0
+
+Without polling, Homa's CPU utilization is slightly lower than TCP's.
+Polling costs an extra 2-3 cores for Homa.
+
 62. (August 2025) Using ktime_get_ns (rdtscp) instead of get_cycles (rdtsc)
 in homa_clock (Linux reviewers won't allow get_cycles for upstreaming).
 rdtscp takes about 14 ns per call, vs. 8 for ktime_get_ns. Running "w4 -b20"
