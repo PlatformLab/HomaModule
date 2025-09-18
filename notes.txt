@@ -4,6 +4,9 @@ Notes for Homa implementation in Linux:
 * Move interest cleanup code from homa_sock to a new function in
   homa_interest. Also move wakeup code from homa_rpc_handoff.
 
+* Find a way to reduce pacer core utilization? It currently takes about 0.7
+  core when running at high load. Maybe use polling threads instead?
+
 * Use skb_attempt_defer_free once it has been properly exported.
 
 * Thoughts on making TCP and Homa play better together:
@@ -78,10 +81,6 @@ Notes for Homa implementation in Linux:
 
 * Use vmap to map the user-space buffer pool so that the kernel can use
   memcpy rather than copy_to_user?
-
-* SoftIRQ processing can lock out kernel-to-user copies; add a preemption
-  mechanism where the copying code can set a flag that it needs the lock,
-  then SoftIRQ releases the lock until the flag is clear?
 
 * For W3, throttle_min_bytes is a problem: a significant fraction of all
   transmitted bytes aren't being counted; as a result, the NIC queue
