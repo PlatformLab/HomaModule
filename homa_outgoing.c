@@ -262,7 +262,6 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	struct sk_buff **last_link;
 	struct dst_entry *dst;
 	u64 segs_per_gso;
-	IF_NO_STRIP(int overlap_xmit);
 	/* Bytes of the message that haven't yet been copied into skbs. */
 	int bytes_left;
 	int gso_size;
@@ -320,9 +319,6 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		 mtu, max_seg_data, max_gso_data);
 
 #ifndef __STRIP__ /* See strip.py */
-	overlap_xmit = rpc->msgout.length > 2 * max_gso_data;
-	if (homa_qdisc_active(rpc->hsk->homa))
-		overlap_xmit = 0;
 	rpc->msgout.granted = rpc->msgout.unscheduled;
 #endif /* See strip.py */
 	homa_skb_stash_pages(rpc->hsk->homa, rpc->msgout.length);
@@ -378,23 +374,28 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		rpc->msgout.copied_from_user = rpc->msgout.length - bytes_left;
 		rpc->msgout.first_not_tx = rpc->msgout.packets;
 #ifndef __STRIP__ /* See strip.py */
-		if (overlap_xmit && list_empty(&rpc->throttled_links) &&
-		    xmit && offset < rpc->msgout.granted) {
-			tt_record1("waking up pacer for id %d", rpc->id);
-			homa_pacer_manage_rpc(rpc);
-		}
+		/* The code below improves pipelining for long messages
+		 * by overlapping transmission with copying from user space.
+		 * This is a bit tricky because sending the packets takes
+		 * a significant amount time. On high-speed networks (e.g.
+		 * 100 Gbps and above), copying from user space is the
+		 * bottleneck, so transmitting the packets here will slow
+		 * that down. Thes, we only transmit the unscheduled packets
+		 * here, to fill the pipe. Packets after that can be
+		 * transmitted by SoftIRQ in response to incoming grants;
+		 * this allows us to use two cores: this core copying data
+		 * and the SoftIRQ core sending packets.
+		 */
+		if (offset < rpc->msgout.unscheduled && xmit)
+			homa_xmit_data(rpc, false);
 #endif /* See strip.py */
 	}
 	tt_record2("finished copy from user space for id %d, length %d",
 		   rpc->id, rpc->msgout.length);
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
 	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
-#ifndef __STRIP__ /* See strip.py */
-	if (!overlap_xmit && xmit)
+	if (xmit)
 		homa_xmit_data(rpc, false);
-#else /* See strip.py */
-	homa_xmit_data(rpc);
-#endif /* See strip.py */
 	return 0;
 
 error:

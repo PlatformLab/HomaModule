@@ -584,38 +584,22 @@ TEST_F(homa_outgoing, homa_message_out_fill__rpc_freed_during_copy)
 	homa_rpc_unlock(crpc);
 }
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, homa_message_out_fill__add_to_throttled)
+TEST_F(homa_outgoing, homa_message_out_fill__xmit_packets)
 {
 	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
 			&self->server_addr);
 
 	ASSERT_FALSE(crpc == NULL);
+	self->homa.unsched_bytes = 2800;
 	ASSERT_EQ(0, -homa_message_out_fill(crpc,
 			unit_iov_iter((void *) 1000, 5000), 1));
 	homa_rpc_unlock(crpc);
-	unit_log_clear();
-	unit_log_filled_skbs(crpc->msgout.packets, 0);
-	EXPECT_STREQ("DATA 1400@0; DATA 1400@1400; DATA 1400@2800; "
-			"DATA 800@4200",
-			unit_log_get());
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request id 2, next_offset 0",
-			unit_log_get());
-}
-TEST_F(homa_outgoing, homa_message_out_fill__too_short_for_pipelining)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-
-	ASSERT_FALSE(crpc == NULL);
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 1000), 1));
-	homa_rpc_unlock(crpc);
-	EXPECT_SUBSTR("xmit DATA 1000@0", unit_log_get());
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_SUBSTR(" _copy_from_iter 1400 bytes at 1000; "
+		     "xmit DATA 1400@0; "
+		     "_copy_from_iter 1400 bytes at 2400; "
+		     "xmit DATA 1400@1400; "
+		     "_copy_from_iter 1400 bytes at 3800; "
+		     "_copy_from_iter 800 bytes at 5200", unit_log_get());
 }
 #endif /* See strip.py */
 TEST_F(homa_outgoing, homa_message_out_fill__packet_memory_accounting)
