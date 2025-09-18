@@ -33,9 +33,9 @@ else:
 delta = float(sys.argv[2]) - float(sys.argv[1])
 
 for line in f:
-    match = re.match(' *([0-9.]+) us (.*)', line)
+    match = re.match(' *(-[0-9.]+) us (.*)', line)
     if not match:
-        print(line)
+        print(line, end='')
         continue
     time = float(match.group(1))
     print("%9.3f us %s" % (time + delta, match.group(2)))
