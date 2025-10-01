@@ -585,10 +585,14 @@ def config_nic():
     mechanisms).
     """
     interface = get_interfaces()[0]
+
+    # Use a separate ethtool command for each paramemeter. Otherwise,
+    # if one parametere isn't supported the command will be aborted,
+    # so no parameters will get set.
     exec_cmd(["sudo", "ethtool", "-C", interface, "adaptive-rx", "off"],
             check=False)
-    exec_cmd(["sudo", "ethtool", "-C", interface, "rx-usecs", "5",
-            "rx-frames", "1"], check=False)
+    exec_cmd(["sudo", "ethtool", "-C", interface, "rx-usecs", "0"], check=False)
+    exec_cmd(["sudo", "ethtool", "-C", interface, "rx-frames", "1"], check=False)
 
 def config_power():
     """
