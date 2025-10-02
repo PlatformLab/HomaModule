@@ -429,6 +429,7 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 #ifndef __STRIP__ /* See strip.py */
 	h->flags = HOMA_TCP_FLAGS;
 	h->urgent = htons(HOMA_TCP_URGENT);
+	h->doff = 0x50;
 #endif /* See strip.py */
 	h->sender_id = cpu_to_be64(rpc->id);
 	return __homa_xmit_control(contents, length, rpc->peer, rpc->hsk);
