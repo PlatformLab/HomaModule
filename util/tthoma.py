@@ -1178,31 +1178,31 @@ class Dispatcher:
                   'id ([0-9]+), offset ([0-9]+), qid ([0-9]+) \(([^)]+)\)'
     })
 
-    def __mlx_data(self, trace, time, core, match, interests):
-        peer = match.group(1)
-        id = int(match.group(2))
-        offset = int(match.group(3))
-        tx_queue = match.group(4)
+    def __nic_data(self, trace, time, core, match, interests):
+        peer = match.group(2)
+        id = int(match.group(3))
+        offset = int(match.group(4))
+        tx_queue = match.group(5)
         for interest in interests:
-            interest.tt_mlx_data(trace, time, core, peer, id, offset, tx_queue)
+            interest.tt_nic_data(trace, time, core, peer, id, offset, tx_queue)
 
     patterns.append({
-        'name': 'mlx_data',
-        'regexp': 'mlx sent homa data packet to ([^,]+), id ([0-9]+), '
+        'name': 'nic_data',
+        'regexp': '(mlx|ice) sent homa data packet to ([^,]+), id ([0-9]+), '
                   'offset ([0-9]+), queue (0x[0-9a-f]+)'
     })
 
-    def __mlx_grant(self, trace, time, core, match, interests):
-        peer = match.group(1)
-        id = int(match.group(2))
-        offset = int(match.group(3))
-        tx_queue = match.group(4)
+    def __nic_grant(self, trace, time, core, match, interests):
+        peer = match.group(2)
+        id = int(match.group(3))
+        offset = int(match.group(4))
+        tx_queue = match.group(5)
         for interest in interests:
-            interest.tt_mlx_grant(trace, time, core, peer, id, offset, tx_queue)
+            interest.tt_nic_grant(trace, time, core, peer, id, offset, tx_queue)
 
     patterns.append({
-        'name': 'mlx_grant',
-        'regexp': 'mlx sent homa grant to ([^,]+), id ([0-9]+), '
+        'name': 'nic_grant',
+        'regexp': '(mlx|ice) sent homa grant to ([^,]+), id ([0-9]+), '
                   'offset ([0-9]+), queue (0x[0-9a-f]+)'
     })
 
@@ -2949,7 +2949,8 @@ class AnalyzeDelay:
                     break
                 time, delay, node = data[i]
                 result += '%-26s %6.1f   %9.3f %10s %5.1f\n' % (
-                        label, time, delay, node, 100*i/(num-1))
+                        label, time, delay, node,
+                        100*i/(num-1) if num > 1 else 100)
             return result
 
         verbose += print_worst('GRO to SoftIRQ', soft)
@@ -6235,7 +6236,7 @@ class AnalyzePackets:
         else:
             p['retransmits'][-1]['xmit'] = t
 
-    def tt_mlx_data(self, trace, t, core, peer, id, offset, tx_queue):
+    def tt_nic_data(self, trace, t, core, peer, id, offset, tx_queue):
         global packets
         p = packets[pkt_id(id, offset)]
         p['tx_node'] = trace['node']
@@ -6340,7 +6341,7 @@ class AnalyzePackets:
         g['tx_node'] = trace['node']
         g['increment'] = increment
 
-    def tt_mlx_grant(self, trace, t, core, peer, id, offset, tx_queue):
+    def tt_nic_grant(self, trace, t, core, peer, id, offset, tx_queue):
         global grants
         g = grants[pkt_id(id, offset)]
         g['nic'] = t
