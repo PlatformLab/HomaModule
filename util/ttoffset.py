@@ -33,7 +33,7 @@ else:
 delta = float(sys.argv[2]) - float(sys.argv[1])
 
 for line in f:
-    match = re.match(' *(-[0-9.]+) us (.*)', line)
+    match = re.match(' *([-0-9.]+) us (.*)', line)
     if not match:
         print(line, end='')
         continue
