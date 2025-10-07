@@ -1169,9 +1169,9 @@ TEST_F(homa_outgoing, homa_resend_data__error_copying_data)
 #endif /* See strip.py */
 TEST_F(homa_outgoing, homa_resend_data__add_to_to_free_and_set_homa_info)
 {
+	struct homa_skb_info *homa_info;
 	struct homa_rpc *crpc;
 	struct sk_buff *skb;
-	struct homa_skb_info *homa_info;
 
 	mock_set_ipv6(&self->hsk);
 	self->dev->gso_max_size = 5000;
@@ -1190,6 +1190,7 @@ TEST_F(homa_outgoing, homa_resend_data__add_to_to_free_and_set_homa_info)
 	EXPECT_EQ(8400, homa_info->offset);
 	EXPECT_EQ(crpc, homa_info->rpc);
 	EXPECT_EQ(1, refcount_read(&skb->users));
+	EXPECT_EQ(6, crpc->msgout.num_skbs);
 }
 
 TEST_F(homa_outgoing, homa_rpc_tx_end)

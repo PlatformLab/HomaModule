@@ -27,7 +27,7 @@ struct homa_message_out {
 	 */
 	int length;
 
-	/** @num_skbs: Total number of buffers currently in @packets. */
+	/** @num_skbs: Total number of buffers currently in @to_free. */
 	int num_skbs;
 
 	/**

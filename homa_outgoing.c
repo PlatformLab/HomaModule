@@ -836,6 +836,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			new_homa_info->rpc = rpc;
 
 			rpc->msgout.to_free = new_skb;
+			rpc->msgout.num_skbs++;
 			skb_get(new_skb);
 			tt_record3("retransmitting offset %d, length %d, id %d",
 				   offset, seg_length, rpc->id);
