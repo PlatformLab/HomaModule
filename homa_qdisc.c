@@ -623,14 +623,15 @@ int homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev, int bytes,
 int homa_qdisc_pacer_main(void *device)
 {
 	struct homa_qdisc_dev *qdev = device;
-	u64 wake_time;
 	int status;
+	u64 start;
 
-	wake_time = homa_clock();
 	while (1) {
 		if (kthread_should_stop())
 			break;
+		start = homa_clock();
 		homa_qdisc_pacer(qdev, false);
+		INC_METRIC(pacer_cycles, homa_clock() - start);
 
 		if (homa_qdisc_any_deferred(qdev)) {
 			/* There are more packets to transmit (the NIC queue
@@ -644,10 +645,8 @@ int homa_qdisc_pacer_main(void *device)
 		}
 
 		tt_record("homa_qdisc pacer sleeping");
-		INC_METRIC(pacer_cycles, homa_clock() - wake_time);
 		status = wait_event_interruptible(qdev->pacer_sleep,
 			kthread_should_stop() || homa_qdisc_any_deferred(qdev));
-		wake_time = homa_clock();
 		tt_record1("homa_qdisc pacer woke up with status %d", status);
 		if (status != 0 && status != -ERESTARTSYS)
 			break;

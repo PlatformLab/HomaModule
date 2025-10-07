@@ -159,15 +159,15 @@ int homa_pacer_check_nic_q(struct homa_pacer *pacer, struct sk_buff *skb,
 int homa_pacer_main(void *arg)
 {
 	struct homa_pacer *pacer = arg;
-	u64 wake_time;
+	u64 start;
 	int status;
 
 	while (1) {
 		if (kthread_should_stop())
 			break;
-		wake_time = homa_clock();
+		start = homa_clock();
 		homa_pacer_xmit(pacer);
-		INC_METRIC(pacer_cycles, homa_clock() - wake_time);
+		INC_METRIC(pacer_cycles, homa_clock() - start);
 		if (!list_empty(&pacer->throttled_rpcs)) {
 			/* NIC queue is full; before calling pacer again,
 			 * give other threads a chance to run (otherwise
