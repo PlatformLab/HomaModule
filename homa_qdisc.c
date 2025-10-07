@@ -448,12 +448,10 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 {
 	struct homa_skb_info *info = homa_get_skb_info(skb);
 	struct homa_rpc *rpc = info->rpc;
-	struct rb_node *prev_deferred;
 	u64 now = homa_clock();
 	unsigned long flags;
 
 	spin_lock_irqsave(&qdev->defer_lock, flags);
-	prev_deferred = rb_first_cached(&qdev->deferred_rpcs);
 	__skb_queue_tail(&rpc->qrpc.packets, skb);
 	if (skb_queue_len(&rpc->qrpc.packets) == 1) {
 		int bytes_left;
@@ -463,8 +461,8 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 			rpc->qrpc.tx_left = bytes_left;
 		homa_qdisc_insert_rb(qdev, rpc);
 	}
-	if (prev_deferred)
-		INC_METRIC(throttled_cycles, now - qdev->last_defer);
+	if (qdev->last_defer)
+		INC_METRIC(nic_backlog_cycles, now - qdev->last_defer);
 	else
 		wake_up(&qdev->pacer_sleep);
 	qdev->last_defer = now;
@@ -541,8 +539,10 @@ struct sk_buff *homa_qdisc_dequeue_homa(struct homa_qdisc_dev *qdev)
 	if (bytes_left < qrpc->tx_left)
 		qrpc->tx_left = bytes_left;
 
-	if (!rb_first_cached(&qdev->deferred_rpcs))
-		INC_METRIC(throttled_cycles, homa_clock() - qdev->last_defer);
+	if (!homa_qdisc_any_deferred(qdev)) {
+		INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
+		qdev->last_defer = 0;
+	}
 	spin_unlock_irqrestore(&qdev->defer_lock, flags);
 	return skb;
 }
@@ -597,13 +597,6 @@ int homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev, int bytes,
 		clock = homa_clock();
 		idle = atomic64_read(&qdev->link_idle_time);
 		if (idle < clock) {
-			if (qdev->pacer_wake_time) {
-				u64 lost = (qdev->pacer_wake_time > idle)
-						? clock - qdev->pacer_wake_time
-						: clock - idle;
-				INC_METRIC(pacer_lost_cycles, lost);
-				tt_record1("homa_qdisc pacer lost %d cycles", lost);
-			}
 			new_idle = clock + cycles_for_packet;
 		} else {
 			if (max_queue_cycles >= 0 && (idle - clock) >
@@ -617,8 +610,6 @@ int homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev, int bytes,
 			break;
 		INC_METRIC(idle_time_conflicts, 1);
 	}
-	if (rb_first_cached(&qdev->deferred_rpcs))
-		INC_METRIC(pacer_bytes, bytes);
 	return 1;
 }
 
@@ -632,17 +623,14 @@ int homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev, int bytes,
 int homa_qdisc_pacer_main(void *device)
 {
 	struct homa_qdisc_dev *qdev = device;
+	u64 wake_time;
 	int status;
-	u64 start;
 
+	wake_time = homa_clock();
 	while (1) {
 		if (kthread_should_stop())
 			break;
-		start = homa_clock();
-		qdev->pacer_wake_time = start;
-		homa_qdisc_pacer(qdev);
-		qdev->pacer_wake_time = 0;
-		INC_METRIC(pacer_cycles, homa_clock() - start);
+		homa_qdisc_pacer(qdev, false);
 
 		if (homa_qdisc_any_deferred(qdev)) {
 			/* There are more packets to transmit (the NIC queue
@@ -656,8 +644,10 @@ int homa_qdisc_pacer_main(void *device)
 		}
 
 		tt_record("homa_qdisc pacer sleeping");
+		INC_METRIC(pacer_cycles, homa_clock() - wake_time);
 		status = wait_event_interruptible(qdev->pacer_sleep,
 			kthread_should_stop() || homa_qdisc_any_deferred(qdev));
+		wake_time = homa_clock();
 		tt_record1("homa_qdisc pacer woke up with status %d", status);
 		if (status != 0 && status != -ERESTARTSYS)
 			break;
@@ -680,8 +670,11 @@ int homa_qdisc_pacer_main(void *device)
  * invocations are not guaranteed to happen, so the pacer thread provides a
  * backstop.
  * @qdev:    The device on which to transmit.
+ * @help:    True means this function was invoked from homa_qdisc_pacer_check
+ *           rather than homa_qdisc_pacer_main (indicating that the pacer
+ *           thread wasn't keeping up and needs help).
  */
-void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
+void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool help)
 {
 	int i;
 
@@ -721,10 +714,16 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 		 * but we transmit anyway (don't want this thread to get
 		 * starved by others).
 		 */
+		UNIT_HOOK("pacer_xmit");
 		skb = homa_qdisc_dequeue_homa(qdev);
 		if (!skb)
 			break;
 
+		INC_METRIC(pacer_packets, 1);
+		INC_METRIC(pacer_bytes, qdisc_skb_cb(skb)->pkt_len);
+		if (help)
+			INC_METRIC(pacer_help_bytes,
+				   qdisc_skb_cb(skb)->pkt_len);
 		homa_qdisc_update_link_idle(qdev, qdisc_skb_cb(skb)->pkt_len,
 					    -1);
 		h = (struct homa_data_hdr *)skb_transport_header(skb);
@@ -732,6 +731,7 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 			   be64_to_cpu(h->common.sender_id),
 			   ntohl(h->seg.offset), qdev->pacer_qix);
 		homa_qdisc_redirect_skb(skb, qdev, true);
+		INC_METRIC(pacer_xmit_cycles, homa_clock() - now);
 	}
 done:
 	spin_unlock_bh(&qdev->pacer_mutex);
@@ -822,8 +822,7 @@ void homa_qdisc_pacer_check(struct homa *homa) {
 		    atomic64_read(&qdev->link_idle_time))
 			continue;
 		tt_record("homa_qdisc_pacer_check calling homa_qdisc_pacer");
-		homa_qdisc_pacer(qdev);
-		INC_METRIC(pacer_needed_help, 1);
+		homa_qdisc_pacer(qdev, true);
 	}
 	rcu_read_unlock();
 }

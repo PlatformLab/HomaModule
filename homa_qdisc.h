@@ -126,7 +126,8 @@ struct homa_qdisc_dev {
 
 	/**
 	 * @last_defer: The most recent homa_clock() time when a packet was
-	 * added to homa_deferred or tcp_deferred.
+	 * added to homa_deferred or tcp_deferred, or 0 if there are currently
+	 * no deferred packets.
 	 */
 	u64 last_defer;
 
@@ -135,12 +136,6 @@ struct homa_qdisc_dev {
 	 * packets, including deferred_rpcs, tcp_deferred, and last_defer.
 	 */
 	spinlock_t defer_lock;
-
-	/**
-	 * @pacer_wake_time: homa_clock() time when the pacer woke up (if
-	 * the pacer is running) or 0 if the pacer is sleeping.
-	 */
-	u64 pacer_wake_time;
 
 	/**
 	 * @pacer_kthread: Kernel thread that eventually transmits packets
@@ -215,7 +210,7 @@ int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
 void            homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev,
 				     struct homa_rpc *rpc);
-void            homa_qdisc_pacer(struct homa_qdisc_dev *qdev);
+void            homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool help);
 void            homa_qdisc_pacer_check(struct homa *homa);
 int             homa_qdisc_pacer_main(void *device);
 struct homa_qdisc_dev *

@@ -375,36 +375,45 @@ struct homa_metrics {
 	__u64 idle_time_conflicts;
 
 	/**
-	 * @pacer_cycles: total time spent executing in homa_pacer_main
-	 * (not including blocked time).
+	 * @nic_backlog_cycles: total amount of time when there were packets
+	 * waiting to be transmitted in homa_qdisc because the NIC queue was
+	 * too long.
+	 */
+	u64 nic_backlog_cycles;
+
+	/**
+	 * @pacer_cycles: total execution time in the pacer thread (excluding
+	 * blocked time).
 	 */
 	u64 pacer_cycles;
 
 	/**
-	 * @pacer_lost_cycles: unnecessary delays in transmitting packets
-	 * (i.e. wasted output bandwidth) because the pacer was slow or got
-	 * descheduled.
+	 * @pacer_xmit_cycles: total time spent by the pacer actually
+	 * transmitting packets (as opposed to polling waiting for the
+	 * NIC queue to subside).
 	 */
-	u64 pacer_lost_cycles;
+	u64 pacer_xmit_cycles;
 
 	/**
-	 * @pacer_bytes: total number of bytes transmitted when
-	 * @homa->throttled_rpcs is nonempty.
+	 * @pacer_packets: total number of Homa packets that were transmitted
+	 * by homa_qdisc_pacer (they were deferred because of NIC queue
+	 * overload).
+	 */
+	u64 pacer_packets;
+
+	/**
+	 * @pacer_bytes: total number of bytes in packets that were
+	 * transmitted by homa_qdisc_pacer (they were deferred because of
+	 * NIC queue overload).
 	 */
 	u64 pacer_bytes;
 
 	/**
-	 * @pacer_needed_help: total number of times that homa_check_pacer
-	 * found that the pacer was running behind, so it actually invoked
-	 * homa_pacer_xmit.
+	 * @pacer_help_bytes: bytes in @pacer_bytes that were transmitted via
+	 * calls to homa_qdisc_pacer_check (presumably because the pacer thread
+	 * wasn't keeping up). Includes header bytes.
 	 */
-	u64 pacer_needed_help;
-
-	/**
-	 * @throttled_cycles: total amount of time that @homa->throttled_rpcs
-	 * is nonempty.
-	 */
-	u64 throttled_cycles;
+	u64 pacer_help_bytes;
 
 	/**
 	 * @resent_packets: total number of data packets issued in response to

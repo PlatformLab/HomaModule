@@ -222,8 +222,7 @@ if elapsed_secs != 0:
         for core in range(first_core, end_core):
             line += "  Core%-2d" % (core)
         print(line)
-        for where in ["napi", "softirq", "send", "recv", "reply",
-                "timer", "pacer"]:
+        for where in ["napi", "softirq", "send", "recv", "reply", "timer"]:
             if where == "softirq":
                 symbol = "linux_softirq_cycles"
             else:
@@ -403,36 +402,49 @@ if elapsed_secs != 0:
         print("GRO bypass for data packets:  %5.1f%%" % (data_bypass_percent))
         print("GRO bypass for grant packets: %5.1f%%" % (grant_bypass_percent))
 
+    if deltas["pacer_packets"] != 0:
+        print("\nPacer:")
+        print("--------")
+        print("Packets sent:                   %5.3f M/sec (%.1f %% of all packets)" %
+                (1e-6*deltas["pacer_packets"]/elapsed_secs,
+                100*deltas["pacer_packets"]/packets_sent))
+        print("Throughput (including headers): %5.2f Gbps" %
+                (8e-9*deltas["pacer_bytes"]/elapsed_secs))
+        print("Helper throughput:              %5.2f Gbps (%.1f%% of all pacer bytes)" %
+                (8e-9*deltas["pacer_help_bytes"]/elapsed_secs,
+                100*deltas["pacer_help_bytes"]/deltas["pacer_bytes"]))
+        backlog_secs = float(deltas["nic_backlog_cycles"])/(cpu_khz * 1000.0)
+        print("Active throughput:              %5.2f Gbps (NIC backlogged %.1f%% of time)" % (
+                deltas["pacer_bytes"]*8e-09/backlog_secs,
+                100*backlog_secs/elapsed_secs))
+        xmit_secs = float(deltas["pacer_xmit_cycles"])/(cpu_khz * 1000.0)
+        print("Pacer thread duty cycle:        %5.1f %%" %
+                (100*deltas["pacer_cycles"]/time_delta))
+        print("Time xmitting packets:          %5.1f %% (%.2f usecs/packet)" %
+                (100*xmit_secs/elapsed_secs, 1e6*xmit_secs/deltas["pacer_packets"]))
+
     print("\nMiscellaneous:")
     print("--------------")
     if packets_received > 0:
-        print("Bytes/packet rcvd:    %6.0f" % (
+        print("Bytes/packet rcvd:      %6.0f" % (
                 total_received_bytes/packets_received))
-        print("Packets received:      %5.3f M/sec" % (
+        print("Packets received:        %5.3f M/sec" % (
                 1e-6*packets_received/elapsed_secs))
-        print("Packets sent:          %5.3f M/sec" % (
+        print("Packets sent:            %5.3f M/sec" % (
                 1e-6*packets_sent/elapsed_secs))
-        print("Core efficiency:       %5.3f M packets/sec/core "
+        print("Core efficiency:         %5.3f M packets/sec/core "
                 "(sent & received combined)" % (
                 1e-6*(packets_sent + packets_received)/elapsed_secs
                 /total_cores_used))
-        print("                      %5.2f  Gbps/core (goodput)" % (
+        print("                         %5.2f Gbps/core (goodput)" % (
                 8e-9*(total_received_bytes + float(deltas["sent_msg_bytes"]))
                 /(total_cores_used * elapsed_secs)))
-    if deltas["pacer_cycles"] != 0:
-        pacer_secs = float(deltas["pacer_cycles"])/(cpu_khz * 1000.0)
-        print("Pacer throughput:    %6.2f  Gbps (pacer output when pacer active)" % (
-                deltas["pacer_bytes"]*8e-09/pacer_secs))
-    if deltas["throttled_cycles"] != 0:
-        throttled_secs = float(deltas["throttled_cycles"])/(cpu_khz * 1000.0)
-        print("Throttled throughput: %5.2f  Gbps (pacer output when NIC backlogged)" % (
-                deltas["pacer_bytes"]*8e-09/throttled_secs))
     if deltas["skb_allocs"] != 0:
-        print("Skb alloc time:        %4.2f  usec/skb" % (
+        print("Skb alloc time:           %4.2f usec/skb" % (
                 float(deltas["skb_alloc_cycles"]) / (cpu_khz / 1000.0) /
                 deltas["skb_allocs"]))
     if deltas["skb_page_allocs"] != 0:
-        print("Skb page alloc time:  %5.2f  usec/page" % (
+        print("Skb page alloc time:     %5.2f usec/page" % (
                 float(deltas["skb_page_alloc_cycles"]) / (cpu_khz / 1000.0) /
                 deltas["skb_page_allocs"]))
 
@@ -452,8 +464,8 @@ if elapsed_secs != 0:
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
         print("%-30s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
-    for symbol in ["pacer_lost_cycles", "timer_reap_cycles",
-            "data_pkt_reap_cycles", "grant_lock_cycles"]:
+    for symbol in ["timer_reap_cycles", "data_pkt_reap_cycles",
+            "grant_lock_cycles"]:
         delta = deltas[symbol]
         if delta == 0 or time_delta == 0:
             continue

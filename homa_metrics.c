@@ -289,22 +289,24 @@ char *homa_metrics_print(void)
 		  "Time in homa_data_pkt spent reaping RPCs\n");
 		M("idle_time_conflicts", m->idle_time_conflicts,
 		  "Cache conflicts when updating link_idle_time\n");
+		M("nic_backlog_cycles", m->nic_backlog_cycles,
+		  "Time when NIC queue was backlogged\n");
 		M("pacer_cycles", m->pacer_cycles,
-		  "Time spent in homa_pacer_main\n");
+		  "Execution time in pacer thread\n");
+		M("pacer_xmit_cycles", m->pacer_xmit_cycles,
+		  "Time pacer spent xmitting packets (vs. polling NIC queue)\n");
+		M("pacer_packets", m->pacer_packets,
+		  "Packets transmitted by the pacer\n");
+		M("pacer_bytes", m->pacer_bytes,
+		  "Bytes transmitted by the pacer (including headers)\n");
+		M("pacer_help_bytes", m->pacer_help_bytes,
+		  "Bytes transmitted via homa_qdisc_pacer_check");
 		M("homa_cycles",
 		  m->softirq_cycles + m->napi_cycles +
 		  m->send_cycles + m->recv_cycles +
 		  m->reply_cycles - m->blocked_cycles +
-		  m->timer_cycles + m->pacer_cycles,
+		  m->timer_cycles + m->nic_backlog_cycles,
 		  "Total time in all Homa-related functions\n");
-		M("pacer_lost_cycles", m->pacer_lost_cycles,
-		  "Lost transmission time because pacer was slow\n");
-		M("pacer_bytes", m->pacer_bytes,
-		  "Bytes transmitted when the pacer was active\n");
-		M("pacer_needed_help", m->pacer_needed_help,
-		  "homa_pacer_xmit invocations from homa_check_pacer\n");
-		M("throttled_cycles", m->throttled_cycles,
-		  "Time when output was throttled because NIC was backlogged\n");
 		M("resent_packets", m->resent_packets,
 		  "DATA packets sent in response to RESENDs\n");
 		M("peer_allocs", m->peer_allocs,

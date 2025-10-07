@@ -9,7 +9,6 @@
 #include "homa_pacer.h"
 #include "homa_rpc.h"
 
-#ifndef __STRIP__ /* See strip.py */
 /* Used to enable sysctl access to pacer-specific configuration parameters. The
  * @data fields are actually offsets within a struct homa_pacer; these are
  * converted to pointers into a net-specific struct homa later.
@@ -38,7 +37,6 @@ static struct ctl_table pacer_ctl_table[] = {
 		.proc_handler	= homa_pacer_dointvec
 	},
 };
-#endif /* See strip.py */
 
 /**
  * homa_pacer_alloc() - Allocate and initialize a new pacer object, which
@@ -71,7 +69,6 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa)
 	}
 	atomic64_set(&pacer->link_idle_time, homa_clock());
 
-#ifndef __STRIP__ /* See strip.py */
 	pacer->sysctl_header = register_net_sysctl(&init_net, "net/homa",
 						   pacer_ctl_table);
 	if (!pacer->sysctl_header) {
@@ -79,7 +76,6 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa)
 		pr_err("couldn't register sysctl parameters for Homa pacer\n");
 		goto error;
 	}
-#endif /* See strip.py */
 	homa_pacer_update_sysctl_deps(pacer);
 	return pacer;
 
@@ -96,12 +92,10 @@ error:
  */
 void homa_pacer_free(struct homa_pacer *pacer)
 {
-#ifndef __STRIP__ /* See strip.py */
 	if (pacer->sysctl_header) {
 		unregister_net_sysctl_table(pacer->sysctl_header);
 		pacer->sysctl_header = NULL;
 	}
-#endif /* See strip.py */
 	if (pacer->kthread) {
 		kthread_stop(pacer->kthread);
 		pacer->kthread = NULL;
@@ -141,27 +135,12 @@ int homa_pacer_check_nic_q(struct homa_pacer *pacer, struct sk_buff *skb,
 		if ((clock + pacer->max_nic_queue_cycles) < idle && !force &&
 		    !(pacer->homa->flags & HOMA_FLAG_DONT_THROTTLE))
 			return 0;
-#ifndef __STRIP__ /* See strip.py */
 		if (!list_empty(&pacer->throttled_rpcs))
 			INC_METRIC(pacer_bytes, bytes);
-		if (idle < clock) {
-			if (pacer->wake_time) {
-				u64 lost = (pacer->wake_time > idle)
-						? clock - pacer->wake_time
-						: clock - idle;
-				INC_METRIC(pacer_lost_cycles, lost);
-				tt_record1("pacer lost %d cycles", lost);
-			}
-			new_idle = clock + cycles_for_packet;
-		} else {
-			new_idle = idle + cycles_for_packet;
-		}
-#else /* See strip.py */
 		if (idle < clock)
 			new_idle = clock + cycles_for_packet;
 		else
 			new_idle = idle + cycles_for_packet;
-#endif /* See strip.py */
 
 		/* This method must be thread-safe. */
 		if (atomic64_cmpxchg_relaxed(&pacer->link_idle_time, idle,
@@ -180,15 +159,15 @@ int homa_pacer_check_nic_q(struct homa_pacer *pacer, struct sk_buff *skb,
 int homa_pacer_main(void *arg)
 {
 	struct homa_pacer *pacer = arg;
+	u64 wake_time;
 	int status;
 
 	while (1) {
 		if (kthread_should_stop())
 			break;
-		pacer->wake_time = homa_clock();
+		wake_time = homa_clock();
 		homa_pacer_xmit(pacer);
-		INC_METRIC(pacer_cycles, homa_clock() - pacer->wake_time);
-		pacer->wake_time = 0;
+		INC_METRIC(pacer_cycles, homa_clock() - wake_time);
 		if (!list_empty(&pacer->throttled_rpcs)) {
 			/* NIC queue is full; before calling pacer again,
 			 * give other threads a chance to run (otherwise
@@ -285,12 +264,8 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 		/* Note: rpc->state could be RPC_DEAD here, but the code
 		 * below should work anyway.
 		 */
-#ifndef __STRIP__ /* See strip.py */
 		if (!*rpc->msgout.next_xmit || rpc->msgout.next_xmit_offset >=
 					       rpc->msgout.granted) {
-#else /* See strip.py */
-		if (!*rpc->msgout.next_xmit) {
-#endif /* See strip.py */
 			/* No more data can be transmitted from this message
 			 * (right now), so remove it from the throttled list.
 			 */
@@ -317,25 +292,22 @@ void homa_pacer_manage_rpc(struct homa_rpc *rpc)
 	struct homa_pacer *pacer = rpc->hsk->homa->pacer;
 	struct homa_rpc *candidate;
 	int bytes_left;
-
-	IF_NO_STRIP(int checks = 0);
-	IF_NO_STRIP(u64 now);
+	int checks = 0;
+	u64 now;
 
 	if (!list_empty(&rpc->throttled_links))
 		return;
-	IF_NO_STRIP(now = homa_clock());
-#ifndef __STRIP__ /* See strip.py */
+	now = homa_clock();
 	if (!list_empty(&pacer->throttled_rpcs))
-		INC_METRIC(throttled_cycles, now - pacer->throttle_add);
+		INC_METRIC(nic_backlog_cycles, now - pacer->throttle_add);
 	pacer->throttle_add = now;
-#endif /* See strip.py */
 	bytes_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
 	homa_pacer_throttle_lock(pacer);
 	list_for_each_entry(candidate, &pacer->throttled_rpcs,
 			    throttled_links) {
 		int bytes_left_cand;
 
-		IF_NO_STRIP(checks++);
+		checks++;
 
 		/* Watch out: the pacer might have just transmitted the last
 		 * packet from candidate.
@@ -371,11 +343,9 @@ void homa_pacer_unmanage_rpc(struct homa_rpc *rpc)
 		UNIT_LOG("; ", "removing id %llu from throttled list", rpc->id);
 		homa_pacer_throttle_lock(pacer);
 		list_del_init(&rpc->throttled_links);
-#ifndef __STRIP__ /* See strip.py */
 		if (list_empty(&pacer->throttled_rpcs))
-			INC_METRIC(throttled_cycles, homa_clock()
+			INC_METRIC(nic_backlog_cycles, homa_clock()
 					- pacer->throttle_add);
-#endif /* See strip.py */
 		homa_pacer_throttle_unlock(pacer);
 	}
 }
@@ -399,7 +369,6 @@ void homa_pacer_update_sysctl_deps(struct homa_pacer *pacer)
 	pacer->cycles_per_mbyte = tmp;
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_pacer_dointvec() - This function is a wrapper around proc_dointvec. It
  * is invoked to read and write pacer-related sysctl values.
@@ -481,4 +450,3 @@ void homa_pacer_throttle_lock_slow(struct homa_pacer *pacer)
 	INC_METRIC(throttle_lock_misses, 1);
 	INC_METRIC(throttle_lock_miss_cycles, homa_clock() - start);
 }
-#endif /* See strip.py */

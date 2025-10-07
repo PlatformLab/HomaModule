@@ -36,12 +36,6 @@ struct homa_pacer {
 	int fifo_count;
 
 	/**
-	 * @wake_time: homa_clock() time when the pacer woke up (if the pacer
-	 * is running) or 0 if the pacer is sleeping.
-	 */
-	u64 wake_time;
-
-	/**
 	 * @throttle_lock: Used to synchronize access to @throttled_rpcs. Must
 	 * hold when inserting or removing an RPC from throttled_rpcs.
 	 */
@@ -54,13 +48,11 @@ struct homa_pacer {
 	 */
 	struct list_head throttled_rpcs;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @throttle_add: The most recent homa_clock() time when an RPC was
 	 * added to @throttled_rpcs.
 	 */
 	u64 throttle_add;
-#endif /* See strip.py */
 
 	/**
 	 * @fifo_fraction: Out of every 1000 packets transmitted by the
@@ -168,7 +160,6 @@ static inline void homa_pacer_check(struct homa_pacer *pacer)
 		return;
 	tt_record("homa_check_pacer calling homa_pacer_xmit");
 	homa_pacer_xmit(pacer);
-	INC_METRIC(pacer_needed_help, 1);
 }
 
 #ifndef __STRIP__ /* See strip.py */

@@ -1239,6 +1239,7 @@ void __lockfunc _raw_spin_lock_irq(raw_spinlock_t *lock)
 
 unsigned long _raw_spin_lock_irqsave(raw_spinlock_t *lock)
 {
+	UNIT_HOOK("spin_lock_irqsave");
 	mock_record_locked(lock);
 	return 1234;
 }
