@@ -48,7 +48,11 @@ char *buf_region;
 /* Either AF_INET or AF_INET6: indicates whether to use IPv6 instead of IPv4. */
 int inet_family = AF_INET;
 
-/* Control blocks for receiving messages. */
+/* Control blocks for receiving messages. Reusing the same
+ * homa_recvmsg_args causes receive buffers to be returned to Homa
+ * automatically. Each call to recvmsg returns the buffers from the
+ * previous call.
+ */
 struct homa_recvmsg_args recv_args;
 struct msghdr recv_hdr;
 
