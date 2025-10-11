@@ -25,7 +25,7 @@
  *
  * Return:    A printer to the newly allocated object, or a negative
  *            errno if an error occurred. The RPC will be locked; the
- *            caller must eventually unlock it.
+ *            caller must eventually unlock it. Sets hsk->error_msg on errors.
  */
 struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 				       const union sockaddr_in_union *dest)
@@ -37,8 +37,10 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	int err;
 
 	crpc = kzalloc(sizeof(*crpc), GFP_KERNEL);
-	if (unlikely(!crpc))
+	if (unlikely(!crpc)) {
+		hsk->error_msg = "couldn't allocate memory for client RPC";
 		return ERR_PTR(-ENOMEM);
+	}
 
 	/* Initialize fields that don't require the socket lock. */
 	crpc->hsk = hsk;
@@ -49,7 +51,6 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	refcount_set(&crpc->refs, 1);
 	crpc->peer = homa_peer_get(hsk, &dest_addr_as_ipv6);
 	if (IS_ERR(crpc->peer)) {
-		tt_record("error in homa_peer_get");
 		err = PTR_ERR(crpc->peer);
 		crpc->peer = NULL;
 		goto error;
@@ -79,6 +80,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
 		homa_rpc_unlock(crpc);
+		hsk->error_msg = "socket has been shut down";
 		err = -ESHUTDOWN;
 		goto error;
 	}
@@ -760,4 +762,57 @@ struct homa_rpc *homa_rpc_find_server(struct homa_sock *hsk,
 	}
 	homa_bucket_unlock(bucket, id);
 	return NULL;
+}
+
+/**
+ * homa_rpc_get_info() - Extract information from an RPC for returning to
+ * an application via the HOMAIOCINFO ioctl.
+ * @rpc:   RPC for which information is desired.
+ * @info:  Structure in which to store the information.
+ */
+void homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info)
+{
+	struct homa_gap *gap;
+
+	memset(info, 0, sizeof(*info));
+	info->id = rpc->id;
+	if (rpc->hsk->inet.sk.sk_family == AF_INET6) {
+		info->peer.in6.sin6_family = AF_INET6;
+		info->peer.in6.sin6_addr = rpc->peer->addr;
+		info->peer.in6.sin6_port = htons(rpc->dport);
+	} else {
+		info->peer.in6.sin6_family = AF_INET;
+		info->peer.in4.sin_addr.s_addr = ipv6_to_ipv4(rpc->peer->addr);
+		info->peer.in4.sin_port = htons(rpc->dport);
+	}
+	info->completion_cookie = rpc->completion_cookie;
+	if (rpc->msgout.length >= 0) {
+		info->tx_length = rpc->msgout.length;
+		info->tx_sent = rpc->msgout.next_xmit_offset;
+		info->tx_granted = rpc->msgout.granted;
+		info->tx_prio = rpc->msgout.sched_priority;
+	} else {
+		info->tx_length = -1;
+	}
+	if (rpc->msgin.length >= 0) {
+		info->rx_length = rpc->msgin.length;
+		info->rx_remaining = rpc->msgin.bytes_remaining;
+		list_for_each_entry(gap, &rpc->msgin.gaps, links) {
+			info->rx_gaps++;
+			info->rx_gap_bytes += gap->end - gap->start;
+		}
+		info->rx_granted = rpc->msgin.granted;
+		if (skb_queue_len(&rpc->msgin.packets) > 0)
+			info->flags |= HOMA_RPC_RX_COPY;
+	} else {
+		info->rx_length = -1;
+	}
+	if (!list_empty(&rpc->buf_links))
+		info->flags |= HOMA_RPC_BUF_STALL;
+	if (!list_empty(&rpc->ready_links) &&
+	    rpc->msgin.bytes_remaining == 0 &&
+	    skb_queue_len(&rpc->msgin.packets) == 0)
+		info->flags |= HOMA_RPC_RX_READY;
+	if (rpc->flags & RPC_PRIVATE)
+		info->flags |= HOMA_RPC_PRIVATE;
 }

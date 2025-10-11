@@ -724,7 +724,8 @@ int      homa_getsockopt(struct sock *sk, int level, int optname,
 int      homa_hash(struct sock *sk);
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer);
 int      homa_init(struct homa *homa);
-int      homa_ioctl(struct sock *sk, int cmd, int *karg);
+int      homa_ioc_info(struct socket *sock, unsigned long arg);
+int      homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
 int      homa_load(void);
 int      homa_message_out_fill(struct homa_rpc *rpc,
 			       struct iov_iter *iter, int xmit);
@@ -774,7 +775,7 @@ void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 int      homa_dointvec(const struct ctl_table *table, int write,
 		       void *buffer, size_t *lenp, loff_t *ppos);
 void     homa_incoming_sysctl_changed(struct homa *homa);
-int      homa_ioc_abort(struct sock *sk, int *karg);
+int      homa_ioc_abort(struct socket *sock, unsigned long arg);
 int      homa_message_in_init(struct homa_rpc *rpc, int length,
 			      int unsched);
 void     homa_prios_changed(struct homa *homa);

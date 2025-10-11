@@ -351,7 +351,8 @@ done:
  *              as IPv4-mapped IPv6 addresses.
  * Return:      The peer associated with @addr, or a negative errno if an
  *              error occurred. On a successful return the reference count
- *              will be incremented for the returned peer.
+ *              will be incremented for the returned peer. Sets hsk->error_msg
+ *              on errors.
  */
 struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 				  const struct in6_addr *addr)
@@ -362,6 +363,7 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 	peer = kzalloc(sizeof(*peer), GFP_ATOMIC);
 	if (!peer) {
 		INC_METRIC(peer_kmalloc_errors, 1);
+		hsk->error_msg = "couldn't allocate memory for homa_peer";
 		return (struct homa_peer *)ERR_PTR(-ENOMEM);
 	}
 	peer->ht_key.addr = *addr;
@@ -379,6 +381,7 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 
 	status = homa_peer_reset_dst(peer, hsk);
 	if (status != 0) {
+		hsk->error_msg = "couldn't find route for peer";
 		kfree(peer);
 		return ERR_PTR(status);
 	}

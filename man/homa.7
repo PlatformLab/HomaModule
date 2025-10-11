@@ -298,6 +298,195 @@ an abort is requested, it may still be executed on the server. Any response
 from the server will be discarded.
 .PP
 Only outgoing (client-side) RPCs may be aborted.
+.SH STATUS INFORMATION
+.PP
+To retrieve information about the state of a Homa socket, invoke
+.B ioctl
+with the
+.B HOMAIOCINFO
+operation. One additional argument must be specified for
+.BR ioctl ,
+consisting of a pointer to the following structure:
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_info {
+	struct homa_rpc_info *rpc_info;
+	size_t rpc_info_length;
+	__u64 bpool_avail_bytes;
+	__u32 port;
+	__u32 num_rpcs;
+	char error_msg[HOMA_ERROR_MSG_SIZE];
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+The caller must set the
+.BR rpc_info
+and
+.B
+rpc_info_length
+fields before invoking
+.BR ioctl.
+The
+.B rpc_info
+field points to an area in application memory that can be used to
+return detailed information about all of the active RPCs on the socket;
+.B rpc_info_length
+indicates how much memory is available at
+.BR rpc_info ,
+in bytes. If
+.B rpc_info
+is NULL or
+.B rpc_info_length
+is zero then no detailed RPC information will be returned.
+.PP
+The other fields are used to return information about the Homa socket
+to the application:
+.TP 18n
+.BR bpool_avail_bytes
+The amount of memory currently available in the receive
+buffer region for the socket (previously specified with the
+.B SO_HOMA_RCVBUF
+socket option).
+.TP 18n
+.BR port
+The socket's port number.
+.TP 18n
+.BR num_rpcs
+The number of active RPCs on the socket.
+.TP 18n
+.BR error_msg
+A null-terminated string containing additional information about the
+most recent error returne by Homa for a system call on this socket. This
+is particularly useful for errors such as
+.B EINVAL
+and
+.BR EFAULT ,
+where there are numerous possible causes.
+.PP
+If
+.B num_rpcs
+is greater than zero and
+.B rpc_info
+has been specified then details about active RPCs will be returned in
+.B rpc_info
+(if
+.B rpc_info_length
+is too small to hold all of the active RPCs, then some RPCs will
+not be recorded). Each element of
+.B rpc_info
+contains information about one RPC, in the following format:
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_rpc_info {
+	__u64 id;
+	union {
+		struct sockaddr_storage storage;
+		struct sockaddr_in in4;
+		struct sockaddr_in6 in6;
+	} peer;
+	__u64 completion_cookie;
+	__s32 tx_length;
+	__u32 tx_sent;
+	__u32 tx_granted;
+	__u32 tx_prio;
+	__s32 rx_length;
+	__u32 rx_remaining;
+	__u32 rx_gaps;
+	__u32 rx_gap_bytes;
+	__u32 rx_granted;
+	__u16 flags;
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+The fields have the following meaning:
+.TP 18n
+.BR id
+Identifier for the RPC. If the low-order bit is 1, this node is the server
+for the RPC; 0 means this node is the client.
+.TP 18n
+.BR peer
+Address of the peer application for the RPC, including both its host address
+and port number.
+.TP 18n
+.BR completion_cookie
+For client RPCs, this is the completion cookie specified when
+.B sendmsg
+was invoked to create the RPC. For server RPCs this field is always zero.
+.TP 18n
+.BR tx_length
+The length of the outgoing message for the RPC (in bytes) or -1 if this
+is a server RPC and
+.B sendmsg
+has not yet been invoked for the RPC's response.
+.TP 18n
+.B tx_sent
+The number of bytes in the outgoing message that have been transmitted
+at least once (this is also the index within the message of the first
+byte that has not yet been transmitted).
+.TP 18n
+.BR tx_granted
+The number of bytes in the outgoing message that this node is authorized
+to transmit (includes any unscheduled bytes).
+.TP 18n
+.BR tx_prio
+The priority level currently being used to transmit data packets.
+.TP 18n
+.BR rx_length
+The length of the incoming message for the RPC (in bytes) or -1 if this
+is a client RPC and no packets have been received for the response yet.
+.TP 18n
+.BR rx_remaining
+The number of bytes in the incoming message that have not yet been received.
+.TP 18n
+.BR rx_gaps
+The number of gaps in the incoming message. A gap is a range of bytes that
+have not been received while the byte just after the end of the range has
+been received.
+.TP 18n
+.BR rx_gap_bytes
+The total number of bytes in all of the gaps of the incoming message.
+.TP 18n
+.BR rx_granted
+The number of bytes in the incoming message that this node has authorized
+the peer to transmit (this is also the index within the message of the
+first byte that has not been granted).
+.TP 18n
+.BR flags
+A bit mask containing various flags; see below.
+.PP
+The supported bits in
+.B flags
+are as follows:
+.TP 25n
+.BR HOMA_RPC_PRIVATE
+This is a client RPC and was declared private when
+.B sendmsg
+was invoked.
+.TP 25n
+.BR HOMA_RPC_BUF_STALL
+The incoming message has stalled because there is no buffer space
+available for it. Transmission of the message will restart when buffer space
+becomes available.
+.TP 25n
+.BR HOMA_RPC_RX_COPY
+There exist packets that have been received for the incoming message
+whose data has not yet been copied out of
+the packet(s) and into the buffer memory for the message.
+.TP 25n
+.BR HOMA_RPC_RX_READY
+The incoming message has been received successully and has been copied
+to buffer memory; it is currently queued waiting for a thread to invoke
+.BR recvmsg .
 .SH SHUTDOWN
 .PP
 The

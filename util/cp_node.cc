@@ -2693,6 +2693,83 @@ void tcp_client::read(tcp_connection *connection, int pid)
 }
 
 /**
+ * homa_info() - Use the HOMAIOCINFO ioctl to extract the status of a
+ * Homa socket and print the information to the log.
+ * @fd:   File descriptor for a Homa socket.
+ */
+void log_homa_info(int fd) {
+#define MAX_RPCS 1000
+	struct homa_rpc_info *rpcs, *rinfo;
+	struct homa_info hinfo;
+	const char *priv;
+	std::string flags;
+	bool is_server;
+	int status;
+
+	rpcs = new homa_rpc_info[MAX_RPCS];
+	hinfo.rpc_info = rpcs;
+	hinfo.rpc_info_length = MAX_RPCS * sizeof(*rpcs);
+	status = ioctl(fd, HOMAIOCINFO, &hinfo);
+	if (status != 0) {
+		log(NORMAL, "HOMAIOCINFO failed for fd %d (%p): %s\n", fd,
+				&hinfo, strerror(errno));
+		goto done;
+	}
+	log(NORMAL, "  Homa info for port %d (fd %d):\n", hinfo.port, fd);
+	log(NORMAL, "  Free bytes in rx buffer pool: %llu\n",
+			hinfo.bpool_avail_bytes);
+	log(NORMAL, "  %d active RPCs\n", hinfo.num_rpcs);
+	for (__u32 i = 0; i < hinfo.num_rpcs; i++) {
+		rinfo = &rpcs[i];
+		is_server = rinfo->id & 1;
+		if (rinfo->flags & HOMA_RPC_PRIVATE)
+			priv = "(private)";
+		else
+			priv = "";
+		log(NORMAL, "  %s RPC id %llu%s:\n", is_server ? "Server" : "Client",
+				rinfo->id, priv);
+		log(NORMAL, "    Peer: %s\n", print_address(reinterpret_cast<
+				union sockaddr_in_union *>(&rinfo->peer)));
+		if (!is_server)
+			log(NORMAL, "    Completion cookie: %lld\n",
+					rinfo->completion_cookie);
+		if (rinfo->tx_length >= 0)
+			log(NORMAL, "    Tx: %d/%d sent, %d granted, prio %u\n",
+					rinfo->tx_sent, rinfo->tx_length,
+					rinfo->tx_granted, rinfo->tx_prio);
+		else
+			log(NORMAL, "   Tx: not yet initiated\n");
+		if (rinfo->rx_length >= 0) {
+			char gap_info[100];
+			const char *state;
+
+			if (rinfo->rx_gaps != 0)
+				snprintf(gap_info, sizeof(gap_info),
+						", %d gaps (%d missing bytes)",
+						rinfo->rx_gaps,
+						rinfo->rx_gap_bytes);
+			else
+				gap_info[0] = 0;
+			state = "";
+			if (rinfo->flags & HOMA_RPC_BUF_STALL)
+				state = " (waiting for buffer space)";
+			else if (rinfo->flags & HOMA_RPC_RX_COPY)
+				state = " (data available for copying to user space)";
+			else if (rinfo->flags & (HOMA_RPC_RX_READY))
+				state = " (queued waiting for recvmsg)";
+			log(NORMAL, "    Rx: %d/%d remaining, %d granted%s%s\n",
+					rinfo->rx_remaining, rinfo->rx_length,
+					rinfo->rx_granted, gap_info, state);
+		} else {
+			log(NORMAL, "    Rx: no packets received yet\n");
+		}
+	}
+
+done:
+	delete[] rpcs;
+}
+
+/**
  * server_stats() -  Prints recent statistics collected from all
  * servers.
  * @now:   Current time in rdtsc cycles (used to compute rates for
@@ -2902,8 +2979,19 @@ void log_stats()
 		uint64_t now = rdtsc();
 		server_stats(now);
 		client_stats(now);
-
 		last_stats_time = now;
+
+#if 0
+		for (client *client: clients) {
+			homa_client *hclient =
+					dynamic_cast<homa_client *>(client);
+			if (hclient == NULL)
+				continue;
+			log_homa_info(hclient->fd);
+		}
+		for (homa_server *server: homa_servers)
+			log_homa_info(server->fd);
+#endif
 	}
 }
 

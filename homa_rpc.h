@@ -145,8 +145,8 @@ struct homa_gap {
  */
 struct homa_message_in {
 	/**
-	 * @length: Payload size in bytes. A value less than 0 means this
-	 * structure is uninitialized and therefore not in use.
+	 * @length: Payload size in bytes. -1 means this structure is
+	 * uninitialized and therefore not in use.
 	 */
 	int length;
 
@@ -474,6 +474,8 @@ void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			 int port, int error);
 void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 void     homa_rpc_abort(struct homa_rpc *crpc, int error);
+void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
+			struct homa_ack *ack);
 struct homa_rpc
 	*homa_rpc_alloc_client(struct homa_sock *hsk,
 			       const union sockaddr_in_union *dest);
@@ -487,9 +489,7 @@ struct homa_rpc
 struct homa_rpc
 	*homa_rpc_find_server(struct homa_sock *hsk,
 			      const struct in6_addr *saddr, u64 id);
-void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
-			struct homa_ack *ack);
-void     homa_rpc_end(struct homa_rpc *rpc);
+void     homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info);
 int      homa_rpc_reap(struct homa_sock *hsk, bool reap_all);
 
 /**

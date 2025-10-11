@@ -122,7 +122,8 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
  *                much data.
  * @max_seg_data: Maximum number of bytes of message data that can go in
  *                a single segment of the GSO packet.
- * Return: A pointer to the new packet, or a negative errno.
+ * Return:        A pointer to the new packet, or a negative errno. Sets
+ *                rpc->hsk->error_msg on errors.
  */
 struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 				       struct iov_iter *iter, int offset,
@@ -145,8 +146,10 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr) + length +
 			      (segs - 1) * sizeof(struct homa_seg_hdr));
 #endif /* See strip.py */
-	if (!skb)
+	if (!skb) {
+		rpc->hsk->error_msg = "couldn't allocate sk_buff for outgoing message";
 		return ERR_PTR(-ENOMEM);
+	}
 
 	/* Fill in the Homa header (which will be replicated in every
 	 * network packet by GSO).
@@ -207,8 +210,10 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 		err = homa_skb_append_from_iter(rpc->hsk->homa, skb, iter,
 						length);
 	}
-	if (err)
+	if (err) {
+		rpc->hsk->error_msg = "couldn't copy message body into packet buffers";
 		goto error;
+	}
 
 	if (segs > 1) {
 		skb_shinfo(skb)->gso_segs = segs;
@@ -244,7 +249,7 @@ error:
  * Return:   0 for success, or a negative errno for failure. It is possible
  *           for the RPC to be freed while this function is active. If that
  *           happens, copying will cease, -EINVAL will be returned, and
- *           rpc->state will be RPC_DEAD.
+ *           rpc->state will be RPC_DEAD. Sets rpc->hsk->error_msg on errors.
  */
 int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	__must_hold(rpc->bucket->lock)
@@ -269,8 +274,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 	if (unlikely(iter->count > HOMA_MAX_MESSAGE_LENGTH ||
 		     iter->count == 0)) {
-		tt_record2("homa_message_out_fill found bad length %d for id %d",
-			   iter->count, rpc->id);
+		rpc->hsk->error_msg = "message length exceeded HOMA_MAX_MESSAGE_LENGTH";
 		err = -EINVAL;
 		goto error;
 	}
@@ -362,6 +366,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		homa_rpc_lock(rpc);
 		if (rpc->state == RPC_DEAD) {
 			/* RPC was freed while we were copying. */
+			rpc->hsk->error_msg = "rpc deleted while creating outgoing message";
 			err = -EINVAL;
 			homa_skb_free_tx(rpc->hsk->homa, skb);
 			goto error;

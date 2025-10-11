@@ -749,3 +749,35 @@ TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(4, pool->bpages_needed);
 }
+
+TEST_F(homa_pool, homa_pool_avail_bytes__no_region)
+{
+	struct homa_pool *pool = homa_pool_alloc(&self->hsk);
+
+	EXPECT_EQ(0, homa_pool_avail_bytes(pool));
+	homa_pool_free(pool);
+}
+TEST_F(homa_pool, homa_pool_avail_bytes__a_few_pages_allocated)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	u32 pages[10];
+
+	EXPECT_EQ(100 * HOMA_BPAGE_SIZE, homa_pool_avail_bytes(pool));
+	EXPECT_EQ(0, homa_pool_get_pages(pool, 5, pages, 0));
+	EXPECT_EQ(95 * HOMA_BPAGE_SIZE, homa_pool_avail_bytes(pool));
+}
+TEST_F(homa_pool, homa_pool_avail_bytes__include_free_space_in_core_private_pages)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+
+	pcpu_hot.cpu_number = 3;
+	EXPECT_EQ(100 * HOMA_BPAGE_SIZE, homa_pool_avail_bytes(pool));
+	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			&self->server_ip, 4000, 98, 1000, 2000);
+	EXPECT_EQ(100 * HOMA_BPAGE_SIZE - 2000, homa_pool_avail_bytes(pool));
+
+	pcpu_hot.cpu_number = 5;
+	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			&self->server_ip, 4000, 98, 1000, 50000);
+	EXPECT_EQ(100 * HOMA_BPAGE_SIZE - 52000, homa_pool_avail_bytes(pool));
+}

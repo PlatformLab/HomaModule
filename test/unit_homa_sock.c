@@ -311,8 +311,12 @@ TEST_F(homa_sock, homa_sock_bind)
 	EXPECT_EQ(HOMA_MIN_DEFAULT_PORT, self->hsk.port);
 	EXPECT_EQ(EINVAL, -homa_sock_bind(self->hnet, &self->hsk,
 			HOMA_MIN_DEFAULT_PORT + 100));
+	EXPECT_STREQ("port number invalid: in the automatically assigned range",
+		     self->hsk.error_msg);
 
 	EXPECT_EQ(EADDRINUSE, -homa_sock_bind(self->hnet, &self->hsk, 100));
+	EXPECT_STREQ("requested port number is already in use",
+		     self->hsk.error_msg);
 	EXPECT_EQ(0, -homa_sock_bind(self->hnet, &hsk2, 100));
 
 	EXPECT_EQ(0, -homa_sock_bind(self->hnet, &self->hsk, 110));
@@ -329,6 +333,7 @@ TEST_F(homa_sock, homa_sock_bind__socket_shutdown)
 {
 	unit_sock_destroy(&self->hsk);
 	EXPECT_EQ(ESHUTDOWN, -homa_sock_bind(self->hnet, &self->hsk, 100));
+	EXPECT_STREQ("socket has been shut down", self->hsk.error_msg);
 }
 
 TEST_F(homa_sock, homa_sock_find__basics)

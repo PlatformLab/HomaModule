@@ -123,6 +123,8 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant changes
+- October 2025: added the HOMAIOCINFO ioctl for retrieving status
+  information about a Homa socket. See man/homa.7 for details.
 - May 2025: `homa_api.c` has been removed, so the functions `homa_abort`,
   `homa_reply`, `homa_replyv`, `homa_send`, and `homa_sendv` no longer
   exist.

@@ -546,3 +546,27 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 		homa_rpc_unlock(rpc);
 	}
 }
+
+/**
+ * homa_pool_avail_bytes() - Return a count of the number of bytes currently
+ * unused and available for allocation in a pool.
+ * @pool:    Pool of interest.
+ * Return    See above.
+ */
+u64 homa_pool_avail_bytes(struct homa_pool *pool)
+{
+	struct homa_pool_core *core;
+	u64 avail;
+	int cpu;
+
+	if (!pool->region)
+		return 0;
+	avail = atomic_read(&pool->free_bpages);
+	avail *= HOMA_BPAGE_SIZE;
+	for (cpu = 0; cpu < nr_cpu_ids; cpu++) {
+		core = per_cpu_ptr(pool->cores, cpu);
+		if (pool->descriptors[core->page_hint].owner == cpu)
+			avail += HOMA_BPAGE_SIZE - core->allocated;
+	}
+	return avail;
+}

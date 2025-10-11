@@ -140,7 +140,7 @@ void homa_socktab_end_scan(struct homa_socktab_scan *scan)
  * @hsk:    Object to initialize. The Homa-specific parts must have been
  *          initialized to zeroes by the caller.
  *
- * Return: 0 for success, otherwise a negative errno.
+ * Return:  0 for success, otherwise a negative errno.
  */
 int homa_sock_init(struct homa_sock *hsk)
 {
@@ -375,7 +375,8 @@ void homa_sock_destroy(struct sock *sk)
  *             becomes a no-op: the socket will continue to use
  *             its randomly assigned client port.
  *
- * Return:  0 for success, otherwise a negative errno.
+ * Return:  0 for success, otherwise a negative errno. If an error is
+ *          returned, hsk->error_msg is set.
  */
 int homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 		   u16 port)
@@ -386,11 +387,14 @@ int homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 
 	if (port == 0)
 		return result;
-	if (port >= HOMA_MIN_DEFAULT_PORT)
+	if (port >= HOMA_MIN_DEFAULT_PORT) {
+		hsk->error_msg = "port number invalid: in the automatically assigned range";
 		return -EINVAL;
+	}
 	homa_sock_lock(hsk);
 	spin_lock_bh(&socktab->write_lock);
 	if (hsk->shutdown) {
+		hsk->error_msg = "socket has been shut down";
 		result = -ESHUTDOWN;
 		goto done;
 	}
@@ -398,8 +402,10 @@ int homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 	owner = homa_sock_find(hnet, port);
 	if (owner) {
 		sock_put(&owner->sock);
-		if (owner != hsk)
+		if (owner != hsk) {
+			hsk->error_msg = "requested port number is already in use";
 			result = -EADDRINUSE;
+		}
 		goto done;
 	}
 	hlist_del_rcu(&hsk->socktab_links);

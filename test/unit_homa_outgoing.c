@@ -218,6 +218,8 @@ TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__cant_allocate_skb)
 	skb = homa_tx_data_pkt_alloc(crpc, iter, 0, 500, 2000);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
+	EXPECT_STREQ("couldn't allocate sk_buff for outgoing message",
+		     self->hsk.error_msg);
 }
 TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__include_acks)
 {
@@ -412,6 +414,8 @@ TEST_F(homa_outgoing, homa_message_out_fill__message_too_long)
 	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
 			unit_iov_iter((void *) 1000, HOMA_MAX_MESSAGE_LENGTH+1),
 			0));
+	EXPECT_STREQ("message length exceeded HOMA_MAX_MESSAGE_LENGTH",
+		     self->hsk.error_msg);
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(0, crpc->msgout.skb_memory);
 	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
@@ -560,6 +564,8 @@ TEST_F(homa_outgoing, homa_message_out_fill__error_in_homa_tx_data_packet_alloc)
 
 	EXPECT_EQ(EFAULT, -homa_message_out_fill(crpc,
 			unit_iov_iter((void *) 1000, 3000), 0));
+	EXPECT_STREQ("couldn't copy message body into packet buffers",
+		     self->hsk.error_msg);
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, crpc->msgout.num_skbs);
@@ -577,6 +583,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__rpc_freed_during_copy)
 	hook_rpc = crpc;
 	ASSERT_EQ(EINVAL, -homa_message_out_fill(crpc,
 			unit_iov_iter((void *) 1000, 3000), 0));
+	EXPECT_STREQ("rpc deleted while creating outgoing message", self->hsk.error_msg);
 	EXPECT_EQ(0, crpc->msgout.num_skbs);
 	EXPECT_EQ(RPC_DEAD, crpc->state);
 	EXPECT_EQ(0, crpc->msgout.skb_memory);

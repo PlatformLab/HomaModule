@@ -180,6 +180,14 @@ struct homa_sock {
 	/** @socktab_links: Links this socket into a homa_socktab bucket. */
 	struct hlist_node socktab_links;
 
+	/**
+	 * @error_msg: Static string giving human-readable information about
+	 * the reason for the last error returned by a Homa kernel call.
+	 * Applications can fetch this with the HOMAIOCINFO ioctl to figure
+	 * out why a call failed.
+	 */
+	char *error_msg;
+
 	/* Information above is (almost) never modified; start a new
 	 * cache line below for info that is modified frequently.
 	 */
