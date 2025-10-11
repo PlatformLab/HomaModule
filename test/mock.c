@@ -196,7 +196,7 @@ unsigned int tsc_khz = 1000000;
  */
 bool mock_exit_thread;
 
-/* Indicates whether we should be simulation IPv6 or IPv4 in the
+/* Indicates whether we should be simulating IPv6 or IPv4 in the
  * current test. Can be overridden by a test.
  */
 bool mock_ipv6 = true;
