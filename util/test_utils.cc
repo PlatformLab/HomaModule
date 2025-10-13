@@ -217,8 +217,6 @@ void seed_buffer(void *buffer, size_t length, int seed)
 /**
  * print_address() - Generate a human-readable description of an inet address.
  * @addr:    The address to print
- * @buffer:  Where to store the human readable description.
- * @size:    Number of bytes available in buffer.
  *
  * Return:   The address of the human-readable string (buffer).
  *
