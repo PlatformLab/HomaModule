@@ -241,7 +241,8 @@ int mock_rht_num_walk_results;
 /* Used instead of HOMA_MIN_DEFAULT_PORT by homa_skb.c. */
 __u16 mock_min_default_port = 0x8000;
 
-/* Used as sk_socket for all sockets created by mock_sock_init. */
+/* Used as sk_socket for all sockets created by mock_sock_init.
+ * Its sk field points to the most recently created Homa socket. */
 static struct socket mock_socket;
 
 /* Each of the entries in mock_hnets below is associated with the
@@ -2271,8 +2272,9 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	sk->sk_socket = &mock_socket;
-	sk->sk_net.net = mock_net_for_hnet(hnet);
 	memset(&mock_socket, 0, sizeof(mock_socket));
+	mock_socket.sk = sk;
+	sk->sk_net.net = mock_net_for_hnet(hnet);
 	refcount_set(&sk->sk_wmem_alloc, 1);
 	init_waitqueue_head(&mock_socket.wq.wait);
 	rcu_assign_pointer(sk->sk_wq, &mock_socket.wq);

@@ -400,7 +400,11 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
 	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
 	if (xmit)
+#ifndef __STRIP__ /* See strip.py */
 		homa_xmit_data(rpc, false);
+#else /* See strip.py */
+		homa_xmit_data(rpc);
+#endif /* See strip.py */
 	return 0;
 
 error:
@@ -490,16 +494,8 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		hsk->inet.tos = hsk->homa->priority_map[priority] << 5;
 		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
 	}
-#else /* See strip.py */
-	if (hsk->inet.sk.sk_family == AF_INET6)
-		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
-				  NULL, 0, 0);
-	else
-		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
-#endif /* See strip.py */
 	if (unlikely(result != 0))
 		INC_METRIC(control_xmit_errors, 1);
-#ifndef __STRIP__ /* See strip.py */
 	if (skb->dev) {
 		struct netdev_queue *txq;
 
@@ -509,6 +505,12 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 				be64_to_cpu(h->sender_id), skb->queue_mapping,
 				txq->dql.num_queued, txq->dql.adj_limit);
 	}
+#else /* See strip.py */
+	if (hsk->inet.sk.sk_family == AF_INET6)
+		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
+				  NULL, 0, 0);
+	else
+		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
 #endif /* See strip.py */
 	INC_METRIC(packets_sent[h->type - DATA], 1);
 	INC_METRIC(priority_bytes[priority], skb->len);

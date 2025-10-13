@@ -128,7 +128,6 @@ void     homa_rpc_log_tt(struct homa_rpc *rpc);
 void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
 void     homa_rpc_snapshot_log_tt(void);
 void     homa_rpc_stats_log(void);
-bool     homa_rpcs_deferred(struct homa *homa);
 void     homa_snapshot_get_stats(struct homa_rpc_snapshot *snap);
 void     homa_snapshot_rpcs(void);
 int      homa_snprintf(char *buffer, int size, int used,
@@ -137,6 +136,10 @@ char    *homa_symbol_for_type(uint8_t type);
 char    *homa_symbol_for_state(struct homa_rpc *rpc);
 int      homa_validate_incoming(struct homa *homa, int verbose,
 				int *link_errors);
+
+#ifndef __STRIP__ /* See strip.py */
+bool     homa_rpcs_deferred(struct homa *homa);
 void     homa_validate_rbtree(struct rb_node *node, int depth, char *message);
+#endif /* See strip.py */
 
 #endif /* _HOMA_DEVEL_H */

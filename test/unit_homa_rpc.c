@@ -952,12 +952,12 @@ TEST_F(homa_rpc, homa_rpc_get_info__basics)
 	EXPECT_EQ(1000, info.tx_length);
 	EXPECT_EQ(1000, info.tx_sent);
 	EXPECT_EQ(1000, info.tx_granted);
-	EXPECT_EQ(0, info.tx_prio);
+	IF_NO_STRIP(EXPECT_EQ(0, info.tx_prio));
 	EXPECT_EQ(20000, info.rx_length);
 	EXPECT_EQ(18600, info.rx_remaining);
 	EXPECT_EQ(0, info.rx_gaps);
 	EXPECT_EQ(0, info.rx_gap_bytes);
-	EXPECT_EQ(11400, info.rx_granted);
+	IF_NO_STRIP(EXPECT_EQ(11400, info.rx_granted));
 }
 TEST_F(homa_rpc, homa_rpc_get_info__ipv4_address)
 {
@@ -973,6 +973,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__ipv4_address)
 	EXPECT_EQ(0x04030201, info.peer.in4.sin_addr.s_addr);
 	EXPECT_EQ(99, ntohs(info.peer.in4.sin_port));
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_get_info__tx_incomplete)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -990,6 +991,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__tx_incomplete)
 	EXPECT_EQ(4000, info.tx_granted);
 	EXPECT_EQ(5, info.tx_prio);
 }
+#endif /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_get_info__tx_not_started)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,

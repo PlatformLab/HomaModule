@@ -217,11 +217,15 @@ struct homa_rpc_info {
 	 */
 	__u32 tx_granted;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @tx_prio: Current priority level that the receiver has specified
 	 * for transmitting packets.
 	 */
 	__u32 tx_prio;
+#else /* See strip.py */
+	__u32 reserved;
+#endif /* See strip.py */
 
 	/**
 	 * @rx_length: Length of the incoming message, in bytes. -1 means

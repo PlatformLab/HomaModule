@@ -1109,6 +1109,7 @@ void homa_rpc_stats_log(void)
 		  snap.server_response_bytes_done);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_rpcs_deferred() - Return true if there are any RPCs with packets
  * that have been deferred by homa_qdisc, false if there are none.
@@ -1272,3 +1273,4 @@ error:
 	}
 #endif /* __UNIT_TEST__ */
 }
+#endif /* See strip.py */

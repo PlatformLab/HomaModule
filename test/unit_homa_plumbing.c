@@ -458,13 +458,13 @@ TEST_F(homa_plumbing, homa_ioctl__HOMAIOCINFO)
 
 	hinfo.rpc_info = NULL;
 	self->hsk.error_msg = "Sample error message";
-	EXPECT_EQ(0, -homa_ioctl(&self->hsk.inet.sk, HOMAIOCINFO,
-		  (int *) &hinfo));
+	EXPECT_EQ(0, -homa_ioctl(self->hsk.sock.sk_socket, HOMAIOCINFO,
+		  (unsigned long) &hinfo));
 	EXPECT_STREQ("Sample error message", hinfo.error_msg);
 }
 TEST_F(homa_plumbing, homa_ioctl__unknown_ioctl_command)
 {
-	EXPECT_EQ(EINVAL, -homa_ioctl(&self->hsk.inet.sk, 47, NULL));
+	EXPECT_EQ(EINVAL, -homa_ioctl(self->hsk.sock.sk_socket, 47, 0));
 	EXPECT_STREQ("ioctl opcode isn't supported by Homa",
 		     self->hsk.error_msg);
 }
