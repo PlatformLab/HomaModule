@@ -223,6 +223,7 @@ struct homa_message_in {
 #endif /* See strip.py */
 };
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * struct homa_rpc_qdisc - Information that homa_qdisc needs to store in
  * each RPC. Managed entirely by homa_qdisc.
@@ -250,6 +251,7 @@ struct homa_rpc_qdisc {
 	 */
 	int tx_left;
 };
+#endif /* See strip.py */
 
 /**
  * struct homa_rpc - One of these structures exists for each active
