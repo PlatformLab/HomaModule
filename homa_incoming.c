@@ -1130,9 +1130,9 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 	}
 
 #ifndef __STRIP__ /* See strip.py */
-	if (avail_immediately)
+	if (avail_immediately) {
 		INC_METRIC(wait_none, 1);
-	else if (result == 0) {
+	} else if (result == 0) {
 		if (blocked)
 			INC_METRIC(wait_block, 1);
 		else

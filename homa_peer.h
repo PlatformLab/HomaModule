@@ -183,7 +183,7 @@ struct homa_peer {
 	/**
 	 * @flow: Addressing info used to create @dst and also required
 	 * when transmitting packets.
-	 * */
+	 */
 	struct flowi flow;
 
 #ifndef __STRIP__ /* See strip.py */

@@ -224,6 +224,7 @@ struct homa_rpc_info {
 	 */
 	__u32 tx_prio;
 #else /* See strip.py */
+	/** @reserved: Reserved for future use. */
 	__u32 reserved;
 #endif /* See strip.py */
 
@@ -235,7 +236,7 @@ struct homa_rpc_info {
 	__s32 rx_length;
 
 	/**
-	 * @rx_received: Number of bytes in the incoming message that have
+	 * @rx_remaining: Number of bytes in the incoming message that have
 	 * not yet been received.
 	 */
 	__u32 rx_remaining;
@@ -287,8 +288,8 @@ struct homa_rpc_info {
  */
 struct homa_info {
 	/**
-	 * @rpc_info: (in) Address of memory region in which to store infomation
-	 * about individual RPCs.
+	 * @rpc_info: (in) Address of memory region in which to store
+	 * information about individual RPCs.
 	 */
 	struct homa_rpc_info *rpc_info;
 

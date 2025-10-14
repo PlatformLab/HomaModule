@@ -243,7 +243,8 @@ TEST_F(homa_plumbing, homa_ioc_abort__basics)
 	struct homa_abort_args args = {self->client_id, 0};
 
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
+	EXPECT_EQ(0, homa_ioc_abort(self->hsk.sock.sk_socket,
+				    (unsigned long) &args));
 	EXPECT_EQ(RPC_DEAD, crpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -252,7 +253,8 @@ TEST_F(homa_plumbing, homa_ioc_abort__cant_read_user_args)
 	struct homa_abort_args args = {self->client_id, 0};
 
 	mock_copy_data_errors = 1;
-	EXPECT_EQ(EFAULT, -homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
+	EXPECT_EQ(EFAULT, -homa_ioc_abort(self->hsk.sock.sk_socket,
+					  (unsigned long) &args));
 	EXPECT_STREQ("invalid address for homa_abort_args",
 		     self->hsk.error_msg);
 }
@@ -261,7 +263,8 @@ TEST_F(homa_plumbing, homa_ioc_abort__nonzero_reserved_fields)
 	struct homa_abort_args args;
 
 	args._pad1 = 777;
-	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
+	EXPECT_EQ(EINVAL, -homa_ioc_abort(self->hsk.sock.sk_socket,
+					  (unsigned long) &args));
 	EXPECT_STREQ("reserved fields in homa_abort_args must be zero",
 		     self->hsk.error_msg);
 }
@@ -277,7 +280,8 @@ TEST_F(homa_plumbing, homa_ioc_abort__abort_multiple_rpcs)
 
 	ASSERT_NE(NULL, crpc1);
 	ASSERT_NE(NULL, crpc2);
-	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
+	EXPECT_EQ(0, homa_ioc_abort(self->hsk.sock.sk_socket,
+				    (unsigned long) &args));
 	EXPECT_EQ(-ECANCELED, crpc1->error);
 	EXPECT_EQ(-ECANCELED, crpc2->error);
 	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
@@ -286,17 +290,20 @@ TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 {
 	struct homa_abort_args args = {99, 0};
 
-	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
+	EXPECT_EQ(EINVAL, -homa_ioc_abort(self->hsk.sock.sk_socket,
+					  (unsigned long) &args));
 	EXPECT_STREQ("RPC identifier did not match any existing RPC",
 		     self->hsk.error_msg);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_plumbing, homa_ioc_info__cant_read_homa_info_from_user_space)
 {
 	struct homa_info hinfo;
 
 	mock_copy_data_errors = 1;
-	EXPECT_EQ(EFAULT, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(EFAULT, -homa_ioc_info(self->hsk.sock.sk_socket,
+					 (unsigned long) &hinfo));
 	EXPECT_STREQ("invalid address for homa_info", self->hsk.error_msg);
 }
 TEST_F(homa_plumbing, homa_ioc_info__basics)
@@ -304,7 +311,8 @@ TEST_F(homa_plumbing, homa_ioc_info__basics)
 	struct homa_info hinfo;
 
 	memset(&hinfo, 0, sizeof(hinfo));
-	EXPECT_EQ(0, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
 	EXPECT_EQ(100 * HOMA_BPAGE_SIZE, hinfo.bpool_avail_bytes);
 	EXPECT_EQ(99, hinfo.port);
 }
@@ -316,7 +324,8 @@ TEST_F(homa_plumbing, homa_ioc_info__socket_shutdown)
 	mock_sock_init(&hsk, self->hnet, self->server_port);
 	homa_sock_shutdown(&hsk);
 
-	EXPECT_EQ(ESHUTDOWN, -homa_ioc_info(&hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(ESHUTDOWN, -homa_ioc_info(self->hsk.sock.sk_socket,
+					    (unsigned long) &hinfo));
 	EXPECT_STREQ("socket has been shut down", hsk.error_msg);
 	unit_sock_destroy(&hsk);
 }
@@ -334,7 +343,8 @@ TEST_F(homa_plumbing, homa_ioc_info__rpc_info)
 	hinfo.rpc_info = info;
 	hinfo.rpc_info_length = sizeof(info);
 
-	EXPECT_EQ(0, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
 	EXPECT_EQ(2, hinfo.num_rpcs);
 	EXPECT_EQ(self->server_id, info[0].id);
 	EXPECT_EQ(self->server_id + 2, info[1].id);
@@ -356,7 +366,8 @@ TEST_F(homa_plumbing, homa_ioc_info__ignore_dead_rpc)
 	hinfo.rpc_info = info;
 	hinfo.rpc_info_length = sizeof(info);
 
-	EXPECT_EQ(0, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
 	EXPECT_EQ(1, hinfo.num_rpcs);
 	EXPECT_EQ(self->server_id + 2, info[0].id);
 	srpc->state = RPC_IN_SERVICE;
@@ -374,7 +385,8 @@ TEST_F(homa_plumbing, homa_ioc_info__no_memory_for_rpc_info)
 	hinfo.rpc_info = NULL;
 	hinfo.rpc_info_length = 1000;
 
-	EXPECT_EQ(0, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
 	EXPECT_EQ(2, hinfo.num_rpcs);
 }
 TEST_F(homa_plumbing, homa_ioc_info__not_enough_space_for_all_rpcs)
@@ -392,7 +404,8 @@ TEST_F(homa_plumbing, homa_ioc_info__not_enough_space_for_all_rpcs)
 	hinfo.rpc_info = info;
 	hinfo.rpc_info_length = sizeof(*info);
 
-	EXPECT_EQ(0, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
 	EXPECT_EQ(2, hinfo.num_rpcs);
 	EXPECT_EQ(self->server_id, info[0].id);
 	EXPECT_EQ(0, info[1].id);
@@ -413,7 +426,8 @@ TEST_F(homa_plumbing, homa_ioc_info__cant_copy_rpc_info_to_user)
 	hinfo.rpc_info_length = sizeof(info);
 
 	mock_copy_to_user_errors = 2;
-	EXPECT_EQ(EFAULT, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(EFAULT, -homa_ioc_info(self->hsk.sock.sk_socket,
+					 (unsigned long) &hinfo));
 	EXPECT_STREQ("couldn't copy homa_rpc_info to user space: invalid or read-only address?",
 		     self->hsk.error_msg);
 	EXPECT_EQ(self->server_id, info[0].id);
@@ -425,12 +439,14 @@ TEST_F(homa_plumbing, homa_ioc_info__error_msg)
 
 	/* First call: no error message. */
 	strcpy(hinfo.error_msg, "Bogus message");
-	EXPECT_EQ(0, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
 	EXPECT_STREQ("", hinfo.error_msg);
 
 	/* Second call: there is a message. */
 	self->hsk.error_msg = "Sample error message";
-	EXPECT_EQ(0, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
 	EXPECT_STREQ("Sample error message", hinfo.error_msg);
 
 	/* Third call: the message is too long. */
@@ -438,7 +454,8 @@ TEST_F(homa_plumbing, homa_ioc_info__error_msg)
 			"a lot longer than you might think; "
 			"so long that it exceeds the available space "
 			"for storing message in struct homa_info";
-	EXPECT_EQ(0, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
 	EXPECT_EQ(HOMA_ERROR_MSG_SIZE - 1, strlen(hinfo.error_msg));
 }
 TEST_F(homa_plumbing, homa_ioc_info__cant_copy_back_to_user_space)
@@ -446,11 +463,11 @@ TEST_F(homa_plumbing, homa_ioc_info__cant_copy_back_to_user_space)
 	struct homa_info hinfo;
 
 	mock_copy_to_user_errors = 1;
-	EXPECT_EQ(EFAULT, -homa_ioc_info(&self->hsk.inet.sk, (int *) &hinfo));
+	EXPECT_EQ(EFAULT, -homa_ioc_info(self->hsk.sock.sk_socket,
+					 (unsigned long) &hinfo));
 	EXPECT_STREQ("couldn't copy homa_info to user space: read-only address?",
 		     self->hsk.error_msg);
 }
-#endif /* See strip.py */
 
 TEST_F(homa_plumbing, homa_ioctl__HOMAIOCINFO)
 {

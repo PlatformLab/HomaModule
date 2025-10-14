@@ -126,7 +126,7 @@ struct homa_common_hdr {
 	u8 type;
 
 	/**
-	 * @doff: High order 4 bits corespond to the Data Offset field of a
+	 * @doff: High order 4 bits correspond to the Data Offset field of a
 	 * TCP header. In DATA packets they hold the number of 4-byte chunks
 	 * in a homa_data_hdr; used by TSO to determine where the replicated
 	 * header portion ends. For other packets the offset is always 5

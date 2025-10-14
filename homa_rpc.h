@@ -229,7 +229,7 @@ struct homa_message_in {
  */
 struct homa_rpc_qdisc {
 	/**
-	 * @deferred: List of tx skbs from this RPC that have been deferred
+	 * @packets: List of tx skbs from this RPC that have been deferred
 	 * by homa_qdisc. Non-empty means this RPC is currently linked into
 	 * homa_qdisc_dev->deferred_rpcs.
 	 */
@@ -520,6 +520,7 @@ static inline int homa_rpc_try_lock(struct homa_rpc *rpc)
  * homa_rpc_lock_preempt() - Same as homa_rpc_lock, except sets the
  * APP_NEEDS_LOCK flags while waiting to encourage the existing lock
  * owner to relinquish the lock.
+ * @rpc:   RPC to lock.
  */
 static inline void homa_rpc_lock_preempt(struct homa_rpc *rpc)
 	__acquires(rpc->bucket->lock)

@@ -132,7 +132,7 @@ struct homa_qdisc_dev {
 	u64 last_defer;
 
 	/**
-	 * @defer_lock: Sychronizes access to information about deferred
+	 * @defer_lock: Synchronizes access to information about deferred
 	 * packets, including deferred_rpcs, tcp_deferred, and last_defer.
 	 */
 	spinlock_t defer_lock;
@@ -190,7 +190,7 @@ struct homa_rcu_kfreer {
 	/** @rcu_head: Holds state of a pending call_rcu invocation. */
 	struct rcu_head rcu_head;
 
-	/** object: Kfree this after waiting until RCU has synced. */
+	/** @object: Kfree this after waiting until RCU has synced. */
 	void *object;
 };
 

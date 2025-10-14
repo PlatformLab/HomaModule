@@ -288,9 +288,9 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 *    gro_list by the caller, so it will be considered for merges
 	 *    in the future.
 	 */
+	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
 	u64 saved_softirq_metric, softirq_cycles;
 	struct homa_offload_core *offload_core;
-	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
 	struct sk_buff *result = NULL;
 	struct homa_data_hdr *h_new;
 	u64 *softirq_cycles_metric;

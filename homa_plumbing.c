@@ -928,7 +928,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
  * homa_ioctl() - Implements the ioctl system call for Homa sockets.
  * @sock:  Socket on which the system call was invoked.
  * @cmd:   Identifier for a particular ioctl operation.
- * karg:   Operation-specific argument; typically the address of a block
+ * @arg:   Operation-specific argument; typically the address of a block
  *         of data in user address space.
  *
  * Return: 0 on success, otherwise a negative errno. Sets hsk->error_msg
@@ -1177,9 +1177,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 	if (!homa_sock_wmem_avl(hsk)) {
 		result = homa_sock_wait_wmem(hsk,
 					     msg->msg_flags & MSG_DONTWAIT);
-		if (result != 0) {
+		if (result != 0)
 			goto error;
-		}
 	}
 
 	if (addr->sa.sa_family != sk->sk_family) {
@@ -1692,8 +1691,8 @@ discard:
  */
 int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
-	const struct icmphdr *icmp = icmp_hdr(skb);
 	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
+	const struct icmphdr *icmp = icmp_hdr(skb);
 	struct in6_addr daddr;
 	int type = icmp->type;
 	int code = icmp->code;

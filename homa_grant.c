@@ -548,8 +548,8 @@ void homa_grant_unmanage_rpc(struct homa_rpc *rpc,
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
-	bool removed = false;
 	u64 time = homa_clock();
+	bool removed = false;
 
 	homa_grant_lock(grant);
 

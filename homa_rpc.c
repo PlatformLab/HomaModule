@@ -564,7 +564,6 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 					rpc->msgout.num_skbs--;
 					if (num_skbs >= batch_size)
 						goto release;
-
 				}
 			}
 

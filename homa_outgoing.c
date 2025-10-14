@@ -385,7 +385,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		 * a significant amount time. On high-speed networks (e.g.
 		 * 100 Gbps and above), copying from user space is the
 		 * bottleneck, so transmitting the packets here will slow
-		 * that down. Thes, we only transmit the unscheduled packets
+		 * that down. Thus, we only transmit the unscheduled packets
 		 * here, to fill the pipe. Packets after that can be
 		 * transmitted by SoftIRQ in response to incoming grants;
 		 * this allows us to use two cores: this core copying data
@@ -502,8 +502,9 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
 		if (netif_tx_queue_stopped(txq))
 			tt_record4("__homa_xmit_control found stopped txq for id %d, qid %u, num_queued %u, limit %d",
-				be64_to_cpu(h->sender_id), skb->queue_mapping,
-				txq->dql.num_queued, txq->dql.adj_limit);
+				   be64_to_cpu(h->sender_id),
+				   skb->queue_mapping,
+				   txq->dql.num_queued, txq->dql.adj_limit);
 	}
 #else /* See strip.py */
 	if (hsk->inet.sk.sk_family == AF_INET6)

@@ -61,7 +61,7 @@ void homa_rcu_kfree(void *object)
 {
 	struct homa_rcu_kfreer *freer;
 
-	freer = kmalloc(sizeof *freer, GFP_KERNEL);
+	freer = kmalloc(sizeof(*freer), GFP_KERNEL);
 	if (!freer) {
 		/* Can't allocate memory needed for asynchronous freeing,
 		 * so free synchronously.
@@ -90,7 +90,7 @@ void homa_rcu_kfree_callback(struct rcu_head *head)
 }
 
 /**
- * homa_qdisc_alloc_devs() - Allocate and initialize a new homa_qdisc_qdevs
+ * homa_qdisc_qdevs_alloc() - Allocate and initialize a new homa_qdisc_qdevs
  * object.
  * Return:   The new object, or an ERR_PTR if an error occurred.
  */
@@ -415,8 +415,8 @@ enqueue:
 		if (h->common.type == DATA) {
 			h = (struct homa_data_hdr *)skb_transport_header(skb);
 			tt_record3("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d on qid %d",
-				be64_to_cpu(h->common.sender_id), offset,
-				q->ix);
+				   be64_to_cpu(h->common.sender_id), offset,
+				   q->ix);
 		}
 	} else {
 		tt_record2("homa_qdisc_enqueue queuing non-homa packet, qix %d, pacer_qix %d",
@@ -477,7 +477,7 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
  */
 void homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev, struct homa_rpc *rpc)
 {
-	struct rb_node **new = &(qdev->deferred_rpcs.rb_root.rb_node);
+	struct rb_node **new = &qdev->deferred_rpcs.rb_root.rb_node;
 	struct rb_node *parent = NULL;
 	struct homa_rpc *rpc2;
 	bool leftmost = true;
@@ -801,7 +801,8 @@ done:
  * @homa:       Overall information about the Homa transport; used to find
  *              homa_qdisc_devs to check.
  */
-void homa_qdisc_pacer_check(struct homa *homa) {
+void homa_qdisc_pacer_check(struct homa *homa)
+{
 	struct homa_qdisc_dev *qdev;
 	u64 now = homa_clock();
 	int max_cycles;

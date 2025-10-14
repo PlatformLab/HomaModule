@@ -159,8 +159,8 @@ int homa_pacer_check_nic_q(struct homa_pacer *pacer, struct sk_buff *skb,
 int homa_pacer_main(void *arg)
 {
 	struct homa_pacer *pacer = arg;
-	u64 start;
 	int status;
+	u64 start;
 
 	while (1) {
 		if (kthread_should_stop())
