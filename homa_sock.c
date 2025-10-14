@@ -511,7 +511,7 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 	int result;
 
 	/* Note: we can't use sock_wait_for_wmem because that function
-	 * is not available to modules (as of August 2025  it's static).
+	 * is not available to modules (as of August 2025 it's static).
 	 */
 
 	if (nonblocking)
