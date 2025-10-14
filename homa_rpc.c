@@ -546,12 +546,18 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 						rpc->msgout.packets = NULL;
 					}
 
+#ifndef __STRIP__ /* See strip.py */
 					/* This tests whether skb is still in a
 					 * transmit queue somewhere; if so,
 					 * can't reap the RPC since homa_qdisc
 					 * may try to access the RPC via the
 					 * skb's homa_skb_info.
 					 */
+#else /* See strip.py */
+					/* Don't reap RPC if anyone besides
+					 * us has a reference to the skb.
+					 */
+#endif /* See strip.py */
 					if (refcount_read(&skb->users) > 1) {
 						INC_METRIC(reaper_active_skbs,
 							   1);
