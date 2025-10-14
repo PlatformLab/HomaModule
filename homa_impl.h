@@ -823,7 +823,7 @@ static inline u64 homa_clock(void)
 #else /* __UNIT_TEST__ */
 #ifndef __UPSTREAM__ /* See strip.py */
 	/* As of August 2025, get_cycles takes only about 8 ns/call, vs.
-	 * 14 ns/call for ktime_get_ns. This saves about .04 core when
+	 * 14 ns/call for ktime_get_ns. This saves about .24 core when
 	 * driving a 25 Gbps network at high load (see perf.txt for details).
 	 * Unfortunately, Linux reviewers will not allow get_cycles in the
 	 * upstreamed version.
