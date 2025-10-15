@@ -401,7 +401,7 @@ void homa_peer_free(struct rcu_head *head)
 	struct homa_peer *peer;
 
 	peer = container_of(head, struct homa_peer, rcu_head);
-	dst_release(peer->dst);
+	dst_release(rcu_dereference(peer->dst));
 	kfree(peer);
 }
 
