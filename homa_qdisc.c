@@ -12,13 +12,42 @@
  */
 
 #include "homa_impl.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
 #include "homa_rpc.h"
 #include "timetrace.h"
 
 #include <linux/ethtool.h>
 #include <net/pkt_sched.h>
+
+/* Used to enable sysctl access to configuration parameters related to
+ * homa_qdisc. The @data fields are actually offsets within a struct
+ * homa_qdisc_shared; these are converted to pointers into a net-specific
+ * struct homa later.
+ */
+#define OFFSET(field) ((void *)offsetof(struct homa_qdisc_shared, field))
+static struct ctl_table homa_qdisc_ctl_table[] = {
+	{
+		.procname	= "max_nic_queue_ns",
+		.data		= OFFSET(max_nic_queue_ns),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_qdisc_dointvec
+	},
+	{
+		.procname	= "pacer_fifo_fraction",
+		.data		= OFFSET(fifo_fraction),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_qdisc_dointvec
+	},
+	{
+		.procname	= "defer_min_bytes",
+		.data		= OFFSET(defer_min_bytes),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_qdisc_dointvec
+	},
+};
 
 static struct Qdisc_ops homa_qdisc_ops __read_mostly = {
 	.id = "homa",
@@ -90,40 +119,51 @@ void homa_rcu_kfree_callback(struct rcu_head *head)
 }
 
 /**
- * homa_qdisc_qdevs_alloc() - Allocate and initialize a new homa_qdisc_qdevs
+ * homa_qdisc_shared_alloc() - Allocate and initialize a new homa_qdisc_shared
  * object.
  * Return:   The new object, or an ERR_PTR if an error occurred.
  */
-struct homa_qdisc_qdevs *homa_qdisc_qdevs_alloc(void)
+struct homa_qdisc_shared *homa_qdisc_shared_alloc(void)
 {
-	struct homa_qdisc_qdevs *qdevs;
+	struct homa_qdisc_shared *qshared;
 
-	qdevs = kzalloc(sizeof(*qdevs), GFP_KERNEL);
-	if (!qdevs)
+	qshared = kzalloc(sizeof(*qshared), GFP_KERNEL);
+	if (!qshared)
 		return ERR_PTR(-ENOMEM);
 
-	mutex_init(&qdevs->mutex);
-	INIT_LIST_HEAD(&qdevs->qdevs);
-	return qdevs;
+	mutex_init(&qshared->mutex);
+	INIT_LIST_HEAD(&qshared->qdevs);
+	qshared->fifo_fraction = 50;
+	qshared->max_nic_queue_ns = 5000;
+	qshared->defer_min_bytes = 1000;
+	qshared->sysctl_header = register_net_sysctl(&init_net, "net/homa",
+						   homa_qdisc_ctl_table);
+	if (!qshared->sysctl_header) {
+		pr_err("couldn't register sysctl parameters for Homa qdisc\n");
+		kfree(qshared);
+		return ERR_PTR(-ENOMEM);
+	}
+	homa_qdisc_update_sysctl_deps(qshared);
+	return qshared;
 }
 
 /**
- * homa_qdisc_qdevs_free() - Invoked when a struct homa is being freed;
- * releases information related to all the assoiciated homa_qdiscs.
- * @qdevs:    Information about homa_qdisc_devs associated with a
+ * homa_qdisc_shared_free() - Invoked when a struct homa is being freed;
+ * releases information related to all the associated homa_qdiscs.
+ * @qshared:    Information about homa_qdisc_devs associated with a
  *            particular struct homa.
  */
-void homa_qdisc_qdevs_free(struct homa_qdisc_qdevs *qdevs)
+void homa_qdisc_shared_free(struct homa_qdisc_shared *qshared)
 {
 	struct homa_qdisc_dev *qdev;
 	int stranded = 0;
 
-	/* At this point this object no-one else besides us should
-	 * ever access this object again, but lock it just to be safe.
+	/* At this point no-one else besides us should ever access this object
+	 * again, but lock it just to be safe.
 	 */
-	mutex_lock(&qdevs->mutex);
+	mutex_lock(&qshared->mutex);
 	while (1) {
-		qdev = list_first_or_null_rcu(&qdevs->qdevs,
+		qdev = list_first_or_null_rcu(&qshared->qdevs,
 					      struct homa_qdisc_dev, links);
 		if (!qdev)
 			break;
@@ -139,12 +179,16 @@ void homa_qdisc_qdevs_free(struct homa_qdisc_qdevs *qdevs)
 		kthread_stop(qdev->pacer_kthread);
 		qdev->pacer_kthread = NULL;
 	}
-
 	if (stranded != 0)
 		pr_err("homa_qdisc_devs_free found %d live qdevs (should have been none)\n",
 		       stranded);
-	mutex_unlock(&qdevs->mutex);
-	homa_rcu_kfree(qdevs);
+
+	if (qshared->sysctl_header) {
+		unregister_net_sysctl_table(qshared->sysctl_header);
+		qshared->sysctl_header = NULL;
+	}
+	mutex_unlock(&qshared->mutex);
+	homa_rcu_kfree(qshared);
 }
 
 /**
@@ -156,14 +200,14 @@ void homa_qdisc_qdevs_free(struct homa_qdisc_qdevs *qdevs)
  */
 struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 {
-	struct homa_qdisc_qdevs *qdevs;
+	struct homa_qdisc_shared *qshared;
 	struct homa_qdisc_dev *qdev;
 	struct homa_net *hnet;
 
 	rcu_read_lock();
 	hnet = homa_net(dev_net(dev));
-	qdevs = hnet->homa->qdevs;
-	list_for_each_entry_rcu(qdev, &qdevs->qdevs, links) {
+	qshared = hnet->homa->qshared;
+	list_for_each_entry_rcu(qdev, &qshared->qdevs, links) {
 		if (qdev->dev == dev && refcount_inc_not_zero(&qdev->refs)) {
 			rcu_read_unlock();
 			return qdev;
@@ -175,8 +219,8 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 	 * after acquiring the mutex, in case someone else already
 	 * created it).
 	 */
-	mutex_lock(&qdevs->mutex);
-	list_for_each_entry_rcu(qdev, &qdevs->qdevs, links) {
+	mutex_lock(&qshared->mutex);
+	list_for_each_entry_rcu(qdev, &qshared->qdevs, links) {
 		if (qdev->dev == dev && refcount_inc_not_zero(&qdev->refs)) {
 			UNIT_LOG("; ", "race in homa_qdisc_qdev_get");
 			goto done;
@@ -193,7 +237,7 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 	refcount_set(&qdev->refs, 1);
 	qdev->pacer_qix = -1;
 	qdev->redirect_qix = -1;
-	homa_qdisc_update_sysctl(qdev);
+	homa_qdev_update_sysctl(qdev);
 	INIT_LIST_HEAD(&qdev->links);
 	qdev->deferred_rpcs = RB_ROOT_CACHED;
 	skb_queue_head_init(&qdev->tcp_deferred);
@@ -212,10 +256,10 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 		qdev = ERR_PTR(error);
 		goto done;
 	}
-	list_add_rcu(&qdev->links, &qdevs->qdevs);
+	list_add_rcu(&qdev->links, &qshared->qdevs);
 
 done:
-	mutex_unlock(&qdevs->mutex);
+	mutex_unlock(&qshared->mutex);
 	return qdev;
 }
 
@@ -226,22 +270,22 @@ done:
  */
 void homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev)
 {
-	struct homa_qdisc_qdevs *qdevs;
+	struct homa_qdisc_shared *qshared;
 
 	if (!refcount_dec_and_test(&qdev->refs))
 		return;
 
 	/* Make this homa_qdisc_dev inaccessible, then schedule an RCU-safe
 	 * free. Think carefully before you modify this code, to ensure that
-	 * concurrent RCU scans of qdevs->qdevs are safe.
+	 * concurrent RCU scans of qshared->qdevs are safe.
 	 */
-	qdevs = qdev->hnet->homa->qdevs;
-	mutex_lock(&qdevs->mutex);
+	qshared = qdev->hnet->homa->qshared;
+	mutex_lock(&qshared->mutex);
 	list_del_rcu(&qdev->links);
 	kthread_stop(qdev->pacer_kthread);
 	qdev->pacer_kthread = NULL;
 	call_rcu(&qdev->rcu_head, homa_qdisc_dev_callback);
-	mutex_unlock(&qdevs->mutex);
+	mutex_unlock(&qshared->mutex);
 }
 
 /**
@@ -354,7 +398,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 {
 	struct homa_qdisc *q = qdisc_priv(sch);
 	struct homa_qdisc_dev *qdev = q->qdev;
-	struct homa *homa = qdev->hnet->homa;
+	struct homa_qdisc_shared *qshared = qdev->hnet->homa->qshared;
 	struct homa_data_hdr *h;
 	int pkt_len;
 	int result;
@@ -392,14 +436,14 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	if (offset == -1)
 		offset = ntohl(h->common.sequence);
 	if (h->common.type != DATA || ntohl(h->message_length) <
-			homa->pacer->throttle_min_bytes) {
+				      qshared->defer_min_bytes) {
 		homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 		goto enqueue;
 	}
 
 	if (!homa_qdisc_any_deferred(qdev) &&
 	    homa_qdisc_update_link_idle(qdev, pkt_len,
-					homa->pacer->max_nic_queue_cycles))
+					qshared->max_nic_queue_cycles))
 		goto enqueue;
 
 	/* This packet needs to be deferred until the NIC queue has
@@ -696,7 +740,7 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool help)
 		/* If the NIC queue is too long, wait until it gets shorter. */
 		now = homa_clock();
 		idle_time = atomic64_read(&qdev->link_idle_time);
-		while ((now + qdev->hnet->homa->pacer->max_nic_queue_cycles) <
+		while ((now + qdev->hnet->homa->qshared->max_nic_queue_cycles) <
 		       idle_time) {
 			/* If we've xmitted at least one packet then
 			 * return (this helps with testing and also
@@ -807,9 +851,9 @@ void homa_qdisc_pacer_check(struct homa *homa)
 	u64 now = homa_clock();
 	int max_cycles;
 
-	max_cycles = homa->pacer->max_nic_queue_cycles;
+	max_cycles = homa->qshared->max_nic_queue_cycles;
 	rcu_read_lock();
-	list_for_each_entry_rcu(qdev, &homa->qdevs->qdevs, links) {
+	list_for_each_entry_rcu(qdev, &homa->qshared->qdevs, links) {
 		if (!homa_qdisc_any_deferred(qdev))
 			continue;
 
@@ -828,11 +872,43 @@ void homa_qdisc_pacer_check(struct homa *homa)
 }
 
 /**
- * homa_qdisc_update_sysctl() - Recompute information in a homa_qdisc_dev
+ * homa_qdisc_dointvec() - This function is a wrapper around proc_dointvec. It
+ * is invoked to read and write pacer-related sysctl values.
+ * @table:    sysctl table describing value to be read or written.
+ * @write:    Nonzero means value is being written, 0 means read.
+ * @buffer:   Address in user space of the input/output data.
+ * @lenp:     Not exactly sure.
+ * @ppos:     Not exactly sure.
+ *
+ * Return: 0 for success, nonzero for error.
+ */
+int homa_qdisc_dointvec(const struct ctl_table *table, int write,
+			void *buffer, size_t *lenp, loff_t *ppos)
+{
+	struct ctl_table table_copy;
+	struct homa_qdisc_shared *qshared;
+	int result;
+
+	qshared = homa_net(current->nsproxy->net_ns)->homa->qshared;
+
+	/* Generate a new ctl_table that refers to a field in the
+	 * net-specific struct homa.
+	 */
+	table_copy = *table;
+	table_copy.data = ((char *)qshared) + (uintptr_t)table_copy.data;
+
+	result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
+	if (write)
+		homa_qdisc_update_sysctl_deps(qshared);
+	return result;
+}
+
+/**
+ * homa_qdev_update_sysctl() - Recompute information in a homa_qdisc_dev
  * that depends on sysctl parameters.
  * @qdev:    Update information here that depends on sysctl values.
  */
-void homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev)
+void homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev)
 {
 	struct ethtool_link_ksettings ksettings;
 	struct homa *homa = qdev->hnet->homa;
@@ -869,20 +945,20 @@ void homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev)
 }
 
 /**
- * homa_qdisc_update_all_sysctl() - Invoked whenever a sysctl value is changed;
- * updates all qdisc structures to reflect new values.
- * @hnet:    Homa's information about a network namespace: changes will apply
- *           to qdiscs in this namespace.
+ * homa_qdisc_update_sysctl_deps() - Update any qdisc fields that depend
+ * on values set by sysctl. This function is invoked anytime a qdisc sysctl
+ * value is updated.
+ * @qshared:   Qdisc data to update.
  */
-void homa_qdisc_update_all_sysctl(struct homa_net *hnet)
+void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 {
 	struct homa_qdisc_dev *qdev;
 
+	qshared->max_nic_queue_cycles =
+			homa_ns_to_cycles(qshared->max_nic_queue_ns);
+
 	rcu_read_lock();
-	list_for_each_entry_rcu(qdev, &hnet->homa->qdevs->qdevs, links) {
-		if (qdev->hnet != hnet)
-			continue;
-		homa_qdisc_update_sysctl(qdev);
-	}
+	list_for_each_entry_rcu(qdev, &qshared->qdevs, links)
+		homa_qdev_update_sysctl(qdev);
 	rcu_read_unlock();
 }

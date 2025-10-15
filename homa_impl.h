@@ -108,6 +108,11 @@ struct homa {
 	 */
 	atomic64_t next_outgoing_id;
 
+#ifndef __UPSTREAM__ /* See strip.py */
+	/** @qshared: Contains information used by homa_qdisc.c. */
+	struct homa_qdisc_shared *qshared;
+#endif /* See strip.py */
+
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @pacer:  Information related to the pacer; managed by homa_pacer.c.
@@ -119,12 +124,6 @@ struct homa {
 	 * grants for incoming messages.
 	 */
 	struct homa_grant *grant;
-
-	/**
-	 * @qdevs: Contains information used by homa_qdisc.c to manage
-	 * homa_qdisc_qdevs for this struct homa.
-	 */
-	struct homa_qdisc_qdevs *qdevs;
 #endif /* See strip.py */
 
 	/**

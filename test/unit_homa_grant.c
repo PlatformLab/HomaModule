@@ -94,7 +94,7 @@ FIXTURE_SETUP(homa_grant)
 	self->homa.num_priorities = 1;
 	self->homa.poll_cycles = 0;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
-	self->homa.pacer->fifo_fraction = 0;
+	self->homa.qshared->fifo_fraction = 0;
 	self->homa.grant->fifo_fraction = 0;
 	self->homa.grant->window = 10000;
 	self->homa.grant->max_incoming = 50000;

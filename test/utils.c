@@ -6,7 +6,6 @@
 
 #include "homa_impl.h"
 #include "homa_grant.h"
-#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #include "ccutils.h"
@@ -14,6 +13,10 @@
 #include "kselftest_harness.h"
 #include "mock.h"
 #include "utils.h"
+
+#ifndef __STRIP__ /* See strip.py */
+#include "homa_pacer.h"
+#endif /* See strip.py */
 
 /**
  * unit_client_rpc() - Create a homa_client_rpc and arrange for it to be

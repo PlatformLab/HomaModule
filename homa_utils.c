@@ -36,6 +36,12 @@ int homa_init(struct homa *homa)
 	atomic64_set(&homa->next_outgoing_id, 2);
 	homa->link_mbps = 25000;
 #ifndef __STRIP__ /* See strip.py */
+	homa->qshared = homa_qdisc_shared_alloc();
+	if (IS_ERR(homa->qshared)) {
+		err = PTR_ERR(homa->qshared);
+		homa->qshared = NULL;
+		return err;
+	}
 	homa->pacer = homa_pacer_alloc(homa);
 	if (IS_ERR(homa->pacer)) {
 		err = PTR_ERR(homa->pacer);
@@ -46,12 +52,6 @@ int homa_init(struct homa *homa)
 	if (IS_ERR(homa->grant)) {
 		err = PTR_ERR(homa->grant);
 		homa->grant = NULL;
-		return err;
-	}
-	homa->qdevs = homa_qdisc_qdevs_alloc();
-	if (IS_ERR(homa->qdevs)) {
-		err = PTR_ERR(homa->qdevs);
-		homa->qdevs = NULL;
 		return err;
 	}
 #endif /* See strip.py */
@@ -139,10 +139,6 @@ void homa_destroy(struct homa *homa)
 		homa->socktab = NULL;
 	}
 #ifndef __STRIP__ /* See strip.py */
-	if (homa->qdevs) {
-		homa_qdisc_qdevs_free(homa->qdevs);
-		homa->qdevs = NULL;
-	}
 	if (homa->grant) {
 		homa_grant_free(homa->grant);
 		homa->grant = NULL;
@@ -150,6 +146,10 @@ void homa_destroy(struct homa *homa)
 	if (homa->pacer) {
 		homa_pacer_free(homa->pacer);
 		homa->pacer = NULL;
+	}
+	if (homa->qshared) {
+		homa_qdisc_shared_free(homa->qshared);
+		homa->qshared = NULL;
 	}
 #endif /* See strip.py */
 	if (homa->peertab) {

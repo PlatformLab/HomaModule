@@ -100,7 +100,7 @@ struct homa_qdisc_dev {
 
 	/**
 	 * @links: Used to link this object into the qdevs list in a
-	 * homa_qdisc_qdevs struct.
+	 * homa_qdisc_shared struct.
 	 */
 	struct list_head links;
 
@@ -164,11 +164,11 @@ struct homa_qdisc_dev {
 };
 
 /**
- * struct homa_qdisc_qdevs - There is one of these structs for each
- * struct homa. Used to manage all of the homa_qdisc_devs for the
- * struct homa.
+ * struct homa_qdisc_shared - There is one of these structs for each
+ * struct homa. Contains information that is shared across all homq_qdiscs
+ * and homa_qdisc_devs for the struct homa.
  */
-struct homa_qdisc_qdevs {
+struct homa_qdisc_shared {
 	/**
 	 * @mutex: Must hold when modifying qdevs. Can scan qdevs
 	 * without locking using RCU.
@@ -180,6 +180,46 @@ struct homa_qdisc_qdevs {
 	 * exist for this struct homa.
 	 */
 	struct list_head qdevs;
+
+	/**
+	 * @fifo_fraction: Out of every 1000 packets transmitted by the
+	 * pacer, this number will be transmitted from the oldest message
+	 * rather than the highest-priority message. Set externally via
+	 * sysctl.
+	 */
+	int fifo_fraction;
+
+	/**
+	 * @max_nic_queue_ns: Limits the NIC queue length: we won't queue
+	 * up a packet for transmission if link_idle_time is this many
+	 * nanoseconds in the future (or more). Set externally via sysctl.
+	 */
+	int max_nic_queue_ns;
+
+	/**
+	 * @max_nic_queue_cycles: Same as max_nic_queue_ns except in
+	 * homa_clock() units.
+	 */
+	int max_nic_queue_cycles;
+
+	/**
+	 * @defer_min_bytes: If a packet has fewer bytes than this, then it
+	 * will be transmitted immediately, regardless of NIC queue length.
+	 * We have this limit because for very small packets CPU overheads
+	 * make it impossible to keep up with the NIC so (a) the NIC queue
+	 * can't grow and (b) using the pacer would serialize all of these
+	 * packets through a single core, which makes things even worse.
+	 * Set externally via sysctl.
+	 */
+	int defer_min_bytes;
+
+#ifndef __STRIP__ /* See strip.py */
+	/**
+	 * @sysctl_header: Used to remove sysctl values when this structure
+	 * is destroyed.
+	 */
+	struct ctl_table_header *sysctl_header;
+#endif /* See strip.py */
 };
 
 /**
@@ -194,15 +234,15 @@ struct homa_rcu_kfreer {
 	void *object;
 };
 
+void            homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev,
 				      struct sk_buff *skb);
 struct sk_buff *
 		homa_qdisc_dequeue_homa(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_destroy(struct Qdisc *sch);
 void            homa_qdisc_dev_callback(struct rcu_head *head);
-struct homa_qdisc_qdevs *
-		homa_qdisc_qdevs_alloc(void);
-void            homa_qdisc_qdevs_free(struct homa_qdisc_qdevs *qdevs);
+int             homa_qdisc_dointvec(const struct ctl_table *table, int write,
+				    void *buffer, size_t *lenp, loff_t *ppos);
 int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
 void            homa_qdisc_free_homa(struct homa_qdisc_dev *qdev);
@@ -221,11 +261,13 @@ int             homa_qdisc_redirect_skb(struct sk_buff *skb,
 					bool pacer);
 int             homa_qdisc_register(void);
 void            homa_qdisc_set_qixs(struct homa_qdisc_dev *qdev);
+struct homa_qdisc_shared *
+		homa_qdisc_shared_alloc(void);
+void            homa_qdisc_shared_free(struct homa_qdisc_shared *qshared);
 void            homa_qdisc_unregister(void);
-void            homa_qdisc_update_all_sysctl(struct homa_net *hnet);
 int             homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev,
 					    int bytes, int max_queue_ns);
-void            homa_qdisc_update_sysctl(struct homa_qdisc_dev *qdev);
+void            homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared);
 void            homa_rcu_kfree(void *object);
 void            homa_rcu_kfree_callback(struct rcu_head *head);
 
@@ -237,7 +279,7 @@ void            homa_rcu_kfree_callback(struct rcu_head *head);
  */
 static inline bool homa_qdisc_active(struct homa *homa)
 {
-	return list_first_or_null_rcu(&homa->qdevs->qdevs,
+	return list_first_or_null_rcu(&homa->qshared->qdevs,
 				      struct homa_qdisc_dev, links) != NULL;
 }
 

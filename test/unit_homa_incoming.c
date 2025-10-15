@@ -3,7 +3,6 @@
 #include "homa_impl.h"
 #include "homa_grant.h"
 #include "homa_interest.h"
-#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 #define KSELFTEST_NOT_MAIN 1
@@ -14,6 +13,7 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_offload.h"
+#include "homa_pacer.h"
 #endif /* See strip.py */
 
 #ifndef __STRIP__ /* See strip.py */
@@ -101,7 +101,7 @@ FIXTURE_SETUP(homa_incoming)
 	self->homa.num_priorities = 1;
 	self->homa.poll_cycles = 0;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
-	self->homa.pacer->fifo_fraction = 0;
+	self->homa.qshared->fifo_fraction = 0;
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
 #endif /* See strip.py */

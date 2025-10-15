@@ -1828,6 +1828,8 @@ int homa_dointvec(const struct ctl_table *table, int write,
 		 * dependent information).
 		 */
 		homa_incoming_sysctl_changed(homa);
+		homa_pacer_update_sysctl_deps(homa->pacer);
+		homa_qdisc_update_sysctl_deps(homa->qshared);
 
 		/* For this value, only call the method when this
 		 * particular value was written (don't want to increment

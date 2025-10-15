@@ -607,7 +607,7 @@ void homa_xmit_data(struct homa_rpc *rpc)
 		}
 
 		if (rpc->msgout.length - rpc->msgout.next_xmit_offset >
-		    homa->pacer->throttle_min_bytes &&
+		    homa->qshared->defer_min_bytes &&
 		    !homa_qdisc_active(rpc->hsk->homa)) {
 			if (!homa_pacer_check_nic_q(homa->pacer, skb, force)) {
 				tt_record1("homa_xmit_data adding id %u to throttle queue",

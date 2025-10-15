@@ -2,20 +2,21 @@
 
 #include "homa_impl.h"
 #include "homa_grant.h"
-#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
-#ifndef __STRIP__ /* See strip.py */
-#include "homa_qdisc.h"
-#include "homa_skb.h"
-#else /* See strip.py */
-#include "homa_stub.h"
-#endif /* See strip.py */
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "ccutils.h"
 #include "mock.h"
 #include "utils.h"
+
+#ifndef __STRIP__ /* See strip.py */
+#include "homa_pacer.h"
+#include "homa_qdisc.h"
+#include "homa_skb.h"
+#else /* See strip.py */
+#include "homa_stub.h"
+#endif /* See strip.py */
 
 #ifndef __STRIP__ /* See strip.py */
 #define XMIT_DATA(rpc, force) homa_xmit_data(rpc, force)
@@ -96,7 +97,7 @@ FIXTURE_SETUP(homa_outgoing)
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
-	self->homa.pacer->fifo_fraction = 0;
+	self->homa.qshared->fifo_fraction = 0;
 #endif /* See strip.py */
 	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 	self->server_addr.in6.sin6_family = AF_INET;
@@ -830,8 +831,8 @@ TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
 
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 11000);
-	self->homa.pacer->max_nic_queue_cycles = 500;
-	self->homa.pacer->throttle_min_bytes = 250;
+	self->homa.qshared->max_nic_queue_cycles = 500;
+	self->homa.qshared->defer_min_bytes = 250;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	homa_rpc_lock(crpc);
 	XMIT_DATA(crpc, false);
@@ -852,7 +853,7 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 
 	/* First, get an RPC on the throttled list. */
 	atomic64_set(&self->homa.pacer->link_idle_time, 11000);
-	self->homa.pacer->max_nic_queue_cycles = 3000;
+	self->homa.qshared->max_nic_queue_cycles = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	homa_rpc_lock(crpc1);
 	XMIT_DATA(crpc1, false);
@@ -883,7 +884,7 @@ TEST_F(homa_outgoing, homa_xmit_data__dont_throttle_because_homa_qdisc_in_use)
 			       self->client_id, 2000, 1000);
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 1000000);
-	self->homa.pacer->max_nic_queue_cycles = 0;
+	self->homa.qshared->max_nic_queue_cycles = 0;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 
 	homa_rpc_lock(crpc);
@@ -903,7 +904,7 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 11000);
-	self->homa.pacer->max_nic_queue_cycles = 3000;
+	self->homa.qshared->max_nic_queue_cycles = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 
 	homa_rpc_lock(crpc);

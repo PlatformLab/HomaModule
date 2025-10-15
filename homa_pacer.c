@@ -9,35 +9,6 @@
 #include "homa_pacer.h"
 #include "homa_rpc.h"
 
-/* Used to enable sysctl access to pacer-specific configuration parameters. The
- * @data fields are actually offsets within a struct homa_pacer; these are
- * converted to pointers into a net-specific struct homa later.
- */
-#define OFFSET(field) ((void *)offsetof(struct homa_pacer, field))
-static struct ctl_table pacer_ctl_table[] = {
-	{
-		.procname	= "max_nic_queue_ns",
-		.data		= OFFSET(max_nic_queue_ns),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_pacer_dointvec
-	},
-	{
-		.procname	= "pacer_fifo_fraction",
-		.data		= OFFSET(fifo_fraction),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_pacer_dointvec
-	},
-	{
-		.procname	= "throttle_min_bytes",
-		.data		= OFFSET(throttle_min_bytes),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_pacer_dointvec
-	},
-};
-
 /**
  * homa_pacer_alloc() - Allocate and initialize a new pacer object, which
  * will hold pacer-related information for @homa.
@@ -57,9 +28,6 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa)
 	pacer->fifo_count = 1000;
 	spin_lock_init(&pacer->throttle_lock);
 	INIT_LIST_HEAD_RCU(&pacer->throttled_rpcs);
-	pacer->fifo_fraction = 50;
-	pacer->max_nic_queue_ns = 5000;
-	pacer->throttle_min_bytes = 1000;
 	init_waitqueue_head(&pacer->wait_queue);
 	pacer->kthread = kthread_run(homa_pacer_main, pacer, "homa_pacer");
 	if (IS_ERR(pacer->kthread)) {
@@ -68,15 +36,6 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa)
 		goto error;
 	}
 	atomic64_set(&pacer->link_idle_time, homa_clock());
-
-	pacer->sysctl_header = register_net_sysctl(&init_net, "net/homa",
-						   pacer_ctl_table);
-	if (!pacer->sysctl_header) {
-		err = -ENOMEM;
-		pr_err("couldn't register sysctl parameters for Homa pacer\n");
-		goto error;
-	}
-	homa_pacer_update_sysctl_deps(pacer);
 	return pacer;
 
 error:
@@ -92,10 +51,6 @@ error:
  */
 void homa_pacer_free(struct homa_pacer *pacer)
 {
-	if (pacer->sysctl_header) {
-		unregister_net_sysctl_table(pacer->sysctl_header);
-		pacer->sysctl_header = NULL;
-	}
 	if (pacer->kthread) {
 		kthread_stop(pacer->kthread);
 		pacer->kthread = NULL;
@@ -132,8 +87,8 @@ int homa_pacer_check_nic_q(struct homa_pacer *pacer, struct sk_buff *skb,
 	while (1) {
 		clock = homa_clock();
 		idle = atomic64_read(&pacer->link_idle_time);
-		if ((clock + pacer->max_nic_queue_cycles) < idle && !force &&
-		    !(pacer->homa->flags & HOMA_FLAG_DONT_THROTTLE))
+		if ((clock + pacer->homa->qshared->max_nic_queue_cycles) < idle &&
+		    !force && !(pacer->homa->flags & HOMA_FLAG_DONT_THROTTLE))
 			return 0;
 		if (!list_empty(&pacer->throttled_rpcs))
 			INC_METRIC(pacer_bytes, bytes);
@@ -216,7 +171,7 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 	while (1) {
 		queue_cycles = atomic64_read(&pacer->link_idle_time) -
 					     homa_clock();
-		if (queue_cycles >= pacer->max_nic_queue_cycles)
+		if (queue_cycles >= pacer->homa->qshared->max_nic_queue_cycles)
 			break;
 		if (list_empty(&pacer->throttled_rpcs))
 			break;
@@ -229,7 +184,7 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 		 * Locking Strategy" in homa_impl.h).
 		 */
 		homa_pacer_throttle_lock(pacer);
-		pacer->fifo_count -= pacer->fifo_fraction;
+		pacer->fifo_count -= pacer->homa->qshared->fifo_fraction;
 		if (pacer->fifo_count <= 0) {
 			struct homa_rpc *cur;
 			u64 oldest = ~0;
@@ -360,45 +315,10 @@ void homa_pacer_update_sysctl_deps(struct homa_pacer *pacer)
 {
 	u64 tmp;
 
-	pacer->max_nic_queue_cycles =
-			homa_ns_to_cycles(pacer->max_nic_queue_ns);
-
 	/* Underestimate link bandwidth (overestimate time) by 1%. */
 	tmp = 101 * 8000 * (u64)homa_clock_khz();
 	do_div(tmp, pacer->homa->link_mbps * 100);
 	pacer->cycles_per_mbyte = tmp;
-}
-
-/**
- * homa_pacer_dointvec() - This function is a wrapper around proc_dointvec. It
- * is invoked to read and write pacer-related sysctl values.
- * @table:    sysctl table describing value to be read or written.
- * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space of the input/output data.
- * @lenp:     Not exactly sure.
- * @ppos:     Not exactly sure.
- *
- * Return: 0 for success, nonzero for error.
- */
-int homa_pacer_dointvec(const struct ctl_table *table, int write,
-			void *buffer, size_t *lenp, loff_t *ppos)
-{
-	struct ctl_table table_copy;
-	struct homa_pacer *pacer;
-	int result;
-
-	pacer = homa_net(current->nsproxy->net_ns)->homa->pacer;
-
-	/* Generate a new ctl_table that refers to a field in the
-	 * net-specific struct homa.
-	 */
-	table_copy = *table;
-	table_copy.data = ((char *)pacer) + (uintptr_t)table_copy.data;
-
-	result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
-	if (write)
-		homa_pacer_update_sysctl_deps(pacer);
-	return result;
 }
 
 /**
