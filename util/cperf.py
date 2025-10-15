@@ -383,7 +383,7 @@ def init(options):
     vlog("Options: %s" % (s))
     vlog("Homa configuration (node%d):" % (options.nodes[0]))
     result = subprocess.run(['ssh', 'node%d' % (options.nodes[0]),
-            'sysctl', '-a'], capture_output=True, encoding="utf-8")
+            'sysctl', '-a'], capture_output=True, encoding="iso8859-1")
     if (result.returncode != 0):
         log("sysctl -a on node%d exited with status %d:" %
                 (options.nodes[0], result.returncode))
