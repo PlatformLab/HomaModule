@@ -542,23 +542,17 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 		dst = &rt->dst;
 		peer->dst_cookie = 0;
 	} else {
-		peer->flow.u.ip6.flowi6_oif = hsk->sock.sk_bound_dev_if;
-		peer->flow.u.ip6.flowi6_iif = LOOPBACK_IFINDEX;
-		peer->flow.u.ip6.flowi6_mark = hsk->sock.sk_mark;
-		peer->flow.u.ip6.flowi6_scope = RT_SCOPE_UNIVERSE;
+		/* This code is derived from code in tcp_v6_connect. */
 		peer->flow.u.ip6.flowi6_proto = hsk->sock.sk_protocol;
-		peer->flow.u.ip6.flowi6_flags = 0;
-		peer->flow.u.ip6.flowi6_secid = 0;
-		peer->flow.u.ip6.flowi6_tun_key.tun_id = 0;
-		peer->flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
 		peer->flow.u.ip6.daddr = peer->addr;
 		peer->flow.u.ip6.saddr = hsk->inet.pinet6->saddr;
-		peer->flow.u.ip6.fl6_dport = 0;
-		peer->flow.u.ip6.fl6_sport = 0;
-		peer->flow.u.ip6.mp_hash = 0;
-		peer->flow.u.ip6.__fl_common.flowic_tos = hsk->inet.tos;
 		peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos,
 							       0);
+		peer->flow.u.ip6.flowi6_oif = hsk->sock.sk_bound_dev_if;
+		peer->flow.u.ip6.flowi6_mark = hsk->sock.sk_mark;
+		peer->flow.u.ip6.fl6_dport = 0;
+		peer->flow.u.ip6.fl6_sport = 0;
+		peer->flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
 		security_sk_classify_flow(&hsk->sock,
 					  &peer->flow.u.__fl_common);
 		dst = ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
