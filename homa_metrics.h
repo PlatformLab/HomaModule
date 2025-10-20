@@ -395,23 +395,38 @@ struct homa_metrics {
 	u64 pacer_xmit_cycles;
 
 	/**
-	 * @pacer_packets: total number of Homa packets that were transmitted
-	 * by homa_qdisc_pacer (they were deferred because of NIC queue
-	 * overload).
-	 */
-	u64 pacer_packets;
-
-	/**
-	 * @pacer_bytes: total number of bytes in packets that were
+	 * @pacer_homa_packets: total number of Homa packets that were
 	 * transmitted by homa_qdisc_pacer (they were deferred because of
 	 * NIC queue overload).
 	 */
-	u64 pacer_bytes;
+	u64 pacer_homa_packets;
 
 	/**
-	 * @pacer_help_bytes: bytes in @pacer_bytes that were transmitted via
-	 * calls to homa_qdisc_pacer_check (presumably because the pacer thread
-	 * wasn't keeping up). Includes header bytes.
+	 * @pacer_homa_bytes: total number of bytes in Homa packets that were
+	 * transmitted by homa_qdisc_pacer (they were deferred because of
+	 * NIC queue overload).
+	 */
+	u64 pacer_homa_bytes;
+
+	/**
+	 * @pacer_tcp_packets: total number of TCP packets that were
+	 * transmitted by homa_qdisc_pacer (they were deferred because of
+	 * NIC queue overload).
+	 */
+	u64 pacer_tcp_packets;
+
+	/**
+	 * @pacer_tcp_bytes: total number of bytes in TCP packets that were
+	 * transmitted by homa_qdisc_pacer (they were deferred because of
+	 * NIC queue overload).
+	 */
+	u64 pacer_tcp_bytes;
+
+	/**
+	 * @pacer_help_bytes: bytes that the pacer transmitted via calls to
+	 * homa_qdisc_pacer_check (presumably because the pacer thread
+	 * wasn't keeping up). Includes both TCP and Homa packets as well as
+	 * header bytes.
 	 */
 	u64 pacer_help_bytes;
 

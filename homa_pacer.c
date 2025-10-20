@@ -90,8 +90,10 @@ int homa_pacer_check_nic_q(struct homa_pacer *pacer, struct sk_buff *skb,
 		if ((clock + pacer->homa->qshared->max_nic_queue_cycles) < idle &&
 		    !force && !(pacer->homa->flags & HOMA_FLAG_DONT_THROTTLE))
 			return 0;
-		if (!list_empty(&pacer->throttled_rpcs))
-			INC_METRIC(pacer_bytes, bytes);
+		if (!list_empty(&pacer->throttled_rpcs)) {
+			INC_METRIC(pacer_homa_packets, 1);
+			INC_METRIC(pacer_homa_bytes, bytes);
+		}
 		if (idle < clock)
 			new_idle = clock + cycles_for_packet;
 		else

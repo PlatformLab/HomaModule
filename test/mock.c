@@ -1667,6 +1667,27 @@ struct page *mock_alloc_pages(gfp_t gfp, unsigned int order)
 	return page;
 }
 
+#ifndef __STRIP__ /* See strip.py */
+/**
+ * mock_alloc_qdisc() - Allocate and initialize a new Qdisc suitable for
+ * use in unit tests as a homa qdisc.
+ * Return:  The new Qdisc. The memory is dynamically allocated and must
+ * be kfree-d by the caller. homa_qdisc_init has not been invoked on
+ * this Qdisc yet.
+ */
+struct Qdisc *mock_alloc_qdisc(struct netdev_queue *dev_queue)
+{
+	struct Qdisc *qdisc;
+
+	qdisc = kzalloc(sizeof(struct Qdisc) + sizeof(struct homa_qdisc),
+		      GFP_ATOMIC);
+	qdisc->dev_queue = dev_queue;
+	qdisc->ops = qdisc_ops;
+	spin_lock_init(&qdisc->q.lock);
+	return qdisc;
+}
+#endif /* See strip.py */
+
 /**
  * mock_check_error() - Determines whether a method should simulate an error
  * return.
@@ -1942,26 +1963,70 @@ void mock_put_page(struct page *page)
 	}
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
- * mock_alloc_qdisc() - Allocate and initialize a new Qdisc suitable for
- * use in unit tests as a homa qdisc.
- * Return:  The new Qdisc. The memory is dynamically allocated and must
- * be kfree-d by the caller. homa_qdisc_init has not been invoked on
- * this Qdisc yet.
+ * mock_raw_skb() - Performs most of the work of mock_skb_alloc and
+ * mock_tcp_skb. Allocates and initializes an skb.
+ * @saddr:        IPv6 address to use as the sender of the packet, in
+ *                network byte order.
+ * @protocol:     Protocol to use in the IP header, such as IPPROTO_HOMA.
+ * @length:       How many bytes of space to allocated after the IP header.
+ * Return:        The new packet buffer, initialized as if the packet just
+ *                arrived from the network and is about to be processed at
+ *                transport level (e.g. there will be an IP header before
+ *                skb->tail). The skb has room for @length additional bytes,
+ *                but they have not yet been allocated with skb_put(). The
+ *                caller must eventually free the skb.
  */
-struct Qdisc *mock_alloc_qdisc(struct netdev_queue *dev_queue)
+struct sk_buff *mock_raw_skb(struct in6_addr *saddr, int protocol, int length)
 {
-	struct Qdisc *qdisc;
+	int ip_size, data_size, shinfo_size;
+	struct sk_buff *skb;
 
-	qdisc = kzalloc(sizeof(struct Qdisc) + sizeof(struct homa_qdisc),
-		      GFP_ATOMIC);
-	qdisc->dev_queue = dev_queue;
-	qdisc->ops = qdisc_ops;
-	spin_lock_init(&qdisc->q.lock);
-	return qdisc;
+	/* Don't let the IP header start at the beginning of the packet
+	 * buffer: that will confuse is_homa_pkt.
+	 */
+#define IP_HDR_OFFSET 4
+
+	skb = malloc(sizeof(struct sk_buff));
+	memset(skb, 0, sizeof(*skb));
+	if (!skbs_in_use)
+		skbs_in_use = unit_hash_new();
+	unit_hash_set(skbs_in_use, skb, "used");
+
+	ip_size = mock_ipv6 ? sizeof(struct ipv6hdr) : sizeof(struct iphdr);
+	data_size = SKB_DATA_ALIGN(IP_HDR_OFFSET + ip_size + length);
+	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
+	skb->head = malloc(data_size + shinfo_size);
+	memset(skb->head, 0, data_size + shinfo_size);
+	skb->data = skb->head;
+	skb_reset_tail_pointer(skb);
+	skb->end = skb->tail + data_size;
+
+	/* Don't want IP header starting at the beginning of the packet
+	 * buffer (will confuse is_homa_pkt).
+	 */
+	skb_reserve(skb, IP_HDR_OFFSET + ip_size);
+	skb_reset_transport_header(skb);
+	skb_reset_network_header(skb);
+	skb_set_network_header(skb, -ip_size);
+	if (mock_ipv6) {
+		ipv6_hdr(skb)->version = 6;
+		ipv6_hdr(skb)->saddr = *saddr;
+		ipv6_hdr(skb)->nexthdr = protocol;
+	} else {
+		ip_hdr(skb)->version = 4;
+		ip_hdr(skb)->saddr = saddr->in6_u.u6_addr32[3];
+		ip_hdr(skb)->protocol = protocol;
+		ip_hdr(skb)->check = 0;
+	}
+	skb->users.refs.counter = 1;
+	skb->_skb_refdst = 0;
+	skb->hash = 3;
+	skb->next = NULL;
+	skb->dev = &mock_devices[0];
+	qdisc_skb_cb(skb)->pkt_len = length + 100;
+	return skb;
 }
-#endif /* See strip.py */
 
 /**
  * mock_rcu_read_lock() - Called instead of rcu_read_lock when Homa is compiled
@@ -2108,7 +2173,7 @@ void mock_set_ipv6(struct homa_sock *hsk)
 }
 
 /**
- * mock_skb_alloc() - Allocate and return a packet buffer. The buffer is
+ * mock_skb_alloc() - Allocate and return a Homa packet buffer. The buffer is
  * initialized as if it just arrived from the network.
  * @saddr:        IPv6 address to use as the sender of the packet, in
  *                network byte order.
@@ -2124,12 +2189,13 @@ void mock_set_ipv6(struct homa_sock *hsk)
  * Return:        A packet buffer containing the information described above.
  *                The caller owns this buffer and is responsible for freeing it.
  */
-struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct homa_common_hdr *h,
-		int extra_bytes, int first_value)
+struct sk_buff *mock_skb_alloc(struct in6_addr *saddr,
+			       struct homa_common_hdr *h, int extra_bytes,
+			       int first_value)
 {
-	int header_size, ip_size, data_size, shinfo_size;
 	struct sk_buff *skb;
 	unsigned char *p;
+	int header_size;
 
 	/* Don't let the IP header start at the beginning of the packet
 	 * buffer: that will confuse is_homa_pkt.
@@ -2176,58 +2242,45 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct homa_common_hdr *h
 	} else {
 		header_size = 0;
 	}
-	skb = malloc(sizeof(struct sk_buff));
-	memset(skb, 0, sizeof(*skb));
-	if (!skbs_in_use)
-		skbs_in_use = unit_hash_new();
-	unit_hash_set(skbs_in_use, skb, "used");
-
-	ip_size = mock_ipv6 ? sizeof(struct ipv6hdr) : sizeof(struct iphdr);
-	data_size = SKB_DATA_ALIGN(IP_HDR_OFFSET + ip_size + header_size +
-				   extra_bytes);
-	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
-	if (h) {
-		skb->head = malloc(data_size + shinfo_size);
-		memset(skb->head, 0, data_size + shinfo_size);
-	} else {
-		skb->head = malloc(extra_bytes);
-		memset(skb->head, 0, extra_bytes);
-
-	}
-	skb->data = skb->head;
-	skb_reset_tail_pointer(skb);
-	skb->end = skb->tail + data_size;
-
-	/* Don't want IP header starting at the beginning of the packet
-	 * buffer (will confuse is_homa_pkt).
-	 */
-	skb_reserve(skb, IP_HDR_OFFSET + ip_size);
-	skb_reset_transport_header(skb);
+	skb = mock_raw_skb(saddr, IPPROTO_HOMA, header_size + extra_bytes);
+	p = skb_transport_header(skb);
 	if (header_size != 0) {
 		p = skb_put(skb, header_size);
-		memcpy(skb->data, h, header_size);
+		memcpy(p, h, header_size);
 	}
 	if (h && extra_bytes != 0) {
 		p = skb_put(skb, extra_bytes);
 		unit_fill_data(p, extra_bytes, first_value);
 	}
-	skb->users.refs.counter = 1;
-	skb_reset_network_header(skb);
-	skb_set_network_header(skb, -ip_size);
-	if (mock_ipv6) {
-		ipv6_hdr(skb)->version = 6;
-		ipv6_hdr(skb)->saddr = *saddr;
-		ipv6_hdr(skb)->nexthdr = IPPROTO_HOMA;
-	} else {
-		ip_hdr(skb)->version = 4;
-		ip_hdr(skb)->saddr = saddr->in6_u.u6_addr32[3];
-		ip_hdr(skb)->protocol = IPPROTO_HOMA;
-		ip_hdr(skb)->check = 0;
-	}
-	skb->_skb_refdst = 0;
-	skb->hash = 3;
-	skb->next = NULL;
-	skb->dev = &mock_devices[0];
+	qdisc_skb_cb(skb)->pkt_len = extra_bytes + 100;
+	return skb;
+}
+
+/**
+ * mock_tcp_skb() - Allocate and return a TCP packet buffer. The buffer is
+ * initialized as if it just arrived from the network.
+ * @saddr:        IPv6 address to use as the sender of the packet, in
+ *                network byte order.
+ * @sequence:     Sequence number to store in the TCP header.
+ * @extra_bytes:  How much additional data to add to the buffer after
+ *                the TCP header.
+ *
+ * Return:        A packet buffer containing the information described above.
+ *                The caller owns this buffer and is responsible for freeing it.
+ */
+struct sk_buff *mock_tcp_skb(struct in6_addr *saddr, int sequence,
+			     int extra_bytes)
+{
+	struct sk_buff *skb;
+	struct tcphdr *tcp;
+
+	skb = mock_raw_skb(saddr, IPPROTO_TCP,
+			   sizeof(struct tcphdr) + extra_bytes);
+	tcp = (struct tcphdr *)skb_put(skb, sizeof(struct tcphdr));
+	tcp->seq = htonl(sequence);
+	tcp->doff = sizeof(struct tcphdr) / 4;
+	skb_put(skb, extra_bytes);
+	qdisc_skb_cb(skb)->pkt_len = extra_bytes + 100;
 	return skb;
 }
 

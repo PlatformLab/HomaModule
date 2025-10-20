@@ -1471,7 +1471,7 @@ TEST_F(homa_plumbing, homa_err_handler_v4__port_unreachable)
 	failed = mock_skb_alloc(self->server_ip, &self->data.common, 100, 0);
 	ip_hdr(failed)->daddr = ipv6_to_ipv4(self->server_ip[0]);
 
-	icmp = mock_skb_alloc(self->server_ip, NULL, 1000, 0);
+	icmp = mock_raw_skb(self->server_ip, IPPROTO_ICMP, 1000);
 	icmph = skb_put(icmp, sizeof *icmph);
 	icmph->type = ICMP_DEST_UNREACH;
 	icmph->code = ICMP_PORT_UNREACH;
@@ -1499,7 +1499,7 @@ TEST_F(homa_plumbing, homa_err_handler_v4__host_unreachable)
 	failed = mock_skb_alloc(self->server_ip, &self->data.common, 100, 0);
 	ip_hdr(failed)->daddr = ipv6_to_ipv4(self->server_ip[0]);
 
-	icmp = mock_skb_alloc(self->server_ip, NULL, 1000, 0);
+	icmp = mock_raw_skb(self->server_ip, IPPROTO_ICMP, 1000);
 	icmph = skb_put(icmp, sizeof *icmph);
 	icmph->type = ICMP_DEST_UNREACH;
 	icmph->code = ICMP_HOST_UNKNOWN;
@@ -1526,7 +1526,7 @@ TEST_F(homa_plumbing, homa_err_handler_v6__port_unreachable)
 	failed = mock_skb_alloc(self->server_ip, &self->data.common, 100, 0);
 	ipv6_hdr(failed)->daddr = self->server_ip[0];
 
-	icmp = mock_skb_alloc(self->server_ip, NULL, 1000, 0);
+	icmp = mock_raw_skb(self->server_ip, IPPROTO_ICMP, 1000);
 	memcpy(skb_put(icmp, failed->len), skb_network_header(failed),
 	       failed->len);
 
@@ -1550,7 +1550,7 @@ TEST_F(homa_plumbing, homa_err_handler_v6__protocol_not_supported)
 	failed = mock_skb_alloc(self->server_ip, &self->data.common, 100, 0);
 	ipv6_hdr(failed)->daddr = self->server_ip[0];
 
-	icmp = mock_skb_alloc(self->server_ip, NULL, 1000, 0);
+	icmp = mock_raw_skb(self->server_ip, IPPROTO_ICMP, 1000);
 	memcpy(skb_put(icmp, failed->len), skb_network_header(failed),
 	       failed->len);
 

@@ -25,6 +25,9 @@
  * the homa queuing discipline
  */
 struct homa_qdisc {
+	/** @sch: The Qdisc that this structure is associated with. */
+	struct Qdisc *sch;
+
 	/** @qdev: Info shared among all qdiscs for a net_device. */
 	struct homa_qdisc_dev *qdev;
 
@@ -33,6 +36,27 @@ struct homa_qdisc {
 	 * its net_device.
 	 */
 	int ix;
+
+	/**
+	 * @credit: Used to share bandwidth equally among qdiscs with
+	 * deferred TCP packets. Packets won't be transmitted from
+	 * tcp_deferred until this becomes positive.
+	 */
+	int credit;
+
+	/**
+	 * @tcp_deferred: TCP packets whose transmission was deferred
+	 * because the NIC queue was too long. The queue is in order of
+	 * packet arrival at the qdisc.
+	 */
+	struct sk_buff_head tcp_deferred;
+
+	/**
+	 * @defer_links: Used to link this qdisc into the tcp_qdiscs list
+	 * in homa_qdisc_dev. This will be an empty list whenever this
+	 * object is not queued on tcp_qdiscs.
+	 */
+	struct list_head defer_links;
 };
 
 /**
@@ -118,18 +142,35 @@ struct homa_qdisc_dev {
 	struct rb_root_cached deferred_rpcs;
 
 	/**
-	 * @tcp_deferred: TCP packets whose transmission was deferred
-	 * because the NIC queue was too long. The queue is in order of
-	 * packet arrival at the qdisc.
+	 * @tcp_qdiscs: List of all homa_qdiscs that have deferred TCP
+	 * packets.
 	 */
-	struct sk_buff_head tcp_deferred;
+	struct list_head tcp_qdiscs;
+
+	/**
+	 * @cur_tcp_qdisc: Points to an element of tcp_qdiscs or NULL; this is
+	 * the qdisc currently being serviced by the pacer. This pointer
+	 * rotates circularly through tcp_qdiscs.
+	 */
+	struct homa_qdisc *cur_tcp_qdisc;
 
 	/**
 	 * @last_defer: The most recent homa_clock() time when a packet was
-	 * added to homa_deferred or tcp_deferred, or 0 if there are currently
-	 * no deferred packets.
+	 * deferred, or 0 if there are currently no deferred packets.
 	 */
 	u64 last_defer;
+
+	/**
+	 * @homa_credit: When there are both Homa and TCP deferred packets,
+	 * this is used to balance output between them according to the
+	 * homa_share sysctl value. Positive means that Homa packets should
+	 * be transmitted next, zero or negative means TCP. When a TCP
+	 * packet is transmitted, this is incremented by the packet length
+	 * times homa_share; when a Homa packet is transmitted, it is
+	 * decremented by packet length times (100 - homa_share). Used only
+	 * by the pacer, so no need for synchronization.
+	 */
+	int homa_credit;
 
 	/**
 	 * @defer_lock: Synchronizes access to information about deferred
@@ -213,6 +254,21 @@ struct homa_qdisc_shared {
 	 */
 	int defer_min_bytes;
 
+	/**
+	 * @homa_share: When the uplink is overloaded, this determines how
+	 * to share bandwidth between TCP and Homa. It gives the percentage
+	 * of bandwidth that Homa will receive; TCP (and all other protocols,
+	 * such as UDP) get the remainder. Must be between 0 and 100,
+	 * inclusive.
+	 */
+	int homa_share;
+
+	/**
+	 * @tcp_credit_increment: Amount by which the credit field of
+	 * homa_qdisc is incremented.
+	 */
+	int tcp_credit_increment;
+
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @sysctl_header: Used to remove sysctl values when this structure
@@ -237,8 +293,7 @@ struct homa_rcu_kfreer {
 void            homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev,
 				      struct sk_buff *skb);
-struct sk_buff *
-		homa_qdisc_dequeue_homa(struct homa_qdisc_dev *qdev);
+void            homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb);
 void            homa_qdisc_destroy(struct Qdisc *sch);
 void            homa_qdisc_dev_callback(struct rcu_head *head);
 int             homa_qdisc_dointvec(const struct ctl_table *table, int write,
@@ -246,6 +301,7 @@ int             homa_qdisc_dointvec(const struct ctl_table *table, int write,
 int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
 void            homa_qdisc_free_homa(struct homa_qdisc_dev *qdev);
+struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev);
 int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
 void            homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev,
@@ -268,6 +324,8 @@ void            homa_qdisc_unregister(void);
 int             homa_qdisc_update_link_idle(struct homa_qdisc_dev *qdev,
 					    int bytes, int max_queue_ns);
 void            homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared);
+int             homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev);
+int             homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev);
 void            homa_rcu_kfree(void *object);
 void            homa_rcu_kfree_callback(struct rcu_head *head);
 
@@ -302,13 +360,13 @@ static inline void homa_qdisc_rpc_init(struct homa_rpc_qdisc *qrpc)
 static inline bool homa_qdisc_any_deferred(struct homa_qdisc_dev *qdev)
 {
 	return rb_first_cached(&qdev->deferred_rpcs) ||
-	       !skb_queue_empty(&qdev->tcp_deferred);
+	       !list_empty(&qdev->tcp_qdiscs);
 }
 
 /**
- * homa_qdisc_precedes() - Return true if @rpc1 is considered "less"
- * than @rpc2 for the purposes of qdev->deferred_rpcs, or false if @rpc1
- * is consdered "greater" (ties not allowed).
+ * homa_qdisc_precedes() - Return true if @rpc1 is considered "less" than
+ * @rpc2 (i.e. higher priority) for the purposes of qdev->deferred_rpcs, or
+ * false if @rpc1 is consdered "greater" (ties not allowed).
  * @rpc1:    RPC to compare
  * @rpc2:    RPC to compare; must be different from rpc1.
  */

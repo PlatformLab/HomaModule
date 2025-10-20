@@ -402,26 +402,35 @@ if elapsed_secs != 0:
         print("GRO bypass for data packets:  %5.1f%%" % (data_bypass_percent))
         print("GRO bypass for grant packets: %5.1f%%" % (grant_bypass_percent))
 
-    if deltas["pacer_packets"] != 0:
+    pacer_bytes = deltas["pacer_homa_bytes"] + deltas["pacer_tcp_bytes"]
+    if pacer_bytes != 0:
         print("\nPacer:")
         print("--------")
-        print("Packets sent:                   %5.3f M/sec (%.1f %% of all packets)" %
-                (1e-6*deltas["pacer_packets"]/elapsed_secs,
-                100*deltas["pacer_packets"]/packets_sent))
-        print("Throughput (including headers): %5.2f Gbps" %
-                (8e-9*deltas["pacer_bytes"]/elapsed_secs))
-        print("Helper throughput:              %5.2f Gbps (%.1f%% of all pacer bytes)" %
+        if packets_sent > 0:
+            print("Homa packets sent:              %5.3f M/sec (%.1f %% of all Homa packets)" %
+                    (1e-6*deltas["pacer_homa_packets"]/elapsed_secs,
+                    100*deltas["pacer_homa_packets"]/packets_sent))
+        else:
+            print("Homa packets sent:              0.000 M/sec")
+        print("Homa throughput (inc. headers): %5.2f Gbps" %
+                (8e-9*deltas["pacer_homa_bytes"]/elapsed_secs))
+        print("TCP packets sent:               %5.3f M/sec" %
+                (1e-6*deltas["pacer_tcp_packets"]/elapsed_secs))
+        print("TCP throughput (inc. headers):  %5.2f Gbps" %
+                (8e-9*deltas["pacer_tcp_bytes"]/elapsed_secs))
+        print("Helper throughput (Homa + TCP): %5.2f Gbps (%.1f%% of all pacer bytes)" %
                 (8e-9*deltas["pacer_help_bytes"]/elapsed_secs,
-                100*deltas["pacer_help_bytes"]/deltas["pacer_bytes"]))
+                100*deltas["pacer_help_bytes"]/pacer_bytes))
         backlog_secs = float(deltas["nic_backlog_cycles"])/(cpu_khz * 1000.0)
         print("Active throughput:              %5.2f Gbps (NIC backlogged %.1f%% of time)" % (
-                deltas["pacer_bytes"]*8e-09/backlog_secs,
-                100*backlog_secs/elapsed_secs))
+                pacer_bytes*8e-09/backlog_secs, 100*backlog_secs/elapsed_secs))
         xmit_secs = float(deltas["pacer_xmit_cycles"])/(cpu_khz * 1000.0)
         print("Pacer thread duty cycle:        %5.1f %%" %
                 (100*deltas["pacer_cycles"]/time_delta))
         print("Time xmitting packets:          %5.1f %% (%.2f usecs/packet)" %
-                (100*xmit_secs/elapsed_secs, 1e6*xmit_secs/deltas["pacer_packets"]))
+                (100*xmit_secs/elapsed_secs,
+                1e6*xmit_secs/(deltas["pacer_homa_packets"] +
+                deltas["pacer_tcp_packets"])))
 
     print("\nMiscellaneous:")
     print("--------------")

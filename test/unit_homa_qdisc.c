@@ -178,8 +178,12 @@ FIXTURE_TEARDOWN(homa_qdisc)
 {
 	int i;
 
-	for (i = 0; i < NUM_TXQS; i++)
+	for (i = 0; i < NUM_TXQS; i++) {
+		struct homa_qdisc *q = qdisc_priv(self->qdiscs[i]);
+		if (q->qdev)
+			homa_qdisc_destroy(self->qdiscs[i]);
 		kfree(self->qdiscs[i]);
+	}
 	homa_destroy(&self->homa);
 	homa_qdisc_unregister();
 	unit_teardown();
@@ -434,15 +438,20 @@ TEST_F(homa_qdisc, homa_qdisc_destroy)
 {
 	struct Qdisc *qdisc, *qdisc2;
 	struct homa_qdisc_dev *qdev;
+	struct homa_qdisc *q;
 
 	qdisc = mock_alloc_qdisc(&mock_net_queue);
 	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
+	q = qdisc_priv(qdisc);
 	qdisc2 = mock_alloc_qdisc(&mock_net_queue);
 	EXPECT_EQ(0, homa_qdisc_init(qdisc2, NULL, NULL));
 	qdev = list_first_or_null_rcu(&self->homa.qshared->qdevs,
 				      struct homa_qdisc_dev, links);
 	EXPECT_NE(NULL, qdev);
 	EXPECT_EQ(2, refcount_read(&qdev->refs));
+
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1000));
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 6000, 1100));
 
 	homa_qdisc_destroy(qdisc2);
 	EXPECT_EQ(1, refcount_read(&qdev->refs));
@@ -491,7 +500,7 @@ TEST_F(homa_qdisc, _homa_qdisc_homa_qdisc_set_qixs_object)
 	homa_qdisc_qdev_put(qdev);
 }
 
-TEST_F(homa_qdisc, homa_qdisc_enqueue__packet_not_homa)
+TEST_F(homa_qdisc, homa_qdisc_enqueue__defer_short_tcp_packet)
 {
 	struct Qdisc *qdisc = mock_alloc_qdisc(&mock_net_queue);
 	struct sk_buff *skb, *to_free;
@@ -507,11 +516,45 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__packet_not_homa)
 	q = qdisc_priv(qdisc);
 	atomic64_set(&q->qdev->link_idle_time, 1000000);
 	q->ix = 3;
-	skb = new_test_skb(srpc, &self->addr, 0, 1500);
-	if (skb_is_ipv6(skb))
-		ipv6_hdr(skb)->nexthdr = IPPROTO_TCP;
-	else
-		ip_hdr(skb)->protocol = IPPROTO_TCP;
+
+	/* First packet is long and gets deferred because of link_idle_time. */
+	skb = mock_tcp_skb(&self->addr, 5000, 1500);
+	to_free = NULL;
+	homa_qdisc_enqueue(skb, qdisc, &to_free);
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_EQ(1, q->tcp_deferred.qlen);
+	EXPECT_EQ(1000000, atomic64_read(&q->qdev->link_idle_time));
+
+	/* Second packet is short, but must be deferred to maintain order
+	 * within qdisc.
+	 */
+	skb = mock_tcp_skb(&self->addr, 6000, 500);
+	to_free = NULL;
+	homa_qdisc_enqueue(skb, qdisc, &to_free);
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_EQ(2, q->tcp_deferred.qlen);
+	EXPECT_EQ(1000000, atomic64_read(&q->qdev->link_idle_time));
+
+	homa_qdisc_destroy(qdisc);
+	kfree(qdisc);
+}
+TEST_F(homa_qdisc, homa_qdisc_enqueue__xmit_short_tcp_packet)
+{
+	struct Qdisc *qdisc = mock_alloc_qdisc(&mock_net_queue);
+	struct sk_buff *skb, *to_free;
+	struct homa_rpc *srpc;
+	struct homa_qdisc *q;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->client_port,
+			       self->server_id, 100, 7100);
+	ASSERT_NE(NULL, srpc);
+
+	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
+	q = qdisc_priv(qdisc);
+	atomic64_set(&q->qdev->link_idle_time, 1000000);
+	q->ix = 3;
+	skb = mock_tcp_skb(&self->addr, 5000, 500);
 	to_free = NULL;
 	unit_log_clear();
 
@@ -521,6 +564,45 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__packet_not_homa)
 	EXPECT_EQ(1, qdisc->q.qlen);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_LT(1000000, atomic64_read(&q->qdev->link_idle_time));
+
+	homa_qdisc_destroy(qdisc);
+	kfree(qdisc);
+}
+TEST_F(homa_qdisc, homa_qdisc_enqueue__defer_tcp_packet_because_of_homa_deferred)
+{
+	struct Qdisc *qdisc = mock_alloc_qdisc(&mock_net_queue);
+	struct sk_buff *skb, *to_free;
+	struct homa_rpc *srpc;
+	struct homa_qdisc *q;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->client_port,
+			       self->server_id, 100, 7100);
+	ASSERT_NE(NULL, srpc);
+
+	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
+	q = qdisc_priv(qdisc);
+	atomic64_set(&q->qdev->link_idle_time, 1000000);
+	q->ix = 3;
+
+	/* First packet is Homa, gets deferred because of link_idle_time. */
+	skb = new_test_skb(srpc, &self->addr, 0, 1500);
+	to_free = NULL;
+	homa_qdisc_enqueue(skb, qdisc, &to_free);
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_TRUE(homa_qdisc_any_deferred(q->qdev));
+	EXPECT_EQ(1000000, atomic64_read(&q->qdev->link_idle_time));
+
+	/* Second packet is TCP, gets deferred because of deferred Homa
+	 * packet.
+	 */
+	mock_clock = 1000000;
+	skb = mock_tcp_skb(&self->addr, 6000, 1500);
+	to_free = NULL;
+	homa_qdisc_enqueue(skb, qdisc, &to_free);
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_EQ(1, q->tcp_deferred.qlen);
+	EXPECT_EQ(1000000, atomic64_read(&q->qdev->link_idle_time));
 
 	homa_qdisc_destroy(qdisc);
 	kfree(qdisc);
@@ -687,9 +769,85 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__use_special_queue)
 	EXPECT_FALSE(homa_qdisc_any_deferred(q->qdev));
 	EXPECT_EQ(0, self->qdiscs[1]->q.qlen);
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
+}
 
-	homa_qdisc_destroy(self->qdiscs[1]);
-	homa_qdisc_destroy(self->qdiscs[3]);
+TEST_F(homa_qdisc, homa_qdisc_defer_tcp__basics)
+{
+	struct homa_rpc *srpc;
+	struct homa_qdisc *q;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->client_port,
+			       self->server_id, 100, 10000);
+	ASSERT_NE(NULL, srpc);
+
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[2], NULL, NULL));
+	q = qdisc_priv(self->qdiscs[2]);
+
+	/* First packet: must add qdisc to qdev->tcp_qdiscs. */
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1500));
+	EXPECT_EQ(1, skb_queue_len(&q->tcp_deferred));
+	EXPECT_EQ(1, unit_list_length(&q->qdev->tcp_qdiscs));
+
+	/* Second packet: qdisc already in qdev->tcp_qdiscs. */
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 7000, 1500));
+	EXPECT_EQ(2, skb_queue_len(&q->tcp_deferred));
+	EXPECT_EQ(1, unit_list_length(&q->qdev->tcp_qdiscs));
+}
+TEST_F(homa_qdisc, homa_qdisc_defer_tcp__multiple_qdiscs_on_list)
+{
+	struct homa_rpc *srpc;
+	struct homa_qdisc *q1, *q2, *q3;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->client_port,
+			       self->server_id, 100, 10000);
+	ASSERT_NE(NULL, srpc);
+
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[1], NULL, NULL));
+	q1 = qdisc_priv(self->qdiscs[1]);
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[2], NULL, NULL));
+	q2 = qdisc_priv(self->qdiscs[2]);
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
+	q3 = qdisc_priv(self->qdiscs[3]);
+
+	homa_qdisc_defer_tcp(q1, mock_tcp_skb(&self->addr, 5000, 1000));
+	homa_qdisc_defer_tcp(q2, mock_tcp_skb(&self->addr, 5000, 2000));
+	homa_qdisc_defer_tcp(q3, mock_tcp_skb(&self->addr, 5000, 3000));
+	EXPECT_EQ(3, unit_list_length(&q1->qdev->tcp_qdiscs));
+	EXPECT_EQ(&q1->defer_links, q1->qdev->tcp_qdiscs.next);
+	EXPECT_EQ(&q2->defer_links, q1->defer_links.next);
+	EXPECT_EQ(&q3->defer_links, q2->defer_links.next);
+}
+TEST_F(homa_qdisc, homa_qdisc_defer_tcp__update_metrics_and_wakeup)
+{
+	struct homa_rpc *srpc;
+	struct homa_qdisc *q;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->client_port,
+			       self->server_id, 100, 10000);
+	ASSERT_NE(NULL, srpc);
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[2], NULL, NULL));
+	q = qdisc_priv(self->qdiscs[2]);
+	mock_log_wakeups = 1;
+
+	/* First packet: qdev->last_defer is 0. */
+	EXPECT_EQ(0, q->qdev->last_defer);
+	mock_clock = 5000;
+	unit_log_clear();
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1500));
+	EXPECT_EQ(5000, q->qdev->last_defer);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->nic_backlog_cycles);
+	EXPECT_STREQ("wake_up", unit_log_get());
+
+	/* Second packet: qdev->last_defer != 0. */
+	mock_clock = 15000;
+	unit_log_clear();
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 7000, 1500));
+	EXPECT_EQ(15000, q->qdev->last_defer);
+	EXPECT_EQ(10000, homa_metrics_per_cpu()->nic_backlog_cycles);
+	EXPECT_STREQ("", unit_log_get());
 }
 
 TEST_F(homa_qdisc, homa_qdisc_defer_homa__basics)
@@ -928,17 +1086,120 @@ TEST_F(homa_qdisc, homa_qdisc_insert_rb__long_right_chain)
         homa_qdisc_qdev_put(qdev);
 }
 
-TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__no_deferred_rpcs)
+TEST_F(homa_qdisc, homa_qdisc_xmit_deferred_tcp__basics)
+{
+	struct homa_qdisc *q;
+
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[2], NULL, NULL));
+	q = qdisc_priv(self->qdiscs[2]);
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1000));
+	atomic64_set(&q->qdev->link_idle_time, 20000);
+
+	EXPECT_EQ(1100, homa_qdisc_xmit_deferred_tcp(q->qdev));
+	EXPECT_EQ(1, self->qdiscs[2]->q.qlen);
+	EXPECT_EQ(0, skb_queue_len(&q->tcp_deferred));
+	EXPECT_LT(20000, atomic64_read(&q->qdev->link_idle_time));
+}
+TEST_F(homa_qdisc, homa_qdisc_xmit_deferred_tcp__no_deferred_packets)
+{
+	struct homa_qdisc_dev *qdev;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	unit_log_clear();
+	EXPECT_EQ(0, homa_qdisc_xmit_deferred_tcp(qdev));
+	EXPECT_EQ(0, self->qdiscs[2]->q.qlen);
+	homa_qdisc_qdev_put(qdev);
+}
+TEST_F(homa_qdisc, homa_qdisc_xmit_deferred_tcp__scan_for_qdisc_with_credit)
+{
+	struct homa_qdisc *q1, *q2, *q3;
+
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[1], NULL, NULL));
+	q1 = qdisc_priv(self->qdiscs[1]);
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[2], NULL, NULL));
+	q2 = qdisc_priv(self->qdiscs[2]);
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
+	q3 = qdisc_priv(self->qdiscs[3]);
+	homa_qdisc_defer_tcp(q1, mock_tcp_skb(&self->addr, 5000, 1000));
+	homa_qdisc_defer_tcp(q2, mock_tcp_skb(&self->addr, 6000, 1100));
+	homa_qdisc_defer_tcp(q3, mock_tcp_skb(&self->addr, 7000, 1200));
+	EXPECT_EQ(3, unit_list_length(&q2->qdev->tcp_qdiscs));
+	self->homa.qshared->tcp_credit_increment = 10000;
+	q1->credit = -30000;
+	q2->credit = -10000;
+	q3->credit = -15000;
+
+	EXPECT_EQ(1200, homa_qdisc_xmit_deferred_tcp(q2->qdev));
+	EXPECT_EQ(1, self->qdiscs[2]->q.qlen);
+	EXPECT_EQ(1, skb_queue_len(&q1->tcp_deferred));
+	EXPECT_EQ(0, skb_queue_len(&q2->tcp_deferred));
+	EXPECT_EQ(1, skb_queue_len(&q3->tcp_deferred));
+}
+TEST_F(homa_qdisc, homa_qdisc_xmit_deferred_tcp__unlink_qdiscs)
+{
+	struct homa_qdisc *q1, *q2;
+
+	mock_clock = 10000;
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[1], NULL, NULL));
+	q1 = qdisc_priv(self->qdiscs[1]);
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[2], NULL, NULL));
+	q2 = qdisc_priv(self->qdiscs[2]);
+	homa_qdisc_defer_tcp(q1, mock_tcp_skb(&self->addr, 5000, 1000));
+	homa_qdisc_defer_tcp(q1, mock_tcp_skb(&self->addr, 6000, 1100));
+	homa_qdisc_defer_tcp(q2, mock_tcp_skb(&self->addr, 7000, 1200));
+	EXPECT_EQ(2, unit_list_length(&q2->qdev->tcp_qdiscs));
+	self->homa.qshared->tcp_credit_increment = 1000;
+
+	/* First call xmits packet from q1. */
+	mock_clock = 11000;
+	EXPECT_EQ(1100, homa_qdisc_xmit_deferred_tcp(q2->qdev));
+	EXPECT_EQ(2, unit_list_length(&q2->qdev->tcp_qdiscs));
+
+	/* Second call xmits packet from q2 and unlinks it. */
+	mock_clock = 13000;
+	EXPECT_EQ(1300, homa_qdisc_xmit_deferred_tcp(q2->qdev));
+	EXPECT_EQ(1, unit_list_length(&q2->qdev->tcp_qdiscs));
+	EXPECT_FALSE(list_empty(&q1->defer_links));
+	EXPECT_TRUE(list_empty(&q2->defer_links));
+
+	/* Third call xmits last packet from q1 and unlinks it. */
+	mock_clock = 16000;
+	EXPECT_EQ(1200, homa_qdisc_xmit_deferred_tcp(q2->qdev));
+	EXPECT_EQ(0, unit_list_length(&q2->qdev->tcp_qdiscs));
+}
+TEST_F(homa_qdisc, homa_qdisc_xmit_deferred_tcp__backlog_cycles_metric)
+{
+	struct homa_qdisc *q1;
+
+	mock_clock = 10000;
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[1], NULL, NULL));
+	q1 = qdisc_priv(self->qdiscs[1]);
+	homa_qdisc_defer_tcp(q1, mock_tcp_skb(&self->addr, 5000, 1000));
+	homa_qdisc_defer_tcp(q1, mock_tcp_skb(&self->addr, 6000, 1100));
+	homa_qdisc_defer_tcp(q1, mock_tcp_skb(&self->addr, 6000, 1200));
+
+	mock_clock = 11000;
+	EXPECT_EQ(1100, homa_qdisc_xmit_deferred_tcp(q1->qdev));
+	EXPECT_EQ(0, homa_metrics_per_cpu()->nic_backlog_cycles);
+	mock_clock = 12000;
+	EXPECT_EQ(1200, homa_qdisc_xmit_deferred_tcp(q1->qdev));
+	EXPECT_EQ(0, homa_metrics_per_cpu()->nic_backlog_cycles);
+	mock_clock = 13000;
+	EXPECT_EQ(1300, homa_qdisc_xmit_deferred_tcp(q1->qdev));
+	EXPECT_EQ(3000, homa_metrics_per_cpu()->nic_backlog_cycles);
+}
+
+TEST_F(homa_qdisc, homa_qdisc_get_deferred_homa__no_deferred_rpcs)
 {
 	struct homa_qdisc_dev *qdev;
 
 	qdev = homa_qdisc_qdev_get(self->dev);
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
 
-	EXPECT_EQ(NULL, homa_qdisc_dequeue_homa(qdev));
+	EXPECT_EQ(NULL, homa_qdisc_get_deferred_homa(qdev));
         homa_qdisc_qdev_put(qdev);
 }
-TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__multiple_packets_for_rpc)
+TEST_F(homa_qdisc, homa_qdisc_get_deferred_homa__multiple_packets_for_rpc)
 {
 	struct homa_qdisc_dev *qdev;
 	struct homa_rpc *srpc;
@@ -958,14 +1219,14 @@ TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__multiple_packets_for_rpc)
 	log_deferred(qdev);
 	EXPECT_STREQ("[id 1235, offsets 2000 3000 4000]", unit_log_get());
 
-	EXPECT_EQ(skb, homa_qdisc_dequeue_homa(qdev));
+	EXPECT_EQ(skb, homa_qdisc_get_deferred_homa(qdev));
 	unit_log_clear();
 	log_deferred(qdev);
 	EXPECT_STREQ("[id 1235, offsets 3000 4000]", unit_log_get());
 	kfree_skb(skb);
         homa_qdisc_qdev_put(qdev);
 }
-TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__last_packet_for_rpc)
+TEST_F(homa_qdisc, homa_qdisc_get_deferred_homa__last_packet_for_rpc)
 {
 	struct homa_rpc *srpc1, *srpc2;
 	struct homa_qdisc_dev *qdev;
@@ -992,14 +1253,14 @@ TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__last_packet_for_rpc)
 	EXPECT_STREQ("[id 1235, offsets 5000]; [id 1237, offsets 2000 3000]",
 		     unit_log_get());
 
-	EXPECT_EQ(skb, homa_qdisc_dequeue_homa(qdev));
+	EXPECT_EQ(skb, homa_qdisc_get_deferred_homa(qdev));
 	unit_log_clear();
 	log_deferred(qdev);
 	EXPECT_STREQ("[id 1237, offsets 2000 3000]", unit_log_get());
 	kfree_skb(skb);
         homa_qdisc_qdev_put(qdev);
 }
-TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__update_tx_left)
+TEST_F(homa_qdisc, homa_qdisc_get_deferred_homa__update_tx_left)
 {
 	struct homa_qdisc_dev *qdev;
 	struct homa_rpc *srpc;
@@ -1015,16 +1276,16 @@ TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__update_tx_left)
 	srpc->qrpc.tx_left = 6000;
 
 	/* First packet doesn't update tx_left. */
-	kfree_skb(homa_qdisc_dequeue_homa(qdev));
+	kfree_skb(homa_qdisc_get_deferred_homa(qdev));
 	EXPECT_EQ(6000, srpc->qrpc.tx_left);
 
 	/* Second packet does update tx_left. */
-	kfree_skb(homa_qdisc_dequeue_homa(qdev));
+	kfree_skb(homa_qdisc_get_deferred_homa(qdev));
 	EXPECT_EQ(5500, srpc->qrpc.tx_left);
 
         homa_qdisc_qdev_put(qdev);
 }
-TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__nic_backlog_cycles_metric)
+TEST_F(homa_qdisc, homa_qdisc_get_deferred_homa__nic_backlog_cycles_metric)
 {
 	struct homa_qdisc_dev *qdev;
 	struct homa_rpc *srpc;
@@ -1042,16 +1303,53 @@ TEST_F(homa_qdisc, homa_qdisc_dequeue_homa__nic_backlog_cycles_metric)
 	EXPECT_EQ(5000, qdev->last_defer);
 
 	mock_clock = 12000;
-	kfree_skb(homa_qdisc_dequeue_homa(qdev));
+	kfree_skb(homa_qdisc_get_deferred_homa(qdev));
 	EXPECT_EQ(0, homa_metrics_per_cpu()->nic_backlog_cycles);
 	EXPECT_EQ(5000, qdev->last_defer);
 	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
 
 	mock_clock = 14000;
-	kfree_skb(homa_qdisc_dequeue_homa(qdev));
+	kfree_skb(homa_qdisc_get_deferred_homa(qdev));
 	EXPECT_EQ(9000, homa_metrics_per_cpu()->nic_backlog_cycles);
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
 	EXPECT_EQ(0, qdev->last_defer);
+        homa_qdisc_qdev_put(qdev);
+}
+
+TEST_F(homa_qdisc, homa_qdisc_xmit_deferred_homa__no_packets_available)
+{
+	struct homa_qdisc_dev *qdev;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	EXPECT_EQ(0, homa_qdisc_xmit_deferred_homa(qdev));
+        homa_qdisc_qdev_put(qdev);
+}
+TEST_F(homa_qdisc, homa_qdisc_xmit_deferred_homa__packet_available)
+{
+	struct homa_qdisc_dev *qdev;
+	struct homa_rpc *srpc;
+	u64 link_idle;
+
+	mock_clock = 10000;
+	qdev = homa_qdisc_qdev_get(self->dev);
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+
+	link_idle = atomic64_read(&qdev->link_idle_time);
+	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
+	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
+	qdev->pacer_qix = 3;
+	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
+
+	mock_clock = 11000;
+	EXPECT_EQ(1100, homa_qdisc_xmit_deferred_homa(qdev));
+	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
+	EXPECT_LT(link_idle, atomic64_read(&qdev->link_idle_time));
+
         homa_qdisc_qdev_put(qdev);
 }
 
@@ -1168,10 +1466,9 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_main)
 
 	homa_qdisc_pacer_main(qdev);
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_packets);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_homa_packets);
 	EXPECT_EQ(0, exit_hook_count);
 
-	homa_qdisc_destroy(self->qdiscs[3]);
 	homa_qdisc_qdev_put(qdev);
 }
 
@@ -1204,82 +1501,6 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__spin_until_link_idle)
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
 	EXPECT_EQ(7000, xmit_clock);
 
-	homa_qdisc_destroy(self->qdiscs[3]);
-	homa_qdisc_qdev_put(qdev);
-}
-TEST_F(homa_qdisc, homa_qdisc_pacer__pacer_lock_unavailable)
-{
-	struct homa_qdisc_dev *qdev;
-	u64 link_idle;
-	struct homa_rpc *srpc;
-
-	qdev = homa_qdisc_qdev_get(self->dev);
-	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id, 10000, 10000);
-	ASSERT_NE(NULL, srpc);
-
-	link_idle = atomic64_read(&qdev->link_idle_time);
-	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
-	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
-	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
-	qdev->pacer_qix = 3;
-	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
-	unit_log_clear();
-
-	mock_trylock_errors = 1;
-	homa_qdisc_pacer(qdev, false);
-	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
-	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
-	EXPECT_EQ(link_idle, atomic64_read(&qdev->link_idle_time));
-
-	homa_qdisc_destroy(self->qdiscs[3]);
-	homa_qdisc_qdev_put(qdev);
-}
-TEST_F(homa_qdisc, homa_qdisc_pacer__queue_empty)
-{
-	struct homa_qdisc_dev *qdev;
-
-	qdev = homa_qdisc_qdev_get(self->dev);
-	unit_log_clear();
-
-	homa_qdisc_pacer(qdev, false);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(0, atomic64_read(&qdev->link_idle_time));
-
-	homa_qdisc_qdev_put(qdev);
-}
-TEST_F(homa_qdisc, homa_qdisc_pacer__enqueue_packet)
-{
-	struct homa_qdisc_dev *qdev;
-	struct homa_rpc *srpc;
-	u64 link_idle;
-
-	qdev = homa_qdisc_qdev_get(self->dev);
-	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id, 10000, 10000);
-	ASSERT_NE(NULL, srpc);
-
-	link_idle = atomic64_read(&qdev->link_idle_time);
-	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
-	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
-	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
-	qdev->pacer_qix = 3;
-	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
-	mock_clock_tick = 1000;
-	unit_log_clear();
-
-	homa_qdisc_pacer(qdev, false);
-	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
-	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
-	EXPECT_LT(link_idle, atomic64_read(&qdev->link_idle_time));
-	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_packets);
-	EXPECT_EQ(1100, homa_metrics_per_cpu()->pacer_bytes);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->pacer_help_bytes);
-	EXPECT_NE(0, homa_metrics_per_cpu()->pacer_xmit_cycles);
-
-	homa_qdisc_destroy(self->qdiscs[3]);
 	homa_qdisc_qdev_put(qdev);
 }
 TEST_F(homa_qdisc, homa_qdisc_pacer__return_after_one_packet)
@@ -1322,7 +1543,167 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__return_after_one_packet)
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
 	EXPECT_LT(mock_clock + 100, atomic64_read(&qdev->link_idle_time));
 
-	homa_qdisc_destroy(self->qdiscs[3]);
+	homa_qdisc_qdev_put(qdev);
+}
+TEST_F(homa_qdisc, homa_qdisc_pacer__pacer_lock_unavailable)
+{
+	struct homa_qdisc_dev *qdev;
+	u64 link_idle;
+	struct homa_rpc *srpc;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+
+	link_idle = atomic64_read(&qdev->link_idle_time);
+	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
+	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
+	qdev->pacer_qix = 3;
+	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
+	unit_log_clear();
+
+	mock_trylock_errors = 1;
+	homa_qdisc_pacer(qdev, false);
+	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
+	EXPECT_EQ(link_idle, atomic64_read(&qdev->link_idle_time));
+
+	homa_qdisc_qdev_put(qdev);
+}
+TEST_F(homa_qdisc, homa_qdisc_pacer__no_deferred_packets)
+{
+	struct homa_qdisc_dev *qdev;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	qdev->homa_credit = -1000;
+
+	homa_qdisc_pacer(qdev, false);
+	EXPECT_EQ(0, atomic64_read(&qdev->link_idle_time));
+	EXPECT_EQ(-1000, qdev->homa_credit);
+
+	homa_qdisc_qdev_put(qdev);
+}
+TEST_F(homa_qdisc, homa_qdisc_pacer__xmit_homa_packet_no_tcp)
+{
+	struct homa_qdisc_dev *qdev;
+	struct homa_rpc *srpc;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+
+	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
+	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
+	qdev->pacer_qix = 3;
+	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
+	qdev->homa_credit = -100;
+	qdev->hnet->homa->qshared->homa_share = 40;
+
+	homa_qdisc_pacer(qdev, false);
+	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
+	EXPECT_EQ(-65999, qdev->homa_credit);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_homa_packets);
+	EXPECT_EQ(1100, homa_metrics_per_cpu()->pacer_homa_bytes);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->pacer_help_bytes);
+
+	homa_qdisc_qdev_put(qdev);
+}
+TEST_F(homa_qdisc, homa_qdisc_pacer__xmit_tcp_no_homa)
+{
+	struct homa_qdisc_dev *qdev;
+	struct homa_qdisc *q;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[2], NULL, NULL));
+	q = qdisc_priv(self->qdiscs[2]);
+
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1100));
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1200));
+	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
+	qdev->homa_credit = 1000;
+	qdev->hnet->homa->qshared->homa_share = 40;
+
+	homa_qdisc_pacer(qdev, false);
+	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(2, self->qdiscs[2]->q.qlen);
+	EXPECT_EQ(52000, qdev->homa_credit);
+	EXPECT_EQ(2, homa_metrics_per_cpu()->pacer_tcp_packets);
+	EXPECT_EQ(2500, homa_metrics_per_cpu()->pacer_tcp_bytes);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->pacer_help_bytes);
+
+	homa_qdisc_qdev_put(qdev);
+}
+TEST_F(homa_qdisc, homa_qdisc_pacer__both_protocols_have_packets_choose_tcp)
+{
+	struct homa_qdisc_dev *qdev;
+	struct homa_rpc *srpc;
+	struct homa_qdisc *q;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[2], NULL, NULL));
+	q = qdisc_priv(self->qdiscs[2]);
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+
+	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1100));
+	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
+	qdev->pacer_qix = 3;
+	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
+	qdev->homa_credit = -100;
+	qdev->hnet->homa->qshared->homa_share = 40;
+
+	/* Arrange for the the NIC queue to exceed its limit once the next
+	 * packet is transmitted.
+	 */
+	atomic64_set(&qdev->link_idle_time, 1000000);
+	qdev->hnet->homa->qshared->max_nic_queue_cycles = 10000;
+	mock_clock = 1000000 - 10000 + 100;
+
+	homa_qdisc_pacer(qdev, false);
+	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(1, self->qdiscs[2]->q.qlen);
+	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
+	EXPECT_EQ(40*1200 - 100, qdev->homa_credit);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_tcp_packets);
+	EXPECT_EQ(1200, homa_metrics_per_cpu()->pacer_tcp_bytes);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->pacer_help_bytes);
+
+	homa_qdisc_qdev_put(qdev);
+}
+TEST_F(homa_qdisc, homa_qdisc_pacer__xmit_multiple_packets)
+{
+	struct homa_qdisc_dev *qdev;
+	struct homa_qdisc *q;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[2], NULL, NULL));
+	q = qdisc_priv(self->qdiscs[2]);
+
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1100));
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1200));
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1300));
+	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
+	qdev->hnet->homa->qshared->homa_share = 40;
+	qdev->hnet->homa->qshared->max_nic_queue_cycles = 100000;
+
+	homa_qdisc_pacer(qdev, false);
+	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(3, self->qdiscs[2]->q.qlen);
+	EXPECT_EQ(3, homa_metrics_per_cpu()->pacer_tcp_packets);
+	EXPECT_EQ(3900, homa_metrics_per_cpu()->pacer_tcp_bytes);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->pacer_help_bytes);
+
 	homa_qdisc_qdev_put(qdev);
 }
 TEST_F(homa_qdisc, homa_qdisc_pacer__pacer_help_bytes_metric)
@@ -1345,11 +1726,10 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__pacer_help_bytes_metric)
 
 	homa_qdisc_pacer(qdev, true);
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
-	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_packets);
-	EXPECT_EQ(900, homa_metrics_per_cpu()->pacer_bytes);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_homa_packets);
+	EXPECT_EQ(900, homa_metrics_per_cpu()->pacer_homa_bytes);
 	EXPECT_EQ(900, homa_metrics_per_cpu()->pacer_help_bytes);
 
-	homa_qdisc_destroy(self->qdiscs[3]);
 	homa_qdisc_qdev_put(qdev);
 }
 
@@ -1372,9 +1752,6 @@ TEST_F(homa_qdisc, homa_qdisc_redirect_skb__use_pacer_qix)
 	EXPECT_EQ(1, self->qdiscs[1]->q.qlen);
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
 	EXPECT_EQ(1, mock_netif_schedule_calls);
-
-	homa_qdisc_destroy(self->qdiscs[1]);
-	homa_qdisc_destroy(self->qdiscs[3]);
 }
 TEST_F(homa_qdisc, homa_qdisc_redirect_skb__use_redirect_qix)
 {
@@ -1394,9 +1771,6 @@ TEST_F(homa_qdisc, homa_qdisc_redirect_skb__use_redirect_qix)
 	EXPECT_EQ(NET_XMIT_SUCCESS, status);
 	EXPECT_EQ(0, self->qdiscs[1]->q.qlen);
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
-
-	homa_qdisc_destroy(self->qdiscs[1]);
-	homa_qdisc_destroy(self->qdiscs[3]);
 }
 TEST_F(homa_qdisc, homa_qdisc_redirect_skb__redirect_qix_invalid)
 {
@@ -1418,9 +1792,6 @@ TEST_F(homa_qdisc, homa_qdisc_redirect_skb__redirect_qix_invalid)
 	EXPECT_EQ(1, self->qdiscs[1]->q.qlen);
 	EXPECT_EQ(0, qdev->pacer_qix);
 	EXPECT_EQ(1, qdev->redirect_qix);
-
-	for (i = 0; i < 4; i++)
-		homa_qdisc_destroy(self->qdiscs[i]);
 }
 TEST_F(homa_qdisc, homa_qdisc_redirect_skb__redirect_qix_not_a_homa_qdisc)
 {
@@ -1443,9 +1814,6 @@ TEST_F(homa_qdisc, homa_qdisc_redirect_skb__redirect_qix_not_a_homa_qdisc)
 	EXPECT_EQ(1, self->qdiscs[2]->q.qlen);
 	EXPECT_EQ(1, qdev->pacer_qix);
 	EXPECT_EQ(2, qdev->redirect_qix);
-
-	for (i = 0; i < 4; i++)
-		homa_qdisc_destroy(self->qdiscs[i]);
 }
 TEST_F(homa_qdisc, homa_qdisc_redirect_skb__no_suitable_qdisc)
 {
@@ -1469,9 +1837,6 @@ TEST_F(homa_qdisc, homa_qdisc_redirect_skb__no_suitable_qdisc)
 	EXPECT_EQ(-1, qdev->pacer_qix);
 	EXPECT_EQ(-1, qdev->redirect_qix);
 	EXPECT_EQ(0, mock_netif_schedule_calls);
-
-	for (i = 0; i < 4; i++)
-		homa_qdisc_destroy(self->qdiscs[i]);
 }
 
 TEST_F(homa_qdisc, homa_qdisc_pacer_check__enqueue_packet)
@@ -1502,7 +1867,6 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_check__enqueue_packet)
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
 
-	homa_qdisc_destroy(self->qdiscs[3]);
 	homa_qdisc_qdev_put(qdev);
 	homa_qdisc_qdev_put(qdev2);
 }
@@ -1527,7 +1891,6 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_check__no_deferred_rpcs)
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
 
-	homa_qdisc_destroy(self->qdiscs[3]);
 	homa_qdisc_qdev_put(qdev);
 	homa_qdisc_qdev_put(qdev2);
 }
@@ -1555,7 +1918,6 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_check__lag_not_long_enough)
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
 	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
 
-	homa_qdisc_destroy(self->qdiscs[3]);
 	homa_qdisc_qdev_put(qdev);
 }
 
@@ -1597,6 +1959,24 @@ TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__max_nic_queue_cycles)
 	self->homa.link_mbps = 10000;
 	homa_qdisc_update_sysctl_deps(self->homa.qshared);
 	EXPECT_EQ(6000, self->homa.qshared->max_nic_queue_cycles);
+}
+TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__limit_homa_share)
+{
+	self->homa.qshared->homa_share = -1;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->homa_share);
+
+	self->homa.qshared->homa_share = 0;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->homa_share);
+
+	self->homa.qshared->homa_share = 100;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(100, self->homa.qshared->homa_share);
+
+	self->homa.qshared->homa_share = 101;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(100, self->homa.qshared->homa_share);
 }
 TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__update_all_qdevs)
 {

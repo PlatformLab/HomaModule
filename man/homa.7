@@ -634,6 +634,13 @@ requires Homa to intercept all incoming TCP packets to see if they are
 actually Homa packets. Some might object to this interference with the
 rest of the Linux kernel.
 .TP
+.IR homa_share
+When there exist both Homa and TCP packets whose transmission has been
+deferred because the NIC queue is overloaded, this determines how the
+uplink bandwidth is allocated between Homa and TCP. This parameter is
+a value between 0 and 100 indicating what percent of the uplink bandwidth
+will be allocated to Homa; the remainder will be allocated to TCP.
+.TP
 .IR link_mbps
 An integer value specifying the bandwidth of this machine's uplink to
 the top-of-rack switch, in units of 1e06 bits per second.
@@ -851,6 +858,11 @@ When releasing pages from the sk_buff page pools back to Linux, Homa will
 not release pages from a pool if the amount of unused space in
 the pool has been less than this (specified in Kbytes) at any point
 in the recent past.
+.TP
+.IR tcp_credit_increment
+Determines the granularity of bandwidth sharing among qdiscs that have
+deferred TCP output packets. Read the code in homa_qdisc.c to learn more
+about this. You probably shouldn't ever modify this option.
 .TP
 .IR throttle_min_bytes
 An integer value specifying the smallest packet size subject to

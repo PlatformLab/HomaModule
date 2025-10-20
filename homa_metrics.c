@@ -295,10 +295,14 @@ char *homa_metrics_print(void)
 		  "Execution time in pacer thread\n");
 		M("pacer_xmit_cycles", m->pacer_xmit_cycles,
 		  "Time pacer spent xmitting packets (vs. polling NIC queue)\n");
-		M("pacer_packets", m->pacer_packets,
-		  "Packets transmitted by the pacer\n");
-		M("pacer_bytes", m->pacer_bytes,
-		  "Bytes transmitted by the pacer (including headers)\n");
+		M("pacer_homa_packets", m->pacer_homa_packets,
+		  "Homa packets transmitted by the pacer\n");
+		M("pacer_homa_bytes", m->pacer_homa_bytes,
+		  "Homa bytes transmitted by the pacer (including headers)\n");
+		M("pacer_tcp_packets", m->pacer_tcp_packets,
+		  "TCP packets transmitted by the pacer\n");
+		M("pacer_tcp_bytes", m->pacer_tcp_bytes,
+		  "TCP bytes transmitted by the pacer (including headers)\n");
 		M("pacer_help_bytes", m->pacer_help_bytes,
 		  "Bytes transmitted via homa_qdisc_pacer_check");
 		M("homa_cycles",
