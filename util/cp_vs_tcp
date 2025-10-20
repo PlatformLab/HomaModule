@@ -143,7 +143,7 @@ for workload, bw, seconds in load_info:
         plot_histogram(ax, dctcp_exp, "p50", "DCTCP P50", color=dctcp_color2)
     plot_histogram(ax, homa_exp, "p99", "Homa P99", color=homa_color)
     plot_histogram(ax, homa_exp, "p50", "Homa P50", color=homa_color2)
-    ax.legend(loc="upper right", prop={'size': 9})
+    ax.legend(loc="upper left", prop={'size': 9})
     plt.tight_layout()
     plt.savefig("%s/reports/rtt_%s.pdf" % (options.log_dir, workload))
 
