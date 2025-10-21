@@ -70,6 +70,18 @@ ax.legend(loc="upper right", prop={'size': 9})
 plt.tight_layout()
 plt.savefig("%s/reports/both_%s.pdf" % (options.log_dir, options.workload))
 
+# Generate latency plot.
+log("Generating RTT latency plot for %s" % (options.workload))
+ax = start_plot_vs_msg_length(title, [30, 30000], homa_exp,
+        y_label=r'RTT (µsec)')
+plot_histogram(ax, tcp_exp, "p99", "TCP P99", color=tcp_color)
+plot_histogram(ax, tcp_exp, "p50", "TCP P50", color=tcp_color2)
+plot_histogram(ax, homa_exp, "p99", "Homa P99", color=homa_color)
+plot_histogram(ax, homa_exp, "p50", "Homa P50", color=homa_color2)
+ax.legend(loc="upper left", prop={'size': 9})
+plt.tight_layout()
+plt.savefig("%s/reports/rtt_%s.pdf" % (options.log_dir, options.workload))
+
 # Generate CDF of small-message RTTs.
 log("Generating short message CDF for %s" % (options.workload))
 homa_x, homa_y = get_short_cdf(homa_exp)
