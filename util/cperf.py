@@ -747,8 +747,9 @@ def run_experiment(name, clients, options):
                     do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
         if not "no_rtt_files" in options:
             do_cmd("dump_times /dev/null %s" % (name), clients)
-        log("Unfreezing timetraces on %s" % (nodes))
-        set_sysctl_parameter(".net.homa.action", "10", nodes)
+        if options.protocol == "homa" and options.tt_freeze:
+            log("Unfreezing timetraces on %s" % (nodes))
+            set_sysctl_parameter(".net.homa.action", "10", nodes)
         do_cmd("log Starting measurements for %s experiment" % (name),
                 server_nodes, clients)
         log("Starting measurements")
@@ -925,6 +926,9 @@ def run_experiments(*args):
             vlog("Initializing metrics")
             do_ssh(["metrics.py > /dev/null"], homa_nodes)
     do_cmd("dump_times /dev/null", all_nodes)
+    if homa_nodes and exp.tt_freeze:
+        log("Unfreezing timetraces on %s" % (all_nodes))
+        set_sysctl_parameter(".net.homa.action", "10", all_nodes)
     do_cmd("log Starting measurements", all_nodes)
     log("Starting measurements")
 
