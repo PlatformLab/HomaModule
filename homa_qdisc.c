@@ -448,6 +448,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		 * we must defer short packets if there are other packets
 		 * already deferred for this qdisc.
 		 */
+		INC_METRIC(qdisc_tcp_packets, 1);
 		if (!list_empty(&q->defer_links)) {
 			homa_qdisc_defer_tcp(q, skb);
 			return NET_XMIT_SUCCESS;

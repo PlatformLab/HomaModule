@@ -431,6 +431,13 @@ struct homa_metrics {
 	u64 pacer_help_bytes;
 
 	/**
+	 * @qdisc_tcp_packets: total number of TCP packets that passed through
+	 * homa_qdisc; includes packets that were transmitted immediately as
+	 * well as those that were deferred.
+	 */
+	u64 qdisc_tcp_packets;
+
+	/**
 	 * @resent_packets: total number of data packets issued in response to
 	 * RESEND packets.
 	 */

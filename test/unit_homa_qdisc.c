@@ -564,6 +564,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__xmit_short_tcp_packet)
 	EXPECT_EQ(1, qdisc->q.qlen);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_LT(1000000, atomic64_read(&q->qdev->link_idle_time));
+	EXPECT_EQ(1, homa_metrics_per_cpu()->qdisc_tcp_packets);
 
 	homa_qdisc_destroy(qdisc);
 	kfree(qdisc);

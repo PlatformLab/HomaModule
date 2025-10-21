@@ -304,7 +304,9 @@ char *homa_metrics_print(void)
 		M("pacer_tcp_bytes", m->pacer_tcp_bytes,
 		  "TCP bytes transmitted by the pacer (including headers)\n");
 		M("pacer_help_bytes", m->pacer_help_bytes,
-		  "Bytes transmitted via homa_qdisc_pacer_check");
+		  "Bytes transmitted via homa_qdisc_pacer_check\n");
+		M("qdisc_tcp_packets", m->qdisc_tcp_packets,
+		  "TCP packets processed by homa_qdisc\n");
 		M("homa_cycles",
 		  m->softirq_cycles + m->napi_cycles +
 		  m->send_cycles + m->recv_cycles +
