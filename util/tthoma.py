@@ -219,6 +219,7 @@ recv_offsets = {}
 # softirq:      Time when homa_softirq processed the packet
 # softirq_core: Core on which SoftIRQ processed the packet
 # tx_node:      Node that sent grant (if known)
+# rx_node:      Node that received grant (if known)
 # id:           Id of the RPC on the node that sent the grant
 # offset:       Offset specified in the grant
 # increment:    How much previously ungranted data is covered by this grant;
@@ -496,6 +497,18 @@ def get_interval(node, usecs):
     if i < 0 or i >= len(data):
         return None
     return data[i]
+
+def get_last_start():
+    """
+    Return the latest time at which any of the traces begins (i.e. the first
+    time that is present in all of the trace files).
+    """
+    latest = -1e20
+    for trace in traces.values():
+        first = trace['first_time']
+        if first > latest:
+            latest = first
+    return latest
 
 def get_last_time():
     """
@@ -2048,6 +2061,132 @@ class AnalyzeBpages:
         for node in get_sorted_nodes():
             print('%-10s  %5d  %6d' % (node, self.node_rpcs[node],
                     self.node_bpages[node]))
+
+#------------------------------------------------
+# Analyzer: buffers
+#------------------------------------------------
+class AnalyzeBuffers:
+    """
+    Estimates buffer occupancy in the egress ports between TOR and nodes
+    by computing one-way packet delays and assuming that additional time
+    beyond the minimum observed for a source-destination pair must be due
+    to queuing in the switch. Also displays minimum node-to-node latencies.
+    Uses the --gbps option.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeIntervals')
+
+    def output(self):
+        global grants, options, packets
+        nodes = get_sorted_nodes()
+
+        # Node1 -> dictionary of:
+        #         Node2 -> minimum observed latency (from nic to gro) of
+        #                  packets sent from Node1 to Node2.
+        latency = {}
+        for src in nodes:
+            latency[src] = {}
+            for dst in nodes:
+                latency[src][dst] = 1e20
+
+        # Compute (and output) minimum node-to-node latencies.
+        for pkt in packets.values():
+            if not 'nic' in pkt or not 'gro' in pkt:
+                continue
+            delta = pkt['gro'] - pkt['nic']
+            if delta < latency[pkt['tx_node']][pkt['rx_node']]:
+                latency[pkt['tx_node']][pkt['rx_node']] = delta
+        for pkt in grants.values():
+            if not 'nic' in pkt or not 'gro' in pkt:
+                continue
+            delta = pkt['gro'] - pkt['nic']
+            if delta < latency[pkt['tx_node']][pkt['rx_node']]:
+                latency[pkt['tx_node']][pkt['rx_node']] = delta
+
+        print('\n-----------------')
+        print('Analyzer: buffers')
+        print('-----------------')
+
+        print('\nMinimum one-way latency (microseconds) from when a packet '
+                'was passed')
+        print('to the NIC on a source node (rows) until it was received by '
+                'GRO on')
+        print('the destination node:')
+        print(' '*10, end='')
+        for dst in nodes:
+            print('%10s' % (dst), end='')
+        print('')
+        for src in nodes:
+            print('%-10s' % (src), end='')
+            for dst in nodes:
+                t = latency[src][dst]
+                if t >= 1e20:
+                    print(' '*10, end='')
+                else:
+                    print('%10.1f' % (latency[src][dst]), end='')
+            print('')
+
+        # Augment the interval information with a new element max_delay
+        # which contains the highest incremental latency (beyond the
+        # node-to-node minimum) for any packet received in that interval.
+        for pkt in packets.values():
+            if not 'nic' in pkt or not 'gro' in pkt:
+                continue
+            gro = pkt['gro']
+            delay = (gro - pkt['nic']) - latency[pkt['tx_node']][pkt['rx_node']]
+            interval = get_interval(pkt['rx_node'], gro)
+            if not 'max_delay' in interval or interval['max_delay'] < delay:
+                interval['max_delay'] = delay
+
+        # Print the interval information, converting delay into buffer
+        # space (assumes all incremental delays are caused by buffering
+        # at TOR downlinks).
+        print('\nEstimated buffer space occupied at TOR downlink ports for '
+                'each node, as')
+        print('a function of time. Buffer occupancy is estimated from the '
+                'largest packet ')
+        print('delay (beyond minimum times) observed during an interval. '
+                'Assumes a network')
+        print('speed of %s Gbps' % (options.gbps))
+        print('\nTime              Total', end='')
+        for dst in nodes:
+            print('%10s' % (dst), end='')
+        print('')
+        t = get_last_start()
+        end = get_first_end()
+        totals = []
+        per_node = []
+        while t < end:
+            buffer_info = ''
+            total_kbytes = 0
+            for node in nodes:
+                interval = get_interval(node, t)
+                if 'max_delay' in interval:
+                    delay = interval['max_delay']
+                    kbytes_buffered = delay * options.gbps / 8
+                    total_kbytes += kbytes_buffered
+                    buffer_info += '%10d' % (kbytes_buffered)
+                    per_node.append(kbytes_buffered)
+                else:
+                    buffer_info += '       N/A'
+            print('%8.1f     %10d%s' % (interval['time'], total_kbytes,
+                    buffer_info))
+            totals.append(total_kbytes)
+            t += options.interval
+
+        per_node.sort()
+        print("\nPer-node buffer utilization:")
+        print("  P50:     %5d KB" % (per_node[len(per_node)//2]))
+        print("  P99:     %5d KB" % (per_node[99*len(per_node)//100]))
+        print("  Maximum: %5d KB" % (per_node[-1]))
+
+        totals.sort()
+        print("\nTotal buffer utilization:")
+        print("  P50:     %5d KB" % (totals[len(totals)//2]))
+        print("  P99:     %5d KB" % (totals[99*len(totals)//100]))
+        print("  Maximum: %5d KB" % (totals[-1]))
 
 #------------------------------------------------
 # Analyzer: copy
@@ -6355,6 +6494,7 @@ class AnalyzePackets:
             rpcs[id]['gro_grant_pkts'].append(g)
         g['gro'] = t
         g['gro_core'] = core
+        g['rx_node'] = trace['node']
 
     def tt_softirq_grant(self, trace, t, core, id, offset, priority, increment):
         global grants
@@ -6364,6 +6504,7 @@ class AnalyzePackets:
         g['softirq'] = t
         g['softirq_core'] = core
         g['increment'] = increment
+        g['rx_node'] = trace['node']
 
     def analyze(self):
         """
@@ -8369,7 +8510,7 @@ class AnalyzeTxpkts:
         print('Summary statistics on delays related to outgoing packets:')
         print('Node:      Name of node')
         print('Qid:       Identifier of transmit queue')
-        print('TxQueue:  Address of netdev_queue struct for Qid')
+        print('TxQueue:   Address of netdev_queue struct for Qid')
         print('Tsos:      Total number of TSO frames transmitted by node '
                 'or queue')
         print('Segs:      Total number of segments (packets received by GRO) '
