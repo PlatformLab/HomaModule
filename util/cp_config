@@ -212,7 +212,7 @@ elif options.config == 'ports':
                 })
 elif options.config == 'prios':
     # Vary the number of available priority levels
-    for priority in [1, 2, 3, 4, 8]:
+    for priority in [1, 2, 3, 8]:
         specs.append({'exp_name': 'prios_%d' % (priority),
                 'label': '%d prios' % (priority),
                 'sysctl': ['.net.homa.num_priorities', priority]})
@@ -350,6 +350,23 @@ for workload, bw, seconds in load_info:
         ax.legend(loc="upper left", prop={'size': 9})
     plt.tight_layout()
     plt.savefig("%s/reports/%s_%s.pdf" %
+            (options.log_dir, options.config, workload))
+
+    # Generate latency plot.
+    log("Generating latency plot for %s" % (workload))
+    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, bw)
+    ax = start_plot_vs_msg_length(title, [30, 30000], "%s_%s" % (
+            specs[0]['exp_name'], workload), y_label=r'RTT (µsec)')
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_histogram(ax, exp_name, "p99", spec['label'] + ' P99')
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_histogram(ax, exp_name, "p50", spec['label'] + ' P50')
+    ax.legend(loc="upper left", prop={'size': 9})
+    plt.tight_layout()
+    plt.savefig("%s/reports/%s_%s_rtt.pdf" %
             (options.log_dir, options.config, workload))
 
     # Generate CDF of small-message RTTs.
