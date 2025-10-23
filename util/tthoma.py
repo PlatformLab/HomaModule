@@ -11,7 +11,7 @@ Invoke with the --help option for documentation.
 from collections import defaultdict
 from functools import cmp_to_key
 from glob import glob
-from itertools import count
+import itertools
 import matplotlib
 import matplotlib.pyplot as plt
 from optparse import OptionParser
@@ -318,6 +318,14 @@ grants = GrantDict()
 # tx_grant_info:  Formatted text describing outgoing RPCs with available grants
 #                 as of the end of the interval
 intervals = None
+
+# Node (src) -> dictionary of
+#    Node(dst) -> minimum observed latency (from packet "nic" to "gro")
+#                 among all data and grant packets sent from src to dst.
+#                 A value of math.inf means there were no packets between
+#                 the hosts.
+# This structure is created only if the "minlatency" analyzer is active.
+min_latency = {}
 
 # Dispatcher used to parse the traces.
 dispatcher = None
@@ -4728,7 +4736,7 @@ class AnalyzeLongterm:
         # for the result.
         next = [1] * len(nodes)
         self.intervals = []
-        for t in count(start, interval):
+        for t in itertools.count(start, interval):
             if t > end:
                 break
             indices = []
@@ -5187,6 +5195,62 @@ class AnalyzeLost:
 
             print('%9s   %-10s %-10s %4s %12s %6d' % (xmit_info, tx_node,
                     rx_node, core_info, id_info, pkt['offset']))
+
+#------------------------------------------------
+# Analyzer: minlatency
+#------------------------------------------------
+class AnalyzeMinlatency:
+    """
+    Analyzes packet information to compute the minimum one-way latency
+    between each pair of nodes.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzePackets')
+
+    def analyze(self):
+        global grants, min_latency, packets
+
+        nodes = get_sorted_nodes()
+        for src in nodes:
+            min_latency[src] = {}
+            for dst in nodes:
+                min_latency[src][dst] = math.inf
+
+        for pkt in itertools.chain(packets.values(), grants.values()):
+            if not 'nic' in pkt or not 'gro' in pkt:
+                continue
+            delta = pkt['gro'] - pkt['nic']
+            if delta < min_latency[pkt['tx_node']][pkt['rx_node']]:
+                min_latency[pkt['tx_node']][pkt['rx_node']] = delta
+
+    def output(self):
+        global min_latency
+
+        print('\n--------------------')
+        print('Analyzer: minlatency')
+        print('--------------------')
+
+        print('\nMinimum one-way latency (microseconds) from when a packet '
+                'was queued')
+        print('for the NIC on a source node (rows) until it was received by '
+                'GRO on')
+        print('the destination node:')
+
+        nodes = get_sorted_nodes()
+        print(' '*10, end='')
+        for dst in nodes:
+            print('%10s' % (dst), end='')
+        print('')
+        for src in nodes:
+            line = '%-10s' % (src)
+            for dst in nodes:
+                t = min_latency[src][dst]
+                if t == math.inf:
+                    line += ' '*10
+                else:
+                    line += '%10.1f' % (t)
+            print(line.rstrip())
 
 #------------------------------------------------
 # Analyzer: msgrange
@@ -6575,6 +6639,7 @@ class AnalyzeQdelay:
         require_options('qdelay', 'plot')
         dispatcher.interest('AnalyzePackets')
         dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzeMinlatency')
         dispatcher.interest('AnalyzeIntervals')
 
     def init_qdelay_axis(self, ax, title, x_min, x_max, max_qdelay, size=10):
@@ -6589,7 +6654,6 @@ class AnalyzeQdelay:
         max_qdelay:        Largest value that will be displayed as y (queuing
                            delay in usecs).
         size:              Size to use for fonts
-        figsize:           Dimensions of plot
         """
         global options
 
@@ -6609,15 +6673,6 @@ class AnalyzeQdelay:
         global grants, options, packets, rpcs
         nodes = get_sorted_nodes()
 
-        # Node1 -> dictionary of:
-        #         Node2 -> minimum observed latency (from nic to gro) of
-        #                  packets sent from Node1 to Node2.
-        latency = {}
-        for src in nodes:
-            latency[src] = {}
-            for dst in nodes:
-                latency[src][dst] = 1e20
-
         # Node -> <times, qdelays, colors> for all of the data packets
         # received by the node. Time is a list of packet GRO times, qdelays
         # is a list of corresponding queuing delays, and colors is a list
@@ -6628,20 +6683,6 @@ class AnalyzeQdelay:
         # the node and times are NIC times.
         tx_delays = defaultdict(lambda: [[], [], []])
 
-        # Compute (and output) minimum node-to-node latencies.
-        for pkt in packets.values():
-            if not 'nic' in pkt or not 'gro' in pkt:
-                continue
-            delta = pkt['gro'] - pkt['nic']
-            if delta < latency[pkt['tx_node']][pkt['rx_node']]:
-                latency[pkt['tx_node']][pkt['rx_node']] = delta
-        for pkt in grants.values():
-            if not 'nic' in pkt or not 'gro' in pkt:
-                continue
-            delta = pkt['gro'] - pkt['nic']
-            if delta < latency[pkt['tx_node']][pkt['rx_node']]:
-                latency[pkt['tx_node']][pkt['rx_node']] = delta
-
         print('\n-----------------')
         print('Analyzer: qdelay')
         print('-----------------')
@@ -6649,29 +6690,7 @@ class AnalyzeQdelay:
         print('See graphs qdelay_tx.pdf and qdelay_rx.pdf in %s'
                 % (options.plot))
 
-        print('\nMinimum one-way latency (microseconds) from when a packet '
-                'was passed')
-        print('to the NIC on a source node (rows) until it was received by '
-                'GRO on')
-        print('the destination node:')
-        print(' '*10, end='')
-        for dst in nodes:
-            print('%10s' % (dst), end='')
-        print('')
-        for src in nodes:
-            line = '%-10s' % (src)
-            for dst in nodes:
-                t = latency[src][dst]
-                if t >= 1e20:
-                    line += ' '*10
-                else:
-                    line += '%10.1f' % (latency[src][dst])
-            print(line.rstrip())
-
-        # Augment the interval information with a new element max_delay
-        # which contains the highest incremental latency (beyond the
-        # node-to-node minimum) for any packet received in that interval.
-        # Also collect data for the scatter plots
+        # Collect data for the scatter plots.
         overall_max_delay = 0
         for pkt_type, pkts in [['data', packets.values()],
                 ['grant', grants.values()]]:
@@ -6682,10 +6701,7 @@ class AnalyzeQdelay:
                 nic = pkt['nic']
                 tx_node = pkt['tx_node']
                 rx_node = pkt['rx_node']
-                delay = (gro - nic) - latency[tx_node][rx_node]
-                interval = get_interval(rx_node, gro)
-                if not 'max_delay' in interval or interval['max_delay'] < delay:
-                    interval['max_delay'] = delay
+                qdelay = (gro - nic) - min_latency[tx_node][rx_node]
                 if pkt_type == 'grant':
                     color = '#844F1A'
                 else:
@@ -6695,36 +6711,15 @@ class AnalyzeQdelay:
                     else:
                         color = '#1f77b4'
                 tx_delays[tx_node][0].append(nic)
-                tx_delays[tx_node][1].append(delay)
+                tx_delays[tx_node][1].append(qdelay)
                 tx_delays[tx_node][2].append(color)
                 rx_delays[rx_node][0].append(nic)
-                rx_delays[rx_node][1].append(delay)
+                rx_delays[rx_node][1].append(qdelay)
                 rx_delays[rx_node][2].append(color)
-                if delay > overall_max_delay:
-                    overall_max_delay = delay
+                if qdelay > overall_max_delay:
+                    overall_max_delay = qdelay
 
-        # Print maximum queuing delay for each node and interval.
-        print('\nLargest queuing delay (μsecs) for incoming packets on each '
-                'node, over')
-        print('%d μsec intervals:' % (options.interval) )
-        print('Time         ', end='')
-        for dst in nodes:
-            print('%10s' % (dst), end='')
-        print('')
-        t = options.interval * math.floor(get_last_start()/options.interval)
-        end = get_first_end()
-        while t < end:
-            buffer_info = ''
-            for node in nodes:
-                interval = get_interval(node, t)
-                if interval and 'max_delay' in interval:
-                    buffer_info += '%10.1f' % (interval['max_delay'])
-                else:
-                    buffer_info += ' '*10
-            print(('%8.1f     %s' % (t, buffer_info)).rstrip())
-            t += options.interval
-
-        # Generate plots
+        # Generate scatter plots
         legend_handles = [
             matplotlib.lines.Line2D([], [], color=c, marker='o',
                     linestyle='None', markersize=8, label=label)
@@ -6759,7 +6754,7 @@ class AnalyzeQdelay:
                     x_min, x_max, overall_max_delay)
             ax.scatter(tx_delays[node][0], tx_delays[node][1],
                     marker='o', s=1, c=tx_delays[node][2])
-        fig.legend(handles=legend_handles, loc='lower left', ncol=3,
+        fig.legend(handles=legend_handles, loc='lower center', ncol=3,
                 bbox_to_anchor=(0.5, -0.03), frameon=False)
         plt.tight_layout()
         plt.savefig("%s/qdelay_tx.pdf" % (options.plot), bbox_inches='tight')
