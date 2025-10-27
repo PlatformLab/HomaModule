@@ -1,6 +1,11 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Performance problems to track down:
+  * On c6620 cluster, Homa is getting RPC timeouts on w4 at 'b 80' and '-b 100'
+  * On xl170s, both TCP and Homa run slower with qdisc than pacer (P99 for
+    TCP small packets increases by 50%)
+
 * Move interest cleanup code from homa_sock to a new function in
   homa_interest. Also move wakeup code from homa_rpc_handoff.
 
@@ -35,6 +40,21 @@ Notes for Homa implementation in Linux:
       protocols. Maybe adjust rates for the token buckets based on recent
       traffic?
   * Also consider the amount of data that is "stuck" in the NIC?
+
+* Consider eliminating SoftIRQ: process packets completely at NAPI level?
+  * This eliminates the latency and cache overheads of switching cores
+    for SoftIRQ
+  * Should also help with tail latency: eliminates one opportunity for
+    hot-spots
+  * Load balancing should still be fine (especially if port number is used
+    for packet spraying)
+  * Or, always do SoftIRQ processing on same node as NAPI?
+
+* Eliminate use of link_mbps in homa_grant.c; perhaps replace with
+  configuration parameter fifo_mbps? Maybe the grant mechanism needs
+  to be net_device-specific?
+
+* Eliminate HOMA_FLAG_DONT_THROTTLE
 
 * Optimizations for skb freeing:
   * In GRO, merge page frags out of skbs and return skbs to napi with
