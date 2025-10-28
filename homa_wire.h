@@ -547,4 +547,18 @@ static inline u64 homa_local_id(__be64 sender_id)
 	return be64_to_cpu(sender_id) ^ 1;
 }
 
+#ifndef __STRIP__ /* See strip.py */
+/**
+ * homa_set_hijack() - Set fields in a Homa header that are needed for
+ * TCP hijacking to work properly.
+ * @common:   Header in which to set fields.
+ */
+static inline void homa_set_hijack(struct homa_common_hdr *common)
+{
+	common->flags = HOMA_TCP_FLAGS;
+	common->urgent = htons(HOMA_TCP_URGENT);
+	common->doff = 0x50;
+}
+#endif /* See strip.py */
+
 #endif /* _HOMA_WIRE_H */

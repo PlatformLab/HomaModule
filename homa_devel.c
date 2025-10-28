@@ -427,8 +427,7 @@ void homa_freeze_peers(void)
 	freeze.common.type = FREEZE;
 	freeze.common.sport = htons(hsk->port);
 	freeze.common.dport = 0;
-	IF_NO_STRIP(freeze.common.flags = HOMA_TCP_FLAGS);
-	IF_NO_STRIP(freeze.common.urgent = htons(HOMA_TCP_URGENT));
+	IF_NO_STRIP(homa_set_hijack(&freeze.common));
 	freeze.common.sender_id = 0;
 
 	rhashtable_walk_enter(&hnet->homa->peertab->ht, &iter);

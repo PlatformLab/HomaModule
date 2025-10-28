@@ -159,24 +159,15 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	h->common.dport = htons(rpc->dport);
 	h->common.sequence = htonl(offset);
 	h->common.type = DATA;
+	IF_NO_STRIP(homa_set_hijack(&h->common));
 	homa_set_doff(h, sizeof(struct homa_data_hdr));
-#ifndef __STRIP__ /* See strip.py */
-	h->common.flags = HOMA_TCP_FLAGS;
-#endif /* See strip.py */
 	h->common.checksum = 0;
-#ifndef __STRIP__ /* See strip.py */
-	h->common.urgent = htons(HOMA_TCP_URGENT);
-#endif /* See strip.py */
 	h->common.sender_id = cpu_to_be64(rpc->id);
 	h->message_length = htonl(rpc->msgout.length);
-#ifndef __STRIP__ /* See strip.py */
-	h->incoming = htonl(rpc->msgout.unscheduled);
-#endif /* See strip.py */
+	IF_NO_STRIP(h->incoming = htonl(rpc->msgout.unscheduled));
 	h->ack.client_id = 0;
 	homa_peer_get_acks(rpc->peer, 1, &h->ack);
-#ifndef __STRIP__ /* See strip.py */
-	h->cutoff_version = rpc->peer->cutoff_version;
-#endif /* See strip.py */
+	IF_NO_STRIP(h->cutoff_version = rpc->peer->cutoff_version);
 	h->retransmit = 0;
 #ifndef __STRIP__ /* See strip.py */
 	h->seg.offset = htonl(-1);
@@ -435,11 +426,7 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	h->type = type;
 	h->sport = htons(rpc->hsk->port);
 	h->dport = htons(rpc->dport);
-#ifndef __STRIP__ /* See strip.py */
-	h->flags = HOMA_TCP_FLAGS;
-	h->urgent = htons(HOMA_TCP_URGENT);
-	h->doff = 0x50;
-#endif /* See strip.py */
+	IF_NO_STRIP(homa_set_hijack(h));
 	h->sender_id = cpu_to_be64(rpc->id);
 	return __homa_xmit_control(contents, length, rpc->peer, rpc->hsk);
 }
@@ -544,10 +531,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
 	unknown.common.type = RPC_UNKNOWN;
-#ifndef __STRIP__ /* See strip.py */
-	unknown.common.flags = HOMA_TCP_FLAGS;
-	unknown.common.urgent = htons(HOMA_TCP_URGENT);
-#endif /* See strip.py */
+	IF_NO_STRIP(homa_set_hijack(&unknown.common));
 	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
 	peer = homa_peer_get(hsk, &saddr);
 	if (!IS_ERR(peer))
