@@ -32,6 +32,9 @@ cpu_type = None
 # Cached result of get_link_speed (integer Mbits/sec.)
 link_mbps = None
 
+# Cached result of get_nic_type.
+nic_type = None
+
 # Number of this node (e.g. 1 for "node1"). Set by get_node_num.
 node_num = None
 
@@ -201,6 +204,25 @@ def get_nic_irqs():
         result.append(irqs[i])
     f.close()
     return result
+
+def get_nic_type():
+    """
+    Returns the type of driver for the primary NIC, such as "ice" for
+    the Intel driver.
+    """
+
+    global nic_type
+    if nic_type != None:
+        return nic_type
+    info = exec_cmd(["sudo", "ethtool", "-i", get_interfaces()[0]],
+            stdout=subprocess.PIPE, encoding="utf-8", check=True).stdout
+    match = re.search(r'.*driver:\s*(\S+)', info, re.MULTILINE)
+    if not match:
+        raise Exception("Couldn't identify NIC type (no 'driver' info in "
+                "ethtool output")
+    nic_type = match.group(1)
+    print("Driver type for primary network interface is %s" % (nic_type))
+    return nic_type
 
 def get_node_num():
     """
@@ -469,6 +491,10 @@ def config_homa(mod):
         raise Exception("Can't configure Homa: no config info available "
                 "for link speed %d Mbps" % (link_mbps))
 
+    if get_nic_type() == "ice":
+        print("Enabling TCP hijacking")
+        set_sysctl("hijack_tcp", 1)
+
 def config_ecn_threshold(kb):
     """
     Modify the configuration of this experiment's egress ports at the
@@ -587,7 +613,7 @@ def config_nic():
     interface = get_interfaces()[0]
 
     # Use a separate ethtool command for each paramemeter. Otherwise,
-    # if one parametere isn't supported the command will be aborted,
+    # if one parameter isn't supported the command will be aborted,
     # so no parameters will get set.
     exec_cmd(["sudo", "ethtool", "-C", interface, "adaptive-rx", "off"],
             check=False)
@@ -598,7 +624,7 @@ def config_power():
     """
     Configure the machine's power management for best Homa performance.
     """
-    if "Intel" in get_cpu_type():
+    if "intel" in get_cpu_type().lower():
         # For Intel processors, it's best to leave C-states enabled. This
         # can cause CPUs to sleep in power-saving mode, but if C-states
         # are disabled, then so is Turbo mode, and that will hurt  peak peformance.
