@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 
-# A Switch object represent the top-of-rack switch for a CloudLab
+# A Switch object represents a Mellanox top-of-rack switch for a CloudLab
 # experiment, and it provides various operations on the switch such
 # as configuring ports and querying statistics such as maximum buffer
 # usage.
