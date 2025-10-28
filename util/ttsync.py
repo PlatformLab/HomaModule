@@ -110,6 +110,7 @@ addr_node_num = {}
 def parse_tt(tt, node_num):
     """
     Reads a timetrace file and adds entries to send_pkts and recv_pkts.
+    Also updates num_records and last_time
 
     tt:        Name of the timetrace file
     node_num:  Integer identifier for this file/node (should reflect the
@@ -120,36 +121,45 @@ def parse_tt(tt, node_num):
     global retransmits
     sent = 0
     recvd = 0
+    num_records = 0
+    first_time = None
+    last_time = None
 
     for line in open(tt):
-        match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\]'
-                '.* id ([-0-9.]+),.* offset ([-0-9.]+)', line)
+        num_records += 1
+        match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] (.*)', line)
         if not match:
-            match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
-                    'retransmitting offset ([0-9.]+), .*id ([0-9.]+)', line)
+            continue
+        time = float(match.group(1))
+        core = int(match.group(2))
+        msg = match.group(3)
+        if first_time == None:
+            first_time = time
+        last_time = time
+
+        match = re.match('.* id ([-0-9.]+),.* offset ([-0-9.]+)', msg)
+        if not match:
+            match = re.match('retransmitting offset ([0-9.]+), .*id ([0-9.]+)',
+                    msg)
             if match:
-                offset = int(match.group(3))
-                id = int(match.group(4))
+                offset = int(match.group(1))
+                id = int(match.group(2))
                 pktid = '%d:%d' % (id, offset)
                 retransmits[pktid] = 1
                 continue
 
-            match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
-                    'sending BUSY from resend, id ([0-9]+),', line)
+            match = re.match('sending BUSY from resend, id ([0-9]+),', msg)
             if match:
-                time = float(match.group(1))
-                id = match.group(3)
+                id = match.group(1)
                 send_ctl[node_num][id].append(time)
                 continue
 
-            match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
-                    '[^ ]+ sent homa packet to ([^ ]+) id ([0-9]+), '
-                    'type (0x[0-9a-f]+)', line)
+            match = re.match('[^ ]+ sent homa packet to ([^ ]+) id ([0-9]+), '
+                    'type (0x[0-9a-f]+)', msg)
             if match:
-                time = float(match.group(1))
-                addr = match.group(3)
-                id = match.group(4)
-                type = match.group(5)
+                addr = match.group(1)
+                id = match.group(2)
+                type = match.group(3)
                 id_addr[peer_id(id)] = addr
                 id_node_num[id] = node_num
                 if type != '0x12' and type != '0x14':
@@ -157,14 +167,12 @@ def parse_tt(tt, node_num):
                 send_ctl[node_num][id].append(time)
                 continue
 
-            match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
-                    'homa_gro_receive got packet from ([^ ]+) id ([0-9]+), '
-                    'type (0x[0-9a-f]+)', line)
+            match = re.match('homa_gro_receive got packet from ([^ ]+) id '
+                    '([0-9]+), type (0x[0-9a-f]+)', msg)
             if match:
-                time = float(match.group(1))
-                addr = match.group(3)
-                id = match.group(4)
-                type = match.group(5)
+                addr = match.group(1)
+                id = match.group(2)
+                type = match.group(3)
                 id_addr[peer_id(id)] = addr
                 id_node_num[id] = node_num
                 if type == '0x16':
@@ -175,30 +183,17 @@ def parse_tt(tt, node_num):
                 recv_ctl[id].append(time)
                 continue
 
-            match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
-                    'Sending freeze to (0x[0-9a-f]+)', line)
+            match = re.match('Sending freeze to (0x[0-9a-f]+)', msg)
             if match:
-                time = float(match.group(1))
-                addr = match.group(3)
+                addr = match.group(1)
                 send_freeze.append([time, node_num, addr])
                 continue
-
-            # match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
-            #         'Freezing because of request on port [0-9]+ '
-            #         'from (0x[0-9a-f]+):', line)
-            # if match:
-            #     time = float(match.group(1))
-            #     addr = match.group(3)
-            #     recv_freeze[node_num] = [time, addr]
-            #     continue
             continue
 
-        time = float(match.group(1))
-        core = int(match.group(2))
-        id = int(match.group(3))
-        offset = int(match.group(4))
+        id = int(match.group(1))
+        offset = int(match.group(2))
 
-        if re.match('.*calling .*_xmit: wire_bytes', line):
+        if re.match('.*calling .*_xmit: wire_bytes', msg):
             if (id in max_send_offsets) and (max_send_offsets[id] >= offset):
                 continue
             pktid = '%d:%d' % (id, offset)
@@ -209,7 +204,7 @@ def parse_tt(tt, node_num):
             sent += 1
 
         match2 = re.match('.*Finished queueing packet: rpc id .*, offset .*, '
-                'len ([0-9.]+)', line)
+                'len ([0-9.]+)', msg)
         if match2:
             pktid = '%d:%d' % (id, offset)
             if pktid in retransmits:
@@ -219,7 +214,7 @@ def parse_tt(tt, node_num):
                 max_send_offsets[id] = last_offset
             continue
 
-        if "homa_gro_receive got packet" in line:
+        if "homa_gro_receive got packet" in msg:
             if (id in max_recv_offsets) and (max_recv_offsets[id] >= offset):
                 continue
             pktid = '%d:%d' % (id^1, offset)
@@ -228,30 +223,31 @@ def parse_tt(tt, node_num):
             recvd += 1
             continue
 
-        if "sending grant for" in line:
+        if "sending grant for" in msg:
             pktid = '%d:%dg' % (id, offset)
             if not pktid in send_pkts:
                 send_pkts[pktid] = [time, node_num]
                 sent += 1
             continue
 
-        if "homa_gro_receive got grant from" in line:
+        if "homa_gro_receive got grant from" in msg:
             pktid = '%d:%dg' % (id^1, offset)
             recv_pkts[pktid] = [time, node_num]
             recvd += 1
             continue
 
-        match = re.match(r' *([-0-9.]+) us .* us\) \[C([0-9]+)\] Sent RESEND '
-                    r'for client RPC id ([0-9]+), server ([^:]+):', line)
+        match = re.match(r'Sent RESEND for client RPC id ([0-9]+), '
+                         r'server ([^:]+):', msg)
         if False and match:
-            id = match.group(3)
-            addr = match.group(4)
+            id = match.group(1)
+            addr = match.group(2)
             id_addr[peer_id(id)] = addr
             id_node_num[id] = node_num
             send_ctl[node_num][id].append(time)
             continue
 
-    print("%s has %d packet sends, %d receives" % (tt, sent, recvd))
+    print('%-12s %8d %8d %8d %8.1f' % (tt, num_records, sent, recvd,
+            (last_time - first_time)/1000))
 
 def find_min_delays(num_nodes):
     """
@@ -376,6 +372,14 @@ def peer_id(id):
 tt_files.sort(key = lambda name : get_node_num(name))
 node_names = [Path(tt_file).stem for tt_file in tt_files]
 num_nodes = len(tt_files)
+print('Trace file statistics:')
+print('File:      Name of trace file')
+print('Records:   Total number of timetrace records')
+print('Sends:     Total number of packets sent')
+print('Receives:  Total number of packets redeived (will be more than Sends')
+print('           because of TSO)')
+print('Timespan:  Elapsed time between first and last timetrace records (ms)')
+print('\nFile          Records    Sends Receives Timespan')
 for i in range(num_nodes):
     parse_tt(tt_files[i],i)
 for id, addr in id_addr.items():
