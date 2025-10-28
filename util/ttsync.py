@@ -143,7 +143,7 @@ def parse_tt(tt, node_num):
                 continue
 
             match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
-                    'mlx sent homa packet to ([^ ]+) id ([0-9]+), '
+                    '[^ ]+ sent homa packet to ([^ ]+) id ([0-9]+), '
                     'type (0x[0-9a-f]+)', line)
             if match:
                 time = float(match.group(1))
