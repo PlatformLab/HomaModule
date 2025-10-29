@@ -8,7 +8,7 @@ This script analyzes time traces gathered from Homa in a variety of ways.
 Invoke with the --help option for documentation.
 """
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from functools import cmp_to_key
 from glob import glob
 import itertools
@@ -5940,9 +5940,10 @@ class AnalyzeNictx:
 #------------------------------------------------
 class AnalyzeOoo:
     """
-    Prints statistics about out-of-order packet arrivals. Also prints
-    details about out-of-order packets in the RPCs that experienced the
-    highest out-of-order delays (--verbose will print info for all OOO RPCs)
+    Prints statistics about out-of-order packet arrivals within a message.
+    Also prints details about out-of-order packets in the RPCs that
+    experienced the highest out-of-order delays (--verbose will print info
+    for all OOO RPCs).
     """
 
     def __init__(self, dispatcher):
@@ -6489,7 +6490,7 @@ class AnalyzePackets:
                         pkt['tso_length'] = tso_length
 
             if not 'rx_node' in pkt:
-                if 'peer' in tx_rpc:
+                if 'peer' in tx_rpc and tx_rpc['peer'] in peer_nodes:
                     pkt['rx_node'] = peer_nodes[tx_rpc['peer']]
 
             if 'qdisc_xmit' in pkt:
@@ -6620,6 +6621,144 @@ class AnalyzePairs:
                     print('%6s %6s %6d %6d %6d' % (src, dst, info['xmit'],
                             info['backlog'], len(delays)))
             first = False
+
+#------------------------------------------------
+# Analyzer: pass
+#------------------------------------------------
+class AnalyzePass:
+    """
+    Compute statistics on "passing", where a packet A passes a packet B
+    if both are sent to the same destination and B was transmitted before
+    A, but A arrived before B. This information will indicate whether or
+    not priority queues are being used properly. If the --same-gro-core
+    option is specified, than packets must be processed by the same GRO
+    core at the destination in order to be considered for passing.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzePackets')
+
+    def output(self):
+        global packets
+
+        print('\n--------------')
+        print('Analyzer: pass')
+        print('--------------')
+        doc = 'Statistics on passing. A packet A has passed a packet B if A '
+        doc += 'and B are sent to the same destination node and A was '
+        doc += 'transmitted after B but arrived at GRO before B. '
+        if options.same_gro_core:
+            doc += 'Since the --same-gro-core option was specified, A and B '
+            doc += 'must also have been handled by the same GRO core at the '
+            doc += 'destination. '
+        doc += 'The term "gain" refers to the largest difference in '
+        doc += 'transmission times between a packet and any of the packets '
+        doc += 'it passed.'
+        print(textwrap.fill(doc, width=70))
+        print('Node:     Destination node for packets')
+        print('Packets:  Total data packets sent to Node')
+        print('PassFrac: Fraction of packets that passed a lower-priority packet')
+        print('GainP50:  50th percentile gain of packets that passed a '
+                'lower-priority')
+        print('          packet (usecs)')
+        print('GainP90:  90th percentile gain of packets that passed a '
+                'lower-priority')
+        print('          packet (usecs)')
+        print('GainMax:  Maximum gain of any packet that passed a '
+                'lower-priority')
+        print('          packet (usecs)')
+        print('RFrac:    Fraction of packets that passed a higher-priority '
+                'packet ("reverse")')
+        print('RP50:     50th percentile gain of packets that passed a '
+                'higher-priority')
+        print('          packet (usecs)')
+        print('RP90:     90th percentile gain of packets that passed a '
+                'higher-priority')
+        print('          packet (usecs)')
+        print('RMax:     Maximum gain of any packet that passed a '
+                'higher-priority packet')
+        print('\nNode        Packets PassFrac GainP50 GainP90 GainMax   RFrac  RP50  RP90   RMax')
+
+        # Node -> list of all data packets sent to that node. The list will
+        # eventually be sorted by packet transmission time (nic).
+        node_pkts = defaultdict(list)
+
+        for pkt in packets.values():
+            if not 'nic' in pkt  or not 'gro' in pkt or not 'rx_node' in pkt:
+                continue
+            if not 'priority' in pkt:
+                continue
+            node_pkts[pkt['rx_node']].append(pkt)
+        for pkts in node_pkts.values():
+            pkts.sort(key=lambda d: d['nic'])
+        for node in get_sorted_nodes():
+            pkts = node_pkts[node]
+
+            # Active packets (those that have been sent but have not yet been
+            # discovered to have been received), sorted in order of 'nic'.
+            active = deque()
+
+            # For each packet that passed a lower-priority packet, this list
+            # contains one element (the "gain"), which is the largest
+            # difference in transmission times between the passing
+            # packet and any of the packets it passed.
+            gains = []
+
+            # Same as gains, except when a lower-priority packet passes
+            # a higher-priority one.
+            lgains = []
+
+            # Scan packets sent to the current node in order of 'nic' time,
+            # gathering data about inversions
+            for pkt in pkts:
+                nic = pkt['nic']
+                gro = pkt['gro']
+                priority = pkt['priority']
+                gro_core = pkt['gro_core']
+
+                # Drop "active" packets that have completed.
+                while len(active) > 0 and active[0]['gro'] <= nic:
+                    active.popleft()
+
+                have_gain = False
+                have_lgain = False
+                for i, p2 in enumerate(active):
+                    if gro >= p2['gro']:
+                        continue
+                    if options.same_gro_core and gro_core != p2['gro_core']:
+                        continue
+                    gain = nic - p2['nic']
+                    if p2['priority'] < priority:
+                        if not have_gain:
+                            # if node == 'node2':
+                            #     print('%9.3f -> %9.3f prio %d passed %9.3f-> '
+                            #             '%9.3f prio %d, gain %.3f' %
+                            #             (nic, gro, priority, p2['nic'], p2['gro'],
+                            #             p2['priority'], gain))
+                            gains.append(gain)
+                            have_gain = True
+                    elif p2['priority'] > priority and not have_lgain:
+                            # if gain > 89.0:
+                            #     print('%9.3f -> %9.3f prio %d passed %9.3f-> '
+                            #             '%9.3f prio %d, gain %.3f' %
+                            #             (nic, gro, priority, p2['nic'],
+                            #             p2['gro'], p2['priority'], gain))
+                            lgains.append(gain)
+                            have_lgain = True
+                active.append(pkt)
+
+            # Print statistics
+            gains.sort()
+            num_passes = len(gains)
+            lgains.sort()
+            num_lpasses = len(lgains)
+            num_pkts = len(pkts)
+            print('%-10s %8d   %6.3f %7.1f %7.1f %7.1f' % (node, num_pkts,
+                    num_passes/num_pkts, gains[50*num_passes//100],
+                    gains[90*num_passes//100], gains[-1]), end='')
+            print('  %6.3f%6.1f%6.1f %6.1f' % (
+                    num_lpasses/num_pkts, lgains[50*num_lpasses//100],
+                    lgains[90*num_lpasses//100], lgains[-1]))
 
 #------------------------------------------------
 # Analyzer: qdelay
@@ -8465,6 +8604,8 @@ class AnalyzeTxintervals:
             f.write('#             link speed)\n')
             f.write('# InNic:      KB of data that have been queued for the '
                     'NIC but whose packets\n')
+            f.write('#             have not yet been returned after '
+                    'transmission')
             f.write('# NicRx:      KB of data that are still in the NIC\'s '
                     'possession (their packets\n')
             f.write('#             haven\'t been returned after transmission) '
@@ -9050,6 +9191,10 @@ parser.add_option('--rx-node', dest='rx_node', default=None,
 parser.add_option('--rx-start', dest='rx_start', type=float, default=None,
         metavar='T', help='If specified, some analyzers will ignore packets '
         'received before time T')
+parser.add_option('--same-gro-core', dest='same_gro_core', action="store_true",
+        default=False, help='If specified, the pass analyzer will only '
+        'consider passing for packets that are processed by GRO on the '
+        'same core')
 parser.add_option('--sort', dest='sort', default=None,
         metavar='S', help='Used by some analyzers to select a field to use '
         'for sorting data. The supported values depend on the analyzer; '
