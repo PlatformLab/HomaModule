@@ -1,0 +1,186 @@
+# Commands for configuring a Dell switch (OS 10.6.0) to enable priority
+# queues with strict priority:
+
+enable
+configure terminal
+
+# Create maps from DSCP classes to egress queues, and from queues
+# to service policies.
+
+class-map type queuing pq_cm0
+match queue 0
+exit
+class-map type queuing pq_cm1
+match queue 1
+exit
+class-map type queuing pq_cm2
+match queue 2
+exit
+class-map type queuing pq_cm3
+match queue 3
+exit
+class-map type queuing pq_cm4
+match queue 4
+exit
+class-map type queuing pq_cm5
+match queue 5
+exit
+class-map type queuing pq_cm6
+match queue 6
+exit
+class-map type queuing pq_cm7
+match queue 7
+exit
+
+policy-map type queuing pq_pmap
+class pq_cm0
+priority
+class pq_cm1
+priority
+class pq_cm2
+priority
+class pq_cm3
+priority
+class pq_cm4
+priority
+class pq_cm5
+priority
+class pq_cm6
+priority
+class pq_cm7
+priority
+exit
+
+# Configure interfaces to use the trust-map (on input) and policy-
+# (for output)
+
+interface ethernet 1/1/36:3
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/28:1
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/57:3
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/39:3
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/31:2
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/62:1
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/36:2
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/59:3
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/58:2
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/31:4
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/7:4
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
+
+# Reset ports
+
+interface ethernet 1/1/36:3
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/28:1
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/57:3
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/39:3
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/31:2
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/62:1
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/36:2
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/59:3
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/58:2
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/31:4
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+interface ethernet 1/1/7:4
+no trust-map dscp
+no service-policy output type queuing pq_pmap
+exit
+
+# Create policy map that "flattens" the queues: they each get the
+# same bandwidth.
+
+policy-map type queuing pmap_flat
+class pq_cm0
+bandwidth percent 12
+class pq_cm1
+bandwidth percent 12
+class pq_cm2
+bandwidth percent 12
+class pq_cm3
+bandwidth percent 12
+class pq_cm4
+bandwidth percent 12
+class pq_cm5
+bandwidth percent 12
+class pq_cm6
+bandwidth percent 12
+class pq_cm7
+bandwidth percent 12
+exit
+
+
+interface ethernet 1/1/36:2
+service-policy output type queuing pmap_flat
+exit
+interface ethernet 1/1/59:3
+service-policy output type queuing pmap_flat
+exit
+interface ethernet 1/1/58:2
+service-policy output type queuing pmap_flat
+exit
+interface ethernet 1/1/31:4
+service-policy output type queuing pmap_flat
+exit
+interface ethernet 1/1/7:4
+service-policy output type queuing pmap_flat
+exit
