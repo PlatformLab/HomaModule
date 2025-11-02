@@ -141,7 +141,7 @@ max_unsched = 0
 # elapsed_time: Total time interval covered by the trace
 traces = {}
 
-# Peer address -> node name. Computed by AnalyzeRpcs.
+# Peer address -> node name. Computed by AnalyzeRpcs and AnalyzePackets.
 peer_nodes = {}
 
 # This variable holds information about every data packet in the traces.
@@ -210,12 +210,12 @@ packets = PacketDict()
 recv_offsets = {}
 
 # This variable holds information about every grant packet in the traces.
-# it is created by AnalyzePackets. Keys have the form id:offset where id is
+# It is created by AnalyzePackets. Keys have the form id:offset where id is
 # the RPC id on the sending side and offset is the offset in message of
 # the first byte of the packet. Each value is a dictionary containing
 # the following fields:
 # xmit:         Time when ip*xmit was invoked
-# nic:          Time when the NIC transmitted the packet
+# nic:          Time when the the packet was handed off to the NIC
 # gro:          Time when GRO received (the first bytes of) the packet
 # gro_core:     Core on which homa_gro_receive was invoked
 # softirq:      Time when homa_softirq processed the packet
@@ -234,11 +234,29 @@ class GrantDict(dict):
         return self[key]
 grants = GrantDict()
 
+# This variable holds information about every TCP packet in the traces.
+# It is created by AnalyzePackets. See get_tcp_packet for details on the keys
+# used to look up packets. Each value is a dictionary containing the following
+# fields:
+# saddr:        Source address of the packet (hex string)
+# sport:        Source port number
+# daddr:        Destination address of the packet (hex string)
+# dport:        Destination port number
+# sequence:     The sequence number in the packet
+# data_bytes:   The number of data bytes in the packet
+# total_length: Total length of the packet, including IP and TCP headers
+# ack:          The ack sequence number in the packet
+# nic:          Time when the the packet was handed off to the NIC
+# gro:          Time when GRO received the packet
+# tx_node:      Node that sent the packet (corresponds to saddr)
+# rx_node:      Node that received the packet (corresponds to daddr)
+tcp_packets = {}
+
 # Node -> list of intervals for that node. Created by the intervals analyzer.
 # Each interval contains information about a particular time range, including
 # things that happened during that time range and the state of the node at
 # the end of the period. The list entry for each interval is a dictionary with
-# the following fields:repo_
+# the following fields:
 # time:           Ending time of the interval (integer usecs); this time is
 #                 included in the interval
 # rpcs_live:      Number of live RPCs for which this node is the client
@@ -310,6 +328,14 @@ grants = GrantDict()
 # rx_new_grants:  Number of bytes of additional grants passed to ip*xmit
 #                 during the interval
 #
+# The following fields are present only if the buffers analyzer is used.
+# They count bytes of incoming packet data (including headers) for this node
+# that are queued somewhere in the network between 'nic' and 'gro'.
+# q_homa_unsched: Bytes from unscheduled Homa packets
+# q_homa_sched:   Bytes from scheduled Homa packets
+# q_homa_grant:   Bytes from Homa grant packets
+# q_tcp:          Bytes from TCP packets
+#
 # The following fields are present only if the grants analyzer is used:
 # rx_grants:      Number of incoming RPCs with outstanding grants
 # rx_grant_bytes: Total bytes of data in outstanding grants for incoming RPCs
@@ -329,6 +355,22 @@ min_latency = {}
 
 # Dispatcher used to parse the traces.
 dispatcher = None
+
+# Total bytes in an IPv4 header
+ipv4_hdr_length = 20
+
+# Total header bytes in a Homa data packet, including Homa header and
+# IP header.
+data_hdr_length = 60 + ipv4_hdr_length
+
+# Total bytes in a Homa grant packet, including IP header (assume IPv4).
+grant_pkt_length = 33 + ipv4_hdr_length
+
+# Various color values for plotting:
+color_red = '#c00000'
+color_blue = '#1f77b4'
+color_brown = '#844f1a'
+color_green = '#00b050'
 
 def add_to_intervals(node, start, end, key, delta):
     """
@@ -564,6 +606,30 @@ def get_packet(id, offset):
     """
     global packets
     return packets['%d:%d' % (id, offset)]
+
+def get_tcp_packet(saddr, sport, daddr, dport, sequence, data_bytes, ack):
+    """
+    Returns the entry in tcp_packets corresponding to the arguments. Creates
+    a new packet if it doesn't already exist.
+
+    saddr:      IP address of source (hex string)
+    sport:      Source port
+    daddr:      IP address of destination (hex string)
+    dport:      Destination port
+    sequence:   Sequence number in packet
+    data_bytes: Amount of payload data in the packet
+    ack:        Acknowledgment sequence number in the packet
+    """
+    global tcp_packets
+
+    key = '%s:%d %s:%d %d %d %d' % (saddr, sport, daddr, dport, sequence,
+            data_bytes, ack)
+    if key in tcp_packets:
+        return tcp_packets[key]
+    pkt = {'saddr': saddr, 'sport': sport, 'daddr': daddr, 'dport': dport,
+            'sequence': sequence, 'data_bytes': data_bytes, 'ack': ack}
+    tcp_packets[key] = pkt
+    return pkt
 
 def get_recv_length(offset, msg_length=None):
     """
@@ -827,7 +893,7 @@ class Dispatcher:
         # Values are the corresponding objects.
         self.analyzers = {}
 
-        # Pattern name -> list of objects interested in that pattern.
+        # Pattern name -> list of analyzer classes interested in that pattern.
         self.interests = {}
 
         # List of objects with tt_all methods, which will be invoked for
@@ -859,6 +925,12 @@ class Dispatcher:
         # Total number of times regexps were applied to lines of trace
         # files (whether they matched or not)
         self.regex_tries = 0
+
+        # Core -> dictionary of saved values for that core. Used in situations
+        # where it takes multiple time trace entries to provide all the data
+        # needed for an event: info accumulates here until the last time
+        # trace entry is seen.
+        self.core_saved = {}
 
         for pattern in self.patterns:
             pattern['matches'] = 0
@@ -924,14 +996,21 @@ class Dispatcher:
             if name == 'all':
                 self.all_interests.append(obj)
                 continue
+            name_len = len(name)
             for pattern in self.patterns:
-                if name != pattern['name']:
+                # Include all patterns whose names either match the given
+                # name or consist of the name followed by a number (used for
+                # situations where it takes multiple timetrace entries to
+                # supply relevant data).
+                if not pattern['name'].startswith(name):
+                    continue
+                if (len(pattern['name']) != name_len and
+                        not pattern['name'][name_len:].isdigit()):
                     continue
                 found_pattern = True
-                if not name in self.interests:
-                    self.interests[name] = []
-                self.interests[name].append(obj)
-                break
+                if not pattern['name'] in self.interests:
+                    self.interests[pattern['name']] = []
+                self.interests[pattern['name']].append(obj)
             if not name in self.interests:
                 raise Exception('Couldn\'t find pattern %s for analyzer %s'
                         % (name, analyzer))
@@ -1010,11 +1089,7 @@ class Dispatcher:
         if no_matches:
             print('No lines matched the following patterns:', file=sys.stderr)
             for pattern in no_matches:
-                print_string = pattern['regexp']
-                match = re.search('[()[\].+*?\\^${}]', print_string)
-                if match:
-                    print_string = print_string[:match.start()]
-                print('  %s...' % (print_string), file=sys.stderr)
+                print('  %s' % (pattern['regexp']), file=sys.stderr)
 
     def print_stats(self):
         """
@@ -1117,6 +1192,40 @@ class Dispatcher:
         'name': 'gro_grant',
         'regexp': 'homa_gro_receive got grant from ([^ ]+) id ([0-9]+), '
                   'offset ([0-9]+), priority ([0-9]+)'
+    })
+
+    def __gro_tcp(self, trace, time, core, match, interests):
+        saddr = match.group(1)
+        sport = int(match.group(2))
+        daddr = match.group(3)
+        dport = int(match.group(4))
+        self.core_saved[core] = {'saddr': saddr, 'sport': sport,
+                'daddr': daddr, 'dport': dport}
+
+    patterns.append({
+        'name': 'gro_tcp',
+        'regexp': 'tcp_gro_receive got packet from ([^:]+):([0-9]+) to '
+                  '([^:]+):([0-9]+)'
+    })
+
+    def __gro_tcp2(self, trace, time, core, match, interests):
+        if not core in self.core_saved:
+            return
+        saved = self.core_saved[core]
+        sequence = int(match.group(1))
+        data_bytes = int(match.group(2))
+        total = int(match.group(3))
+        ack = int(match.group(4))
+        for interest in interests:
+            interest.tt_gro_tcp(trace, time, core, saved['saddr'],
+                    saved['sport'], saved['daddr'], saved['dport'], sequence,
+                    data_bytes, total, ack)
+        del self.core_saved[core]
+
+    patterns.append({
+        'name': 'gro_tcp2',
+        'regexp': r'tcp_gro_receive .2. sequence ([-0-9]+), data bytes '
+                  '([0-9]+), total length ([0-9]+), ack ([-0-9]+)'
     })
 
     def __softirq_data(self, trace, time, core, match, interests):
@@ -1227,6 +1336,40 @@ class Dispatcher:
         'name': 'nic_grant',
         'regexp': '(mlx|ice) sent homa grant to ([^,]+), id ([0-9]+), '
                   'offset ([0-9]+), queue (0x[0-9a-f]+)'
+    })
+
+    def __nic_tcp(self, trace, time, core, match, interests):
+        saddr = match.group(2)
+        sport = int(match.group(3))
+        daddr = match.group(4)
+        dport = int(match.group(5))
+        self.core_saved[core] = {'saddr': saddr, 'sport': sport,
+                'daddr': daddr, 'dport': dport}
+
+    patterns.append({
+        'name': 'nic_tcp',
+        'regexp': '(mlx|ice) sent TCP packet from ([^:]+):([0-9]+) to '
+                  '([^:]+):([0-9]+)'
+    })
+
+    def __nic_tcp2(self, trace, time, core, match, interests):
+        if not core in self.core_saved:
+            return
+        saved = self.core_saved[core]
+        sequence = int(match.group(2))
+        data_bytes = int(match.group(3))
+        ack = int(match.group(4))
+        gso_size = int(match.group(5))
+        for interest in interests:
+            interest.tt_nic_tcp(trace, time, core, saved['saddr'],
+                    saved['sport'], saved['daddr'], saved['dport'],
+                    sequence, data_bytes, ack, gso_size)
+        del self.core_saved[core]
+
+    patterns.append({
+        'name': 'nic_tcp2',
+        'regexp': r'(mlx|ice) sent TCP packet .2. sequence ([-0-9]+), '
+                  'data bytes ([0-9]+), ack ([-0-9]+), gso_size ([0-9]+)'
     })
 
     def __free_tx_skb(self, trace, time, core, match, interests):
@@ -4176,46 +4319,13 @@ class AnalyzeIntervals:
             t = get_first_interval_end(node)
             end = traces[node]['last_time'] + interval_length
             while t < end:
-                node_intervals.append({
-                    'time':             t,
-                    'rpcs_live':        0,
-                    'tx_starts':        0,
-                    'tx_live_req':      0,
-                    'tx_live_resp':     0,
-                    'tx_pkts':          0,
-                    'tx_bytes':         0,
-                    'tx_nic_pkts':      0,
-                    'tx_nic_bytes':     0,
-                    'tx_in_nic':        0,
-                    'tx_nic_rx':        0,
-                    'tx_qdisc':         0,
-                    'tx_q':             0,
-                    'tx_gro_bytes':     0,
-                    'tx_free_bytes':    0,
-                    'tx_max_free':      0,
-                    'tx_min_free':      0,
-                    'tx_max_gro_free':  None,
-                    'tx_min_gro_free':  None,
-                    'tx_grant_xmit':    0,
-                    'tx_grant_gro':     0,
-                    'tx_grant_avl':     0,
-                    'tx_new_grants':    0,
-                    'rx_starts':        0,
-                    'rx_live':          0,
-                    'rx_pkts':          0,
-                    'rx_bytes':         0,
-                    'rx_grantable':     0,
-                    'rx_granted':       0,
-                    'rx_data_qdisc':    0,
-                    'rx_data_net':      0,
-                    'rx_overdue':       0,
-                    'rx_data_gro':      0,
-                    'rx_new_grants':    0,
-                    'rx_grants':        0,
-                    'rx_grant_bytes':   0,
-                    'rx_grant_info':    None,
-                    'tx_grant_info':    None
-                })
+                interval = defaultdict(lambda: 0)
+                interval['time'] = t
+                interval['tx_max_gro_free'] = None
+                interval['tx_min_gro_free'] = None
+                interval['rx_grant_info'] = None
+                interval['tx_grant_info'] = None
+                node_intervals.append(interval)
                 t += interval_length
             intervals[node] = node_intervals
 
@@ -6446,6 +6556,53 @@ class AnalyzePackets:
         g['increment'] = increment
         g['rx_node'] = trace['node']
 
+    def tt_nic_tcp(self, trace, t, core, saddr, sport, daddr, dport, sequence,
+            data_bytes, ack, gso_size):
+        # Break GSO packets up into multiple packets, matching what will
+        # be received on the other end.
+        bytes_left = data_bytes
+        node = trace['node']
+        if not saddr in peer_nodes and saddr != '0x00000000':
+            peer_nodes[saddr] = node
+        while True:
+            pkt_bytes = bytes_left
+            if pkt_bytes > gso_size and gso_size != 0:
+                pkt_bytes = gso_size
+            tcp_pkt = get_tcp_packet(saddr, sport, daddr, dport, sequence,
+                    pkt_bytes, ack)
+            # if (saddr == '0x0a000105' and sport == 36222 and daddr == '0x0a000103' and dport == 5000):
+            #     print('%9.3f: tcp_pkt: %s' % (t, tcp_pkt))
+            if 'nic' in tcp_pkt and data_bytes > 0:
+                print('TCP packet retransmission (nic %.3f and %.3f), node %s' %
+                    (tcp_pkt['nic'], t, node), file=sys.stderr)
+                return
+            tcp_pkt['nic'] = t
+            tcp_pkt['tx_node'] = node
+            if bytes_left == data_bytes:
+                tcp_pkt['gso_pkt_size'] = data_bytes
+            bytes_left -= pkt_bytes
+            sequence += pkt_bytes
+            if sequence > 0x80000000:
+                # 32-bit sequence number has wrapped around
+                sequence -= 0x100000000
+            if bytes_left <= 0:
+                break
+
+    def tt_gro_tcp(self, trace, t, core, saddr, sport, daddr, dport, sequence,
+            data_bytes, total, ack):
+        tcp_pkt = get_tcp_packet(saddr, sport, daddr, dport, sequence,
+                data_bytes, ack)
+        node = trace['node']
+        if 'gro' in tcp_pkt and data_bytes > 0:
+            print('TCP packet retransmission (gro %.3f and %.3f), node %s' %
+                  (tcp_pkt['gro'], t, node), file=sys.stderr)
+            return
+        tcp_pkt['gro'] = t
+        tcp_pkt['total_length'] = total
+        tcp_pkt['rx_node'] = node
+        if not daddr in peer_nodes and daddr != '0x00000000':
+            peer_nodes[daddr] = node
+
     def analyze(self):
         """
         Try to deduce missing packet fields, such as message length.
@@ -6761,6 +6918,255 @@ class AnalyzePass:
                     lgains[90*num_lpasses//100], lgains[-1]))
 
 #------------------------------------------------
+# Analyzer: qbytes
+#------------------------------------------------
+class AnalyzeQbytes:
+    """
+    Computes the amount of packet data of various kinds (Homa data, TCP
+    data, etc.) queued in the network at each point in time. Requires the
+    --plot option.
+    """
+    def __init__(self, dispatcher):
+        require_options('qbytes', 'plot')
+        dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzeMinlatency')
+        dispatcher.interest('AnalyzeIntervals')
+
+    def analyze(self):
+        """
+        Computes interval fields related to queued data.
+        """
+        global packets, rpcs, minlatency, intervals, grant_pkt_length
+        global tcp_packets
+
+        for pkt_type, pkts in [['data', packets.values()],
+                ['grant', grants.values()],
+                ['tcp', tcp_packets.values()]]:
+            for pkt in pkts:
+                if not 'nic' in pkt or not 'gro' in pkt:
+                    if pkt_type == 'tcp':
+                        trace = None
+                        if 'gro' in pkt:
+                            t = pkt['gro']
+                            if pkt['saddr'] in peer_nodes:
+                                trace = traces[peer_nodes[pkt['saddr']]]
+                        else:
+                            t = pkt['nic']
+                            if pkt['daddr'] in peer_nodes:
+                                trace = traces[peer_nodes[pkt['daddr']]]
+                        if (trace != None and trace['first_time'] < (t-1000) and
+                                trace['last_time'] > (t+1000)):
+                            print('%9.3f: incomplete TCP packet for %s:%d to %s:%d (peer %s, '
+                                    'start %.3f, end %.3f): %s' %
+                                    (t, pkt['saddr'], pkt['sport'],
+                                    pkt['daddr'], pkt['dport'], trace['node'],
+                                    trace['first_time'], trace['last_time'],
+                                    pkt))
+                    continue
+                gro = pkt['gro']
+                nic = pkt['nic']
+                tx_node = pkt['tx_node']
+                rx_node = pkt['rx_node']
+
+                # The packet is assumed to be queued if its latency
+                # exceeds min_latency for the nodes; it is assumed to be
+                # queued for the last part of this time (that's not quite
+                # accurate since the queuing is probably in the switch and
+                # there is probably additional delay after the packet has
+                # been received but before GRO gets it).
+                q_start = nic + min_latency[tx_node][rx_node]
+                if q_start < gro:
+                    if pkt_type == 'grant':
+                        add_to_intervals(rx_node, q_start, gro, 'q_homa_grant',
+                                grant_pkt_length)
+                    elif pkt_type == 'data':
+                        rpc = rpcs[pkt['id']^1]
+                        length = pkt['length'] + data_hdr_length
+                        if 'unsched' in rpc and pkt['offset'] < rpc['unsched']:
+                            add_to_intervals(rx_node, q_start, gro,
+                                    'q_homa_unsched', length)
+                        else:
+                            add_to_intervals(rx_node, q_start, gro,
+                                    'q_homa_sched', length)
+                    else:
+                        add_to_intervals(rx_node, q_start, gro, 'q_tcp',
+                                pkt['total_length'])
+
+    def init_axis(self, ax, x_min, x_max, y_max, size=10):
+        """
+        Initialize an axis for plotting queued bytes.
+        """
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(0, y_max)
+        ax.tick_params(right=True, which='both', direction='in', length=5)
+        ax.set_xlabel('Time (μsec)', size=size)
+        ax.set_ylabel('Queued Data (KB)', size=size)
+
+    def output(self):
+        global grants, options, packets, rpcs
+        nodes = get_sorted_nodes()
+
+        print('\n----------------')
+        print('Analyzer: qbytes')
+        print('----------------')
+        print('See qbytes.pdf in %s' % (options.plot))
+
+        # Node -> dictionary with ready-to-plot data series for the node:
+        # grant, unsched, sched, and tcp. The data are cumulative: sched
+        # includes sched, unsched, and grant. Values correspond to time_data
+        node_data = defaultdict(lambda: {'grant': [], 'unsched': [],
+                'sched': [], 'tcp': []})
+
+        # End-of-interval time values correspond to data points in node_data.
+        time_data = []
+
+        # node-> dictionary with maximum observed queuing across various
+        # categories
+        node_max = defaultdict(lambda:{'grant': 0, 'unsched': 0, 'sched': 0,
+                'tcp': 0, 'total': 0})
+
+        # Largest 'total' value in dictionary above'.
+        overall_node_max = 0
+
+        # Ready-to-plot data series that hold totals across all nodes,
+        # corresponding to time_data.
+        total_grant_data = []
+        total_unsched_data = []
+        total_sched_data = []
+        total_tcp_data = []
+
+        # Maximum values of sums across all nodes
+        max_grant = 0
+        max_unsched = 0
+        max_sched = 0
+        max_tcp = 0
+        max_total = 0
+
+        # Generate data to plot. Each iteration of this outer loop processes
+        # the interval data for all nodes at a given time.
+        t = options.interval * math.floor(get_last_start()/options.interval)
+        end_time = get_first_end()
+        while t < end_time:
+            total_grant = 0
+            total_unsched = 0
+            total_sched = 0
+            total_tcp = 0
+            for node in nodes:
+                data = node_data[node]
+                interval = get_interval(node, t)
+                max = node_max[node]
+
+                val = interval['q_homa_grant']
+                sum = val
+                data['grant'].append(sum/1000)
+                if val > max['grant']:
+                    max['grant'] = val
+                total_grant += val
+
+                val = interval['q_homa_unsched']
+                sum += val
+                data['unsched'].append(sum/1000)
+                if val > max['unsched']:
+                    max['unsched'] = val
+                total_unsched += val
+
+                val = interval['q_homa_sched']
+                sum += val
+                data['sched'].append(sum/1000)
+                if val > max['sched']:
+                    max['sched'] = val
+                total_sched += val
+
+                val = interval['q_tcp']
+                sum += val
+                data['tcp'].append(sum/1000)
+                if val > max['tcp']:
+                    max['tcp'] = val
+                total_tcp += val
+
+                if sum > max['total']:
+                    max['total'] = sum
+                    if sum > overall_node_max:
+                        overall_node_max = sum
+
+            total_grant_data.append(total_grant/1000)
+            if total_grant > max_grant:
+                max_grant = total_grant
+
+            sum = total_grant + total_unsched
+            total_unsched_data.append(sum/1000)
+            if total_unsched > max_unsched:
+                max_unsched= total_unsched
+
+            sum += total_sched
+            total_sched_data.append(sum/1000)
+            if total_sched > max_sched:
+                max_sched= total_sched
+
+            sum += total_tcp
+            total_tcp_data.append(sum/1000)
+            if total_tcp > max_tcp:
+                max_tcp= total_tcp
+
+            if sum > max_total:
+                max_total = sum
+            time_data.append(t)
+            t += options.interval
+
+        # Print summary statistics
+        print('\nLargest observed queued incoming data (KB):')
+        print('Node:    Name of node')
+        print('Total:   Maximum total queued bytes for the node')
+        print('Grants:  Maximum queued bytes from grant packets')
+        print('Unsched: Maximum queued bytes in unscheduled data packets')
+        print('Sched:   Maximum queued bytes in scheduled data packets')
+        print('Tcp:     Maximum queued bytes in TCP packets\n')
+        print('The Total line shows the maximum instantaneous sum across all '
+                'nodes.')
+        print('Node          Total   Grants  Unsched    Sched      Tcp')
+        for node in nodes:
+            max = node_max[node]
+            print('%-10s %8d %8d %8d %8d %8d' % (node, max['total']/1000,
+                    max['grant']/1000, max['unsched']/1000, max['sched']/1000,
+                    max['tcp']/1000))
+        print('Total      %8d %8d %8d %8d %8d' % (max_total/1000, max_grant/1000,
+                max_unsched/1000, max_sched/1000, max_tcp/1000))
+
+        # Generate a stacked graph. The top plot contains cluster-wide totals;
+        # subsequent plots show data for each individual node.
+        fig, axes = plt.subplots(nrows=len(nodes) + 1, ncols=1, sharex=False,
+                figsize=[8, (1 + len(nodes))*2])
+        ax = axes[0]
+        ax.set_title("Total Across All Nodes", size=10)
+        x_min = get_last_start()
+        x_max = get_first_end()
+        self.init_axis(ax, x_min, x_max, max_total/1000)
+        ax.step(time_data, total_grant_data, where='pre',
+                label='Homa grants', color=color_red)
+        ax.step(time_data, total_unsched_data, where='pre',
+                label='Homa unscheduled data', color=color_blue)
+        ax.step(time_data, total_sched_data, where='pre',
+                label='Homa scheduled data', color=color_brown)
+        ax.step(time_data, total_tcp_data, where='pre',
+                label='TCP', color=color_green)
+        for i in range(len(nodes)):
+            node = nodes[i]
+            data = node_data[node]
+            ax = axes[i+1]
+            self.init_axis(ax, x_min, x_max, overall_node_max/1000)
+            ax.set_title(node, size=10)
+            ax.step(time_data, data['grant'], where='pre', color=color_red)
+            ax.step(time_data, data['unsched'], where='pre', color=color_blue)
+            ax.step(time_data, data['sched'], where='pre', color=color_brown)
+            ax.step(time_data, data['tcp'], where='pre', color=color_green)
+        fig.legend(loc='lower center', ncol=4, bbox_to_anchor=(0.5, -0.02),
+                frameon=False, prop={'size': 9})
+        # plt.legend(loc="upper left", prop={'size': 9})
+        plt.tight_layout()
+        plt.savefig("%s/qbytes.pdf" % (options.plot), bbox_inches='tight')
+
+#------------------------------------------------
 # Analyzer: qdelay
 #------------------------------------------------
 class AnalyzeQdelay:
@@ -6842,13 +7248,13 @@ class AnalyzeQdelay:
                 rx_node = pkt['rx_node']
                 qdelay = (gro - nic) - min_latency[tx_node][rx_node]
                 if pkt_type == 'grant':
-                    color = '#844F1A'
+                    color = color_brown
                 else:
                     rpc = rpcs[pkt['id']]
                     if rpc['out_length'] < 1000:
-                        color = '#c00000'
+                        color = color_red
                     else:
-                        color = '#1f77b4'
+                        color = color_blue
                 tx_delays[tx_node][0].append(nic)
                 tx_delays[tx_node][1].append(qdelay)
                 tx_delays[tx_node][2].append(color)
@@ -6862,9 +7268,9 @@ class AnalyzeQdelay:
         legend_handles = [
             matplotlib.lines.Line2D([], [], color=c, marker='o',
                     linestyle='None', markersize=8, label=label)
-            for c, label in [['#c00000', 'Data (messages < 1000B)'],
-                    ['#1f77b4', 'Data (other messages)'],
-                    ['#844F1A', 'Grants']]
+            for c, label in [[color_red, 'Data (messages < 1000B)'],
+                    [color_blue, 'Data (other messages)'],
+                    [color_brown, 'Grants']]
         ]
         x_min = get_last_start()
         x_max = get_first_end()
@@ -8269,33 +8675,30 @@ class AnalyzeTemp:
     debugging. Consult the code to see what it does right now.
     """
     def __init__(self, dispatcher):
-        if True:
+        if False:
             dispatcher.interest('AnalyzeRpcs')
             dispatcher.interest('AnalyzePackets')
+        self.stream_pkts = defaultdict(list)
+
+    def tt_gro_tcp(self, trace, t, core, saddr, sport, daddr, dport, sequence,
+            data_bytes, total, ack):
+        if data_bytes == 0:
+            return
+        stream = '%s:%d to %s:%d' % (saddr, sport, daddr, dport)
+        self.stream_pkts[stream].append([t, sequence, data_bytes])
 
     def output(self):
-        global traces, options, packets, rpcs
-        print('\n-------------------')
-        print('Analyzer: temp')
-        print('-------------------\n')
-
-        bytes = 0
-        for pkt in packets.values():
-            if pkt['retransmits']:
-                print('Packet with %d retransmissions: %s\n' % (
-                        len(pkt['retransmits']), pkt))
-            for r in pkt['retransmits']:
-                if 'tso_length' in r:
-                    bytes += r['tso_length']
-                elif 'length' in pkt:
-                    bytes += pkt['length']
-                else:
-                    print('Can\'t find length for preceding packet')
-        elapsed = 0
-        for trace in traces.values():
-            elapsed += trace['elapsed_time']
-        print('Total elapsed time %.1f ms, retransmitted bytes %d (%.3f MB/sec)'
-                % (elapsed * 1e-3, bytes, bytes / elapsed))
+        for stream in self.stream_pkts.keys():
+            pkts = sorted(self.stream_pkts[stream], key=lambda t: t[1])
+            for i in range(1, len(pkts)):
+                prev = pkts[i-1]
+                pkt = pkts[i]
+                print('%9.3f: stream %s, sequence %d, data_bytes %d' %
+                        (pkt[0], stream, pkt[1], pkt[2]))
+                gap = pkt[1] - (prev[1] + prev[2])
+                if gap == 0:
+                    continue
+                print('  Gap of %d bytes in %s' % (gap, stream))
 
     def output_snapshot(self):
         global packets, rpcs

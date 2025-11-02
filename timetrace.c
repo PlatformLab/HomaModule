@@ -238,8 +238,8 @@ void tt_freeze(void)
  */
 void tt_unfreeze(void)
 {
+	pr_err("%s invoked\n", __func__);
 	if (atomic_xchg(&tt_frozen, 0) == 1) {
-		pr_err("%s invoked\n", __func__);
 		atomic_dec(&tt_freeze_count);
 	}
 }
@@ -268,6 +268,7 @@ void tt_record_buf(struct tt_buffer *buffer, u64 timestamp,
 		   u32 arg3)
 {
 	struct tt_event *event;
+	int index;
 
 	if (unlikely(atomic_read(&tt_freeze_count) > 0)) {
 		// In order to ensure that reads produce consistent
@@ -276,13 +277,14 @@ void tt_record_buf(struct tt_buffer *buffer, u64 timestamp,
 		return;
 	}
 
-	event = &buffer->events[buffer->next_index];
-	buffer->next_index = (buffer->next_index + 1)
-#ifdef __UNIT_TEST__
-		& (tt_buffer_size - 1);
-#else /* __UNIT_TEST__ */
-		& (TT_BUF_SIZE - 1);
-#endif /* __UNIT_TEST__ */
+	/* Even though there is a separate tt buffer for each core, we
+	 * still have to use an atomic operation to update next_index,
+	 * because an interrupt could occur while executing this function.
+	 * Before the atomic increment was added, tt entries were occasionally
+	 * lost.
+	 */
+	index = atomic_fetch_inc_relaxed(&buffer->next_index) & TT_BUF_MASK;
+	event = &buffer->events[index];
 
 	event->timestamp = timestamp;
 	event->format = format;
@@ -317,8 +319,8 @@ u64 tt_find_oldest(int *pos)
 		if (!buffer->events[tt_buffer_size - 1].format) {
 			pos[i] = 0;
 		} else {
-			int index = (buffer->next_index + 1)
-					& (tt_buffer_size - 1);
+			int index = (atomic_read(&buffer->next_index) + 1)
+					& TT_BUF_MASK;
 			struct tt_event *event = &buffer->events[index];
 
 			pos[i] = index;
@@ -331,10 +333,13 @@ u64 tt_find_oldest(int *pos)
 	 * sure that there's no missing data in what we print.
 	 */
 	for (i = 0; i < nr_cpu_ids; i++) {
+		int next;
+
 		buffer = tt_buffers[i];
+		next = tt_get_buf_index(buffer);
 		while (buffer->events[pos[i]].timestamp < start_time &&
-		       pos[i] != buffer->next_index) {
-			pos[i] = (pos[i] + 1) & (tt_buffer_size - 1);
+		       pos[i] != next) {
+			pos[i] = (pos[i] + 1) & TT_BUF_MASK;
 		}
 	}
 	return start_time;
@@ -430,7 +435,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 			struct tt_buffer *buffer = tt_buffers[i];
 
 			event = &buffer->events[pf->pos[i]];
-			if (pf->pos[i] != buffer->next_index &&
+			if (pf->pos[i] != tt_get_buf_index(buffer) &&
 			    event->timestamp < earliest_time) {
 				current_core = i;
 				earliest_time = event->timestamp;
@@ -553,7 +558,7 @@ int tt_proc_release(struct inode *inode, struct file *file)
 				struct tt_buffer *buffer = tt_buffers[i];
 
 				buffer->events[tt_buffer_size - 1].format = NULL;
-				buffer->next_index = 0;
+				atomic_set(&buffer->next_index, 0);
 			}
 		}
 		atomic_dec(&tt_freeze_count);
@@ -627,7 +632,7 @@ void tt_print_file(char *path)
 			struct tt_buffer *buffer = tt_buffers[i];
 
 			event = &buffer->events[pos[i]];
-			if (pos[i] != buffer->next_index &&
+			if (pos[i] != tt_get_buf_index(buffer) &&
 			    event->timestamp < earliest_time) {
 				current_core = i;
 				earliest_time = event->timestamp;
@@ -723,11 +728,11 @@ void tt_printk(void)
 	start_time = tt_find_oldest(oldest);
 	events = 0;
 	for (i = 0; i < nr_cpu_ids; i++) {
-		if (oldest[i] == tt_buffers[i]->next_index)
+		if (oldest[i] == tt_get_buf_index(tt_buffers[i]))
 			pos[i] = -1;
 		else
-			pos[i] = (tt_buffers[i]->next_index - 1) &
-			         (tt_buffer_size - 1);
+			pos[i] = (atomic_read(&tt_buffers[i]->next_index) - 1) &
+			         TT_BUF_MASK;
 	}
 
 #if 0
@@ -819,7 +824,7 @@ void tt_get_messages(char *buffer, size_t length)
 			struct tt_buffer *buffer = tt_buffers[i];
 
 			event = &buffer->events[pos[i]];
-			if (pos[i] != buffer->next_index &&
+			if (pos[i] != tt_get_buf_index(buffer) &&
 			    event->timestamp < earliest_time) {
 				current_core = i;
 				earliest_time = event->timestamp;
