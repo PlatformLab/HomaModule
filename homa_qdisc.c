@@ -1146,8 +1146,13 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 	if (qshared->homa_share > 100)
 		qshared->homa_share = 100;
 
-	rcu_read_lock();
+	/* Use a mutex rather than RCU to prevent qdev deletion while we
+	 * traverse the list. This is more expensive, but RCU isn't safe
+	 * because homa_qdev_update_sysctl may block (and efficiency isn't
+	 * paramount here).
+	 */
+	mutex_lock(&qshared->mutex);
 	list_for_each_entry_rcu(qdev, &qshared->qdevs, links)
 		homa_qdev_update_sysctl(qdev);
-	rcu_read_unlock();
+	mutex_unlock(&qshared->mutex);
 }
