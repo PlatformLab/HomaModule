@@ -171,9 +171,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 				seg_length = homa_info->data_bytes;
 			data_left = homa_info->data_bytes - seg_length;
 		}
-		offset = ntohl(h->seg.offset);
-		if (offset == -1)
-			offset = ntohl(h->common.sequence);
+		offset = homa_get_offset(h);
 #ifndef __STRIP__ /* See strip.py */
 		used = homa_snprintf(buffer, buf_len, used,
 				     ", message_length %d, offset %d, data_length %d, incoming %d",
@@ -322,9 +320,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 			seg_length = homa_info->seg_length;
 			data_left = homa_info->data_bytes - seg_length;
 		}
-		offset = ntohl(h->seg.offset);
-		if (offset == -1)
-			offset = ntohl(h->common.sequence);
+		offset = homa_get_offset(h);
 
 		pos = skb_transport_offset(skb) + sizeof(*h) + seg_length;
 		used = homa_snprintf(buffer, buf_len, 0, "DATA%s %d@%d",

@@ -559,6 +559,19 @@ static inline void homa_set_hijack(struct homa_common_hdr *common)
 	common->urgent = htons(HOMA_TCP_URGENT);
 	common->doff = 0x50;
 }
+
+/**
+ * homa_get_offset() - Returns the offset within message of the first byte
+ * of data in a Homa DATA packet (the offset is stored in different places
+ * in different situations).
+ * @h:       Header for DATA packet
+ * Return:   See above
+ */
+static inline int homa_get_offset(struct homa_data_hdr *h)
+{
+	return (h->seg.offset != -1) ? ntohl(h->seg.offset) :
+	       ntohl(h->common.sequence);
+}
 #endif /* See strip.py */
 
 #endif /* _HOMA_WIRE_H */
