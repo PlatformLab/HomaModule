@@ -32,8 +32,12 @@ for ((i = $first ; i <= $last; i++)); do
     node=node$i
     echo
     echo $node
-    ssh $node 'rm -rf tmp; mkdir -p tmp tmp/boot'
-    rsync -rtv /boot/initrd.img-$v /boot/config-$v /boot/System.map-$v \
+
+    # Forcing IPv4 below helps on CloudLab nodes (otherwise there will be
+    # a 10-20 second delay for each node if Homa hasn't been installed
+    # (tries IPv6 first?)
+    ssh -4 $node 'rm -rf tmp; mkdir -p tmp tmp/boot'
+    rsync --ipv4 -rtv /boot/initrd.img-$v /boot/config-$v /boot/System.map-$v \
             /boot/vmlinuz-$v $node:tmp/boot/
-    ssh $node "sudo cp -f tmp/boot/* /boot; sudo reboot"
+    ssh -4 $node "sudo cp -f tmp/boot/* /boot; sudo reboot"
 done
