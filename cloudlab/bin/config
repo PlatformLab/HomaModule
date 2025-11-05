@@ -48,6 +48,9 @@ num_nodes = 0
 # Cached result of get_node_names.
 node_names = []
 
+# Set from command line option to request detailed output.
+verbose = False
+
 # Contains information from /proc/cpuinfo with one entry for each
 # "processor" in /proc/cpuinfo. The entry is a dictionary with the
 # following entries (same names as in /proc/cpuinfo):
@@ -138,8 +141,7 @@ def get_interfaces():
     if interface:
         return [interface, vlan]
     available = ""
-    for line in exec_cmd(["ifconfig"], stdout=subprocess.PIPE,
-            encoding="utf-8", check=True).stdout.splitlines():
+    for line in exec_cmd(["ifconfig"], check=True).stdout.splitlines():
         match = re.match('^([a-z0-9]*):', line)
         if match:
             current = match.group(1)
@@ -173,9 +175,7 @@ def get_link_speed():
     nic = get_interfaces()[0]
     num_channels = -1
 
-    for line in exec_cmd(["ethtool", nic], stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, encoding="utf-8",
-            check=True).stdout.splitlines():
+    for line in exec_cmd(["ethtool", nic], check=True).stdout.splitlines():
         match = re.match('.*Speed: ([0-9]+)Mb/s', line)
         if match:
             link_mbps = int(match.group(1))
@@ -215,7 +215,7 @@ def get_nic_type():
     if nic_type != None:
         return nic_type
     info = exec_cmd(["sudo", "ethtool", "-i", get_interfaces()[0]],
-            stdout=subprocess.PIPE, encoding="utf-8", check=True).stdout
+            check=True).stdout
     match = re.search(r'.*driver:\s*(\S+)', info, re.MULTILINE)
     if not match:
         raise Exception("Couldn't identify NIC type (no 'driver' info in "
@@ -232,8 +232,7 @@ def get_node_num():
     global node_num
     if node_num != None:
         return node_num
-    hostname = exec_cmd(["hostname"], stdout=subprocess.PIPE,
-            encoding="utf-8", check=True).stdout
+    hostname = exec_cmd(["hostname"], check=True).stdout
     match = re.match(r'node([0-9]+)\.', hostname)
     if not match:
         raise Exception("Couldn't figure out node number for this node")
@@ -314,7 +313,6 @@ def get_qdisc_config():
     result['children'] = []
     nic = get_interfaces()[0]
     for line in exec_cmd(['tc', 'qdisc', 'show', 'dev', nic],
-            stdout=subprocess.PIPE, encoding='utf-8',
             check=True).stdout.splitlines():
         match = re.match('qdisc mq ([0-9a-f]+:[0-9a-f]*) root', line)
         if match:
@@ -338,8 +336,8 @@ def print_rss():
     nic = get_interfaces()[0]
     irqs = get_nic_irqs()
     num_channels = -1
-    for line in exec_cmd(["ethtool", "-l", nic], stdout=subprocess.PIPE,
-            encoding="utf-8", check=True).stdout.splitlines():
+    for line in exec_cmd(["ethtool", "-l", nic],
+            check=True).stdout.splitlines():
         match = re.match('Combined:[^0-9]+([0-9]+)', line)
         if match:
             num_channels = int(match.group(1))
@@ -428,12 +426,21 @@ def add_ipv6_to_etc_hosts(num_hosts):
 
 def exec_cmd(*args, **kwargs):
     """
-    This method is a wrapper around subprocess.run, which logs the command
-    before executing it. The arguments are the same as those to
-    subprocess.run.
+    This method is a wrapper around subprocess.run, which arranges for the
+    output to be captured and also performs logging. The arguments are the
+    same as those for subprocess.run.
     """
-    print("%% %s" % (" ".join(args[0])))
-    return subprocess.run(*args, **kwargs)
+    global verbose
+
+    if verbose:
+        print("%% %s" % (" ".join(args[0])))
+    try:
+        return subprocess.run(*args, text=True, capture_output=True, **kwargs)
+    except subprocess.CalledProcessError as e:
+        if not verbose:
+            print("%% %s" % (" ".join(args[0])))
+        print(e.stderr)
+        raise
 
 def set_sysctl(name, value):
     """
@@ -461,8 +468,7 @@ def config_homa(mod):
     # See if Homa supports sysctls (if it has been stripped down for Linux
     # upstreaming, it might not).
 
-    result = exec_cmd(["sysctl", ".net.homa.num_priorities"],
-            capture_output=True)
+    result = exec_cmd(["sysctl", ".net.homa.num_priorities"], check=False)
     if result.returncode != 0:
         global sysctl_avl
         print("Homa doesn't appear to support sysctls")
@@ -515,8 +521,7 @@ def config_ipv6(num_hosts, vlan):
     """
     vlan = get_interfaces()[1]
     # Configure ifconfig and route if not already done.
-    if "inet6 fd00::" in exec_cmd(["ifconfig", vlan],
-            stdout=subprocess.PIPE, encoding="utf-8", check=True).stdout:
+    if "inet6 fd00::" in exec_cmd(["ifconfig", vlan], check=True).stdout:
         print("IPv6 already configured")
     else:
         print("Configuring IPv6:")
@@ -762,6 +767,7 @@ def print_help():
     print("Usage: config feature feature ...")
     print("\nEach feature may be one of the following:")
     print("    --help                 Print this help text and exit")
+    print("    --verbose              Print details of commands executed and results")
     print("    default                Normal configuration for Homa: equivalent to")
     print("                           'reset_qdisc homa ~/bin/homa.ko ipv6 nic power")
     print("                           rps'")
@@ -813,6 +819,8 @@ while i < len(sys.argv):
     if arg == "--help":
         print_help()
         exit(0)
+    elif arg == "--verbose":
+        verbose = True
     elif arg == "default":
         config_reset_qdisc()
         config_homa("~/bin/homa.ko")

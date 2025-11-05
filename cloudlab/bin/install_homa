@@ -7,7 +7,7 @@
 # or more target machines; it also loads the Homa kernel module.
 #
 # Usage:
-# install_homa [--net-next] num_nodes [first]
+# install_homa [--net-next] [--verbose] num_nodes [first]
 #
 # The "num_nodes" arguments indicates how many servers should be updated.
 # The "first" argument is optional; it is an integer identifying the
@@ -23,10 +23,20 @@ root=~/homaModule
 set -e
 
 homa_ko=$root/homa.ko
-if [ $1 = "--net-next" ]; then
-    homa_ko=/netnext/net-next/net/homa/homa.ko
-    shift
-fi
+verbose=""
+rsync_switches="-rt"
+while true; do
+    if [ $1 = "--net-next" ]; then
+        homa_ko=/netnext/net-next/net/homa/homa.ko
+        shift
+    elif [ $1 = "--verbose" ]; then
+        verbose=" --verbose"
+        rsync_switches="-rtv"
+        shift
+    else
+        break
+    fi
+done
 if [ $# -eq 2 ]; then
     first=$2
 elif [ $# -eq 1 ]; then
@@ -41,11 +51,11 @@ for ((i = $first ; i <= $last; i++)); do
     node=node$i
     echo
     echo '*** Installing Homa on' $node '***'
-    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv ~/.bashrc ~/.bash_profile ~/.gdbinit $node:
-    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv --exclude __pycache__ ~/bin/ $node:bin/
-    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv $homa_ko $root/util/cp_node $root/util/homa_prio $root/util/server $root/util/homa_test $root/util/*.py $node:bin/
-    ssh -4 $node 'sudo sysctl .kernel.printk="5 4 1 7"'
-    ssh -4 $node 'echo $PATH'
-    ssh -4 $node 'config default'
+    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" $rsync_switches ~/.bashrc ~/.bash_profile ~/.gdbinit $node:
+    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" $rsync_switches --exclude __pycache__ ~/bin/ $node:bin/
+    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" $rsync_switches $homa_ko $root/util/cp_node $root/util/homa_prio $root/util/server $root/util/homa_test $root/util/*.py $node:bin/
+    ssh -4 $node 'sudo sysctl .kernel.printk="5 4 1 7" > /dev/null'
+    # ssh -4 $node 'echo $PATH'
+    ssh -4 $node "config$verbose default"
     ssh -4 $node 'if ! grep -q mitigations=off /proc/cmdline; then echo WARNING: Meltdown/Spectre mitigations have not been disabled!; fi'
 done
