@@ -12,6 +12,7 @@ from collections import defaultdict, deque
 from functools import cmp_to_key
 from glob import glob
 import itertools
+from io import StringIO
 import matplotlib
 import matplotlib.pyplot as plt
 from optparse import OptionParser
@@ -278,6 +279,7 @@ tcp_packets = {}
 #                 received at target; provides a tighter (over)estimate of
 #                 "bytes that are queued in the NIC but have not yet been
 #                 transmitted"
+# pkts_in_nic2:   The number of packets associated with tx_in_nic2
 # tx_in_nic_qx:   Same as tx_in_nic2 except only counts bytes in a particular
 #                 tx queue (given by the --tx-qid option, default 0).
 # tx_nic_rx:      Number of bytes of data that have been received by the
@@ -812,6 +814,37 @@ def percentile(data, pct, format, na):
 def pkt_id(id, offset):
     return '%d:%d' % (id, offset)
 
+def plot_ccdf(data, file, fig_size=(8,6), title=None, size=10,
+        y_label="Cumulative Fraction", x_label="Delay (usecs)"):
+    """
+    Generate a complementary CDF with log-scale y-axis.
+
+    data:     X-values for the graph, in ascending order
+    file:     File in which to write the plot.
+    """
+
+    plt.figure(figsize=fig_size)
+    if title != None:
+        plt.title(title, size=size)
+    if x_label:
+        plt.xlabel(x_label, size=size)
+    plt.yscale("log")
+    plt.ylim(1e-3, 1.0)
+    if y_label:
+        plt.ylabel(y_label, size=size)
+    plt.tick_params(top=True, which="both", direction="in", labelsize=size,
+            length=5)
+    plt.grid(which="major", axis="x")
+    plt.grid(which="major", axis="y")
+    l = len(data)
+    y = [(l - i)/l for i in range(0, l)]
+    plt.plot(data, y, color=color_blue)
+    left, right = plt.xlim()
+    print('left: %s, right: %s' % (left, right))
+    plt.xlim(left=0, right=right)
+    plt.tight_layout()
+    plt.savefig(file)
+
 def print_analyzer_help():
     """
     Prints out documentation for all of the analyzers.
@@ -862,6 +895,85 @@ def print_if(value, fmt, modifier=None):
             value = modifier(value)
         return fmt % (value)
     return ''
+
+def print_pkts(pkts, header=True):
+    """
+    Returns a string containing one line for each packet in pkts, which
+    contains various useful information about the packet. If header is True
+    then the string also includes initial text describing the fields that
+    are printed on each line.
+    """
+
+    buf = StringIO()
+    buf.write('# Dest:       Node to which packet was sent\n')
+    buf.write('# Xmit:       Time when packet was passed to ip*xmit\n')
+    buf.write('# Qdisc:      Time when homa_qdisc requeued packet after '
+            'deferral, if any\n')
+    buf.write('# RpcId:      Identifier of packet\'s RPC\n')
+    buf.write('# Offset:     Offset of packet within message\n')
+    buf.write('# Length:     Size of packet (before segmentation)\n')
+    buf.write('# Qid:        Transmit queue on which packet was sent\n')
+    buf.write('# Nic:        Time when packet was queued for NIC\n')
+    buf.write('# NDelay:     Nic - (later of Xmit and Qdisc)\n')
+    buf.write('# MaxGro:     Time when last fragment of packet was '
+            'received by GRO\n')
+    buf.write('# GDelay:     MaxGro - Nic\n')
+    buf.write('# Free:       Time when sk_buff was released on sender\n')
+    buf.write('# FDelay:     Free - Nic\n')
+    buf.write('# Rx:         Number of times segments in the packet were '
+            'retransmitted\n\n')
+    buf.write('# Dest           Xmit      Qdisc      RpcId Offset  Length')
+    buf.write(' Qid        Nic  NDelay     MaxGro  GDelay')
+    buf.write('       Free  FDelay Rx\n')
+    for pkt in pkts:
+        xmit = pkt['xmit']
+        if 'qdisc_xmit' in pkt:
+            qdisc = pkt['qdisc_xmit']
+            qdisc_string = '%10.3f' % (qdisc)
+        else:
+            qdisc = None
+            qdisc_string = ''
+        nic_delay = None
+        if 'nic' in pkt:
+            nic = pkt['nic']
+            if qdisc != None:
+                nic_delay = nic - qdisc
+            elif xmit != None:
+                nic_delay = nic - xmit
+        else:
+            nic = None
+        gro = pkt['gro'] if 'gro' in pkt else None
+        free = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
+        qid = pkt['tx_qid'] if 'tx_qid' in pkt else None
+        length = pkt['tso_length']
+
+        rx = len(pkt['retransmits'])
+        if 'segments' in pkt:
+            for seg in pkt['segments']:
+                rx += len(seg['retransmits'])
+        rx_msg = str(rx) if rx > 0 else ""
+
+        line = '%-10s %10.3f %10s %10d %6d  %6d' % (
+                pkt['rx_node'] if 'rx_node' in pkt else "",
+                xmit, qdisc_string, pkt['id'], pkt['offset'],
+                pkt['tso_length'])
+        nic_delay_string = ''
+        if nic_delay != None:
+            nic_delay_string = '%.1f' % (nic_delay)
+        gro_delay_string = ''
+        if gro != None and nic != None:
+                gro_delay_string = '%.1f' % (gro - nic)
+        line += ' %3s %10s %7s %10s %7s' % (print_if(qid, '%d'),
+                print_if(nic, '%.3f'), nic_delay_string,
+                print_if(gro, '%.3f'), gro_delay_string)
+        free_delay_string = ''
+        if (nic != None) and (free != None):
+            free_delay_string = '%.1f' % (free - nic)
+        line += ' %10s %7s %2s' % (print_if(free, '%.3f'),
+                free_delay_string, rx_msg)
+        buf.write(line.rstrip())
+        buf.write('\n')
+    return buf.getvalue()
 
 def require_options(analyzer, *args):
     """
@@ -4499,6 +4611,8 @@ class AnalyzeIntervals:
                     if nic_end2 < 1e20:
                         add_to_intervals(tx_node, nic_start, nic_end2,
                                 'tx_in_nic2', tso_length)
+                        add_to_intervals(tx_node, nic_start, nic_end2,
+                                'pkts_in_nic2', 1)
                         if 'tx_qid' in pkt and pkt['tx_qid'] == qid:
                             add_to_intervals(tx_node, nic_start, nic_end2,
                                     'tx_in_nic_qx', tso_length)
@@ -6059,8 +6173,9 @@ class AnalyzeNictx:
                     options.tx_qid if options.tx_qid != None else 0))
             f.write('              the --tx-qid option to select a different '
                     'queue)\n')
+            f.write('# NicPkts     Number of packets associated with InNic2')
 
-            f.write('\n#   Time     Tx  ToNic    Gro   Free InNic InNic2 InNicQ\n')
+            f.write('\n#   Time     Tx  ToNic    Gro   Free InNic InNic2 InNicQ NicPkts\n')
 
             node_intervals = intervals[node]
             bytes_to_gbps = 8 / (options.interval * 5 * 1000)
@@ -6075,7 +6190,7 @@ class AnalyzeNictx:
                     gro_bytes += interval['tx_gro_bytes']
                     free_bytes += interval['tx_free_bytes']
                 interval = node_intervals[i]
-                f.write('%8.1f %6.1f %6.1f %6.1f %6.1f %5d %6d %6d\n' %
+                f.write('%8.1f %6.1f %6.1f %6.1f %6.1f %5d %6d %6d  %6d\n' %
                         (interval['time'],
                          tx_bytes * bytes_to_gbps,
                          to_nic_bytes * bytes_to_gbps,
@@ -6083,7 +6198,8 @@ class AnalyzeNictx:
                          free_bytes * bytes_to_gbps,
                          interval['tx_in_nic'] * 1e-3,
                          interval['tx_in_nic2'] * 1e-3,
-                         interval['tx_in_nic_qx'] * 1e-3))
+                         interval['tx_in_nic_qx'] * 1e-3,
+                         interval['pkts_in_nic2']))
             f.close()
 
 #------------------------------------------------
@@ -6533,6 +6649,8 @@ class AnalyzePackets:
             p['tso_length'] = length
         else:
             p['retransmits'][-1]['tso_length'] = length
+        if id == 202753545:
+            print("tt_send_data got packet: %s" % (p))
 
     def tt_pacer_xmit(self, trace, t, core, id, offset, port, bytes_left):
         global packets
@@ -8718,9 +8836,41 @@ class AnalyzeTemp:
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzePackets')
 
-    def output(self):
-        global rpcs
+    def output_delays(self):
+        global packets, options, rpcs
 
+        delays = []
+
+        for pkt in packets.values():
+            if not 'nic' in pkt or not 'gro' in pkt:
+                continue
+            if options.node != None and pkt['tx_node'] != options.node:
+                continue
+            if not pkt['id'] in rpcs:
+                continue
+            rpc = rpcs[pkt['id']]
+            if not 'out_length' in rpc:
+                continue
+            length = rpc['out_length']
+            if length <= 1000 or length > 1400:
+                continue
+            delays.append(pkt['gro'] - pkt['nic'])
+        if not delays:
+            print('No packets matched!')
+            return
+        delays.sort()
+        plot_ccdf(delays, 'temp_delays.pdf')
+        print('%d data points, P50 %.1f P90 %.1f P99 %.1f max %.1f' % (
+                len(delays), delays[50*len(delays)//100],
+                delays[90*len(delays)//100],
+                delays[99*len(delays)//100], delays[-1]))
+
+    def output(self):
+        global packets, rpcs
+
+        matches = []
+        max_rpc = None
+        max_rtt = 0
         for rpc in rpcs.values():
             # print('RPC id %d: %s\n' % (rpc['id'], rpc))
             if not 'sendmsg' in rpc or not 'recvmsg_done' in rpc:
@@ -8730,23 +8880,59 @@ class AnalyzeTemp:
             if rpc['id'] & 1:
                 continue
             rtt = rpc['recvmsg_done'] - rpc['sendmsg']
-            if rtt < 150:
-                continue
+            if rtt > max_rtt:
+                max_rpc = rpc
+                max_rtt = rtt
+            if rtt >= 150:
+                matches.append(rpc)
+        if not matches and max_rpc != None:
+            matches = [max_rpc]
+        for rpc in matches:
             peer = rpc['peer']
+            rtt = rpc['recvmsg_done'] - rpc['sendmsg']
             print('RPC id %d (%s -> %s) took %.1f usecs, length %d, %.3f -> %.3f' %
                     (rpc['id'], rpc['node'],
                     peer_nodes[peer] if peer in peer_nodes else peer,
                     rtt, rpc['out_length'], rpc['sendmsg'], rpc['recvmsg_done']))
             if rpc['send_data_pkts']:
                 pkt = rpc['send_data_pkts'][0]
-                if 'xmit' in pkt and 'nic' in pkt:
-                    print('  Request packet xmit time %.1f usecs (xmit %.3f, nic %.3f)' %
-                            (pkt['nic'] - pkt['xmit'], pkt['xmit'], pkt['nic']))
+                if 'nic' in pkt and 'gro' in pkt:
+                    print('  Request packet network time %.1f usecs (nic %.3f, gro %.3f)' %
+                            (pkt['gro'] - pkt['nic'], pkt['nic'], pkt['gro']))
             if rpc['softirq_data_pkts']:
                 pkt = rpc['softirq_data_pkts'][0]
-                if 'xmit' in pkt and 'nic' in pkt:
-                    print('  Response packet xmit time %.1f usecs (xmit %.3f, nic %.3f)' %
-                            (pkt['nic'] - pkt['xmit'], pkt['xmit'], pkt['nic']))
+                if 'nic' in pkt and 'gro' in pkt:
+                    print('  Response packet network time %.1f usecs (nic %.3f, gro %.3f)' %
+                            (pkt['gro'] - pkt['nic'], pkt['nic'], pkt['gro']))
+
+        max_free_delay = 0
+        max_pkt = None
+        max_gro_free = 0
+        max_gro_free_pkt = None
+        for pkt in packets.values():
+            if not 'nic' in pkt or not 'free_tx_skb' in pkt:
+                continue
+            if not 'tso_length' in pkt or not 'gro' in pkt:
+                continue
+            if 'tx_qid' in pkt and pkt['tx_qid'] <= 1:
+                delay = min(pkt['free_tx_skb'], pkt['gro']) - pkt['nic']
+                if delay > max_free_delay:
+                    max_free_delay = delay
+                    max_pkt = pkt
+            delay = pkt['free_tx_skb'] - pkt['gro']
+            if delay > max_gro_free:
+                max_gro_free = delay
+                max_gro_free_pkt = pkt
+                # print("New max_gro_free_pkt: %s" % (pkt))
+        print('\nMax NIC delay: %.1f usecs, id %d, offset %d, node %s, nic %.3f, free %.3f, gro %.3f' %
+                (max_free_delay, max_pkt['id'], max_pkt['offset'],
+                max_pkt['tx_node'], max_pkt['nic'], max_pkt['free_tx_skb'],
+                max_pkt['gro']))
+        print('\nMax GRO->free delay: %.1f usecs, id %d, offset %d, node %s, nic %.3f, free %.3f, gro %.3f' %
+                (max_gro_free, max_gro_free_pkt['id'],
+                 max_gro_free_pkt['offset'], max_gro_free_pkt['tx_node'],
+                 max_gro_free_pkt['nic'], max_gro_free_pkt['free_tx_skb'],
+                max_gro_free_pkt['gro']))
 
     def output_snapshot(self):
         global packets, rpcs
@@ -9138,12 +9324,12 @@ class AnalyzeTxintervals:
 class AnalyzeTxpkts:
     """
     Generates one data file for each node showing information about every
-    data packet transmitted from that node, in time order. Also generates
-    aggregate statistics for each tx queue on each node. If either --node or
+    data packet transmitted from that node, in time order. If either --node or
     --tx-qid is specified, only packets matching those options will be
     considered. Packets will normally be sorted by the 'Xmit' column, but the
     --sort option can be used to specify a different column to use for sorting
-    ('Xmit', 'Nic', 'MaxGro', or 'Free').
+    ('Xmit', 'Nic', 'MaxGro', or 'Free'). Also generates aggregate statistics
+    for each tx queue on each node.
     """
 
     def __init__(self, dispatcher):
@@ -9224,17 +9410,6 @@ class AnalyzeTxpkts:
             if (options.node != None) and (node != options.node):
                 continue
 
-            # Create a data file for this node with packets in time order
-            # (or whatever order was requested on the command line).
-            pkts = sorted(node_pkts[node], key = lambda pkt : pkt['xmit'])
-            if sort_key == 'gro':
-                pkts = sorted(pkts, key = lambda pkt : get_max_gro(pkt))
-            elif sort_key != 'xmit':
-                pkts = sorted(pkts, key = lambda pkt :
-                        pkt[sort_key] if sort_key in pkt else 1e20)
-            if len(pkts) == 0:
-                continue
-
             # Tx queue number -> dictionary mapping from delay type to a list
             # of delays of the given type on the given transmit queue.
             # Delay types currently used:
@@ -9282,55 +9457,25 @@ class AnalyzeTxpkts:
 
             total_pkts = 0
 
-            f = open('%s/txpkts_%s.dat' % (options.data, node), 'w')
-            f.write('# Node: %s\n' % (node))
-            f.write('# Generated at %s.\n' %
-                    (time.strftime('%I:%M %p on %m/%d/%Y')))
-            f.write('# Data packets transmitted from %s:\n' % (node))
-            f.write('# Dest:       Node to which packet was sent\n')
-            f.write('# Xmit:       Time when packet was passed to ip*xmit\n')
-            f.write('# Qdisc:      Time when homa_qdisc requeued packet after '
-                    'deferral, if any\n')
-            f.write('# RpcId:      Identifier of packet\'s RPC\n')
-            f.write('# Offset:     Offset of packet within message\n')
-            f.write('# Length:     Size of packet (before segmentation)\n')
-            f.write('# Qid:        Transmit queue on which packet was sent\n')
-            f.write('# Nic:        Time when packet was queued for NIC\n')
-            f.write('# NDelay:     Nic - (later of Xmit and Qdisc)\n')
-            f.write('# MaxGro:     Time when last fragment of packet was '
-                    'received by GRO\n')
-            f.write('# GDelay:     MaxGro - Nic\n')
-            f.write('# Free:       Time when sk_buff was released on sender\n')
-            f.write('# FDelay:     Free - Nic\n')
-            f.write('# Rx:         Number of times segments in the packet were '
-                    'retransmitted\n\n')
-
-            f.write('# Dest           Xmit      Qdisc      RpcId Offset  Length')
-            f.write(' Qid        Nic  NDelay     MaxGro  GDelay')
-            f.write('       Free  FDelay Rx\n')
-            for pkt in pkts:
+            # Select packets to print for this node, plus gather statistics.
+            pkts = []
+            for pkt in node_pkts[node]:
                 xmit = pkt['xmit']
-                if 'qdisc_xmit' in pkt:
-                    qdisc = pkt['qdisc_xmit']
-                    qdisc_string = '%10.3f' % (qdisc)
-                else:
-                    qdisc = None
-                    qdisc_string = ''
+                gro = pkt['gro'] if 'gro' in pkt else None
+                free = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
+                nic = pkt['nic'] if 'nic' in pkt else None
+                qdisc = pkt['qdisc_xmit'] if 'qdisc_xmit' in pkt else None
+                qid = pkt['tx_qid'] if 'tx_qid' in pkt else None
+                length = pkt['tso_length']
+
                 nic_delay = None
-                if 'nic' in pkt:
-                    nic = pkt['nic']
+                if nic != None:
                     if qdisc != None:
                         nic_delay = nic - qdisc
                     elif xmit != None:
                         nic_delay = nic - xmit
-                else:
-                    nic = None
-                max_gro = get_max_gro(pkt)
-                free = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
-                length = pkt['tso_length']
 
-                if 'tx_qid' in pkt:
-                    qid = pkt['tx_qid']
+                if qid != None:
                     qid_tsos[qid] += 1
                     segs = 1
                     if 'segments' in pkt:
@@ -9340,32 +9485,22 @@ class AnalyzeTxpkts:
                         qid_bytes[qid] += length
                     if 'pacer' in pkt:
                         qid_pacer_tsos[qid] += 1
-                    if 'qdisc_xmit' in pkt:
+                    if qdisc != None:
                         qid_qdisc_tsos[qid] += 1
                     if 'tx_queue' in pkt:
                         qid_tx_queue[qid] = pkt['tx_queue']
-                    qid_string = str(qid)
-                    if (options.tx_qid != None) and (qid != options.tx_qid):
-                        continue
+                    if (options.tx_qid == None) or (qid == options.tx_qid):
+                        pkts.append(pkt)
                 else:
-                    if options.tx_qid != None:
-                        continue
-                    qid = None
-                    qid_string = ''
+                    if options.tx_qid == None:
+                        pkts.append(pkt)
                 total_pkts += 1
 
-                rx = len(pkt['retransmits'])
-                if 'segments' in pkt:
-                    for seg in pkt['segments']:
-                        rx += len(seg['retransmits'])
-                rx_msg = str(rx) if rx > 0 else ""
-
-                gro_string = ""
-                if rx == 0 and qid != None and nic_delay != None:
+                if (len(pkt['retransmits']) == 0 and qid != None and
+                        nic_delay != None):
                     delays[qid]['nic'].append(nic_delay)
-                    if max_gro != None:
-                        delays[qid]['gro'].append(max_gro - nic)
-                        gro_string = '%.1f' % (max_gro - nic)
+                    if gro != None:
+                        delays[qid]['gro'].append(gro - nic)
                     if free != None:
                         delays[qid]['free'].append(free - nic)
 
@@ -9377,22 +9512,21 @@ class AnalyzeTxpkts:
                         qid_slow_bytes[qid] += length
                 qid_total_bytes[qid] += length
 
-                line = '%-10s %10.3f %10s %10d %6d  %6d' % (
-                        pkt['rx_node'] if 'rx_node' in pkt else "",
-                        xmit, qdisc_string, pkt['id'], pkt['offset'],
-                        pkt['tso_length'])
-                nic_delay_string = ''
-                if (nic_delay != None):
-                    nic_delay_string = '%.1f' % (nic_delay)
-                line += ' %3s %10s %7s %10s %7s' % (qid_string,
-                        print_if(nic, '%.3f'), nic_delay_string,
-                        print_if(max_gro, '%.3f'), gro_string)
-                free_delay_string = ''
-                if (nic != None) and (free != None):
-                    free_delay_string = '%.1f' % (free - nic)
-                line += ' %10s %7s %2s' % (print_if(free, '%.3f'),
-                        free_delay_string, rx_msg)
-                f.write(line.rstrip() + '\n')
+            # Create a data file for this node with packets in time order
+            # (or whatever order was requested on the command line).
+            pkts = sorted(pkts, key = lambda pkt : pkt['xmit'])
+            if sort_key == 'gro':
+                pkts = sorted(pkts, key = lambda pkt : get_max_gro(pkt))
+            elif sort_key != 'xmit':
+                pkts = sorted(pkts, key = lambda pkt :
+                        pkt[sort_key] if sort_key in pkt else 1e20)
+
+            f = open('%s/txpkts_%s.dat' % (options.data, node), 'w')
+            f.write('# Node: %s\n' % (node))
+            f.write('# Generated at %s.\n' %
+                    (time.strftime('%I:%M %p on %m/%d/%Y')))
+            f.write('# Data packets transmitted from %s:\n' % (node))
+            f.write(print_pkts(pkts))
             f.close()
 
             def print_type(delays):
@@ -9610,6 +9744,9 @@ parser.add_option('--late', dest='late', type=int, default=100,
 parser.add_option('--max', dest='max', type=float, default=None,
         metavar='T', help='Upper bound to consider for some parameter; '
         'specific meaning depends on analyzer')
+parser.add_option('--max-rtt', dest='max_rtt', type=float, default=None,
+        metavar='T', help='Only consider RPCs with RTTs <= T usecs.  Used by '
+        'rpc analyzer to select which specific RTTs to print out.')
 parser.add_option('--min', dest='min', type=float, default=None,
         metavar='T', help='Lower bound to consider for some parameter; '
         'specific meaning depends on analyzer')
@@ -9619,9 +9756,6 @@ parser.add_option('--negative-ok', action='store_true', default=False,
 parser.add_option('--node', dest='node', default=None,
         metavar='N', help='Specifies a particular node (the name of its '
         'trace file without the extension); required by some analyzers')
-parser.add_option('--max-rtt', dest='max_rtt', type=float, default=None,
-        metavar='T', help='Only consider RPCs with RTTs <= T usecs.  Used by '
-        'rpc analyzer to select which specific RTTs to print out.')
 parser.add_option('--pkt', dest='pkt', default=None,
         metavar='ID:OFF', help='Identifies a specific packet with ID:OFF, '
         'where ID is the RPC id on the sender (even means request message, '
