@@ -112,7 +112,7 @@ void homa_skb_cleanup(struct homa *homa)
  *                function will allocate additional space for IP and
  *                Ethernet headers, as well as for the homa_skb_info.
  * Return:        New sk_buff, or NULL if there was insufficient memory.
- *                The sk_buff will be configured with so that the next
+ *                The sk_buff will be configured so that the next
  *                skb_put will be for the transport (Homa) header. The
  *                homa_skb_info is not initialized.
  */
@@ -121,9 +121,6 @@ struct sk_buff *homa_skb_alloc_tx(int length)
 	u64 start = homa_clock();
 	struct sk_buff *skb;
 
-	/* Note: allocate space for an IPv6 header, which is larger than
-	 * an IPv4 header.
-	 */
 	skb = alloc_skb(HOMA_SKB_EXTRA + sizeof(struct homa_skb_info) + length,
 			GFP_ATOMIC);
 	if (likely(skb)) {
