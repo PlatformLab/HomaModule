@@ -25,5 +25,5 @@ for ((i = $first ; i <= $last; i++)); do
     node=node$i
     echo ""
     echo $node:
-    ssh $node $@
+    ssh -4 $node $@
 done
