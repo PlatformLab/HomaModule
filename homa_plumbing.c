@@ -544,6 +544,10 @@ int __init homa_load(void)
 		  MAX_NUMNODES);
 #endif /* See strip.py */
 
+#ifndef __UPSTREAM__ /* See strip.py */
+	tt_init("timetrace");
+#endif /* See strip.py */
+
 	status = homa_init(homa);
 	if (status)
 		goto error;
@@ -641,7 +645,6 @@ int __init homa_load(void)
 	homa_gro_hook_tcp();
 #endif /* See strip.py */
 #ifndef __UPSTREAM__ /* See strip.py */
-	tt_init("timetrace");
 	tt_set_temp(homa->temp);
 #endif /* See strip.py */
 
