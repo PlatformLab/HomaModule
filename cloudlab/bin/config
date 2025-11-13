@@ -150,7 +150,7 @@ def get_interfaces():
             available += current
             if (('s1f1' in current) or ('s1f0' in current)
                     or ('s0f0' in current) or ('s0f1' in current)
-                    or (current == 'eno1')):
+                    or (current == 'eno1')) and not interface:
                 interface = current
             continue
         if re.match(r'^[ ]+ inet 10\.0\.1\.', line):
@@ -453,6 +453,17 @@ def set_sysctl(name, value):
     exec_cmd(["sudo", "sysctl", ".net.homa.%s=%s" % (name, value)],
             check=True)
 
+def config_ecn_threshold(kb):
+    """
+    Modify the configuration of this experiment's egress ports at the
+    top-of-rack switch to enable optimal Homa performance.
+    """
+    s = Switch(True)
+    for port in get_exp_ports():
+        print("Configuring ECN threshold for port %d" % (port))
+        s.set_ecn_threshold(port, kb)
+    s.close()
+
 def config_homa(mod):
     """
     Install the Homa kernel driver and configure it appropriately for
@@ -500,17 +511,6 @@ def config_homa(mod):
     if get_nic_type() == "ice":
         print("Enabling TCP hijacking")
         set_sysctl("hijack_tcp", 1)
-
-def config_ecn_threshold(kb):
-    """
-    Modify the configuration of this experiment's egress ports at the
-    top-of-rack switch to enable optimal Homa performance.
-    """
-    s = Switch(True)
-    for port in get_exp_ports():
-        print("Configuring ECN threshold for port %d" % (port))
-        s.set_ecn_threshold(port, kb)
-    s.close()
 
 def config_ipv6(num_hosts, vlan):
     """
@@ -620,10 +620,19 @@ def config_nic():
     # Use a separate ethtool command for each paramemeter. Otherwise,
     # if one parameter isn't supported the command will be aborted,
     # so no parameters will get set.
+    print("Configuring NIC to reduce interrupt latency")
     exec_cmd(["sudo", "ethtool", "-C", interface, "adaptive-rx", "off"],
             check=False)
     exec_cmd(["sudo", "ethtool", "-C", interface, "rx-usecs", "0"], check=False)
     exec_cmd(["sudo", "ethtool", "-C", interface, "rx-frames", "1"], check=False)
+
+    if get_nic_type() == "ice":
+        print("Increasing tx ring size for Intel NIC")
+        exec_cmd(["sudo", "ethtool", "-G", interface, "tx", "1024"],
+                check=True)
+        print("Disabling adaptive-tx for Intel NIC to recover tx buffers faster")
+        exec_cmd(["sudo", "ethtool", "-C", interface, "adaptive-tx", "off",
+                "tx-usecs", "10"], check=True)
 
 def config_power():
     """
@@ -651,6 +660,8 @@ def config_qdisc():
     nic = get_interfaces()[0]
     config = get_qdisc_config()
     root = config['root_handle']
+
+    print('Installing Homa qdisc')
     if root == '0:':
         # Must reset the root qdisc (it isn't possible to modify the
         # default one)
@@ -678,6 +689,7 @@ def config_reset_qdisc():
     config = get_qdisc_config()
     root = config['root_handle']
 
+    print('Removing Homa qdisc, restoring fq_codel')
     for child in config['children']:
         if child['type'] != 'homa':
             continue
