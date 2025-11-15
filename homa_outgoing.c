@@ -130,6 +130,7 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 				       int length, int max_seg_data)
 	__must_hold(rpc->bucket->lock)
 {
+	struct homa_sock *hsk = rpc->hsk;
 	struct homa_skb_info *homa_info;
 	struct homa_data_hdr *h;
 	struct sk_buff *skb;
@@ -147,7 +148,7 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 			      (segs - 1) * sizeof(struct homa_seg_hdr));
 #endif /* See strip.py */
 	if (!skb) {
-		rpc->hsk->error_msg = "couldn't allocate sk_buff for outgoing message";
+		hsk->error_msg = "couldn't allocate sk_buff for outgoing message";
 		return ERR_PTR(-ENOMEM);
 	}
 
@@ -155,7 +156,7 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	 * network packet by GSO).
 	 */
 	h = (struct homa_data_hdr *)skb_put(skb, sizeof(struct homa_data_hdr));
-	h->common.sport = htons(rpc->hsk->port);
+	h->common.sport = htons(hsk->port);
 	h->common.dport = htons(rpc->dport);
 	h->common.sequence = htonl(offset);
 	h->common.type = DATA;
@@ -178,14 +179,14 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	homa_info = homa_get_skb_info(skb);
 	homa_info->next_skb = NULL;
 	homa_info->wire_bytes = length + segs * (sizeof(struct homa_data_hdr)
-			+  rpc->hsk->ip_header_length + HOMA_ETH_OVERHEAD);
+			+  hsk->ip_header_length + HOMA_ETH_OVERHEAD);
 	homa_info->data_bytes = length;
 	homa_info->seg_length = max_seg_data;
 	homa_info->offset = offset;
 	homa_info->rpc = rpc;
 
 #ifndef __STRIP__ /* See strip.py */
-	if (segs > 1 && rpc->hsk->sock.sk_protocol != IPPROTO_TCP) {
+	if (segs > 1 && hsk->sock.sk_protocol != IPPROTO_TCP) {
 #else /* See strip.py */
 	if (segs > 1) {
 #endif /* See strip.py */
@@ -198,11 +199,10 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 		err = homa_fill_data_interleaved(rpc, skb, iter);
 	} else {
 		gso_size = max_seg_data;
-		err = homa_skb_append_from_iter(rpc->hsk->homa, skb, iter,
-						length);
+		err = homa_skb_append_from_iter(hsk->homa, skb, iter, length);
 	}
 	if (err) {
-		rpc->hsk->error_msg = "couldn't copy message body into packet buffers";
+		hsk->error_msg = "couldn't copy message body into packet buffers";
 		goto error;
 	}
 
@@ -214,12 +214,14 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 		 * GSO; the value below seems to work...
 		 */
 		skb_shinfo(skb)->gso_type =
-		    rpc->hsk->homa->gso_force_software ? 0xd : SKB_GSO_TCPV6;
+		    hsk->homa->gso_force_software ? 0xd :
+		    (hsk->inet.sk.sk_family == AF_INET6) ? SKB_GSO_TCPV6 :
+		    SKB_GSO_TCPV4;
 	}
 	return skb;
 
 error:
-	homa_skb_free_tx(rpc->hsk->homa, skb);
+	homa_skb_free_tx(hsk->homa, skb);
 	return ERR_PTR(err);
 }
 
