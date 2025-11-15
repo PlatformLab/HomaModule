@@ -101,7 +101,10 @@
 #define spin_unlock mock_spin_unlock
 
 #undef this_cpu_ptr
-#define this_cpu_ptr(name) (&name[pcpu_hot.cpu_number])
+#define this_cpu_ptr(name) (&name[cpu_number])
+
+#undef __this_cpu_read
+#define __this_cpu_read(name) (name)
 
 #undef vmalloc
 #define vmalloc mock_vmalloc

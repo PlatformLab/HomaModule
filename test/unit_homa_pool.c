@@ -770,13 +770,13 @@ TEST_F(homa_pool, homa_pool_avail_bytes__include_free_space_in_core_private_page
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 
-	pcpu_hot.cpu_number = 3;
+	mock_set_core(3);
 	EXPECT_EQ(100 * HOMA_BPAGE_SIZE, homa_pool_avail_bytes(pool));
 	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 2000);
 	EXPECT_EQ(100 * HOMA_BPAGE_SIZE - 2000, homa_pool_avail_bytes(pool));
 
-	pcpu_hot.cpu_number = 5;
+	mock_set_core(5);
 	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 50000);
 	EXPECT_EQ(100 * HOMA_BPAGE_SIZE - 52000, homa_pool_avail_bytes(pool));

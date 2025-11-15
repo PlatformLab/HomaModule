@@ -59,10 +59,10 @@ FIXTURE_SETUP(homa_offload)
 	self->header.incoming = htonl(10000);
 	self->header.seg.offset = htonl(2000);
 	for (i = 0; i < GRO_HASH_BUCKETS; i++) {
-		INIT_LIST_HEAD(&self->napi.gro_hash[i].list);
-		self->napi.gro_hash[i].count = 0;
+		INIT_LIST_HEAD(&self->napi.gro.hash[i].list);
+		self->napi.gro.hash[i].count = 0;
 	}
-	self->napi.gro_bitmask = 0;
+	self->napi.gro.bitmask = 0;
 
 	self->skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 2000);
 	NAPI_GRO_CB(self->skb)->same_flow = 0;
@@ -75,10 +75,10 @@ FIXTURE_SETUP(homa_offload)
 	NAPI_GRO_CB(self->skb2)->same_flow = 0;
 	NAPI_GRO_CB(self->skb2)->last = self->skb2;
 	NAPI_GRO_CB(self->skb2)->count = 1;
-	self->napi.gro_bitmask = 6;
-	self->napi.gro_hash[2].count = 2;
-	list_add_tail(&self->skb->list, &self->napi.gro_hash[2].list);
-	list_add_tail(&self->skb2->list, &self->napi.gro_hash[2].list);
+	self->napi.gro.bitmask = 6;
+	self->napi.gro.hash[2].count = 2;
+	list_add_tail(&self->skb->list, &self->napi.gro.hash[2].list);
+	list_add_tail(&self->skb2->list, &self->napi.gro.hash[2].list);
 	INIT_LIST_HEAD(&self->empty_list);
 	self->tcp_offloads.callbacks.gro_receive = test_tcp_gro_receive;
 	inet_offloads[IPPROTO_TCP] = &self->tcp_offloads;
@@ -98,7 +98,7 @@ FIXTURE_TEARDOWN(homa_offload)
 	struct sk_buff *skb, *tmp;
 
 	homa_offload_end();
-	list_for_each_entry_safe(skb, tmp, &self->napi.gro_hash[2].list, list)
+	list_for_each_entry_safe(skb, tmp, &self->napi.gro.hash[2].list, list)
 		kfree_skb(skb);
 	homa_destroy(&self->homa);
 	unit_teardown();
@@ -375,7 +375,7 @@ TEST_F(homa_offload, homa_gro_receive__no_held_skb)
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	cur_offload_core->held_skb = NULL;
 	cur_offload_core->held_bucket = 2;
-	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro_hash[2].list, skb));
+	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro.hash[2].list, skb));
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(0, same_flow);
 	EXPECT_EQ(skb, cur_offload_core->held_skb);
@@ -393,7 +393,7 @@ TEST_F(homa_offload, homa_gro_receive__empty_merge_list)
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	cur_offload_core->held_skb = self->skb;
 	cur_offload_core->held_bucket = 3;
-	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro_hash[2].list, skb));
+	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro.hash[2].list, skb));
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(0, same_flow);
 	EXPECT_EQ(skb, cur_offload_core->held_skb);
@@ -411,7 +411,7 @@ TEST_F(homa_offload, homa_gro_receive__held_skb_not_in_merge_list)
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	cur_offload_core->held_skb = skb;
 	cur_offload_core->held_bucket = 2;
-	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro_hash[3].list, skb));
+	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro.hash[3].list, skb));
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(0, same_flow);
 	EXPECT_EQ(skb, cur_offload_core->held_skb);
@@ -433,7 +433,7 @@ TEST_F(homa_offload, homa_gro_receive__held_skb__in_merge_list_but_wrong_proto)
 	else
 		ip_hdr(self->skb)->protocol = IPPROTO_TCP;
 	cur_offload_core->held_bucket = 2;
-	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro_hash[3].list, skb));
+	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro.hash[3].list, skb));
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(0, same_flow);
 	EXPECT_EQ(skb, cur_offload_core->held_skb);
@@ -452,7 +452,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 	self->header.common.sender_id = cpu_to_be64(1002);
 	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(skb)->same_flow = 0;
-	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro_hash[3].list, skb));
+	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro.hash[3].list, skb));
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(1, same_flow);
 	EXPECT_EQ(2, NAPI_GRO_CB(self->skb2)->count);
@@ -461,7 +461,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 	self->header.common.sender_id = cpu_to_be64(1004);
 	skb2 = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(skb2)->same_flow = 0;
-	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro_hash[3].list, skb2));
+	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro.hash[3].list, skb2));
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(1, same_flow);
 	EXPECT_EQ(3, NAPI_GRO_CB(self->skb2)->count);
@@ -481,23 +481,23 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	cur_offload_core->held_bucket = 2;
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
-	homa_gro_receive(&self->napi.gro_hash[3].list, skb);
+	homa_gro_receive(&self->napi.gro.hash[3].list, skb);
 	EXPECT_EQ(2, NAPI_GRO_CB(self->skb2)->count);
-	EXPECT_EQ(2, self->napi.gro_hash[2].count);
+	EXPECT_EQ(2, self->napi.gro.hash[2].count);
 
 	// Second packet hits the limit.
 	self->header.common.sport = htons(40001);
 	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	unit_log_clear();
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(homa_gro_receive(
-			&self->napi.gro_hash[3].list, skb)));
+			&self->napi.gro.hash[3].list, skb)));
 	EXPECT_EQ(3, NAPI_GRO_CB(self->skb2)->count);
-	EXPECT_EQ(1, self->napi.gro_hash[2].count);
+	EXPECT_EQ(1, self->napi.gro.hash[2].count);
 	EXPECT_STREQ("netif_receive_skb, id 1002, offset 4000",
 			unit_log_get());
 	kfree_skb(self->skb2);
-	EXPECT_EQ(1, self->napi.gro_hash[2].count);
-	EXPECT_EQ(6, self->napi.gro_bitmask);
+	EXPECT_EQ(1, self->napi.gro.hash[2].count);
+	EXPECT_EQ(6, self->napi.gro.bitmask);
 
 	// Third packet also hits the limit for skb, causing the bucket
 	// to become empty.
@@ -506,10 +506,10 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	unit_log_clear();
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(homa_gro_receive(
-			&self->napi.gro_hash[3].list, skb)));
+			&self->napi.gro.hash[3].list, skb)));
 	EXPECT_EQ(2, NAPI_GRO_CB(self->skb)->count);
-	EXPECT_EQ(0, self->napi.gro_hash[2].count);
-	EXPECT_EQ(2, self->napi.gro_bitmask);
+	EXPECT_EQ(0, self->napi.gro.hash[2].count);
+	EXPECT_EQ(2, self->napi.gro.bitmask);
 	EXPECT_STREQ("netif_receive_skb, id 1000, offset 2000",
 			unit_log_get());
 	kfree_skb(self->skb);

@@ -289,7 +289,7 @@ unsigned long vmemmap_base;
 kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
 #endif
 int __preempt_count;
-struct pcpu_hot pcpu_hot = {.cpu_number = 1, .current_task = &mock_task};
+int cpu_number = 1;
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
 struct net_hotdata net_hotdata = {
 	.rps_cpu_mask = 0x1f,
@@ -301,6 +301,9 @@ struct static_call_key __SCK__might_resched;
 struct static_call_key __SCK__preempt_schedule;
 struct paravirt_patch_template pv_ops;
 struct workqueue_struct *system_wq;
+struct static_key_true validate_usercopy_range;
+unsigned long __per_cpu_offset[NR_CPUS];
+struct tracepoint __tracepoint_sched_set_state_tp;
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 struct lockdep_map rcu_lock_map;
@@ -1060,7 +1063,7 @@ void lock_sock_nested(struct sock *sk, int subclass)
 	sk->sk_lock.owned = 1;
 }
 
-ssize_t __modver_version_show(struct module_attribute *a,
+ssize_t __modver_version_show(const struct module_attribute *a,
 		struct module_kobject *b, char *c)
 {
 	return 0;
@@ -1579,6 +1582,9 @@ void tasklet_init(struct tasklet_struct *t,
 void tasklet_kill(struct tasklet_struct *t)
 {}
 
+void __trace_set_current_state(int state_value)
+{}
+
 void unregister_net_sysctl_table(struct ctl_table_header *header)
 {
 	UNIT_LOG("; ", "unregister_net_sysctl_table");
@@ -1943,7 +1949,7 @@ void mock_preempt_enable()
 
 int mock_processor_id()
 {
-	return pcpu_hot.cpu_number;
+	return cpu_number;
 }
 
 void mock_put_page(struct page *page)
@@ -2155,7 +2161,7 @@ void mock_set_clock_vals(u64 t, ...)
  */
 void mock_set_core(int num)
 {
-	pcpu_hot.cpu_number = num;
+	cpu_number = num;
 }
 
 /**
@@ -2372,8 +2378,8 @@ void mock_teardown(void)
 {
 	int count, i;
 
-	pcpu_hot.cpu_number = 1;
-	pcpu_hot.current_task = &mock_task;
+	cpu_number = 1;
+	current_task = &mock_task;
 	mock_alloc_page_errors = 0;
 	mock_alloc_skb_errors = 0;
 	mock_cmpxchg_errors = 0;

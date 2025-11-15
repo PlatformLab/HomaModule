@@ -23,7 +23,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
  - Please contact me if you have any problems using this repo; I'm happy to
    provide advice and support.
 
-- The head is known to work under Linux 6.13.9. In the past, Homa has
+- The head is known to work under Linux 6.17.8. In the past, Homa has
   run under several earlier versions of Linux. There is a separate branch
   for each of these
   older versions, with names such as linux_4.15.18. Older branches are
@@ -123,6 +123,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant changes
+- November 2025: upgraded to Linux 6.17.8.
 - October 2025: added the HOMAIOCINFO ioctl for retrieving status
   information about a Homa socket. See man/homa.7 for details.
 - May 2025: `homa_api.c` has been removed, so the functions `homa_abort`,
