@@ -915,15 +915,14 @@ def print_pkts(pkts, header=True):
     buf.write('# Qid:        Transmit queue on which packet was sent\n')
     buf.write('# Nic:        Time when packet was queued for NIC\n')
     buf.write('# NDelay:     Nic - (later of Xmit and Qdisc)\n')
-    buf.write('# MaxGro:     Time when last fragment of packet was '
-            'received by GRO\n')
-    buf.write('# GDelay:     MaxGro - Nic\n')
+    buf.write('# Gro:        Time when packet was received by GRO\n')
+    buf.write('# GDelay:     Gro - Nic\n')
     buf.write('# Free:       Time when sk_buff was released on sender\n')
     buf.write('# FDelay:     Free - Nic\n')
     buf.write('# Rx:         Number of times segments in the packet were '
             'retransmitted\n\n')
     buf.write('# Dest           Xmit      Qdisc      RpcId Offset  Length')
-    buf.write(' Qid        Nic  NDelay     MaxGro  GDelay')
+    buf.write(' Qid        Nic  NDelay        Gro  GDelay')
     buf.write('       Free  FDelay Rx\n')
     for pkt in pkts:
         xmit = pkt['xmit']
@@ -945,7 +944,7 @@ def print_pkts(pkts, header=True):
         gro = pkt['gro'] if 'gro' in pkt else None
         free = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
         qid = pkt['tx_qid'] if 'tx_qid' in pkt else None
-        length = pkt['tso_length']
+        length = pkt['tso_length'] if 'tso_length' in pkt else pkt['length']
 
         rx = len(pkt['retransmits'])
         if 'segments' in pkt:
@@ -955,8 +954,7 @@ def print_pkts(pkts, header=True):
 
         line = '%-10s %10.3f %10s %10d %6d  %6d' % (
                 pkt['rx_node'] if 'rx_node' in pkt else "",
-                xmit, qdisc_string, pkt['id'], pkt['offset'],
-                pkt['tso_length'])
+                xmit, qdisc_string, pkt['id'], pkt['offset'], length)
         nic_delay_string = ''
         if nic_delay != None:
             nic_delay_string = '%.1f' % (nic_delay)
@@ -8836,6 +8834,22 @@ class AnalyzeTemp:
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzePackets')
 
+    def output(self):
+        self.output_slow_pkts()
+
+    def output_slow_pkts(self):
+        pkts = []
+        for pkt in packets.values():
+            if not 'nic' in pkt or not 'gro' in pkt:
+                continue
+            if pkt['length'] > 1000 or pkt['offset'] !=0:
+                continue
+            delay = pkt['gro'] - pkt['nic']
+            if delay >= 150 and delay <= 300:
+                pkts.append(pkt)
+        print("# Packets with nic->gro delays between 150 and 300 usecs:")
+        print(print_pkts(pkts), end='')
+
     def output_delays(self):
         global packets, options, rpcs
 
@@ -8865,7 +8879,7 @@ class AnalyzeTemp:
                 delays[90*len(delays)//100],
                 delays[99*len(delays)//100], delays[-1]))
 
-    def output(self):
+    def output_slow_rpcs(self):
         global packets, rpcs
 
         matches = []
