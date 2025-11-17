@@ -556,6 +556,15 @@ aggressively (which could impact application performance) until the number
 of dead packet buffers drops below
 .I dead_buffs_limit .
 .TP
+.IR defer_min_bytes
+Messages shorter than this value will always be transmitted immediately,
+without worrying about NIC queue length. Messages of this length or greater
+will be queued if the NIC queue becomes too long, in order to implement
+SRPT for outgoing messages. Short messages are transmitted immediately
+because (a) it's unlikely that they can be generated rapidly enough
+to produce significant queuing in the NIC and (b) deferring them can overload
+the pacer to the point where it cannot keep the uplink fully saturated.
+.TP
 .IR fifo_grant_increment
 An integer value. When Homa decides to issue a grant to the oldest message
 (because of
