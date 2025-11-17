@@ -2,6 +2,20 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+64. (November 2025) Separating pacer traffic from non-paced traffic in
+homa_qdisc (use tx queue 0 for paced traffic; non-paced traffic is spread
+across other queues, using default queues except that traffic for queue 0
+goes to queue 1 instead). In comparison to the old pacer (measurements
+with w4 and w5 on c6620 cluster at 80 Gbps load; see log book for graphs)):
+* P99 for messages shorter than defer_min_bytes is 20-30% faster with separation
+* P99 for messages between defer_min_bytes and unsched_limit is about 2x
+  slower with separation
+* P99 for messages longer than unsched_limit starts off 40-50% slower with
+  separate, but gradually converges.
+* Increasing defer_min_bytes provides upside with no apparent downside.
+* Average slowdowns are better with the old pacer: 3.45 vs. 3.77 for W4,
+  9.40 vs. 7.72 for W5 (W5 has no messages shorter than defer_min_bytes).
+
 63. (September 2025) Compared CPU utilization against TCP. Measured with
 top, running cp_vs_tcp -w w4 -b20 on a 6-node xl170 cluster (20 cores):
 
