@@ -17,8 +17,8 @@ parser = get_parser(description=
         usage='%(prog)s [options]')
 parser.add_argument('-c', '--config', dest='config',
         choices=['balance', 'buffers', 'busy_usecs', 'client_threads',
-                'dctcp_buffers', 'fifo', 'gbps', 'gen2', 'gen3',
-                'grant_policy', 'gro_busy_usecs', 'load',
+                'dctcp_buffers', 'defer_min_bytes', 'fifo', 'gbps',
+                'gen2', 'gen3', 'grant_policy', 'gro_busy_usecs', 'load',
                 'max_gro', 'max_gso', 'mtu', 'nic_queue',
                 'poll', 'ports', 'prios', 'receivers', 'repeat',
                 'tcp_buffers', 'throttle', 'time', 'unsched_bytes'],
@@ -87,6 +87,12 @@ elif options.config == 'dctcp_buffers':
                 'options': ['protocol', 'dctcp'],
                 'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp'],
                 'switch_buffer': mb})
+elif options.config == 'defer_min_bytes':
+    # Vary the fraction of bandwidth reserved for the oldest message
+    for value in [1000, 3000, 10000]:
+        specs.append({'exp_name': 'defer_%d' % (value),
+                'label': 'defer_min_bytes %d' % (value),
+                'sysctl': ['.net.homa.defer_min_bytes', value]})
 elif options.config == 'fifo':
     # Vary the fraction of bandwidth reserved for the oldest message
     for fifo in [0, 5, 10, 20]:
@@ -334,8 +340,8 @@ if switch:
 for workload, bw, seconds in load_info:
     # Generate slowdown plot.
     log("Generating slowdown plot for %s" % (workload))
-    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
-            options.num_nodes, bw)
+    title = "%s, %d %s nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, get_node_type(), bw)
     ax = start_plot_vs_msg_length(title, plot_max_y, "%s_%s" % (
             specs[0]['exp_name'], workload), y_label=" Slowdown")
     for spec in specs:
@@ -354,9 +360,9 @@ for workload, bw, seconds in load_info:
 
     # Generate latency plot.
     log("Generating latency plot for %s" % (workload))
-    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
-            options.num_nodes, bw)
-    ax = start_plot_vs_msg_length(title, [30, 30000], "%s_%s" % (
+    title = "%s, %d %s nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, get_node_type(), bw)
+    ax = start_plot_vs_msg_length(title, [10, 10000], "%s_%s" % (
             specs[0]['exp_name'], workload), y_label=r'RTT (µsec)')
     for spec in specs:
         exp_name = "%s_%s" % (spec['exp_name'], workload)
@@ -371,7 +377,8 @@ for workload, bw, seconds in load_info:
 
     # Generate CDF of small-message RTTs.
     log("Generating short message CDFs for %s" % (workload))
-    title = "%s %d nodes" % (workload.capitalize(), options.num_nodes)
+    title = "%s, %d %s nodes" % (workload.capitalize(), options.num_nodes,
+            get_node_type())
     start_cdf_plot(title, 10, 0.99e05, 1e-05, "RTT (usecs)",
             "Cumulative Fraction of Short Messages")
     for spec in specs:
