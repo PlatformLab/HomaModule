@@ -1280,9 +1280,9 @@ def get_buckets(rtts, total):
 
 def get_digest(experiment):
     """
-    Returns an element of digest that contains data for a particular
+    Returns an element of digests that contains data for a particular
     experiment; if this is the first request for a given experiment, the
-    method reads the data for experiment and generates the digest. For
+    method reads the raw RTT data for experiment and generates the digest. For
     each new digest generated, a .data file is generated in the "reports"
     subdirectory of the log directory.
 
@@ -1411,6 +1411,52 @@ def get_digest(experiment):
     digests[experiment] = digest
     return digest
 
+def read_digest(file):
+    """
+    Read digest data from a file return the parsed digest. All digest fields
+    are populated except rtts.
+
+    file:         Name of the file to read
+    """
+
+    digest = {
+        "total_messages": 0,
+        "lengths": [],
+        "cum_frac": [],
+        "counts": [],
+        "p50": [],
+        "p99": [],
+        "p999": [],
+        "s50": [],
+        "s99": [],
+        "s999": []
+    }
+    line_num = 0
+    f = open(file)
+    for line in f:
+        line_num += 1
+        if line.startswith('#'):
+            continue
+        values = line.strip().split()
+        if len(values) != 9:
+            print("Line %d in %s had %d field(s), expected 9: %s" %
+                    (line_num, file, len(values), line.rstrip()),
+                    file=sys.stderr)
+        length, cum_frac, count, p50, p99, p999, s50, s99, s999 = values
+        count = int(count)
+        digest["total_messages"] += count
+        digest["lengths"].append(int(length))
+        digest["cum_frac"].append(float(cum_frac))
+        digest["counts"].append(count)
+        digest["p50"].append(float(p50))
+        digest["p99"].append(float(p99))
+        digest["p999"].append(float(p999))
+        digest["s50"].append(float(s50))
+        digest["s99"].append(float(s99))
+        digest["s999"].append(float(s999))
+    f.close()
+    return digest
+
 def start_plot_vs_msg_length(title, y_range, x_experiment, size=10,
         show_top_label=True, show_bot_label=True, figsize=[6,4],
         y_label="Slowdown", show_upper_x_axis=True):
@@ -1484,10 +1530,9 @@ def start_plot_vs_msg_length(title, y_range, x_experiment, size=10,
         target_count = 0
         tick = 0
         digest = get_digest(x_experiment)
-        rtts = digest["rtts"]
         total = digest["total_messages"]
-        for length in sorted(rtts.keys()):
-            cumulative_count += len(rtts[length])
+        for length, count in zip(digest["lengths"], digest["counts"]):
+            cumulative_count += count
             while cumulative_count >= target_count:
                 ticks.append(target_count/total)
                 if length < 1000:
