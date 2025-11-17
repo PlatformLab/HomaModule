@@ -96,8 +96,8 @@ for workload, bw, seconds in load_info:
 
     # Generate slowdown plot.
     log("Generating slowdown plot for %s" % (workload))
-    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
-            options.num_nodes, bw)
+    title = "%s, %d %s nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, get_node_type(), bw)
     ax = start_plot_vs_msg_length(title, 1000, homa_exp)
     if options.tcp:
         plot_slowdown(ax, tcp_exp, "p99", "TCP P99", color=tcp_color)
@@ -113,9 +113,9 @@ for workload, bw, seconds in load_info:
 
     # Generate latency plot.
     log("Generating RTT latency plot for %s" % (workload))
-    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
-            options.num_nodes, bw)
-    ax = start_plot_vs_msg_length(title, [30, 30000], homa_exp,
+    title = "%s, %d %s nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, get_node_type(), bw)
+    ax = start_plot_vs_msg_length(title, [10, 10000], homa_exp,
             y_label=r'RTT (µsec)')
     if options.tcp:
         plot_histogram(ax, tcp_exp, "p99", "TCP P99", color=tcp_color)
