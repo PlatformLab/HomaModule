@@ -2,7 +2,6 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Performance problems to track down:
-  * On c6620 cluster, Homa is getting RPC timeouts on w4 at 'b 80' and '-b 100'
   * On xl170s, both TCP and Homa run slower with qdisc than pacer (P99 for
     TCP small packets increases by 50%)
 
