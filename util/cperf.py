@@ -51,11 +51,6 @@ log_dir = ''
 # Open file (in the log directory) where log messages should be written.
 log_file = 0
 
-# True means use new slowdown calculation, where denominator is calculated
-# using best-case Homa unloaded RTT plus link bandwidth; False means use
-# original calculation where the denominator is Homa P50 unloaded latency.
-old_slowdown = False
-
 # Indicates whether we should generate additional log messages for debugging
 verbose = False
 
@@ -70,6 +65,11 @@ stripped = False
 
 # Speed of host uplinks.
 link_mbps = None
+
+# "Best possible RTT for short messages", depending on CloudLab node type.
+# Used to compute slowdowns.
+baseline_rtts = {"xl170": 15, "c6620": 25, "c6525-25g": 25, "c6525-100g": 25,
+        "default": 25}
 
 # Defaults for command-line options; assumes that servers and clients
 # share nodes.
@@ -91,7 +91,6 @@ default_defaults = {
     'tcp_port_receivers':  1,
     'tcp_server_ports':    8,
     'tcp_port_threads':    1,
-    'unloaded':            0,
     'unsched':             0,
     'unsched_boost':       0.0,
     'workload':            ''
@@ -115,13 +114,6 @@ default_defaults = {
 # slow_999:        List of 999th percentile slowdowns corresponding to each length
 # avg_slowdown:    Average slowdown across all messages of all sizes
 digests = {}
-
-# A dictionary where keys are message lengths, and each value is the median
-# unloaded RTT (usecs) for messages of that length.
-unloaded_p50 = {}
-
-# Minimum RTT for any measurement in the unloaded dataset
-min_rtt = 1e20;
 
 # Keys are filenames, and each value is a dictionary containing data read
 # from that file. Within that dictionary, each key is the name of a column
@@ -247,11 +239,6 @@ def get_parser(description, usage, defaults = {}):
     parser.add_argument('--no-homa-prio', dest='no_homa_prio',
             action='store_true', default=False,
             help='Don\'t run homa_prio on nodes to adjust unscheduled cutoffs')
-    parser.add_argument('--old-slowdown', dest='old_slowdown',
-            action='store_true', default=False,
-            help='Compute slowdowns using the approach of the Homa ATC '
-            'paper (default: use 15 usec RTT and 100%% link throughput as '
-            'reference)')
     parser.add_argument('--plot-only', dest='plot_only', action='store_true',
             help='Don\'t run experiments; generate plot(s) with existing data')
     parser.add_argument('--port-receivers', type=int, dest='port_receivers',
@@ -336,10 +323,9 @@ def init(options):
     """
     Initialize various global state, such as the log file.
     """
-    global old_slowdown, log_dir, log_file, verbose, delete_rtts, link_mbps
+    global log_dir, log_file, verbose, delete_rtts, link_mbps
     global stripped
     log_dir = options.log_dir
-    old_slowdown = options.old_slowdown
     if not options.plot_only:
         if os.path.exists(log_dir):
             shutil.rmtree(log_dir)
@@ -599,6 +585,18 @@ def set_sysctl_parameter(name, value, nodes):
         do_subprocess(["ssh", "node%d" % id, "sudo", "sysctl",
                 "%s=%s" % (name, value)])
 
+def get_baseline_rtt():
+    """
+    Return the "best possible" RTT for short messages, for use in computing
+    slowdowns.
+    """
+    global baseline_rtts
+
+    node_type = get_node_type()
+    if node_type in baseline_rtts:
+        return baseline_rtts[node_type]
+    return baseline_rtts["default"]
+
 def get_node_type():
     """
     Returns the node type for this machine.
@@ -702,8 +700,6 @@ def run_experiment(name, clients, options):
                     id,
                     name,
                     options.ipv6)
-            if "unloaded" in options:
-                command += " --unloaded %d" % (options.unloaded)
         else:
             if "no_trunc" in options:
                 trunc = '--no-trunc'
@@ -735,41 +731,40 @@ def run_experiment(name, clients, options):
         nodes.append(id)
         vlog("Command for node%d: %s" % (id, command))
     wait_output("% ", nodes, command, 40.0)
-    if not "unloaded" in options:
-        if options.protocol == "homa":
-            # Wait a bit so that homa_prio can set priorities appropriately
-            time.sleep(2)
-            if stripped:
-                vlog("Skipping initial read of metrics (Homa is stripped)")
-            else:
-                vlog("Recording initial metrics")
-                for id in exp_nodes:
-                    do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
-        if not "no_rtt_files" in options:
-            do_cmd("dump_times /dev/null %s" % (name), clients)
-        if options.protocol == "homa" and options.tt_freeze:
-            log("Unfreezing timetraces on %s" % (nodes))
-            set_sysctl_parameter(".net.homa.action", "10", nodes)
-        do_cmd("log Starting measurements for %s experiment" % (name),
-                server_nodes, clients)
-        log("Starting measurements")
-        debug_delay = 0
-        if debug_delay > 0:
-            time.sleep(debug_delay)
-        if False and "dctcp" in name:
-            log("Setting debug info")
-            do_cmd("debug 2000 3000", clients)
-            log("Finished setting debug info")
-        time.sleep(options.seconds - debug_delay)
-        if options.protocol == "homa" and options.tt_freeze:
-            log("Freezing timetraces via node%d" % nodes[0])
-            set_sysctl_parameter(".net.homa.action", "7", nodes[0:1])
-        do_cmd("log Ending measurements for %s experiment" % (name),
-               server_nodes, clients)
+    if options.protocol == "homa":
+        # Wait a bit so that homa_prio can set priorities appropriately
+        time.sleep(2)
+        if stripped:
+            vlog("Skipping initial read of metrics (Homa is stripped)")
+        else:
+            vlog("Recording initial metrics")
+            for id in exp_nodes:
+                do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
+    if not "no_rtt_files" in options:
+        do_cmd("dump_times /dev/null %s" % (name), clients)
+    if options.protocol == "homa" and options.tt_freeze:
+        log("Unfreezing timetraces on %s" % (nodes))
+        set_sysctl_parameter(".net.homa.action", "10", nodes)
+    do_cmd("log Starting measurements for %s experiment" % (name),
+            server_nodes, clients)
+    log("Starting measurements")
+    debug_delay = 0
+    if debug_delay > 0:
+        time.sleep(debug_delay)
+    if False and "dctcp" in name:
+        log("Setting debug info")
+        do_cmd("debug 2000 3000", clients)
+        log("Finished setting debug info")
+    time.sleep(options.seconds - debug_delay)
+    if options.protocol == "homa" and options.tt_freeze:
+        log("Freezing timetraces via node%d" % nodes[0])
+        set_sysctl_parameter(".net.homa.action", "7", nodes[0:1])
+    do_cmd("log Ending measurements for %s experiment" % (name),
+            server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
     if not "no_rtt_files" in options:
         do_cmd("dump_times rtts %s" % (name), clients)
-    if (options.protocol == "homa") and not "unloaded" in options:
+    if (options.protocol == "homa"):
         if stripped:
                 vlog("Skipping final read of metrics (Homa is stripped)")
         else:
@@ -1097,11 +1092,7 @@ def scan_logs():
             vlog("\n%ss for %s experiment:" % (type.capitalize(), name))
             for node in sorted(exp.keys()):
                 if not gbps_key in exp[node]:
-                    if name.startswith("unloaded"):
-                        exp[node][gbps_key] = [0.0]
-                        exp[node][kops_key] = [0.0]
-                    else:
-                        continue
+                    continue
                 gbps = exp[node][gbps_key]
                 avg = sum(gbps)/len(gbps)
                 vlog("%s: %.2f Gbps (%s)" % (node, avg,
@@ -1287,29 +1278,6 @@ def get_buckets(rtts, total):
         buckets.append([length, cumulative/total])
     return buckets
 
-def set_unloaded(experiment):
-    """
-    Collect measurements from an unloaded system to use in computing slowdowns.
-
-    experiment:   Name of experiment that measured RTTs under low load
-    """
-    global unloaded_p50, min_rtt
-
-    # Find (or generate) unloaded data for comparison.
-    files = sorted(glob.glob("%s/%s-*.rtts" % (log_dir, experiment)))
-    if len(files) == 0:
-        raise Exception("Couldn't find %s RTT data" % (experiment))
-    rtts = {}
-    for file in files:
-        read_rtts(file, rtts)
-    unloaded_p50.clear()
-    min_rtt = 1e20
-    for length in rtts.keys():
-        sorted_rtts = sorted(rtts[length])
-        unloaded_p50[length] = sorted_rtts[len(rtts[length])//2]
-        min_rtt = min(min_rtt, sorted_rtts[0])
-    vlog("Computed unloaded_p50: %d entries" % len(unloaded_p50))
-
 def get_digest(experiment):
     """
     Returns an element of digest that contains data for a particular
@@ -1320,7 +1288,7 @@ def get_digest(experiment):
 
     experiment:  Name of the desired experiment
     """
-    global old_slowdown, digests, log_dir, min_rtt, unloaded_p50, delete_rtts
+    global digests, log_dir, delete_rtts
     global link_mbps
 
     if experiment in digests:
@@ -1339,6 +1307,7 @@ def get_digest(experiment):
     digest["slow_999"] = []
 
     avg_slowdowns = []
+    baseline_rtt = get_baseline_rtt()
 
     # Read in the RTT files for this experiment.
     files = sorted(glob.glob(log_dir + ("/%s-*.rtts" % (experiment))))
@@ -1348,13 +1317,13 @@ def get_digest(experiment):
     sys.stdout.write("Reading RTT data for %s experiment: " % (experiment))
     sys.stdout.flush()
     for file in files:
-        count, slowdown = read_rtts(file, digest["rtts"], min_rtt, link_mbps)
+        count, slowdown = read_rtts(file, digest["rtts"], baseline_rtt, link_mbps)
         digest["total_messages"] += count
         avg_slowdowns.append([file, slowdown])
         sys.stdout.write("#")
         sys.stdout.flush()
 
-        if delete_rtts and not ("unloaded" in file):
+        if delete_rtts:
             os.remove(file)
     log("")
 
@@ -1368,9 +1337,6 @@ def get_digest(experiment):
             log("Outlier alt-slowdown in %s: %.1f vs. %.1f overall average"
                     % (info[0], info[1], overall_avg))
 
-    if old_slowdown and (len(unloaded_p50) == 0):
-        raise Exception("No unloaded data: must invoke set_unloaded")
-
     rtts = digest["rtts"]
     buckets = get_buckets(rtts, digest["total_messages"])
     bucket_length, bucket_cum_frac = buckets[0]
@@ -1381,10 +1347,7 @@ def get_digest(experiment):
     slowdown_sum = 0.0
     lengths = sorted(rtts.keys())
     lengths.append(999999999)            # Force one extra loop iteration
-    if old_slowdown:
-        optimal = unloaded_p50[min(unloaded_p50.keys())]
-    else:
-        optimal = 15 + lengths[0]*8/link_mbps
+    optimal = baseline_rtt + lengths[0]*8/link_mbps
     for length in lengths:
         if length > bucket_length:
             digest["lengths"].append(bucket_length)
@@ -1408,10 +1371,7 @@ def get_digest(experiment):
             bucket_count = 0
             bucket_length, bucket_cum_frac = buckets[next_bucket]
             next_bucket += 1
-        if old_slowdown:
-            optimal = unloaded_p50[length]
-        else:
-            optimal = 15 + length*8/link_mbps
+        optimal = baseline_rtt + length*8/link_mbps
         bucket_count += len(rtts[length])
         for rtt in rtts[length]:
             bucket_rtts.append(rtt)
