@@ -58,9 +58,9 @@ scan_metrics(tcp_exp)
 
 # Generate slowdown plot.
 log("Generating slowdown plot for %s" % (options.workload))
-title = "TCP (%.1f Gbps) and Homa (%.1f Gbps) together, %s %d nodes" % (
+title = "TCP (%.1f Gbps) and Homa (%.1f Gbps) together, %s, %d %s nodes" % (
         options.gbps - options.homa_gbps, options.homa_gbps,
-        options.workload.capitalize(), options.num_nodes)
+        options.workload.capitalize(), options.num_nodes, get_node_type())
 ax = start_plot_vs_msg_length(title, 1000, homa_exp)
 plot_slowdown(ax, tcp_exp, "p99", "TCP P99", color=tcp_color)
 plot_slowdown(ax, tcp_exp, "p50", "TCP P50", color=tcp_color2)
@@ -72,7 +72,7 @@ plt.savefig("%s/reports/both_%s.pdf" % (options.log_dir, options.workload))
 
 # Generate latency plot.
 log("Generating RTT latency plot for %s" % (options.workload))
-ax = start_plot_vs_msg_length(title, [30, 30000], homa_exp,
+ax = start_plot_vs_msg_length(title, [10, 10000], homa_exp,
         y_label=r'RTT (µsec)')
 plot_histogram(ax, tcp_exp, "p99", "TCP P99", color=tcp_color)
 plot_histogram(ax, tcp_exp, "p50", "TCP P50", color=tcp_color2)
