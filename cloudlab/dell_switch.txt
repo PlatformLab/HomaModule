@@ -1,12 +1,10 @@
-# Commands for configuring a Dell switch (OS 10.6.0) to enable priority
-# queues with strict priority:
-
+! Commands for configuring a Dell switch (OS 10.6.0) to enable priority
+! queues with strict priority. First, enter configure mode:
 enable
 configure terminal
 
-# Create maps from DSCP classes to egress queues, and from queues
-# to service policies.
-
+! Create maps from DSCP classes to egress queues, and from queues
+! to service policies.
 class-map type queuing pq_cm0
 match queue 0
 exit
@@ -51,9 +49,94 @@ class pq_cm7
 priority
 exit
 
-# Configure interfaces to use the trust-map (on input) and policy-
-# (for output)
+! Configure all ports to use the trust-map (on input) and the
+! policy-map (for output) by default.
+system qos
+trust-map dscp default
+service-policy output type queuing pq_pmap
+exit
 
+! Create a qos-map that maps all traffic classes to queue 0 of egress ports
+qos-map traffic-class qos_map_null
+queue 0 qos-group 0-7 type ucast
+queue 0 qos-group 0-7 type mcast
+exit
+
+! Apply the above qos-map to a few specific ports: this overrides the global
+! default so that there are no priorities for these egress ports (queue 0 is
+! used for all traffic).
+interface ethernet 1/1/15
+qos-map traffic-class qos_map_null
+exit
+interface ethernet 1/1/16
+qos-map traffic-class qos_map_null
+exit
+interface ethernet 1/1/17
+qos-map traffic-class qos_map_null
+exit
+interface ethernet 1/1/18
+qos-map traffic-class qos_map_null
+exit
+interface ethernet 1/1/47
+qos-map traffic-class qos_map_null
+exit
+interface ethernet 1/1/48
+qos-map traffic-class qos_map_null
+exit
+interface ethernet 1/1/49
+qos-map traffic-class qos_map_null
+exit
+interface ethernet 1/1/50
+qos-map traffic-class qos_map_null
+exit
+
+! Do not apply commands below here: I've provided these to show how to
+! undo the effects of the commands above, plus a few other things in
+! case you need them in the future.
+
+! Remove the override for specific ports:
+interface ethernet 1/1/36:3
+no qos-map traffic-class
+exit
+interface ethernet 1/1/28:1
+no qos-map traffic-class
+exit
+interface ethernet 1/1/57:3
+no qos-map traffic-class
+exit
+interface ethernet 1/1/39:3
+no qos-map traffic-class
+exit
+interface ethernet 1/1/31:2
+no qos-map traffic-class
+exit
+interface ethernet 1/1/62:1
+no qos-map traffic-class
+exit
+interface ethernet 1/1/36:2
+no qos-map traffic-class
+exit
+interface ethernet 1/1/59:3
+no qos-map traffic-class
+exit
+interface ethernet 1/1/58:2
+no qos-map traffic-class
+exit
+interface ethernet 1/1/31:4
+no qos-map traffic-class
+exit
+interface ethernet 1/1/7:4
+no qos-map traffic-class
+exit
+
+! Remove the global default
+system qos
+no trust-map dscp
+no service-policy output type queuing
+exit
+
+! Configure specific interfaces to use the trust-map (on input) and policy-map
+! (for output). This is an alternative to the global default.
 interface ethernet 1/1/36:3
 trust-map dscp default
 service-policy output type queuing pq_pmap
@@ -99,88 +182,48 @@ trust-map dscp default
 service-policy output type queuing pq_pmap
 exit
 
-# Reset ports
-
+! Remove the port-specific configuration.
 interface ethernet 1/1/36:3
 no trust-map dscp
-no service-policy output type queuing pq_pmap
+no service-policy output type queuing
 exit
 interface ethernet 1/1/28:1
 no trust-map dscp
-no service-policy output type queuing pq_pmap
+no service-policy output type queuing
 exit
 interface ethernet 1/1/57:3
 no trust-map dscp
-no service-policy output type queuing pq_pmap
+no service-policy output type queuing
 exit
 interface ethernet 1/1/39:3
 no trust-map dscp
-no service-policy output type queuing pq_pmap
+no service-policy output type queuing
 exit
 interface ethernet 1/1/31:2
 no trust-map dscp
-no service-policy output type queuing pq_pmap
+no service-policy output type queuing
 exit
 interface ethernet 1/1/62:1
 no trust-map dscp
-no service-policy output type queuing pq_pmap
+no service-policy output type queuing
 exit
 interface ethernet 1/1/36:2
 no trust-map dscp
-no service-policy output type queuing pq_pmap
+no service-policy output type queuing
 exit
 interface ethernet 1/1/59:3
 no trust-map dscp
-no service-policy output type queuing pq_pmap
+no service-policy output type queuing
 exit
 interface ethernet 1/1/58:2
 no trust-map dscp
-no service-policy output type queuing pq_pmap
+no service-policy output type queuing
 exit
 interface ethernet 1/1/31:4
 no trust-map dscp
-no service-policy output type queuing pq_pmap
+no service-policy output type queuing
 exit
 interface ethernet 1/1/7:4
 no trust-map dscp
-no service-policy output type queuing pq_pmap
-exit
-
-# Create policy map that "flattens" the queues: they each get the
-# same bandwidth.
-
-policy-map type queuing pmap_flat
-class pq_cm0
-bandwidth percent 12
-class pq_cm1
-bandwidth percent 12
-class pq_cm2
-bandwidth percent 12
-class pq_cm3
-bandwidth percent 12
-class pq_cm4
-bandwidth percent 12
-class pq_cm5
-bandwidth percent 12
-class pq_cm6
-bandwidth percent 12
-class pq_cm7
-bandwidth percent 12
-exit
-
-
-interface ethernet 1/1/36:2
-service-policy output type queuing pmap_flat
-exit
-interface ethernet 1/1/59:3
-service-policy output type queuing pmap_flat
-exit
-interface ethernet 1/1/58:2
-service-policy output type queuing pmap_flat
-exit
-interface ethernet 1/1/31:4
-service-policy output type queuing pmap_flat
-exit
-interface ethernet 1/1/7:4
-service-policy output type queuing pmap_flat
+no service-policy output type queuing
 exit
