@@ -750,7 +750,7 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 				h = (struct homa_data_hdr *) skb->data;
 				tt_record3("RPC id %d has %d bpages allocated, first uncopied offset %d",
 					rpc->id, rpc->msgin.num_bpages,
-					ntohl(h->seg.offset));
+					homa_get_offset(h));
 			}
 		}
 	} else if (rpc->state == RPC_OUTGOING) {

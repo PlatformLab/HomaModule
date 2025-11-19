@@ -753,7 +753,7 @@ int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 	h = (struct homa_data_hdr *)skb_transport_header(skb);
 	tt_record3("homa_qdisc_pacer queuing homa data packet for id %d, offset %d on qid %d",
 		   be64_to_cpu(h->common.sender_id),
-		   ntohl(h->seg.offset), qdev->pacer_qix);
+		   homa_get_offset(h), qdev->pacer_qix);
 	homa_qdisc_redirect_skb(skb, qdev, true);
 	return pkt_len;
 }
