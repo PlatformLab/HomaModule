@@ -239,18 +239,28 @@ grants = GrantDict()
 # It is created by AnalyzePackets. See get_tcp_packet for details on the keys
 # used to look up packets. Each value is a dictionary containing the following
 # fields:
+# id:           Always zero; this can be used to distinguish TCP packets from
+#               Homa packets, where there is always a nonzero id.
 # saddr:        Source address of the packet (hex string)
 # sport:        Source port number
 # daddr:        Destination address of the packet (hex string)
 # dport:        Destination port number
 # sequence:     The sequence number in the packet
-# data_bytes:   The number of data bytes in the packet
+# length:       # bytes of message data in the received packet
+# tso_length:   The number of data bytes in the packet (before TSO)
 # total_length: Total length of the packet, including IP and TCP headers
 # ack:          The ack sequence number in the packet
+# xmit:         Time when ip*xmit was invoked for the packet
+# qdisc_xmit:   Time when homa_qdisc requeued a packet that was deferred
+#               because of NIC queue length (only present for deferred
+#               packets)
 # nic:          Time when the the packet was handed off to the NIC
+# free_tx_skb:  Time when NAPI released the skb on the sender, which can't
+#               happen until the packet has been fully transmitted.
 # gro:          Time when GRO received the packet
 # tx_node:      Node that sent the packet (corresponds to saddr)
 # rx_node:      Node that received the packet (corresponds to daddr)
+# retransmits:  Always empty (for compatibility with Homa packets)
 tcp_packets = {}
 
 # Node -> list of intervals for that node. Created by the intervals analyzer.
@@ -636,12 +646,21 @@ def get_tcp_packet(saddr, sport, daddr, dport, sequence, data_bytes, ack):
     """
     global tcp_packets
 
-    key = '%s:%d %s:%d %d %d %d' % (saddr, sport, daddr, dport, sequence,
-            data_bytes, ack)
+    # This is tricky because a 'data' packet can arrive with no data,
+    # just an ack. This code will create one packet if there is data,
+    # ignoring amount of data and ack. If there is no data, then one
+    # packet is created for each distinct sequence/ack combination.
+
+    if data_bytes > 0:
+        key = '%s:%d %s:%d %d' % (saddr, sport, daddr, dport, sequence)
+    else:
+        key = '%s:%d %s:%d %d ack %d' % (saddr, sport, daddr, dport, sequence,
+                ack)
     if key in tcp_packets:
         return tcp_packets[key]
-    pkt = {'saddr': saddr, 'sport': sport, 'daddr': daddr, 'dport': dport,
-            'sequence': sequence, 'data_bytes': data_bytes, 'ack': ack}
+    pkt = {'id': 0, 'saddr': saddr, 'sport': sport, 'daddr': daddr,
+            'dport': dport, 'sequence': sequence, 'length': data_bytes,
+            'ack': ack, 'retransmits': []}
     tcp_packets[key] = pkt
     return pkt
 
@@ -899,18 +918,22 @@ def print_if(value, fmt, modifier=None):
 def print_pkts(pkts, header=True):
     """
     Returns a string containing one line for each packet in pkts, which
-    contains various useful information about the packet. If header is True
+    contains various useful information about the packet. The entries in
+    pkts can be either Homa packets or TCP packets. If header is True
     then the string also includes initial text describing the fields that
     are printed on each line.
     """
 
     buf = StringIO()
+    buf.write('# Source:     Node that sent packet\n')
     buf.write('# Dest:       Node to which packet was sent\n')
     buf.write('# Xmit:       Time when packet was passed to ip*xmit\n')
     buf.write('# Qdisc:      Time when homa_qdisc requeued packet after '
             'deferral, if any\n')
-    buf.write('# RpcId:      Identifier of packet\'s RPC\n')
-    buf.write('# Offset:     Offset of packet within message\n')
+    buf.write('# Id/Seq:     RPC identifier for Homa packets, sequence '
+            'number for TCP\n')
+    buf.write('# Offset:     Offset of packet within message or "TCP" if '
+            'packet is TCP\n')
     buf.write('# Length:     Size of packet (before segmentation)\n')
     buf.write('# Qid:        Transmit queue on which packet was sent\n')
     buf.write('# Nic:        Time when packet was queued for NIC\n')
@@ -921,8 +944,8 @@ def print_pkts(pkts, header=True):
     buf.write('# FDelay:     Free - Nic\n')
     buf.write('# Rx:         Number of times segments in the packet were '
             'retransmitted\n\n')
-    buf.write('# Dest           Xmit      Qdisc      RpcId Offset  Length')
-    buf.write(' Qid        Nic  NDelay        Gro  GDelay')
+    buf.write('Source   Dest           Xmit      Qdisc     Id/Seq Offset')
+    buf.write('  Length Qid        Nic  NDelay        Gro  GDelay')
     buf.write('       Free  FDelay Rx\n')
     for pkt in pkts:
         xmit = pkt['xmit']
@@ -952,17 +975,22 @@ def print_pkts(pkts, header=True):
                 rx += len(seg['retransmits'])
         rx_msg = str(rx) if rx > 0 else ""
 
-        line = '%-10s %10.3f %10s %10d %6d  %6d' % (
+        line = '%-8s %-8s %10.3f %10s' % (pkt['tx_node'],
                 pkt['rx_node'] if 'rx_node' in pkt else "",
-                xmit, qdisc_string, pkt['id'], pkt['offset'], length)
+                xmit, qdisc_string)
+        if pkt['id'] != 0:
+            line += ' %10d %6d' % (pkt['id'], pkt['offset'])
+        else:
+            # This is a TCP packet
+            line += ' %10d    TCP' % (pkt['sequence'])
         nic_delay_string = ''
         if nic_delay != None:
             nic_delay_string = '%.1f' % (nic_delay)
         gro_delay_string = ''
         if gro != None and nic != None:
                 gro_delay_string = '%.1f' % (gro - nic)
-        line += ' %3s %10s %7s %10s %7s' % (print_if(qid, '%d'),
-                print_if(nic, '%.3f'), nic_delay_string,
+        line += '  %6d %3s %10s %7s %10s %7s' % (length,
+                print_if(qid, '%d'), print_if(nic, '%.3f'), nic_delay_string,
                 print_if(gro, '%.3f'), gro_delay_string)
         free_delay_string = ''
         if (nic != None) and (free != None):
@@ -1316,40 +1344,6 @@ class Dispatcher:
                   'offset ([0-9]+), priority ([0-9]+)'
     })
 
-    def __gro_tcp(self, trace, time, core, match, interests):
-        saddr = match.group(1)
-        sport = int(match.group(2))
-        daddr = match.group(3)
-        dport = int(match.group(4))
-        self.core_saved[core] = {'saddr': saddr, 'sport': sport,
-                'daddr': daddr, 'dport': dport}
-
-    patterns.append({
-        'name': 'gro_tcp',
-        'regexp': 'tcp_gro_receive got packet from ([^:]+):([0-9]+) to '
-                  '([^:]+):([0-9]+)'
-    })
-
-    def __gro_tcp2(self, trace, time, core, match, interests):
-        if not core in self.core_saved:
-            return
-        saved = self.core_saved[core]
-        sequence = int(match.group(1))
-        data_bytes = int(match.group(2))
-        total = int(match.group(3))
-        ack = int(match.group(4))
-        for interest in interests:
-            interest.tt_gro_tcp(trace, time, core, saved['saddr'],
-                    saved['sport'], saved['daddr'], saved['dport'], sequence,
-                    data_bytes, total, ack)
-        del self.core_saved[core]
-
-    patterns.append({
-        'name': 'gro_tcp2',
-        'regexp': r'tcp_gro_receive .2. sequence ([-0-9]+), data bytes '
-                  '([0-9]+), total length ([0-9]+), ack ([-0-9]+)'
-    })
-
     def __softirq_data(self, trace, time, core, match, interests):
         id = int(match.group(1))
         offset = int(match.group(2))
@@ -1458,40 +1452,6 @@ class Dispatcher:
         'name': 'nic_grant',
         'regexp': '(mlx|ice) sent homa grant to ([^,]+), id ([0-9]+), '
                   'offset ([0-9]+), queue (0x[0-9a-f]+)'
-    })
-
-    def __nic_tcp(self, trace, time, core, match, interests):
-        saddr = match.group(2)
-        sport = int(match.group(3))
-        daddr = match.group(4)
-        dport = int(match.group(5))
-        self.core_saved[core] = {'saddr': saddr, 'sport': sport,
-                'daddr': daddr, 'dport': dport}
-
-    patterns.append({
-        'name': 'nic_tcp',
-        'regexp': '(mlx|ice) sent TCP packet from ([^:]+):([0-9]+) to '
-                  '([^:]+):([0-9]+)'
-    })
-
-    def __nic_tcp2(self, trace, time, core, match, interests):
-        if not core in self.core_saved:
-            return
-        saved = self.core_saved[core]
-        sequence = int(match.group(2))
-        data_bytes = int(match.group(3))
-        ack = int(match.group(4))
-        gso_size = int(match.group(5))
-        for interest in interests:
-            interest.tt_nic_tcp(trace, time, core, saved['saddr'],
-                    saved['sport'], saved['daddr'], saved['dport'],
-                    sequence, data_bytes, ack, gso_size)
-        del self.core_saved[core]
-
-    patterns.append({
-        'name': 'nic_tcp2',
-        'regexp': r'(mlx|ice) sent TCP packet .2. sequence ([-0-9]+), '
-                  'data bytes ([0-9]+), ack ([-0-9]+), gso_size ([0-9]+)'
     })
 
     def __free_tx_skb(self, trace, time, core, match, interests):
@@ -2011,6 +1971,175 @@ class Dispatcher:
         'name': 'snapshot_server_response',
         'regexp': 'rpc snapshot server responses started ([0-9]+), '
                 'kbytes_started ([0-9]+), kbytes_done ([0-9]+), done ([0-9]+)'
+    })
+
+    def __xmit_tcp(self, trace, time, core, match, interests):
+        saddr = match.group(1)
+        sport = int(match.group(2))
+        daddr = match.group(3)
+        dport = int(match.group(4))
+        self.core_saved[core] = {'saddr': saddr, 'sport': sport,
+                'daddr': daddr, 'dport': dport}
+
+    patterns.append({
+        'name': 'xmit_tcp',
+        'regexp': 'Transmitting TCP packet from ([^:]+):([0-9]+) to '
+                  '([^:]+):([0-9]+)'
+    })
+
+    def __xmit_tcp2(self, trace, time, core, match, interests):
+        if not core in self.core_saved:
+            return
+        saved = self.core_saved[core]
+        sequence = int(match.group(1))
+        data_bytes = int(match.group(2))
+        total_length = int(match.group(3))
+        ack = int(match.group(4))
+        for interest in interests:
+            interest.tt_xmit_tcp(trace, time, core, saved['saddr'],
+                    saved['sport'], saved['daddr'], saved['dport'],
+                    sequence, data_bytes, total_length, ack)
+        del self.core_saved[core]
+
+    patterns.append({
+        'name': 'xmit_tcp2',
+        'regexp': r'Transmitting TCP packet .2. sequence ([-0-9]+), '
+                  'data bytes ([0-9]+), total length ([-0-9]+), ack ([-0-9]+)'
+    })
+
+    def __qdisc_tcp(self, trace, time, core, match, interests):
+        saddr = match.group(1)
+        sport = int(match.group(2))
+        daddr = match.group(3)
+        dport = int(match.group(4))
+        self.core_saved[core] = {'saddr': saddr, 'sport': sport,
+                'daddr': daddr, 'dport': dport}
+
+    patterns.append({
+        'name': 'qdisc_tcp',
+        'regexp': 'homa_qdisc_pacer requeued TCP packet from ([^:]+):([0-9]+) '
+                'to ([^:]+):([0-9]+)'
+    })
+
+    def __qdisc_tcp2(self, trace, time, core, match, interests):
+        if not core in self.core_saved:
+            return
+        saved = self.core_saved[core]
+        sequence = int(match.group(1))
+        data_bytes = int(match.group(2))
+        ack = int(match.group(3))
+        for interest in interests:
+            interest.tt_qdisc_tcp(trace, time, core, saved['saddr'],
+                    saved['sport'], saved['daddr'], saved['dport'],
+                    sequence, data_bytes, ack)
+        del self.core_saved[core]
+
+    patterns.append({
+        'name': 'qdisc_tcp2',
+        'regexp': r'homa_qdisc_pacer requeued TCP packet .2. sequence ([-0-9]+), '
+                  'data bytes ([0-9]+), ack ([-0-9]+)'
+    })
+
+    def __nic_tcp(self, trace, time, core, match, interests):
+        saddr = match.group(2)
+        sport = int(match.group(3))
+        daddr = match.group(4)
+        dport = int(match.group(5))
+        self.core_saved[core] = {'saddr': saddr, 'sport': sport,
+                'daddr': daddr, 'dport': dport}
+
+    patterns.append({
+        'name': 'nic_tcp',
+        'regexp': '(mlx|ice) sent TCP packet from ([^:]+):([0-9]+) to '
+                  '([^:]+):([0-9]+)'
+    })
+
+    def __nic_tcp2(self, trace, time, core, match, interests):
+        if not core in self.core_saved:
+            return
+        saved = self.core_saved[core]
+        sequence = int(match.group(2))
+        data_bytes = int(match.group(3))
+        ack = int(match.group(4))
+        gso_size = int(match.group(5))
+        for interest in interests:
+            interest.tt_nic_tcp(trace, time, core, saved['saddr'],
+                    saved['sport'], saved['daddr'], saved['dport'],
+                    sequence, data_bytes, ack, gso_size)
+        del self.core_saved[core]
+
+    patterns.append({
+        'name': 'nic_tcp2',
+        'regexp': r'(mlx|ice) sent TCP packet .2. sequence ([-0-9]+), '
+                  'data bytes ([0-9]+), ack ([-0-9]+), gso_size ([0-9]+)'
+    })
+
+    def __free_tcp(self, trace, time, core, match, interests):
+        saddr = match.group(1)
+        sport = int(match.group(2))
+        daddr = match.group(3)
+        dport = int(match.group(4))
+        self.core_saved[core] = {'saddr': saddr, 'sport': sport,
+                'daddr': daddr, 'dport': dport}
+
+    patterns.append({
+        'name': 'free_tcp',
+        'regexp': 'napi freeing TCP skb from ([^:]+):([0-9]+) to '
+                  '([^:]+):([0-9]+)'
+    })
+
+    def __free_tcp2(self, trace, time, core, match, interests):
+        if not core in self.core_saved:
+            return
+        saved = self.core_saved[core]
+        sequence = int(match.group(1))
+        data_bytes = int(match.group(2))
+        ack = int(match.group(3))
+        qid = int(match.group(4))
+        for interest in interests:
+            interest.tt_free_tcp(trace, time, core, saved['saddr'],
+                    saved['sport'], saved['daddr'], saved['dport'],
+                    sequence, data_bytes, ack, qid)
+        del self.core_saved[core]
+
+    patterns.append({
+        'name': 'free_tcp2',
+        'regexp': r'napi freeing TCP skb .2. sequence ([-0-9]+), '
+                  'data bytes ([0-9]+), ack ([-0-9]+), qid ([-0-9]+)'
+    })
+
+    def __gro_tcp(self, trace, time, core, match, interests):
+        saddr = match.group(1)
+        sport = int(match.group(2))
+        daddr = match.group(3)
+        dport = int(match.group(4))
+        self.core_saved[core] = {'saddr': saddr, 'sport': sport,
+                'daddr': daddr, 'dport': dport}
+
+    patterns.append({
+        'name': 'gro_tcp',
+        'regexp': 'tcp_gro_receive got packet from ([^:]+):([0-9]+) to '
+                  '([^:]+):([0-9]+)'
+    })
+
+    def __gro_tcp2(self, trace, time, core, match, interests):
+        if not core in self.core_saved:
+            return
+        saved = self.core_saved[core]
+        sequence = int(match.group(1))
+        data_bytes = int(match.group(2))
+        total = int(match.group(3))
+        ack = int(match.group(4))
+        for interest in interests:
+            interest.tt_gro_tcp(trace, time, core, saved['saddr'],
+                    saved['sport'], saved['daddr'], saved['dport'], sequence,
+                    data_bytes, total, ack)
+        del self.core_saved[core]
+
+    patterns.append({
+        'name': 'gro_tcp2',
+        'regexp': r'tcp_gro_receive .2. sequence ([-0-9]+), data bytes '
+                  '([0-9]+), total length ([0-9]+), ack ([-0-9]+)'
     })
 
 #------------------------------------------------
@@ -2900,16 +3029,19 @@ class AnalyzeDelay:
         short_to_nic = []
         short_to_gro = []
         short_to_softirq = []
+        short_free = []
         short_total = []
 
         long_to_nic = []
         long_to_gro = []
         long_to_softirq = []
+        long_free = []
         long_total = []
 
         grant_to_nic = []
         grant_to_gro = []
         grant_to_softirq = []
+        grant_free = []
         grant_total = []
 
         # Collect statistics about delays within individual packets.
@@ -2934,6 +3066,10 @@ class AnalyzeDelay:
                     delay = pkt['softirq'] - pkt['xmit']
                     if delay > 0:
                         short_total.append([delay, p, pkt['softirq']])
+                if ('nic' in pkt) and ('free_tx_skb' in pkt):
+                    delay = pkt['free_tx_skb'] - pkt['nic']
+                    if delay > 0:
+                        short_free.append([delay, p, pkt['free_tx_skb']])
             else:
                 if 'tso_length' in pkt:
                     if 'nic' in pkt:
@@ -2944,6 +3080,10 @@ class AnalyzeDelay:
                             delay = pkt['nic'] - pkt['xmit']
                         if delay > 0:
                             long_to_nic.append([delay, p, pkt['nic']])
+                        if 'free_tx_skb' in pkt:
+                            delay = pkt['free_tx_skb'] - pkt['nic']
+                            if delay > 0:
+                                long_free.append([delay, p, pkt['free_tx_skb']])
                 if ('nic' in pkt) and ('gro' in pkt):
                     delay = pkt['gro'] - pkt['nic']
                     if delay > 0:
@@ -2974,6 +3114,10 @@ class AnalyzeDelay:
                 delay = pkt['softirq'] - pkt['xmit']
                 if delay > 0:
                     grant_total.append([delay, p, pkt['softirq']])
+            if ('nic' in pkt) and ('free_tx_skb' in pkt):
+                delay = pkt['free_tx_skb'] - pkt['nic']
+                if delay > 0:
+                    grant_free.append([delay, p, pkt['free_tx_skb']])
 
         print('\n----------------')
         print('Analyzer: delay')
@@ -2985,6 +3129,8 @@ class AnalyzeDelay:
         print('          homa_xmit_control)')
         print('Net:      Time from when NIC received packet until GRO started processing')
         print('SoftIRQ:  Time from GRO until SoftIRQ started processing')
+        print('Free:     Time from when NIC received packet until packet was returned')
+        print('          to Linux and freed')
         print('Total:    Total time from ip*xmit call until SoftIRQ processing')
 
         def print_pcts(data, label):
@@ -3003,18 +3149,21 @@ class AnalyzeDelay:
         print_pcts(short_to_nic, 'Xmit')
         print_pcts(short_to_gro, 'Net')
         print_pcts(short_to_softirq, 'SoftIRQ')
+        print_pcts(short_free, 'Free')
         print_pcts(short_total, 'Total')
 
         print('\nData packets from multi-packet messages:')
         print_pcts(long_to_nic, 'Xmit')
         print_pcts(long_to_gro, 'Net')
         print_pcts(long_to_softirq, 'SoftIRQ')
+        print_pcts(long_free, 'Free')
         print_pcts(long_total, 'Total')
 
         print('\nGrants:')
         print_pcts(grant_to_nic, 'Xmit')
         print_pcts(grant_to_gro, 'Net')
         print_pcts(grant_to_softirq, 'SoftIRQ')
+        print_pcts(grant_free, 'Free')
         print_pcts(grant_total, 'Total')
 
         # Handle --verbose for packet-related delays.
@@ -3099,14 +3248,19 @@ class AnalyzeDelay:
         short_to_nic = []
         short_to_gro = []
         short_to_softirq = []
+        short_free = []
 
         long_to_nic = []
         long_to_gro = []
         long_to_softirq = []
+        long_free = []
 
         grant_to_nic = []
         grant_to_gro = []
         grant_to_softirq = []
+        grant_free = []
+
+        print('Number of packets is now %d' % (len(packets)))
 
         for p, pkt in packets.items():
             if (not 'softirq' in pkt) or (not 'xmit' in pkt):
@@ -3114,7 +3268,7 @@ class AnalyzeDelay:
             total = pkt['softirq'] - pkt['xmit']
             if (pkt['msg_length'] != None) and (pkt['msg_length'] <= mtu):
                 if (total < min_short) or (total > max_short):
-                    continue;
+                    continue
                 if ('xmit' in pkt) and ('nic' in pkt):
                     short_to_nic.append(
                             [pkt['nic'] - pkt['xmit'], p, pkt['nic']])
@@ -3124,6 +3278,9 @@ class AnalyzeDelay:
                 if ('gro' in pkt) and ('softirq' in pkt):
                     short_to_softirq.append(
                             [pkt['softirq'] - pkt['gro'], p, pkt['softirq']])
+                if ('nic' in pkt) and ('free_tx_skb' in pkt):
+                    short_free.append(
+                            [pkt['free_tx_skb'] - pkt['nic'], p, pkt['free_tx_skb']])
             else:
                 if (total < min_long) or (total > max_long):
                     continue
@@ -3134,6 +3291,10 @@ class AnalyzeDelay:
                     elif ('xmit' in pkt) and ('nic' in pkt):
                         long_to_nic.append(
                                 [pkt['nic'] - pkt['xmit'], p, pkt['nic']])
+                    if ('nic' in pkt) and ('free_tx_skb' in pkt):
+                        long_free.append(
+                                [pkt['free_tx_skb'] - pkt['nic'], p,
+                                pkt['free_tx_skb']])
                 if ('nic' in pkt) and ('gro' in pkt):
                     long_to_gro.append(
                             [pkt['gro'] - pkt['nic'], p, pkt['gro']])
@@ -3156,6 +3317,9 @@ class AnalyzeDelay:
             if ('gro' in pkt) and ('softirq' in pkt):
                 grant_to_softirq.append(
                         [pkt['softirq'] - pkt['gro'], p, pkt['softirq']])
+            if ('nic' in pkt) and ('free_tx_skb' in pkt):
+                grant_free.append(
+                        [pkt['free_tx_skb'] - pkt['nic'], p, pkt['free_tx_skb']])
 
         def get_slow_summary(data):
             if not data:
@@ -3165,21 +3329,24 @@ class AnalyzeDelay:
                     list_avg(data, 0))
 
         print('\nPhase breakdown for P98-P99 packets:')
-        print('                          Xmit          Net         SoftIRQ')
-        print('               Pkts    P50    Avg    P50    Avg    P50    Avg')
-        print('-------------------------------------------------------------')
-        print('Single-packet %5d %s %s %s' % (len(short_to_nic),
+        print('                          Xmit          Net         SoftIRQ         Free')
+        print('               Pkts    P50    Avg    P50    Avg    P50    Avg    P50    Avg')
+        print('---------------------------------------------------------------------------')
+        print('Single-packet %5d %s %s %s %s' % (len(short_to_nic),
                 get_slow_summary(short_to_nic),
                 get_slow_summary(short_to_gro),
-                get_slow_summary(short_to_softirq)))
-        print('Multi-packet  %5d %s %s %s' % (len(long_to_nic),
+                get_slow_summary(short_to_softirq),
+                get_slow_summary(short_free)))
+        print('Multi-packet  %5d %s %s %s %s' % (len(long_to_nic),
                 get_slow_summary(long_to_nic),
                 get_slow_summary(long_to_gro),
-                get_slow_summary(long_to_softirq)))
-        print('Grants        %5d %s %s %s' % (len(grant_to_nic),
+                get_slow_summary(long_to_softirq),
+                get_slow_summary(long_free)))
+        print('Grants        %5d %s %s %s %s' % (len(grant_to_nic),
                 get_slow_summary(grant_to_nic),
                 get_slow_summary(grant_to_gro),
-                get_slow_summary(grant_to_softirq)))
+                get_slow_summary(grant_to_softirq),
+                get_slow_summary(grant_free)))
         return verbose
 
     def print_wakeup_delays(self):
@@ -6713,19 +6880,45 @@ class AnalyzePackets:
         g['increment'] = increment
         g['rx_node'] = trace['node']
 
-    def tt_nic_tcp(self, trace, t, core, saddr, sport, daddr, dport, sequence,
-            data_bytes, ack, gso_size):
-        # Break GSO packets up into multiple packets, matching what will
-        # be received on the other end.
-        bytes_left = data_bytes
+    def tt_xmit_tcp(self, trace, t, core, saddr, sport, daddr, dport, sequence,
+            data_bytes, total, ack):
+        tcp_pkt = get_tcp_packet(saddr, sport, daddr, dport, sequence,
+                data_bytes, ack)
         node = trace['node']
+        tcp_pkt['xmit'] = t
+        tcp_pkt['total_length'] = total
+        tcp_pkt['tx_node'] = node
         if not saddr in peer_nodes and saddr != '0x00000000':
             peer_nodes[saddr] = node
+
+    def tt_qdisc_tcp(self, trace, t, core, saddr, sport, daddr, dport, sequence,
+            data_bytes, ack):
+        tcp_pkt = get_tcp_packet(saddr, sport, daddr, dport, sequence,
+                data_bytes, ack)
+        node = trace['node']
+        tcp_pkt['qdisc_xmit'] = t
+        tcp_pkt['tx_node'] = node
+        if not saddr in peer_nodes and saddr != '0x00000000':
+            peer_nodes[saddr] = node
+
+    def tt_nic_tcp(self, trace, t, core, saddr, sport, daddr, dport, sequence,
+            data_bytes, ack, gso_size):
+        node = trace['node']
+        if sequence == 3666610099:
+            print('%9.3f got sequence %u on %s, data_bytes %d, gso_size %d' %
+                    (t, sequence, node, data_bytes, gso_size), file=sys.stderr)
+        if not saddr in peer_nodes and saddr != '0x00000000':
+            peer_nodes[saddr] = node
+
+        # Break TSO packets up into multiple packets, matching what will
+        # be received on the other end.
+        bytes_left = data_bytes
+        pkt_sequence = sequence
         while True:
             pkt_bytes = bytes_left
             if pkt_bytes > gso_size and gso_size != 0:
                 pkt_bytes = gso_size
-            tcp_pkt = get_tcp_packet(saddr, sport, daddr, dport, sequence,
+            tcp_pkt = get_tcp_packet(saddr, sport, daddr, dport, pkt_sequence,
                     pkt_bytes, ack)
             if 'nic' in tcp_pkt and data_bytes > 0:
                 # Retransmitted packet: retain only the last transmission.
@@ -6733,15 +6926,23 @@ class AnalyzePackets:
                     del tcp_pkt['gro']
             tcp_pkt['nic'] = t
             tcp_pkt['tx_node'] = node
-            if bytes_left == data_bytes:
-                tcp_pkt['gso_pkt_size'] = data_bytes
+            if pkt_sequence == sequence:
+                tcp_pkt['tso_length'] = data_bytes
             bytes_left -= pkt_bytes
-            sequence += pkt_bytes
-            if sequence > 0x80000000:
-                # 32-bit sequence number has wrapped around
-                sequence -= 0x100000000
+            pkt_sequence = (pkt_sequence + pkt_bytes) & 0xffffffff
             if bytes_left <= 0:
                 break
+
+    def tt_free_tcp(self, trace, t, core, saddr, sport, daddr, dport, sequence,
+            data_bytes, ack, qid):
+        tcp_pkt = get_tcp_packet(saddr, sport, daddr, dport, sequence,
+                data_bytes, ack)
+        node = trace['node']
+        tcp_pkt['free_tx_skb'] = t
+        tcp_pkt['tx_qid'] = qid
+        tcp_pkt['tx_node'] = node
+        if not saddr in peer_nodes and saddr != '0x00000000':
+            peer_nodes[saddr] = node
 
     def tt_gro_tcp(self, trace, t, core, saddr, sport, daddr, dport, sequence,
             data_bytes, total, ack):
@@ -6837,7 +7038,7 @@ class AnalyzePackets:
                         new_pkts.append([pid, pkt2])
                     for key in ['xmit', 'qdisc_xmit', 'xmit2', 'nic', 'id',
                                 'msg_length', 'priority', 'tx_node', 'tx_core',
-                                'free_tx_skb']:
+                                'free_tx_skb', 'tx_qid']:
                         if key in pkt:
                             pkt2[key] = pkt[key]
                     if pkt2['msg_length'] != None and pkt2['offset'] > pkt2['msg_length']:
@@ -8839,15 +9040,23 @@ class AnalyzeTemp:
 
     def output_slow_pkts(self):
         pkts = []
+        delays = []
         for pkt in packets.values():
-            if not 'nic' in pkt or not 'gro' in pkt:
+            if (pkt['msg_length'] == None or pkt['msg_length'] <= 1000 or
+                    pkt['msg_length'] >= 60000):
                 continue
-            if pkt['length'] > 1000 or pkt['offset'] !=0:
+            if not 'nic' in pkt or not 'gro' in pkt or not 'tso_length' in pkt:
                 continue
             delay = pkt['gro'] - pkt['nic']
-            if delay >= 150 and delay <= 300:
+            if delay >= 300:
                 pkts.append(pkt)
-        print("# Packets with nic->gro delays between 150 and 300 usecs:")
+            else:
+                if pkt['id'] == 400376130 or pkt['id'] == 400376131:
+                    print('Packet id %d, offset %d, delay %.1f: %s' %
+                            (pkt['id'], pkt['offset'], delay, pkt))
+                delays.append(delay)
+        print('# Packets from messages with length 1000-60000 and')
+        print('# nic->gro delays > 300 usecs:')
         print(print_pkts(pkts), end='')
 
     def output_delays(self):
@@ -9256,7 +9465,7 @@ class AnalyzeTxintervals:
             f.write('# InNic:      KB of data that have been queued for the '
                     'NIC but whose packets\n')
             f.write('#             have not yet been returned after '
-                    'transmission')
+                    'transmission\n')
             f.write('# NicRx:      KB of data that are still in the NIC\'s '
                     'possession (their packets\n')
             f.write('#             haven\'t been returned after transmission) '
@@ -9297,8 +9506,9 @@ class AnalyzeTxintervals:
             total = 0
             for interval in intervals[node]:
                 if not 'tx_bytes' in interval:
-                    print('Bogus interval: %s' % (interval))
-                    print('Trace: %s' % (traces[node]))
+                    interval['tx_bytes'] = 0
+                    # print('Bogus interval: %s' % (interval))
+                    # print('Trace: %s' % (traces[node]))
                 gbps = interval['tx_bytes'] * 8 / (options.interval * 1000)
                 total += gbps
                 f.write('%8.1f %6.1f %5.0f %5d  %5d  %5d' %
@@ -9342,7 +9552,7 @@ class AnalyzeTxpkts:
     --tx-qid is specified, only packets matching those options will be
     considered. Packets will normally be sorted by the 'Xmit' column, but the
     --sort option can be used to specify a different column to use for sorting
-    ('Xmit', 'Nic', 'MaxGro', or 'Free'). Also generates aggregate statistics
+    ('Xmit', 'Nic', 'Gro', or 'Free'). Also generates aggregate statistics
     for each tx queue on each node.
     """
 
@@ -9352,18 +9562,24 @@ class AnalyzeTxpkts:
         dispatcher.interest('AnalyzePackets')
 
     def output(self):
-        global packets, options, traces
+        global packets, tcp_packets, options, traces
 
         # node -> list of packets transmitted by that node
         node_pkts = defaultdict(list)
 
         # Bucket all of the packets by transmitting node.
         for pkt in packets.values():
-            if (not 'xmit' in pkt) or not ('tso_length' in pkt):
+            if not 'xmit' in pkt or not 'tso_length' in pkt:
+                continue
+            node_pkts[pkt['tx_node']].append(pkt)
+        for pkt in tcp_packets.values():
+            if pkt['sequence'] == 3666610099:
+                print('Found TCP packet: %s' % (pkt))
+            if not 'xmit' in pkt or not ('tso_length' in pkt):
                 continue
             node_pkts[pkt['tx_node']].append(pkt)
 
-        sort_keys = {'Xmit': 'xmit', 'Nic': 'nic', 'MaxGro': 'gro',
+        sort_keys = {'Xmit': 'xmit', 'Nic': 'nic', 'Gro': 'gro',
                 'Free': 'free_tx_skb'}
         sort_key = 'xmit'
         if options.sort != None:
