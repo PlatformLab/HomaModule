@@ -11,6 +11,7 @@ Invoke with the --help option for documentation.
 from collections import defaultdict, deque
 from functools import cmp_to_key
 from glob import glob
+import heapq
 import itertools
 from io import StringIO
 import matplotlib
@@ -1455,17 +1456,17 @@ class Dispatcher:
     })
 
     def __free_tx_skb(self, trace, time, core, match, interests):
-        id = int(match.group(1))
-        offset = int(match.group(2))
-        qid = int(match.group(3))
-        msg_length = int(match.group(4))
+        id = int(match.group(2))
+        offset = int(match.group(3))
+        qid = int(match.group(4))
+        msg_length = int(match.group(5))
         for interest in interests:
             interest.tt_free_tx_skb(trace, time, core, id, offset, qid,
                     msg_length)
 
     patterns.append({
         'name': 'free_tx_skb',
-        'regexp': 'napi freeing tx skb for homa data, id ([0-9]+), '
+        'regexp': '(mlx|ice) freeing tx skb for homa data, id ([0-9]+), '
                 'offset ([0-9]+), qid ([0-9]+), msg_length ([0-9]+)'
     })
 
@@ -2075,16 +2076,16 @@ class Dispatcher:
     })
 
     def __free_tcp(self, trace, time, core, match, interests):
-        saddr = match.group(1)
-        sport = int(match.group(2))
-        daddr = match.group(3)
-        dport = int(match.group(4))
+        saddr = match.group(2)
+        sport = int(match.group(3))
+        daddr = match.group(4)
+        dport = int(match.group(5))
         self.core_saved[core] = {'saddr': saddr, 'sport': sport,
                 'daddr': daddr, 'dport': dport}
 
     patterns.append({
         'name': 'free_tcp',
-        'regexp': 'napi freeing TCP skb from ([^:]+):([0-9]+) to '
+        'regexp': '(mlx|ice) freeing TCP skb from ([^:]+):([0-9]+) to '
                   '([^:]+):([0-9]+)'
     })
 
@@ -2092,10 +2093,10 @@ class Dispatcher:
         if not core in self.core_saved:
             return
         saved = self.core_saved[core]
-        sequence = int(match.group(1))
-        data_bytes = int(match.group(2))
-        ack = int(match.group(3))
-        qid = int(match.group(4))
+        sequence = int(match.group(2))
+        data_bytes = int(match.group(3))
+        ack = int(match.group(4))
+        qid = int(match.group(5))
         for interest in interests:
             interest.tt_free_tcp(trace, time, core, saved['saddr'],
                     saved['sport'], saved['daddr'], saved['dport'],
@@ -2104,7 +2105,7 @@ class Dispatcher:
 
     patterns.append({
         'name': 'free_tcp2',
-        'regexp': r'napi freeing TCP skb .2. sequence ([-0-9]+), '
+        'regexp': r'(mlx|ice) freeing TCP skb .2. sequence ([-0-9]+), '
                   'data bytes ([0-9]+), ack ([-0-9]+), qid ([-0-9]+)'
     })
 
@@ -3125,7 +3126,7 @@ class AnalyzeDelay:
         print('Delays in the transmission and processing of data and grant packets')
         print('(all times in usecs):')
         print('Xmit:     Time from ip*xmit call until driver queued packet for NIC')
-        print('          (for grants, includes time in homa_send_grants and ')
+        print('          (for grants, includes time in homa_send_grants and')
         print('          homa_xmit_control)')
         print('Net:      Time from when NIC received packet until GRO started processing')
         print('SoftIRQ:  Time from GRO until SoftIRQ started processing')
@@ -3145,14 +3146,14 @@ class AnalyzeDelay:
                     list_avg(data, 0)))
         print('\nPhase        Count   Min    P10    P50    P90    P99    Max    Avg')
         print('-------------------------------------------------------------------------')
-        print('Data packets from single-packet messages:')
+        print('Data packets from messages <= %d bytes:' % (mtu))
         print_pcts(short_to_nic, 'Xmit')
         print_pcts(short_to_gro, 'Net')
         print_pcts(short_to_softirq, 'SoftIRQ')
         print_pcts(short_free, 'Free')
         print_pcts(short_total, 'Total')
 
-        print('\nData packets from multi-packet messages:')
+        print('\nData packets from messages > %d bytes:' % (mtu))
         print_pcts(long_to_nic, 'Xmit')
         print_pcts(long_to_gro, 'Net')
         print_pcts(long_to_softirq, 'SoftIRQ')
@@ -3206,13 +3207,13 @@ class AnalyzeDelay:
         verbose += ('--------------------------------------------------------'
                 '-------------\n')
 
-        verbose += 'Data packets from single-packet messages:\n'
+        verbose += 'Data packets from messages  <= %d bytes:\n' % (mtu)
         verbose += print_worst(short_to_nic, 'Xmit')
         verbose += print_worst(short_to_gro, 'Net')
         verbose += print_worst(short_to_softirq, 'SoftIRQ')
         verbose += print_worst(short_total, 'Total')
 
-        verbose += '\nData packets from multi-packet messages:\n'
+        verbose += '\nData packets from messages > %d bytes:\n' % (mtu)
         verbose += print_worst(long_to_nic, 'Xmit')
         verbose += print_worst(long_to_gro, 'Net')
         verbose += print_worst(long_to_softirq, 'SoftIRQ')
@@ -3332,12 +3333,12 @@ class AnalyzeDelay:
         print('                          Xmit          Net         SoftIRQ         Free')
         print('               Pkts    P50    Avg    P50    Avg    P50    Avg    P50    Avg')
         print('---------------------------------------------------------------------------')
-        print('Single-packet %5d %s %s %s %s' % (len(short_to_nic),
+        print('Short msgs    %5d %s %s %s %s' % (len(short_to_nic),
                 get_slow_summary(short_to_nic),
                 get_slow_summary(short_to_gro),
                 get_slow_summary(short_to_softirq),
                 get_slow_summary(short_free)))
-        print('Multi-packet  %5d %s %s %s %s' % (len(long_to_nic),
+        print('Long msgs     %5d %s %s %s %s' % (len(long_to_nic),
                 get_slow_summary(long_to_nic),
                 get_slow_summary(long_to_gro),
                 get_slow_summary(long_to_softirq),
@@ -6140,6 +6141,223 @@ class AnalyzeNet:
                         core_data['max_backlog_time']))
 
 #------------------------------------------------
+# Analyzer: nicbacklog
+#------------------------------------------------
+class AnalyzeNicbacklog:
+    """
+    Prints a time-series analysis of backlog in the NIC (packets that
+    have been passed to the NIC but not yet returned after transmission)
+    along with information about the rate of packets flowing into the
+    NIC and being returned from the NIC. Requries the --data option.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzePackets')
+        require_options('nicbacklog', 'data')
+
+    def output(self):
+        global packets, tcp_packets, options, traces
+
+        # Microseconds in the smalleset interval we'll consider for
+        # computing rates.
+        base_interval = 50
+
+        # node -> list of packets transmitted by that node
+        node_pkts = defaultdict(list)
+
+        # Bytes and packets owned by the NIC as of current time
+        nic_pkts = 0
+        nic_bytes = 0
+
+        print('\n--------------------')
+        print('Analyzer: nicbacklog')
+        print('--------------------')
+        print('See data files %s/nicbacklog_*.dat' % (options.data))
+        print('\nMaximum values observed for each node:')
+        print('Node:     Name of node')
+        print('MaxPkts:  Maximum packets owned by NIC at one time')
+        print('MaxKB:    Maximum Kbytes of data in packets owned by NIC '
+                'at one time')
+        print('MaxInP:   Maximum packets passed to NIC in a %d usec interval' %
+                (4 * base_interval))
+        print('MaxInD:   Maximum data rate from pkts passed to NIC in a %d '
+                'usec interval (Gbps)' % (4 * base_interval))
+        print('MaxFrP:   Maximum packets freed in a %d usec interval after '
+                'return from NIC' % (4 * base_interval))
+        print('MaxFrD:   Maximum data rate from pkts freed in a %d usec '
+                'interval (Gbps)' % (4 * base_interval))
+        print()
+        print('Node      MaxPkts  MaxKB MaxInP  MaxInD MaxFrP  MaxFrD')
+        print('------------------------------------------------------')
+
+        # Bucket all of the packets by transmitting node.
+        for pkt in itertools.chain(packets.values(), tcp_packets.values()):
+            if (not 'nic' in pkt or not 'free_tx_skb' in pkt or
+                    not 'tso_length' in pkt):
+                continue
+            node_pkts[pkt['tx_node']].append(pkt)
+
+        # Each iteraction in this loops generates data for one node.
+        for node in get_sorted_nodes():
+            f = open('%s/nicbacklog_%s.dat' % (options.data, node), 'w')
+            f.write('# Node: %s\n' % (node))
+            f.write('# Generated at %s.\n\n' %
+                    (time.strftime('%I:%M %p on %m/%d/%Y')))
+            f.write('# NIC backlog (packets passed to the NIC but not yet '
+                    'returned to the\n')
+            f.write('# kernel) as a function of time\n')
+            f.write('# Time:     Time of measurement (usecs)\n')
+            f.write('# NicPkts:  Packets currently owned by NIC\n')
+            f.write('# NicKB:    Kbytes of data in packets currently owned by NIC\n')
+
+            f.write('# %-8s    Packets passed to NIC in last %d usecs\n' %
+                    ('InP%d:' % (base_interval), base_interval))
+            f.write('# %-8s    Data rate from packets passed to NIC in last %d '
+                    'usecs (Gbps)\n' %
+                    ('InB%d:' % (base_interval), base_interval))
+            f.write('# %-8s    Packets freed in last %d usecs after return from '
+                    'NIC\n' %
+                    ('FrP%d:' % (base_interval), base_interval))
+            f.write('# %-8s    Data rate from packets freed in last %d usecs '
+                    '(Gbps)\n' %
+                    ('FrB%d:' % (base_interval), base_interval))
+
+            f.write('# %-8s    Packets passed to NIC in last %d usecs\n' %
+                    ('InP%d:' % (2*base_interval), 2*base_interval))
+            f.write('# %-8s    Data rate from packets passed to NIC in last %d '
+                    'usecs (Gbps)\n' %
+                    ('InB%d:' % (2*base_interval), 2*base_interval))
+            f.write('# %-8s    Packets freed in last %d usecs after return from '
+                    'NIC\n' %
+                    ('FrP%d:' % (2*base_interval), 2*base_interval))
+            f.write('# %-8s    Data rate from packets freed in last %d usecs '
+                    '(Gbps)\n' %
+                    ('FrB%d:' % (2*base_interval), 2*base_interval))
+
+            f.write('# %-8s    Packets passed to NIC in last %d usecs (M/sec)\n' %
+                    ('InP%d:' % (4*base_interval), 4*base_interval))
+            f.write('# %-8s    Data rate from packets passed to NIC in last %d '
+                    'usecs (Gbps)\n' %
+                    ('InB%d:' % (4*base_interval), 4*base_interval))
+            f.write('# %-8s    Packets freed in last %d usecs after return from '
+                    'NIC (M packets/sec)\n' %
+                    ('FrP%d:' % (4*base_interval), 4*base_interval))
+            f.write('# %-8s    Data rate from packets freed in last %d usecs '
+                    '(Gbps)\n' %
+                    ('FrB%d:' % (4*base_interval), 4*base_interval))
+
+            f.write('\nTime    NicPkts  NicKB')
+            for i in [base_interval, base_interval*2, base_interval*4]:
+                f.write('   %6s' % ('InP%d' % (i)))
+                f.write(' %7s' % ('InB%d' % (i)))
+                f.write(' %6s' % ('FrP%d' % (i)))
+                f.write(' %7s' % ('FrB%d' % (i)))
+            f.write('\n')
+
+            # heapq of all active packets (those that are currently in
+            # the posessions of the NIC) in increasing order of free time.
+            active = []
+
+            # list of <in_pkts, in_kb, free_pkts, free_kb> for each of
+            # 4 intervals, where intervals[0] is the newest interval.
+            # in_pkts:      packets passed to the NIC in the interval
+            # in_bytes:     bytes of data in packets passed to the NIC
+            # free_pkts:    packets returned to Linux and freed in the interval
+            # free_bytes:   bytes of data in packets freed in the interval
+            intervals = deque()
+            for _ in range(4):
+                intervals.appendleft([0, 0, 0, 0])
+
+            # End of the current interval (the next one to be added to
+            # intervals)
+            interval_end = 0
+
+            # Maximum values for any of the largest size interval.
+            max_pkts = 0
+            max_bytes = 0
+            max_in_pkts = 0
+            max_in_bytes = 0
+            max_free_pkts = 0
+            max_free_bytes = 0
+
+            pkts = sorted(node_pkts[node], key = lambda pkt : pkt['nic'])
+            interval_end = (math.ceil(pkts[0]['nic'] / base_interval) *
+                    base_interval)
+            cur = 0
+            # print('\n%s: %d packets:' % (node, len(node_pkts[node])))
+
+            # Each iteration of this loop handles a new interval.
+            while cur < len(pkts) or len(active) > 0:
+                in_pkts = 0
+                in_bytes = 0
+                free_pkts = 0
+                free_bytes = 0
+
+                while cur < len(pkts) and pkts[cur]['nic'] <= interval_end:
+                    pkt = pkts[cur]
+                    cur += 1
+                    in_pkts += 1
+                    in_bytes += pkt['tso_length']
+                    heapq.heappush(active, [pkt['free_tx_skb'], cur, pkt])
+                    # print('\n%9.3f: to Nic: %s' % (pkt['nic'], pkt['free_tx_skb']))
+                while len(active) > 0 and active[0][0] < interval_end:
+                    pkt = heapq.heappop(active)[2]
+                    free_pkts += 1
+                    free_bytes += pkt['tso_length']
+                    # print('\n%9.3f: freed: %s' % (pkt['free_tx_skb'], pkt))
+
+                nic_pkts += in_pkts - free_pkts
+                nic_bytes += in_bytes - free_bytes
+                intervals.pop()
+                intervals.appendleft([in_pkts, in_bytes, free_pkts, free_bytes])
+
+                # print('%7.1f: %8d %8d %8d %8d %8d %8d' % (interval_end,
+                #         in_pkts, in_bytes, free_pkts, free_bytes,
+                #         in_pkts - free_pkts, in_bytes - free_bytes))
+
+                f.write('%7.1f   %5d %6d' % (interval_end, nic_pkts,
+                        nic_bytes/1000))
+                f.write('   %6d %7.2f %6d %7.2f' % (
+                        in_pkts, in_bytes*8/(1000*base_interval),
+                        free_pkts, free_bytes*8/(1000*base_interval)))
+                in_pkts += intervals[1][0]
+                in_bytes += intervals[1][1]
+                free_pkts += intervals[1][2]
+                free_bytes += intervals[1][3]
+                f.write('   %6d %7.2f %6d %7.2f' % (
+                        in_pkts, in_bytes*8/(2000*base_interval),
+                        free_pkts, free_bytes*8/(2000*base_interval)))
+                in_pkts += intervals[2][0] + intervals[3][0]
+                in_bytes += intervals[2][1] + intervals[3][1]
+                free_pkts += intervals[2][2] + intervals[3][2]
+                free_bytes += intervals[2][3] + intervals[3][3]
+                f.write('   %6d %7.2f %6d %7.2f' % (
+                        in_pkts, in_bytes*8/(4000*base_interval),
+                        free_pkts, free_bytes*8/(4000*base_interval)))
+                f.write('\n')
+
+                # Update maximum values
+                if nic_pkts > max_pkts:
+                    max_pkts = nic_pkts
+                if nic_bytes > max_bytes:
+                    max_bytes = nic_bytes
+                if in_pkts > max_in_pkts:
+                    max_in_pkts = in_pkts
+                if in_bytes > max_in_bytes:
+                    max_in_bytes = in_bytes
+                if free_pkts > max_free_pkts:
+                    max_free_pkts = free_pkts
+                if free_bytes > max_free_bytes:
+                    max_free_bytes = free_bytes
+
+                interval_end += base_interval
+            f.close()
+            print('%-10s %6d %6d %6d %7.2f %6d %7.2f' % (
+                    node, max_pkts, max_bytes/1000,
+                    max_in_pkts, max_in_bytes*8/(4000*base_interval),
+                    max_free_pkts, max_free_bytes*8/(4000*base_interval)))
+
+#------------------------------------------------
 # Analyzer: nicqueues
 #------------------------------------------------
 class AnalyzeNicqueues:
@@ -6321,7 +6539,7 @@ class AnalyzeNictx:
                     (time.strftime('%I:%M %p on %m/%d/%Y')))
             f.write('# Statistics about NIC transmit throughput from node ')
             f.write('%s over %d usec intervals\n' % (node, options.interval))
-            f.write('All rates are in gbps, averaged over the 5 preceding intervals\n')
+            f.write('# All rates are in gbps, averaged over the 5 preceding intervals\n')
             f.write('# Time:       End of the time interval\n')
             f.write('# Tx:         Rate at which new data bytes were passed to ip*xmit\n')
             f.write('# ToNic:      Rate at which new data bytes were queued in the NIC\n')
@@ -6332,11 +6550,11 @@ class AnalyzeNictx:
                     'but not yet freed\n')
             f.write('# InNic2      KB of data that has been queued in the NIC '
                     'and has neither been\n')
-            f.write('              freed nor received at the destination\n')
+            f.write('#             freed nor received at the destination\n')
             f.write('# InNicQ      Same as InNic2 except only counts bytes in '
                     'tx queue %d (use\n' % (
                     options.tx_qid if options.tx_qid != None else 0))
-            f.write('              the --tx-qid option to select a different '
+            f.write('#             the --tx-qid option to select a different '
                     'queue)\n')
             f.write('# NicPkts     Number of packets associated with InNic2')
 
@@ -6888,6 +7106,8 @@ class AnalyzePackets:
         tcp_pkt['xmit'] = t
         tcp_pkt['total_length'] = total
         tcp_pkt['tx_node'] = node
+        if sequence == 1749134782:
+            print('tt_xmit_tcp setting tx_node to %s' % (node))
         if not saddr in peer_nodes and saddr != '0x00000000':
             peer_nodes[saddr] = node
 
@@ -6898,15 +7118,14 @@ class AnalyzePackets:
         node = trace['node']
         tcp_pkt['qdisc_xmit'] = t
         tcp_pkt['tx_node'] = node
+        if sequence == 1749134782:
+            print('tt_qdisc_tcp setting tx_node to %s' % (node))
         if not saddr in peer_nodes and saddr != '0x00000000':
             peer_nodes[saddr] = node
 
     def tt_nic_tcp(self, trace, t, core, saddr, sport, daddr, dport, sequence,
             data_bytes, ack, gso_size):
         node = trace['node']
-        if sequence == 3666610099:
-            print('%9.3f got sequence %u on %s, data_bytes %d, gso_size %d' %
-                    (t, sequence, node, data_bytes, gso_size), file=sys.stderr)
         if not saddr in peer_nodes and saddr != '0x00000000':
             peer_nodes[saddr] = node
 
@@ -6926,6 +7145,8 @@ class AnalyzePackets:
                     del tcp_pkt['gro']
             tcp_pkt['nic'] = t
             tcp_pkt['tx_node'] = node
+            if pkt_sequence == 1749134782:
+                print('tt_xmit_tcp setting tx_node to %s' % (node))
             if pkt_sequence == sequence:
                 tcp_pkt['tso_length'] = data_bytes
             bytes_left -= pkt_bytes
@@ -6941,6 +7162,8 @@ class AnalyzePackets:
         tcp_pkt['free_tx_skb'] = t
         tcp_pkt['tx_qid'] = qid
         tcp_pkt['tx_node'] = node
+        if sequence == 1749134782:
+            print('%9.3f: tt_free_tcp setting tx_node to %s' % (t, node))
         if not saddr in peer_nodes and saddr != '0x00000000':
             peer_nodes[saddr] = node
 
@@ -9573,8 +9796,6 @@ class AnalyzeTxpkts:
                 continue
             node_pkts[pkt['tx_node']].append(pkt)
         for pkt in tcp_packets.values():
-            if pkt['sequence'] == 3666610099:
-                print('Found TCP packet: %s' % (pkt))
             if not 'xmit' in pkt or not ('tso_length' in pkt):
                 continue
             node_pkts[pkt['tx_node']].append(pkt)
