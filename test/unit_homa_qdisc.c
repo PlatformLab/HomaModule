@@ -1931,9 +1931,10 @@ TEST_F(homa_qdisc, homa_qdevc_update_sysctl__basics)
 
 	self->homa.link_mbps = 25000;
 	mock_link_mbps = 8000;
+	self->homa.qshared->max_link_usage = 90;
 	homa_qdev_update_sysctl(qdev);
 	EXPECT_EQ(8000, qdev->link_mbps);
-	EXPECT_EQ(1059061, qdev->cycles_per_mibyte);
+	EXPECT_EQ(1165084, qdev->cycles_per_mibyte);
 
 	homa_qdisc_qdev_put(qdev);
 }
@@ -1949,7 +1950,7 @@ TEST_F(homa_qdisc, homa_qdev_update_sysctl__cant_get_link_speed_from_dev)
 	mock_ethtool_ksettings_errors = 1;
 	homa_qdev_update_sysctl(qdev);
 	EXPECT_EQ(16000, qdev->link_mbps);
-	EXPECT_EQ(529530, qdev->cycles_per_mibyte);
+	EXPECT_EQ(529583, qdev->cycles_per_mibyte);
 
 	homa_qdisc_qdev_put(qdev);
 }
@@ -1978,6 +1979,24 @@ TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__limit_homa_share)
 	self->homa.qshared->homa_share = 101;
 	homa_qdisc_update_sysctl_deps(self->homa.qshared);
 	EXPECT_EQ(100, self->homa.qshared->homa_share);
+}
+TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__limit_max_link_usage)
+{
+	self->homa.qshared->max_link_usage = 4;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(5, self->homa.qshared->max_link_usage);
+
+	self->homa.qshared->max_link_usage = 6;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(6, self->homa.qshared->max_link_usage);
+
+	self->homa.qshared->max_link_usage = 100;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(100, self->homa.qshared->max_link_usage);
+
+	self->homa.qshared->max_link_usage = 101;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(100, self->homa.qshared->max_link_usage);
 }
 TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__update_all_qdevs)
 {

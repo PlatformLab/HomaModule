@@ -55,6 +55,13 @@ static struct ctl_table homa_qdisc_ctl_table[] = {
 		.proc_handler	= homa_qdisc_dointvec
 	},
 	{
+		.procname	= "max_link_usage",
+		.data		= OFFSET(max_link_usage),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_qdisc_dointvec
+	},
+	{
 		.procname	= "tcp_credit_increment",
 		.data		= OFFSET(tcp_credit_increment),
 		.maxlen		= sizeof(int),
@@ -152,6 +159,7 @@ struct homa_qdisc_shared *homa_qdisc_shared_alloc(void)
 	qshared->defer_min_bytes = 1000;
 	qshared->homa_share = 50;
 	qshared->tcp_credit_increment = 20000;
+	qshared->max_link_usage = 99;
 	qshared->sysctl_header = register_net_sysctl(&init_net, "net/homa",
 						   homa_qdisc_ctl_table);
 	if (!qshared->sysctl_header) {
@@ -1116,7 +1124,7 @@ void homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev)
 	struct ethtool_link_ksettings ksettings;
 	struct homa *homa = qdev->hnet->homa;
 	const struct ethtool_ops *ops;
-	u64 tmp;
+	u64 tmp, tmp2;
 
 	qdev->link_mbps = homa->link_mbps;
 	ops = qdev->dev->ethtool_ops;
@@ -1125,25 +1133,25 @@ void homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev)
 			qdev->link_mbps = ksettings.base.speed;
 	}
 
-	/* Underestimate link bandwidth (overestimate time) by 1%.
+	/* Compute cycles_per_mibyte based on the link speed (mibytes/sec)
+	 * and max_link_usage:
 	 *
-	 *                                 cycles/sec
-	 * cycles/mibyte =    (101/100) * -------------
-	 *                                 mibytes/sec
+	 *                                            cycles/sec
+	 * cycles/mibyte =    (100/max_link_usage) * -------------
+	 *                                            mibytes/sec
 	 *
-	 *                        101 * homa_clock_khz() * 1000
-	 *               =    ---------------------------------------
-	 *                     100 * link_mbps * (1<<20 / 1000000) / 8
+	 *                             100 * homa_clock_khz() * 1000
+	 *               =    --------------------------------------------------
+	 *                    max_link_usage * link_mbps * (1000000 / 1<<20) / 8
 	 *
-	 *                     8 * 1010 * homa_clock_khz()      1<<20
-	 *               =    ----------------------------- * ---------
-	 *                              link_mbps              1000000
+	 *                         8 * homa_clock_khz()        1<<20
+	 *               =    ----------------------------- * -------
+	 *                      max_link_usage * link_mbps      10
 	 */
-	tmp = 8ULL * 1010;
-	tmp *= homa_clock_khz();
-	do_div(tmp, qdev->link_mbps);
+	tmp = 8ULL * homa_clock_khz();
 	tmp <<= 20;
-	do_div(tmp, 1000000);
+	tmp2 = 10ULL * homa->qshared->max_link_usage * qdev->link_mbps;
+	do_div(tmp, tmp2);
 	qdev->cycles_per_mibyte = tmp;
 }
 
@@ -1164,6 +1172,10 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 		qshared->homa_share = 0;
 	if (qshared->homa_share > 100)
 		qshared->homa_share = 100;
+	if (qshared->max_link_usage < 5)
+		qshared->max_link_usage = 5;
+	if (qshared->max_link_usage > 100)
+		qshared->max_link_usage = 100;
 
 	/* Use a mutex rather than RCU to prevent qdev deletion while we
 	 * traverse the list. This is more expensive, but RCU isn't safe

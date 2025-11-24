@@ -269,6 +269,14 @@ struct homa_qdisc_shared {
 	 */
 	int tcp_credit_increment;
 
+	/**
+	 * @max_link_usage: An integer <= 100 indicating the maximum percentage
+	 * of uplink bandwidth that Homa will attempt to utilize. A smaller
+	 * value reduces the likelihood of queue buildup in the NIC, but
+	 * also prevents full link utilization.
+	 */
+	int max_link_usage;
+
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @sysctl_header: Used to remove sysctl values when this structure

@@ -679,6 +679,19 @@ have appeared) then Homa will not issue grants until enough data has
 been received to get below the limit. Used to control the total
 utilization of TOR switch buffers.
 .TP
+.IR max_link_usage
+In order to reduce the likelihood of queues forming in the NIC (which would
+reduce the effectiveness of Homa's SRPT policy) Homa limits the rate at
+which it submits outgoing packets to the NIC to slightly less than the
+full uplink bandwidth. This parameter determines the degree of undercommitment.
+It is an integer between 5 and 100 (inclusive) that specifies the maximum
+percentage of link bandwidth that Homa will attempt to utilize. 100 means
+Homa will attempt to utilize the full bandwidth. Smaller values reduce the
+likelihood of queues forming, but also limit uplink utilization,  which can
+affect performance. Note that queues can sometimes form even with values less
+than 100, since most NICs cannot transmit at full link speed under all
+conditions.
+.TP
 .IR max_nic_queue_ns
 An integer value specifying a NIC queue length in units of nanoseconds
 (how long it will take the existing packets in the queue
