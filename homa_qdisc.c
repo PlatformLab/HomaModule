@@ -461,6 +461,14 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		    homa_qdisc_update_link_idle(qdev, pkt_len,
 						qshared->max_nic_queue_cycles))
 			goto enqueue;
+		tt_record4("homa_qdisc_enqueue deferring TCP packet from 0x%08x "
+			   "to 0x%08x, ports %x, length %d",
+			   ntohl(ip_hdr(skb)->saddr),
+			   ntohl(ip_hdr(skb)->daddr),
+			   (ntohs(tcp_hdr(skb)->source) << 16) +
+			   ntohs(tcp_hdr(skb)->dest),
+			   skb->len - skb_transport_offset(skb) -
+			   tcp_hdrlen(skb));
 		homa_qdisc_defer_tcp(q, skb);
 		return NET_XMIT_SUCCESS;
 	}
@@ -677,11 +685,11 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 		struct tcphdr *th;
 
 		th = (struct tcphdr*) skb_transport_header(skb);
-		ltt_record4("homa_qdisc_pacer requeued TCP packet "
+		tt_record4("homa_qdisc_pacer requeued TCP packet "
 				"from 0x%08x:%d to 0x%08x:%d",
 				ntohl(ip_hdr(skb)->saddr), ntohs(th->source),
 				ntohl(ip_hdr(skb)->daddr), ntohs(th->dest));
-		ltt_record4("homa_qdisc_pacer requeued TCP packet (2) "
+		tt_record4("homa_qdisc_pacer requeued TCP packet (2) "
 				"sequence %u, data bytes %d, ack %u, gso_size %d",
 				ntohl(th->seq),
 				skb->len - skb_transport_offset(skb) -
