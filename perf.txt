@@ -6,7 +6,7 @@ order.
 homa_qdisc (use tx queue 0 for paced traffic; non-paced traffic is spread
 across other queues, using default queues except that traffic for queue 0
 goes to queue 1 instead). In comparison to the old pacer (measurements
-with w4 and w5 on c6620 cluster at 80 Gbps load; see log book for graphs)):
+with w4 and w5 on c6620 cluster at 80 Gbps load; see log book for graphs):
 * P99 for messages shorter than defer_min_bytes is 20-30% faster with separation
 * P99 for messages between defer_min_bytes and unsched_limit is about 2x
   slower with separation
@@ -15,6 +15,16 @@ with w4 and w5 on c6620 cluster at 80 Gbps load; see log book for graphs)):
 * Increasing defer_min_bytes provides upside with no apparent downside.
 * Average slowdowns are better with the old pacer: 3.45 vs. 3.77 for W4,
   9.40 vs. 7.72 for W5 (W5 has no messages shorter than defer_min_bytes).
+* It appears that Intel NICs cannot always transmit at full link bandwidth,
+  so some some queuing occurs in the NIC even with Homa's output
+  pacing.
+* When packets build up in the NIC, it appears to use some sort of fair
+  sharing mechanism between the queues. By placing a disproportionate
+  share of outgoing bytes in a single queue, those bytes effectively get
+  lower priority and bytes in other queues get higher priority, which
+  explains the behaviors observed above.
+* Overall, it appears that placing pacer traffic in a dedicated queue is
+  not a good idea.
 
 63. (September 2025) Compared CPU utilization against TCP. Measured with
 top, running cp_vs_tcp -w w4 -b20 on a 6-node xl170 cluster (20 cores):
