@@ -268,6 +268,9 @@ struct dst_ops mock_dst_ops = {
 	.check = mock_dst_check};
 struct netdev_queue mock_net_queue = {.state = 0};
 
+/* Use this as the dev queue index in new skbs. */
+int mock_queue_index = 0;
+
 /* Number of invocations of netif_schedule_queue. */
 int mock_netif_schedule_calls;
 
@@ -2030,6 +2033,7 @@ struct sk_buff *mock_raw_skb(struct in6_addr *saddr, int protocol, int length)
 	skb->hash = 3;
 	skb->next = NULL;
 	skb->dev = &mock_devices[0];
+	skb_set_queue_mapping(skb, mock_queue_index);
 	qdisc_skb_cb(skb)->pkt_len = length + 100;
 	return skb;
 }
@@ -2443,6 +2447,7 @@ void mock_teardown(void)
 	memset(mock_devices, 0, sizeof(mock_devices));
 	mock_peer_free_no_fail = 0;
 	mock_link_mbps = 10000;
+	mock_queue_index = 0;
 	mock_netif_schedule_calls = 0;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;

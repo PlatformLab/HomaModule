@@ -881,11 +881,6 @@ not release pages from a pool if the amount of unused space in
 the pool has been less than this (specified in Kbytes) at any point
 in the recent past.
 .TP
-.IR tcp_credit_increment
-Determines the granularity of bandwidth sharing among qdiscs that have
-deferred TCP output packets. Read the code in homa_qdisc.c to learn more
-about this. You probably shouldn't ever modify this option.
-.TP
 .IR throttle_min_bytes
 An integer value specifying the smallest packet size subject to
 output queue throttling.

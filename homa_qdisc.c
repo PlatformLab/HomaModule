@@ -61,13 +61,6 @@ static struct ctl_table homa_qdisc_ctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= homa_qdisc_dointvec
 	},
-	{
-		.procname	= "tcp_credit_increment",
-		.data		= OFFSET(tcp_credit_increment),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_qdisc_dointvec
-	},
 };
 
 static struct Qdisc_ops homa_qdisc_ops __read_mostly = {
@@ -158,7 +151,6 @@ struct homa_qdisc_shared *homa_qdisc_shared_alloc(void)
 	qshared->max_nic_queue_ns = 5000;
 	qshared->defer_min_bytes = 1000;
 	qshared->homa_share = 50;
-	qshared->tcp_credit_increment = 20000;
 	qshared->max_link_usage = 99;
 	qshared->sysctl_header = register_net_sysctl(&init_net, "net/homa",
 						   homa_qdisc_ctl_table);
@@ -264,7 +256,7 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 	homa_qdev_update_sysctl(qdev);
 	INIT_LIST_HEAD(&qdev->links);
 	qdev->deferred_rpcs = RB_ROOT_CACHED;
-	INIT_LIST_HEAD(&qdev->tcp_qdiscs);
+	skb_queue_head_init(&qdev->deferred_tcp);
 	spin_lock_init(&qdev->defer_lock);
 	init_waitqueue_head(&qdev->pacer_sleep);
 	spin_lock_init(&qdev->pacer_mutex);
@@ -323,8 +315,7 @@ void homa_qdisc_dev_callback(struct rcu_head *head)
 
 	qdev = container_of(head, struct homa_qdisc_dev, rcu_head);
 	homa_qdisc_free_homa(qdev);
-	WARN_ON(!list_empty(&qdev->tcp_qdiscs));
-	WARN_ON(qdev->cur_tcp_qdisc);
+	WARN_ON(!skb_queue_empty(&qdev->deferred_tcp));
 	kfree(qdev);
 }
 
@@ -355,8 +346,6 @@ int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 			break;
 		}
 	}
-	skb_queue_head_init(&q->tcp_deferred);
-	INIT_LIST_HEAD(&q->defer_links);
 
 	sch->limit = 10 * 1024;
 	return 0;
@@ -370,12 +359,19 @@ int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 void homa_qdisc_destroy(struct Qdisc *qdisc)
 {
 	struct homa_qdisc *q = qdisc_priv(qdisc);
+	struct sk_buff *skb, *tmp;
 	unsigned long flags;
 
 	qdisc_reset_queue(qdisc);
+
+	/* Delete any deferred skb's for this qdisc. */
 	spin_lock_irqsave(&q->qdev->defer_lock, flags);
-	__skb_queue_purge(&q->tcp_deferred);
-	list_del_init(&q->defer_links);
+	skb_queue_walk_safe(&q->qdev->deferred_tcp, skb, tmp) {
+		if (skb_get_queue_mapping(skb) == q->ix) {
+			__skb_unlink(skb, &q->qdev->deferred_tcp);
+			kfree_skb_reason(skb, SKB_DROP_REASON_QDISC_DROP);
+		}
+	}
 	spin_unlock_irqrestore(&q->qdev->defer_lock, flags);
 	homa_qdisc_qdev_put(q->qdev);
 }
@@ -457,7 +453,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		 * already deferred for this qdisc.
 		 */
 		INC_METRIC(qdisc_tcp_packets, 1);
-		if (!list_empty(&q->defer_links)) {
+		if (q->num_deferred_tcp > 0) {
 			homa_qdisc_defer_tcp(q, skb);
 			return NET_XMIT_SUCCESS;
 		}
@@ -469,14 +465,6 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		    homa_qdisc_update_link_idle(qdev, pkt_len,
 						qshared->max_nic_queue_cycles))
 			goto enqueue;
-		tt_record4("homa_qdisc_enqueue deferring TCP packet from 0x%08x "
-			   "to 0x%08x, ports %x, length %d",
-			   ntohl(ip_hdr(skb)->saddr),
-			   ntohl(ip_hdr(skb)->daddr),
-			   (ntohs(tcp_hdr(skb)->source) << 16) +
-			   ntohs(tcp_hdr(skb)->dest),
-			   skb->len - skb_transport_offset(skb) -
-			   tcp_hdrlen(skb));
 		homa_qdisc_defer_tcp(q, skb);
 		return NET_XMIT_SUCCESS;
 	}
@@ -554,12 +542,18 @@ void homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb)
 	u64 now = homa_clock();
 	unsigned long flags;
 
+	tt_record4("homa_qdisc deferring TCP packet from 0x%08x to 0x%08x, "
+			"ports %x, length %d",
+			ntohl(ip_hdr(skb)->saddr),
+			ntohl(ip_hdr(skb)->daddr),
+			(ntohs(tcp_hdr(skb)->source) << 16) +
+			ntohs(tcp_hdr(skb)->dest),
+			skb->len - skb_transport_offset(skb) -
+			tcp_hdrlen(skb));
+
 	spin_lock_irqsave(&qdev->defer_lock, flags);
-	__skb_queue_tail(&q->tcp_deferred, skb);
-	if (list_empty(&q->defer_links)) {
-		q->credit = 0;
-		list_add_tail(&q->defer_links, &qdev->tcp_qdiscs);
-	}
+	__skb_queue_tail(&qdev->deferred_tcp, skb);
+	q->num_deferred_tcp++;
 	if (qdev->last_defer)
 		INC_METRIC(nic_backlog_cycles, now - qdev->last_defer);
 	else
@@ -631,60 +625,34 @@ void homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev, struct homa_rpc *rpc)
 
 /**
  * homa_qdisc_xmit_deferred_tcp() - Transmit the "next" non-Homa packet
- * that has been deferred for a particular homa_qdisc_dev and remove it
- * from the structures that manage deferred packets.
+ * that has been deferred for a particular homa_qdisc_dev.
  * @qdev:     Device on which to transmit packet.
  * Return:    The number of bytes in the transmitted packet, or 0 if there
  *            were no deferred TCP packets.
  */
 int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 {
-	struct homa_qdisc_shared *qshared;
+	struct netdev_queue *txq;
 	struct homa_qdisc *q;
 	unsigned long flags;
 	struct sk_buff *skb;
-	struct Qdisc *sch;
+	struct Qdisc *qdisc;
 	int pkt_len;
 
-	qshared = qdev->hnet->homa->qshared;
 	spin_lock_irqsave(&qdev->defer_lock, flags);
-	if (list_empty(&qdev->tcp_qdiscs)) {
+	if (skb_queue_empty(&qdev->deferred_tcp)) {
 		spin_unlock_irqrestore(&qdev->defer_lock, flags);
 		return 0;
 	}
-
-	/* Find the next qdisc with positive credit.*/
-	q = qdev->cur_tcp_qdisc;
-	if (!q) {
-		q = list_first_entry(&qdev->tcp_qdiscs, typeof(*q),
-					defer_links);
-		q->credit += qshared->tcp_credit_increment;
-		qdev->cur_tcp_qdisc = q;
-	}
-	while (q->credit <= 0) {
-		q = list_next_entry_circular(q, &qdev->tcp_qdiscs,
-						defer_links);
-		qdev->cur_tcp_qdisc = q;
-		q->credit += qshared->tcp_credit_increment;
-		continue;
-	}
-
-	skb = __skb_dequeue(&q->tcp_deferred);
+	skb = __skb_dequeue(&qdev->deferred_tcp);
 	pkt_len = qdisc_pkt_len(skb);
-	q->credit -= qdisc_pkt_len(skb);
-	if (skb_queue_len(&q->tcp_deferred) == 0) {
-		qdev->cur_tcp_qdisc =
-				list_next_entry_circular(q, &qdev->tcp_qdiscs,
-							 defer_links);
-		list_del_init(&q->defer_links);
-		if (list_empty(&qdev->tcp_qdiscs)) {
-			qdev->cur_tcp_qdisc = NULL;
-			if (!homa_qdisc_any_deferred(qdev)) {
-				INC_METRIC(nic_backlog_cycles,
-					   homa_clock() - qdev->last_defer);
-				qdev->last_defer = 0;
-			}
-		}
+	txq = netdev_get_tx_queue(skb->dev, skb_get_queue_mapping(skb));
+	qdisc = rcu_dereference_bh(txq->qdisc);
+	q = qdisc_priv(qdisc);
+	q->num_deferred_tcp--;
+	if (!homa_qdisc_any_deferred(qdev)) {
+		INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
+		qdev->last_defer = 0;
 	}
 	spin_unlock_irqrestore(&qdev->defer_lock, flags);
 
@@ -704,11 +672,11 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 				tcp_hdrlen(skb), ntohl(th->ack_seq),
 				skb_shinfo(skb)->gso_size);
 	}
-	sch = q->sch;
-	spin_lock_bh(qdisc_lock(sch));
-	qdisc_enqueue_tail(skb, sch);
-	spin_unlock_bh(qdisc_lock(sch));
-	__netif_schedule(sch);
+
+	spin_lock_bh(qdisc_lock(qdisc));
+	qdisc_enqueue_tail(skb, qdisc);
+	spin_unlock_bh(qdisc_lock(qdisc));
+	__netif_schedule(qdisc);
 	return pkt_len;
 }
 
@@ -959,7 +927,7 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool help)
 		 * prevent negative credit buildup for the protocol
 		 * with packets.
 		 */
-		if (list_empty(&qdev->tcp_qdiscs)) {
+		if (skb_queue_empty(&qdev->deferred_tcp)) {
 			if (!rb_first_cached(&qdev->deferred_rpcs))
 				break;
 			qdev->homa_credit = 1;

@@ -38,25 +38,12 @@ struct homa_qdisc {
 	int ix;
 
 	/**
-	 * @credit: Used to share bandwidth equally among qdiscs with
-	 * deferred TCP packets. Packets won't be transmitted from
-	 * tcp_deferred until this becomes positive.
+	 * @num_deferred_tcp: Count of the number of TCP packets for this
+	 * qdisc that are currently in qdev->deferred_tcp. Must hold both
+	 * the qdisc lock and qdev->defer_lock to increment this; must
+	 * hold qdev->defer_lock to decrement.
 	 */
-	int credit;
-
-	/**
-	 * @tcp_deferred: TCP packets whose transmission was deferred
-	 * because the NIC queue was too long. The queue is in order of
-	 * packet arrival at the qdisc.
-	 */
-	struct sk_buff_head tcp_deferred;
-
-	/**
-	 * @defer_links: Used to link this qdisc into the tcp_qdiscs list
-	 * in homa_qdisc_dev. This will be an empty list whenever this
-	 * object is not queued on tcp_qdiscs.
-	 */
-	struct list_head defer_links;
+	int num_deferred_tcp;
 };
 
 /**
@@ -142,17 +129,11 @@ struct homa_qdisc_dev {
 	struct rb_root_cached deferred_rpcs;
 
 	/**
-	 * @tcp_qdiscs: List of all homa_qdiscs that have deferred TCP
-	 * packets.
+	 * @deferred_tcp: List of all non-Homa packets that have been deferred
+	 * because of NIC overload, in order of when they were deferred.
+	 * The internal lock isn't used (defer_lock is used instead)
 	 */
-	struct list_head tcp_qdiscs;
-
-	/**
-	 * @cur_tcp_qdisc: Points to an element of tcp_qdiscs or NULL; this is
-	 * the qdisc currently being serviced by the pacer. This pointer
-	 * rotates circularly through tcp_qdiscs.
-	 */
-	struct homa_qdisc *cur_tcp_qdisc;
+	struct sk_buff_head deferred_tcp;
 
 	/**
 	 * @last_defer: The most recent homa_clock() time when a packet was
@@ -174,7 +155,7 @@ struct homa_qdisc_dev {
 
 	/**
 	 * @defer_lock: Synchronizes access to information about deferred
-	 * packets, including deferred_rpcs, tcp_deferred, and last_defer.
+	 * packets, including deferred_rpcs, deferred_tcp, and last_defer.
 	 */
 	spinlock_t defer_lock;
 
@@ -262,12 +243,6 @@ struct homa_qdisc_shared {
 	 * inclusive.
 	 */
 	int homa_share;
-
-	/**
-	 * @tcp_credit_increment: Amount by which the credit field of
-	 * homa_qdisc is incremented.
-	 */
-	int tcp_credit_increment;
 
 	/**
 	 * @max_link_usage: An integer <= 100 indicating the maximum percentage
@@ -368,7 +343,7 @@ static inline void homa_qdisc_rpc_init(struct homa_rpc_qdisc *qrpc)
 static inline bool homa_qdisc_any_deferred(struct homa_qdisc_dev *qdev)
 {
 	return rb_first_cached(&qdev->deferred_rpcs) ||
-	       !list_empty(&qdev->tcp_qdiscs);
+	       !skb_queue_empty(&qdev->deferred_tcp);
 }
 
 /**

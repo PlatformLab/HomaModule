@@ -161,6 +161,7 @@ extern int         mock_page_nid_mask;
 extern int         mock_peer_free_no_fail;
 extern int         mock_prepare_to_wait_status;
 extern char        mock_printk_output[];
+extern int         mock_queue_index;
 extern int         mock_rht_init_errors;
 extern int         mock_rht_insert_errors;
 extern void      **mock_rht_walk_results;
