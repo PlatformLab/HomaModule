@@ -84,7 +84,11 @@
 
 #define rcu_read_lock mock_rcu_read_lock
 
+#define rcu_read_lock_bh mock_rcu_read_lock
+
 #define rcu_read_unlock mock_rcu_read_unlock
+
+#define rcu_read_unlock_bh mock_rcu_read_unlock
 
 #undef register_net_sysctl
 #define register_net_sysctl mock_register_net_sysctl

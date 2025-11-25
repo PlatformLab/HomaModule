@@ -251,8 +251,6 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 	qdev->dev = dev;
 	qdev->hnet = hnet;
 	refcount_set(&qdev->refs, 1);
-	qdev->pacer_qix = -1;
-	qdev->redirect_qix = -1;
 	homa_qdev_update_sysctl(qdev);
 	INIT_LIST_HEAD(&qdev->links);
 	qdev->deferred_rpcs = RB_ROOT_CACHED;
@@ -377,46 +375,6 @@ void homa_qdisc_destroy(struct Qdisc *qdisc)
 }
 
 /**
- * homa_qdisc_set_qixs() - Recompute the @pacer_qix and @redirect_qix
- * fields in @qdev. Upon return, both fields will be valid unless there
- * are no Homa qdiscs associated with qdev's net_device.
- * @qdev:    Identifies net_device containing qnetdev_queues to choose
- *           between.
- */
-void homa_qdisc_set_qixs(struct homa_qdisc_dev *qdev)
-{
-	int i, pacer_qix, redirect_qix;
-	struct netdev_queue *txq;
-	struct Qdisc *qdisc;
-
-	/* Note: it's safe for multiple instances of this function to
-	 * execute concurrently so no synchronization is needed (other
-	 * than using RCU to protect against deletion of the underlying
-	 * data structures).
-	 */
-
-	pacer_qix = -1;
-	redirect_qix = -1;
-	rcu_read_lock();
-	for (i = 0; i < qdev->dev->num_tx_queues; i++) {
-		txq = netdev_get_tx_queue(qdev->dev, i);
-		qdisc = rcu_dereference_bh(txq->qdisc);
-		if (!qdisc || qdisc->ops != &homa_qdisc_ops)
-			continue;
-		if (pacer_qix == -1) {
-			pacer_qix = i;
-			redirect_qix = i;
-		} else {
-			redirect_qix = i;
-			break;
-		}
-	}
-	qdev->pacer_qix = pacer_qix;
-	qdev->redirect_qix = redirect_qix;
-	rcu_read_unlock();
-}
-
-/**
  * homa_qdisc_enqueue() - Invoked when a new packet becomes available for
  * transmission; this function determines whether to send it immediately
  * or defer it until the NIC queue subsides.
@@ -432,7 +390,6 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	struct homa_qdisc_shared *qshared;
 	struct homa_data_hdr *h;
 	int pkt_len;
-	int result;
 	int offset;
 
 	/* This function tries to transmit short packets immediately for both
@@ -453,7 +410,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		 * already deferred for this qdisc.
 		 */
 		INC_METRIC(qdisc_tcp_packets, 1);
-		if (q->num_deferred_tcp > 0) {
+		if (atomic_read(&q->num_deferred_tcp) > 0) {
 			homa_qdisc_defer_tcp(q, skb);
 			return NET_XMIT_SUCCESS;
 		}
@@ -480,7 +437,6 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	 * issue any grants, even though the "incoming" data isn't going to
 	 * be transmitted anytime soon.
 	 */
-
 	h = (struct homa_data_hdr *)skb_transport_header(skb);
 	offset = homa_get_offset(h);
 	if (h->common.type != DATA || ntohl(h->message_length) <
@@ -498,7 +454,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	 * been drained a bit.
 	 */
 	tt_record3("homa_qdisc_enqueue deferring homa data packet for id %d, offset %d on qid %d",
-		   be64_to_cpu(h->common.sender_id), offset, qdev->pacer_qix);
+		   be64_to_cpu(h->common.sender_id), offset, q->ix);
 	homa_qdisc_defer_homa(qdev, skb);
 	return NET_XMIT_SUCCESS;
 
@@ -511,23 +467,12 @@ enqueue:
 				   q->ix);
 		}
 	} else {
-		tt_record2("homa_qdisc_enqueue queuing non-homa packet, qix %d, pacer_qix %d",
-			   q->ix, qdev->pacer_qix);
+		tt_record1("homa_qdisc_enqueue queuing non-homa packet, qid %d",
+			   q->ix);
 	}
-	if (q->ix != qdev->pacer_qix) {
-		if (unlikely(sch->q.qlen >= READ_ONCE(sch->limit)))
-			return qdisc_drop(skb, sch, to_free);
-		result = qdisc_enqueue_tail(skb, sch);
-	} else {
-		/* homa_qdisc_redirect_skb is going to lock a different qdisc,
-		 * so in order to avoid deadlocks we have to release the
-		 * lock for this qdisc.
-		 */
-		spin_unlock(qdisc_lock(sch));
-		result = homa_qdisc_redirect_skb(skb, qdev, false);
-		spin_lock(qdisc_lock(sch));
-	}
-	return result;
+	if (unlikely(sch->q.qlen >= READ_ONCE(sch->limit)))
+		return qdisc_drop(skb, sch, to_free);
+	return qdisc_enqueue_tail(skb, sch);
 }
 
 /**
@@ -553,7 +498,7 @@ void homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb)
 
 	spin_lock_irqsave(&qdev->defer_lock, flags);
 	__skb_queue_tail(&qdev->deferred_tcp, skb);
-	q->num_deferred_tcp++;
+	atomic_inc(&q->num_deferred_tcp);
 	if (qdev->last_defer)
 		INC_METRIC(nic_backlog_cycles, now - qdev->last_defer);
 	else
@@ -645,17 +590,13 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 		return 0;
 	}
 	skb = __skb_dequeue(&qdev->deferred_tcp);
-	pkt_len = qdisc_pkt_len(skb);
-	txq = netdev_get_tx_queue(skb->dev, skb_get_queue_mapping(skb));
-	qdisc = rcu_dereference_bh(txq->qdisc);
-	q = qdisc_priv(qdisc);
-	q->num_deferred_tcp--;
 	if (!homa_qdisc_any_deferred(qdev)) {
 		INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
 		qdev->last_defer = 0;
 	}
 	spin_unlock_irqrestore(&qdev->defer_lock, flags);
 
+	pkt_len = qdisc_pkt_len(skb);
 	homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 	if (ip_hdr(skb)->protocol == IPPROTO_TCP) {
 		struct tcphdr *th;
@@ -673,10 +614,17 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 				skb_shinfo(skb)->gso_size);
 	}
 
-	spin_lock_bh(qdisc_lock(qdisc));
-	qdisc_enqueue_tail(skb, qdisc);
-	spin_unlock_bh(qdisc_lock(qdisc));
-	__netif_schedule(qdisc);
+	rcu_read_lock_bh();
+	txq = netdev_get_tx_queue(skb->dev, skb_get_queue_mapping(skb));
+	qdisc = rcu_dereference_bh(txq->qdisc);
+	if (qdisc->ops == &homa_qdisc_ops) {
+		q = qdisc_priv(qdisc);
+		atomic_dec(&q->num_deferred_tcp);
+		homa_qdisc_schedule_skb(skb, qdisc);
+	} else {
+		kfree_skb_reason(skb, SKB_DROP_REASON_QDISC_DROP);
+	}
+	rcu_read_unlock_bh();
 	return pkt_len;
 }
 
@@ -737,7 +685,9 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
  */
 int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 {
+	struct netdev_queue *txq;
 	struct homa_data_hdr *h;
+	struct Qdisc *qdisc;
 	struct sk_buff *skb;
 	int pkt_len;
 
@@ -750,8 +700,16 @@ int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 	h = (struct homa_data_hdr *)skb_transport_header(skb);
 	tt_record3("homa_qdisc_pacer queuing homa data packet for id %d, offset %d on qid %d",
 		   be64_to_cpu(h->common.sender_id),
-		   homa_get_offset(h), qdev->pacer_qix);
-	homa_qdisc_redirect_skb(skb, qdev, true);
+		   homa_get_offset(h), skb_get_queue_mapping(skb));
+
+	rcu_read_lock_bh();
+	txq = netdev_get_tx_queue(skb->dev, skb_get_queue_mapping(skb));
+	qdisc = rcu_dereference_bh(txq->qdisc);
+	if (qdisc->ops == &homa_qdisc_ops)
+		homa_qdisc_schedule_skb(skb, qdisc);
+	else
+		kfree_skb_reason(skb, SKB_DROP_REASON_QDISC_DROP);
+	rcu_read_unlock_bh();
 	return pkt_len;
 }
 
@@ -957,63 +915,6 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool help)
 	}
 done:
 	spin_unlock_bh(&qdev->pacer_mutex);
-}
-
-/**
- * homa_qdisc_redirect_skb() - Enqueue a packet on a different queue from
- * the one it was originally passed to and wakeup that queue for
- * transmission. This is used to transmit all pacer packets via a single
- * queue and to redirect other packets originally sent to that queue to
- * another queue.
- * @skb:     Packet to resubmit.
- * @qdev:    Homa data about the network device on which the packet should
- *           be resubmitted.
- * @pacer:   True means queue the packet on qdev->pacer_qix, false means
- *           qdev->redirect_qix.
- * Return:   Standard enqueue return code (usually NET_XMIT_SUCCESS).
- */
-int homa_qdisc_redirect_skb(struct sk_buff *skb,
-			    struct homa_qdisc_dev *qdev, bool pacer)
-{
-	struct netdev_queue *txq;
-	struct Qdisc *qdisc;
-	int result;
-	int qix;
-	int i;
-
-	rcu_read_lock();
-
-	/* Must make sure that the queue index is still valid (refers
-	 * to a Homa qdisc).
-	 */
-	for (i = 0; ; i++) {
-		qix = pacer ? qdev->pacer_qix : qdev->redirect_qix;
-		if (qix >= 0 && qix < qdev->dev->num_tx_queues) {
-			txq = netdev_get_tx_queue(qdev->dev, qix);
-			qdisc = rcu_dereference_bh(txq->qdisc);
-			if (qdisc->ops == &homa_qdisc_ops)
-				break;
-		}
-		if (i > 0) {
-			/* Couldn't find a Homa qdisc to use; drop the skb.
-			 * Shouldn't ever happen?
-			 */
-			kfree_skb_reason(skb, SKB_DROP_REASON_QDISC_DROP);
-			result = NET_XMIT_DROP;
-			goto done;
-		}
-		homa_qdisc_set_qixs(qdev);
-	}
-
-	skb_set_queue_mapping(skb, qix);
-	spin_lock_bh(qdisc_lock(qdisc));
-	result = qdisc_enqueue_tail(skb, qdisc);
-	spin_unlock_bh(qdisc_lock(qdisc));
-	netif_schedule_queue(txq);
-
-done:
-	rcu_read_unlock();
-	return result;
 }
 
 /**

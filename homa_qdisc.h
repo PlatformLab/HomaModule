@@ -39,11 +39,10 @@ struct homa_qdisc {
 
 	/**
 	 * @num_deferred_tcp: Count of the number of TCP packets for this
-	 * qdisc that are currently in qdev->deferred_tcp. Must hold both
-	 * the qdisc lock and qdev->defer_lock to increment this; must
-	 * hold qdev->defer_lock to decrement.
+	 * qdisc that are currently in qdev->deferred_tcp. Incremented and
+	 * decremented without holding a lock.
 	 */
-	int num_deferred_tcp;
+	atomic_t num_deferred_tcp;
 };
 
 /**
@@ -66,36 +65,6 @@ struct homa_qdisc_dev {
 	 * hnet->qdisc_devs_lock to access.
 	 */
 	refcount_t refs;
-
-	/**
-	 * @pacer_qix: Index of a netdev_queue within dev that is reserved
-	 * for the pacer to use for transmitting packets. We segregate paced
-	 * traffic (which is almost entirely large packets) from non-paced
-	 * traffic (mostly small packets). All the paced traffic goes to a
-	 * single transmit queue, and though we try to limit the length of
-	 * this queue, there are situations where the queue can still build
-	 * up (under some scenarios it appears that NICs cannot actually
-	 * transmit at line rate). If the pacer queue is segregated, queue
-	 * buildup there will not affect non-paced packets. In order to
-	 * reserve pacer_qix for pacer traffic, short-packet traffic that
-	 * is assigned to that queue must be redirected to another queue;
-	 * redirect_qix is used for that. -1 means there currently isn't
-	 * a netdev_queue assigned for pacer traffic. Note: this field is
-	 * a hint; the value must be verified under RCU to have a Homa qdisc
-	 * before using.
-	 */
-	int pacer_qix;
-
-	/**
-	 * @redirect_qix: Index of a netdev_queue within dev; packets
-	 * originally passed to pacer_qix are redirected here, so that
-	 * pacer_qix is used only for packets sent by the pacer. -1 means
-	 * there isn't currently a netdev_queue assigned for this purpose.
-	 * This field is a hint that must be verified under RCU before using
-	 * to be sure it still refers to a Homa qdisc. May be the same as
-	 * pacer_qix if there is only one Homa qdisc associated with dev.
-	 */
-	int redirect_qix;
 
 	/** @link_mbps: Speed of the link associated with @dev, in Mbps. */
 	int link_mbps;
@@ -295,11 +264,7 @@ int             homa_qdisc_pacer_main(void *device);
 struct homa_qdisc_dev *
 		homa_qdisc_qdev_get(struct net_device *dev);
 void            homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev);
-int             homa_qdisc_redirect_skb(struct sk_buff *skb,
-					struct homa_qdisc_dev *qdev,
-					bool pacer);
 int             homa_qdisc_register(void);
-void            homa_qdisc_set_qixs(struct homa_qdisc_dev *qdev);
 struct homa_qdisc_shared *
 		homa_qdisc_shared_alloc(void);
 void            homa_qdisc_shared_free(struct homa_qdisc_shared *qshared);
@@ -344,6 +309,20 @@ static inline bool homa_qdisc_any_deferred(struct homa_qdisc_dev *qdev)
 {
 	return rb_first_cached(&qdev->deferred_rpcs) ||
 	       !skb_queue_empty(&qdev->deferred_tcp);
+}
+
+/**
+ * homa_qdisc_schedule_skb() - Enqueue an skb on a qdisc and schedule the
+ * qdisc for execution.
+ * @skb:         Packet buffer to queue for output
+ * @qdisc:       homa_qdisc on which to schedule it.
+ */
+static inline void homa_qdisc_schedule_skb(struct sk_buff *skb,
+					   struct Qdisc *qdisc) {
+	spin_lock_bh(qdisc_lock(qdisc));
+	qdisc_enqueue_tail(skb, qdisc);
+	spin_unlock_bh(qdisc_lock(qdisc));
+	__netif_schedule(qdisc);
 }
 
 /**
