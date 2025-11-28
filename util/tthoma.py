@@ -966,7 +966,7 @@ def print_pkts(pkts, header=True):
     buf.write('# Length:     Size of packet (before segmentation)\n')
     buf.write('# Qid:        Transmit queue on which packet was sent\n')
     buf.write('# Nic:        Time when packet was queued for NIC\n')
-    buf.write('# NDelay:     Nic - (later of Xmit and Qdisc)\n')
+    buf.write('# NDelay:     Nic - Xmit\n')
     buf.write('# Gro:        Time when packet was received by GRO\n')
     buf.write('# GDelay:     Gro - Nic\n')
     buf.write('# Free:       Time when sk_buff was released on sender\n')
@@ -987,9 +987,7 @@ def print_pkts(pkts, header=True):
         nic_delay = None
         if 'nic' in pkt:
             nic = pkt['nic']
-            if qdisc != None:
-                nic_delay = nic - qdisc
-            elif xmit != None:
+            if xmit != None:
                 nic_delay = nic - xmit
         else:
             nic = None
@@ -3477,8 +3475,9 @@ class AnalyzeFilter:
     Select packets based on various criteria, then print summary statistics
     for those packets. The following command-line options are used to filter
     the packets: --tx-node, --rx-node, --tx-qid, --msglen, --grolat, --segs,
-    and --filter. If --verbose is specified then the matching packets are printed
-    in detail; the --sort option determines the order of printing.
+    --pkt_type, and --filter. If --verbose is specified then the matching
+    packets are printed in detail; the --sort option determines the order of
+    printing.
     """
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
@@ -3494,7 +3493,7 @@ class AnalyzeFilter:
         options:   A dictionary of option values (see class doc for list of
                    valid options); usually contains the command-line options.
         """
-        global packets, rpcs
+        global packets, tcp_packets, grants, rpcs
 
         filter_func = None
         if options.filter != None:
@@ -3503,52 +3502,68 @@ class AnalyzeFilter:
             if filter_func == None or not callable(filter_func):
                 raise Exception('Couldn\'t find a filter method %s in the '
                         '%s class' % (name, self.__class__.__name__))
+
         if options.msglen != None:
             min_length, max_length = get_range(options.msglen,
                     option_name='--msglen')
             if max_length == None:
                 max_length = min_length
                 min_length = 0
+
         if options.grolat != None:
             min_gro, max_gro = get_range(options.grolat,
                     option_name='--grolat', parse_float=True)
             if max_gro == None:
                 max_gro = 1e20
 
+        pkt_dict = {}
+        for name in options.pkt_types.split():
+            if name == 'all':
+                pkt_dict['data'] = packets.values()
+                pkt_dict['tcp'] = tcp_packets.values()
+                pkt_dict['grant'] = grants.values()
+            elif name == 'data':
+                pkt_dict['data'] = packets.values()
+            elif name == 'tcp':
+                pkt_dict['tcp'] = tcp_packets.values()
+            elif name == 'grant':
+                pkt_dict['grant'] = grants.values()
+            else:
+                raise Exception('Unknown packet type \'%s\'; must be \'data\', '
+                        '\'tcp\', or \'grant\'' % (name))
+
         result = []
-        for pkt in packets.values():
-            tx_id = pkt['id']
-            rx_id = tx_id ^ 1
-            if not 'gro' in pkt or not 'xmit' in pkt:
-                continue
-            if not rx_id in rpcs or not rx_id in rpcs:
-                continue
-            if options.tx_node != None and options.tx_node != pkt['tx_node']:
-                continue
-            if options.rx_node != None and options.rx_node != pkt['rx_node']:
-                continue
-            if options.tx_core != None and options.tx_core != pkt['tx_core']:
-                continue
-            if options.rx_core != None and options.rx_core != pkt['gro_core']:
-                continue
-            if options.tx_qid != None and (not 'tx_qid' in pkt or
-                    options.tx_qid != pkt['tx_qid']):
-                continue
-            if options.msglen != None:
-                if not 'msg_length' in pkt:
+        for pkt_list in pkt_dict.values():
+            for pkt in pkt_list:
+                if not 'gro' in pkt or not 'xmit' in pkt:
                     continue
-                length = pkt['msg_length']
-                if length < min_length or length > max_length:
+                if options.tx_node != None and options.tx_node != pkt['tx_node']:
                     continue
-            if options.grolat != None:
-                latency = pkt['gro'] - pkt['xmit']
-                if latency < min_gro or latency > max_gro:
+                # print('%s\n' % (pkt))
+                if options.rx_node != None and options.rx_node != pkt['rx_node']:
                     continue
-            if not options.segs and not 'tso_length' in pkt:
-                continue
-            if filter_func != None and not filter_func(pkt):
-                continue
-            result.append(pkt)
+                if options.tx_core != None and options.tx_core != pkt['tx_core']:
+                    continue
+                if options.rx_core != None and options.rx_core != pkt['gro_core']:
+                    continue
+                if options.tx_qid != None and (not 'tx_qid' in pkt or
+                        options.tx_qid != pkt['tx_qid']):
+                    continue
+                if options.msglen != None:
+                    if not 'msg_length' in pkt:
+                        continue
+                    length = pkt['msg_length']
+                    if length < min_length or length > max_length:
+                        continue
+                if options.grolat != None:
+                    latency = pkt['gro'] - pkt['xmit']
+                    if latency < min_gro or latency > max_gro:
+                        continue
+                if not options.segs and not 'tso_length' in pkt:
+                    continue
+                if filter_func != None and not filter_func(pkt):
+                    continue
+                result.append(pkt)
         return result
 
     def output(self):
@@ -3562,24 +3577,27 @@ class AnalyzeFilter:
         if not pkts:
             print('No packets matched filters')
             return
-        print('%d Homa data packets were selected using the following filters:' %
+        print('%d packets were selected using the following filters:' %
                 (len(pkts)))
+        print('    --pkt_types %s' % (options.pkt_types))
         if options.tx_node != None:
-            print('    --tx-node  %s' % (options.tx_node))
+            print('    --tx-node   %s' % (options.tx_node))
         if options.tx_core != None:
-            print('    --tx-core  %d' % (options.tx_core))
+            print('    --tx-core   %d' % (options.tx_core))
         if options.tx_qid != None:
-            print('    --tx-qid   %d' % (options.tx_qid))
+            print('    --tx-qid    %d' % (options.tx_qid))
         if options.rx_node != None:
-            print('    --rx-node  %s' % (options.rx_node))
+            print('    --rx-node   %s' % (options.rx_node))
         if options.rx_core != None:
-            print('    --rx-core  %s' % (options.rx_core))
+            print('    --rx-core   %s' % (options.rx_core))
         if options.segs:
-            print('    --segs     True')
+            print('    --segs      True')
         if options.msglen:
-            print('    --msglen   %s' % (options.msglen))
+            print('    --msglen    %s' % (options.msglen))
+        if options.grolat:
+            print('    --grolat    %s' % (options.grolat))
         if options.filter != None:
-            print('    --filter   %s' % (options.filter))
+            print('    --filter    %s' % (options.filter))
 
         nic = []
         gro = []
@@ -3600,12 +3618,13 @@ class AnalyzeFilter:
                 free.append(pkt['free_tx_skb'] - pkt['nic'])
 
         print('\nDelays (in usecs) for each of the following phases of the '
-                'selected packets\' lifetimes:')
-        print('Xmit:     Time from ip*xmit call until driver queued packet for NIC')
-        print('Net:      Time from when NIC received packet until GRO started processing')
+                'selected packets\'')
+        print('lifetimes:')
+        print('Xmit:     Time from ip*xmit call until NIC handoff')
+        print('Net:      Time from  NIC handoff until GRO started processing')
         print('SoftIRQ:  Time from GRO until SoftIRQ started processing')
-        print('Free:     Time from when NIC received packet until packet was returned')
-        print('          to Linux and freed')
+        print('Free:     Time from NIC handoff until packet was returned to')
+        print('          Linux and freed')
         print('Total:    Total time from ip*xmit call until SoftIRQ started')
         print()
 
@@ -10028,9 +10047,13 @@ class AnalyzeTxpkts:
         for pkt in packets.values():
             if not 'xmit' in pkt or not 'tso_length' in pkt:
                 continue
+            if not 'gro' in pkt:
+                continue
             node_pkts[pkt['tx_node']].append(pkt)
         for pkt in tcp_packets.values():
-            if not 'xmit' in pkt or not ('tso_length' in pkt):
+            if not 'xmit' in pkt or not 'tso_length' in pkt:
+                continue
+            if not 'gro' in pkt:
                 continue
             node_pkts[pkt['tx_node']].append(pkt)
 
@@ -10068,9 +10091,9 @@ class AnalyzeTxpkts:
                 'handoff)')
         print('NicP50:    Median NIC delay')
         print('NicP90:    90th percentile of NIC delay')
-        print('GroP10:    10th percentile of GRO delay (maximum time across '
-                'segments of TSO')
-        print('           from NIC handoff to receipt by destination GRO)')
+        print('GroP10:    10th percentile of GRO delay (time from NIC handoff '
+                'to receipt by')
+        print('           destination GRO)')
         print('GroP50:    Median GRO delay')
         print('GroP90:    90th percentile of GRO delay')
         print('FreP10:    10th percentile of free delay (time from NIC handoff '
@@ -10146,10 +10169,7 @@ class AnalyzeTxpkts:
 
                 nic_delay = None
                 if nic != None:
-                    if qdisc != None:
-                        nic_delay = nic - qdisc
-                    elif xmit != None:
-                        nic_delay = nic - xmit
+                    nic_delay = nic - xmit
 
                 if qid != None:
                     qid_tsos[qid] += 1
@@ -10451,6 +10471,11 @@ parser.add_option('--plot', '-p', dest='plot', default=None,
         metavar='DIR', help='Some analyzers can generate data plots, but '
         'they will do so only if this option is specified; DIR gives the '
         'directory in which to place plots.')
+parser.add_option('--pkt-types', dest='pkt_types', default='data',
+        metavar='T', help='Used by some analyzers to determine which types of '
+        'packets to include for analysis; a list of the values \'data\' for '
+        'Homa data packets, \'tcp\' for TCP packets, and \'grant\' for Homa '
+        'grants, or \'all\' to select all types (default: \'homa\')')
 parser.add_option('--rx-core', dest='rx_core', type=int, default=None,
         metavar='C', help='If specified, some analyzers will ignore packets '
         'transmitted from cores other than C')
