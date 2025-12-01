@@ -66,6 +66,14 @@ send_ctl = defaultdict(lambda: defaultdict(list))
 # busy packets were received for rpc_id (rpc_id is the id on the receiver).
 recv_ctl = defaultdict(list)
 
+# pkt_id -> <time, node> for each TCP packet sent. pkt_id is a unique
+# identifier for the packet: saddr:sport:daddr:dport:sequence:data_bytes:ack.
+send_tcp = {}
+
+# pkt_id -> <time, node> for each TCP packet received. pkt_id has the same
+# structure as for send_tcp.
+recv_tcp = {}
+
 # List of <time, sender, receiver> with one entry for each FREEZE packet
 # sent. Time is the unadjusted time on the sender when the packet was sent.
 # sender is the sender node index, and receiver is the receiver *address*.
@@ -125,6 +133,11 @@ def parse_tt(tt, node_num):
     first_time = None
     last_time = None
 
+    # core -> saddr:sport:daddr:dport for a TCP packet, derived from the
+    # first of two associated time trace records for an event. Saves info
+    # for use by the second record
+    tcp_id = defaultdict(lambda: None)
+
     for line in open(tt):
         num_records += 1
         match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] (.*)', line)
@@ -139,6 +152,42 @@ def parse_tt(tt, node_num):
 
         match = re.match('.* id ([-0-9.]+),.* offset ([-0-9.]+)', msg)
         if not match:
+            match = re.match('Transmitting TCP packet from ([^:]+):([0-9]+) to '
+                    '([^:]+):([0-9]+)', msg)
+            if match:
+                tcp_id[core] = '%s:%s:%s:%s' % (match.group(1), match.group(2),
+                        match.group(3), match.group(4))
+                continue
+
+            match = re.match(r'Transmitting TCP packet .2. sequence ([-0-9]+), '
+                    'data bytes ([0-9]+), .* ack ([-0-9]+)', msg)
+            if match:
+                if tcp_id[core] != None:
+                    id = '%s:%s:%s:%s' % (tcp_id[core], match.group(1),
+                            match.group(2), match.group(3))
+                    send_tcp[id] = [time, node_num]
+                    sent += 1
+                tcp_id[core] = None
+                continue
+
+            match = re.match('tcp_gro_receive got packet from ([^:]+):([0-9]+) '
+                    'to ([^:]+):([0-9]+)', msg)
+            if match:
+                tcp_id[core] = '%s:%s:%s:%s' % (match.group(1), match.group(2),
+                        match.group(3), match.group(4))
+                continue
+
+            match = re.match(r'tcp_gro_receive .2. sequence ([-0-9]+), '
+                    'data bytes ([0-9]+), .* ack ([-0-9]+)', msg)
+            if match:
+                if tcp_id[core] != None:
+                    id = '%s:%s:%s:%s' % (tcp_id[core], match.group(1),
+                            match.group(2), match.group(3))
+                    recv_tcp[id] = [time, node_num]
+                    recvd += 1
+                tcp_id[core] = None
+                continue
+
             match = re.match('retransmitting offset ([0-9.]+), .*id ([0-9.]+)',
                     msg)
             if match:
@@ -251,8 +300,8 @@ def parse_tt(tt, node_num):
 
 def find_min_delays(num_nodes):
     """
-    Combines the information in send_pkts and recv_pkts to fill in
-    min_delays
+    Combines the information in send_pkts, recv_pkts, send_tcp, and
+    recv_tcp to fill in min_delays
 
     num_nodes:  Total number of distinct nodes; node numbers in
                 send_pkts and recv_pkts must be < num_nodes.
@@ -265,11 +314,21 @@ def find_min_delays(num_nodes):
 
     # Iterate over all the client-side events and match them to server-side
     # events if possible.
-    for id, send_pkt in send_pkts.items():
+    for id, send_info in send_pkts.items():
         if not id in recv_pkts:
             continue
-        send_time, send_node = send_pkt
+        send_time, send_node = send_info
         recv_time, recv_node = recv_pkts[id]
+        delay = recv_time - send_time
+        if delay < min_delays[send_node][recv_node]:
+            min_delays[send_node][recv_node] = delay
+            min_recv_times[send_node][recv_node] = recv_time
+
+    for id, send_info in send_tcp.items():
+        if not id in recv_tcp:
+            continue
+        send_time, send_node = send_info
+        recv_time, recv_node = recv_tcp[id]
         delay = recv_time - send_time
         if delay < min_delays[send_node][recv_node]:
             min_delays[send_node][recv_node] = delay
