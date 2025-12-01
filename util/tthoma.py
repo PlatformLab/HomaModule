@@ -6267,7 +6267,7 @@ class AnalyzeNicbacklog:
         # node -> list of packets transmitted by that node
         node_pkts = defaultdict(list)
 
-        # node-> list of interval stats for the largest size interval
+        # node -> list of interval stats for the largest size interval
         # (4*base_interval) on that node. Each list element consists of
         # <time, nic_pkts, nic_bytes, free_pkts, free_bytes>:
         # time:        End time of the interval
@@ -6277,16 +6277,20 @@ class AnalyzeNicbacklog:
         # free_bytes:  Bytes of data in free_pkts
         node_intervals = defaultdict(list)
 
-        # Bytes and packets owned by the NIC as of current time
-        nic_pkts = 0
-        nic_bytes = 0
+        # node -> running sum of packets owned by NIC on that node * time.
+        node_nic_pkts = defaultdict(lambda : 0)
+
+        # node -> running sum of bytes owned by NIC on that node * time.
+        node_nic_bytes = defaultdict(lambda : 0)
 
         print('\n--------------------')
         print('Analyzer: nicbacklog')
         print('--------------------')
         print('See data files %s/nicbacklog_*.dat' % (options.data))
-        print('\nMaximum values observed for each node:')
+        print('\nSummary data for each node:')
         print('Node:     Name of node')
+        print('AvgPkts:  Average # packets owned by NIC at one time')
+        print('AvgKB:    Average Kbytes of data in packets owned by NIC')
         print('MaxPkts:  Maximum packets owned by NIC at one time')
         print('MaxKB:    Maximum Kbytes of data in packets owned by NIC '
                 'at one time')
@@ -6299,15 +6303,32 @@ class AnalyzeNicbacklog:
         print('MaxFrD:   Maximum data rate from pkts freed in a %d usec '
                 'interval (Gbps)' % (4 * base_interval))
         print()
-        print('Node      MaxPkts  MaxKB MaxInP  MaxInD MaxFrP  MaxFrD')
-        print('------------------------------------------------------')
+        print('Node      AvgPkts  AvgKB MaxPkts  MaxKB MaxInP  MaxInD MaxFrP  MaxFrD')
+        print('---------------------------------------------------------------------')
 
-        # Bucket all of the packets by transmitting node.
+        # Bucket all of the packets by transmitting node. Also compute
+        # average backlog data (this calculation will consider packets
+        # that don't have enough data to use in later calculations).
         for pkt in itertools.chain(packets.values(), tcp_packets.values()):
-            if (not 'nic' in pkt or not 'free_tx_skb' in pkt or
-                    not 'tso_length' in pkt):
+            if not 'tso_length' in pkt or not 'tx_node' in pkt:
                 continue
-            node_pkts[pkt['tx_node']].append(pkt)
+            node = pkt['tx_node']
+            if 'nic' in pkt:
+                t1 = pkt['nic']
+            else:
+                if not 'free_tx_skb' in pkt:
+                    continue
+                t1 = traces[node]['first_time']
+            if 'free_tx_skb' in pkt:
+                t2 = pkt['free_tx_skb']
+            else:
+                t2 = traces[node]['last_time']
+            delta_t = t2 - t1
+            node_nic_pkts[node] += delta_t
+            node_nic_bytes[node] += delta_t * pkt['tso_length']
+
+            if 'nic' in pkt and 'free_tx_skb' in pkt:
+                node_pkts[node].append(pkt)
 
         # Each iteration in this loops generates data for one node.
         for node in get_sorted_nodes():
@@ -6392,6 +6413,10 @@ class AnalyzeNicbacklog:
             max_free_pkts = 0
             max_free_bytes = 0
 
+            # Bytes and packets owned by the NIC as of current time
+            nic_pkts = 0
+            nic_bytes = 0
+
             pkts = sorted(node_pkts[node], key = lambda pkt : pkt['nic'])
             interval_end = (math.ceil(pkts[0]['nic'] / base_interval) *
                     base_interval)
@@ -6408,16 +6433,16 @@ class AnalyzeNicbacklog:
 
                 while cur < len(pkts) and pkts[cur]['nic'] <= interval_end:
                     pkt = pkts[cur]
+                    # print('\n%9.3f: to Nic: %s' % (pkt['nic'], pkt['free_tx_skb']))
                     cur += 1
                     in_pkts += 1
                     in_bytes += pkt['tso_length']
                     heapq.heappush(active, [pkt['free_tx_skb'], cur, pkt])
-                    # print('\n%9.3f: to Nic: %s' % (pkt['nic'], pkt['free_tx_skb']))
                 while len(active) > 0 and active[0][0] < interval_end:
                     pkt = heapq.heappop(active)[2]
+                    # print('\n%9.3f: freed: %s' % (pkt['free_tx_skb'], pkt))
                     free_pkts += 1
                     free_bytes += pkt['tso_length']
-                    # print('\n%9.3f: freed: %s' % (pkt['free_tx_skb'], pkt))
 
                 nic_pkts += in_pkts - free_pkts
                 nic_bytes += in_bytes - free_bytes
@@ -6471,8 +6496,11 @@ class AnalyzeNicbacklog:
 
                 interval_end += base_interval
             f.close()
-            print('%-10s %6d %6d %6d %7.2f %6d %7.2f' % (
-                    node, max_pkts, max_bytes/1000,
+            node_time = traces[node]['last_time'] - traces[node]['first_time']
+            print('%-10s %6d %6d %7d %6d %6d %7.2f %6d %7.2f' % (node,
+                    node_nic_pkts[node]/node_time,
+                    1e-3*node_nic_bytes[node]/node_time,
+                    max_pkts, max_bytes/1000,
                     max_in_pkts, max_in_bytes*8/(4000*base_interval),
                     max_free_pkts, max_free_bytes*8/(4000*base_interval)))
 
