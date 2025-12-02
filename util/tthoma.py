@@ -954,28 +954,29 @@ def print_pkts(pkts, header=True):
     """
 
     buf = StringIO()
-    buf.write('# Source:     Node that sent packet\n')
-    buf.write('# Dest:       Node to which packet was sent\n')
-    buf.write('# Xmit:       Time when packet was passed to ip*xmit\n')
-    buf.write('# Qdisc:      Time when homa_qdisc requeued packet after '
-            'deferral, if any\n')
-    buf.write('# Id/Seq:     RPC identifier for Homa packets, sequence '
-            'number for TCP\n')
-    buf.write('# Offset:     Offset of packet within message or "TCP" if '
-            'packet is TCP\n')
-    buf.write('# Length:     Size of packet (before segmentation)\n')
-    buf.write('# Qid:        Transmit queue on which packet was sent\n')
-    buf.write('# Nic:        Time when packet was queued for NIC\n')
-    buf.write('# NDelay:     Nic - Xmit\n')
-    buf.write('# Gro:        Time when packet was received by GRO\n')
-    buf.write('# GDelay:     Gro - Nic\n')
-    buf.write('# Free:       Time when sk_buff was released on sender\n')
-    buf.write('# FDelay:     Free - Nic\n')
-    buf.write('# Rx:         Number of times segments in the packet were '
-            'retransmitted\n\n')
-    buf.write('Source   Dest           Xmit      Qdisc     Id/Seq Offset')
-    buf.write('  Length Qid        Nic  NDelay        Gro  GDelay')
-    buf.write('       Free  FDelay Rx\n')
+    if header:
+        buf.write('# Source:     Node that sent packet\n')
+        buf.write('# Dest:       Node to which packet was sent\n')
+        buf.write('# Xmit:       Time when packet was passed to ip*xmit\n')
+        buf.write('# Qdisc:      Time when homa_qdisc requeued packet after '
+                'deferral, if any\n')
+        buf.write('# Id/Seq:     RPC identifier for Homa packets, sequence '
+                'number for TCP\n')
+        buf.write('# Offset:     Offset of packet within message or "TCP" if '
+                'packet is TCP\n')
+        buf.write('# Length:     Size of packet (before segmentation)\n')
+        buf.write('# Qid:        Transmit queue on which packet was sent\n')
+        buf.write('# Nic:        Time when packet was queued for NIC\n')
+        buf.write('# NDelay:     Nic - Xmit\n')
+        buf.write('# Gro:        Time when packet was received by GRO\n')
+        buf.write('# GDelay:     Gro - Nic\n')
+        buf.write('# Free:       Time when sk_buff was released on sender\n')
+        buf.write('# FDelay:     Free - Nic\n')
+        buf.write('# Rx:         Number of times segments in the packet were '
+                'retransmitted\n\n')
+        buf.write('Source   Dest           Xmit      Qdisc     Id/Seq Offset')
+        buf.write('  Length Qid        Nic  NDelay        Gro  GDelay')
+        buf.write('       Free  FDelay Rx\n')
     for pkt in pkts:
         xmit = pkt['xmit']
         if 'qdisc_xmit' in pkt:
@@ -1026,6 +1027,63 @@ def print_pkts(pkts, header=True):
                 free_delay_string, rx_msg)
         buf.write(line.rstrip())
         buf.write('\n')
+    return buf.getvalue()
+
+def print_rpcs(client_rpcs, header=True):
+    """
+    Returns a string containing one line for each RPC in client_rpcs, which
+    contains various useful statistics about the RPC. The RPCs are all
+    assumed to be client-side RPCs. If header is True then the string also
+    includes initial text describing the fields that are printed on each line.
+    """
+    global rpcs
+
+    buf = StringIO()
+    if header:
+        buf.write('# Client:     Node that sent the RPC request\n')
+        buf.write('# Server:     Node that handled the RPC and sent response\n')
+        buf.write('# Id:         RPC identifier (client side)\n')
+        buf.write('# Length:     Length of request message\n')
+        buf.write('# RqNic:      Elapsed time from sendmsg until first '
+                'request packet handed\n')
+        buf.write('#             off to NIC\n')
+        buf.write('# RqGRO:      Time from NIC handoff to GRO receipt for '
+                'first request packet\n')
+        buf.write('# RqSoft:     Time from GRO to SoftIRQ for first request '
+                'packet\n')
+        buf.write('# RqRecv:     Time from SoftIRQ for first request packet '
+                'until recvmsg completes\n')
+        buf.write('#             on server\n')
+        buf.write('# Srvc:       Time from recvmsg return on server until '
+                'sendmsg for response\n')
+        buf.write('# RspNic:     Elapsed time from sendmsg of response until '
+                'first packet handed\n')
+        buf.write('#             off to NIC\n')
+        buf.write('# RspGRO:     Time from NIC handoff to GRO receipt for '
+                'first response packet\n')
+        buf.write('# RspSoft:    Time from GRO to SoftIRQ for first response '
+                'packet\n')
+        buf.write('# RspRecv:    Time from SoftIRQ for first response packet '
+                'until RPC completes\n')
+        buf.write('# Total:      End-to-end RTT\n\n')
+        buf.write('Client  Server            Id  Length  RqNic  RqGRO ')
+        buf.write('RqSoft RqRecv   Srvc RspNic RspGRO ')
+        buf.write('RspSoft RspRecv  Total\n')
+    for rpc in client_rpcs:
+        srpc = rpcs[rpc['id'] ^ 1]
+        tx = rpc['send_data_pkts'][0]
+        rx = rpc['softirq_data_pkts'][0]
+        buf.write('%-8s %-8s %10s %7d %6.1f %6.1f' % (
+                tx['tx_node'], tx['rx_node'], rpc['id'], rpc['out_length'],
+                tx['nic'] - rpc['sendmsg'], tx['gro'] - tx['nic']))
+        buf.write(' %6.1f %6.1f %6.1f %6.1f %6.1f' % (
+                tx['softirq'] - tx['gro'],
+                srpc['recvmsg_done'] - tx['softirq'],
+                srpc['sendmsg'] - srpc['recvmsg_done'],
+                rx['nic'] - srpc['sendmsg'], rx['gro'] - rx['nic']))
+        buf.write(' %7.1f %7.1f %6.1f\n' % (
+                rx['softirq'] - rx['gro'], rpc['recvmsg_done'] - rx['softirq'],
+                rpc['recvmsg_done'] - rpc['sendmsg']))
     return buf.getvalue()
 
 def require_options(analyzer, *args):
@@ -2305,6 +2363,75 @@ class AnalyzeActivity:
             for time, offset, length in rpc['send_data']:
                 self.node_out_bytes[node] += length
 
+    def print_rates(self):
+        """
+        Print summary information about packet and data rates for both Homa
+        and TCP.
+        """
+        global packets, grants, tcp_packets
+
+        # node -> dictionary of information about that node:
+        # homa_pkts:    Total Homa data packets sent by the node
+        # homa_bytes:   Total Homa message bytes sent by the node
+        # homa_grants:  Homa grants sent by the node
+        # tcp_pkts:     TCP packets with data sent by the node
+        # tcp_bytes:    Total data sent in TCP packets
+        # tcp_acks:     TCP packets with no data
+        nodes = defaultdict(lambda : defaultdict(lambda: 0))
+
+        for pkt in packets.values():
+            if not 'tx_node' in pkt or not 'tso_length' in pkt:
+                continue
+            node_stats = nodes[pkt['tx_node']]
+            node_stats['homa_pkts'] += 1
+            node_stats['homa_bytes'] += pkt['tso_length']
+
+        for pkt in grants.values():
+            if not 'tx_node' in pkt:
+                continue
+            node_stats = nodes[pkt['tx_node']]
+            node_stats['homa_grants'] += 1
+
+        for pkt in tcp_packets.values():
+            if not 'tx_node' in pkt:
+                continue
+            node_stats = nodes[pkt['tx_node']]
+            if not 'tso_length' in pkt:
+                continue
+            length = pkt['tso_length']
+            if length > 0:
+                node_stats['tcp_pkts'] += 1
+                node_stats['tcp_bytes'] += length
+            else:
+                node_stats['tcp_acks'] += 1
+
+        print('Summary of packet and data rates for Homa and TCP for each node:')
+        print('HomaGbps:      Rate of outgoing Homa message data from node '
+                '(Gbps)')
+        print('HomaPkts:      Rate of outgoing Homa data packets from node '
+                '(K pkts/sec)')
+        print('HomaGrants:    Rate of outgoing Homa grant packets from node '
+                '(K pkts/sec)')
+        print('TcpGbps:       Rate of outgoing TCP data from node (Gbps)')
+        print('TcpPkts:       Rate of outgoing TCP packets with data from node '
+                '(K pkts/sec)')
+        print('TcpAcks:       Rate of outgoing TCP ack packets from node '
+                '(K pkts/sec)')
+        print()
+        print('Node         HomaGbps HomaPkts HomaGrants TcpGbps TcpPkts TcpAcks')
+        print('-----------------------------------------------------------------')
+        for node in get_sorted_nodes():
+            node_stats = nodes[node]
+            usecs = traces[node]['last_time'] - traces[node]['first_time']
+            print('%-10s    %7.2f  %7.1f    %7.1f %7.2f %7.1f %7.1f' % (
+                    node, node_stats['homa_bytes'] * 8e-3 / usecs,
+                    node_stats['homa_pkts'] * 1e3 / usecs,
+                    node_stats['homa_grants'] * 1e3 / usecs,
+                    node_stats['tcp_bytes'] * 8e-3 / usecs,
+                    node_stats['tcp_pkts'] * 1e3 / usecs,
+                    node_stats['tcp_acks'] * 1e3 / usecs
+            ))
+
     def sum_list(self, events):
         """
         Given a list of <time, event> entries where event is 'start' or 'end',
@@ -2318,6 +2445,9 @@ class AnalyzeActivity:
         cur_live = 0
         live_time = 0
         live_integral = 0
+
+        if not events:
+            return [0, 0, 0]
         last_time = events[0][0]
 
         for time, event in events:
@@ -2396,7 +2526,8 @@ class AnalyzeActivity:
             avg_gbps = total_bytes*8e-3 / elapsed
             print('%-10s %6d %7.2f %9.3f %8.2f %7.2f  %7.2f' % (
                     node, msgs, rate, liveFrac, avgLive, avg_gbps,
-                    avg_gbps/liveFrac), end='')
+                    avg_gbps/liveFrac if liveFrac != 0 else 0,
+                    ), end='')
             print(' %5.2f (C%02d) %6.3f (C%02d) %6.3f (C%02d)' % (
                     max_gbps, max_core, div_safe(max_rpcs, total_rpcs),
                     max_rpcs_core, div_safe(max_pending, total_pending),
@@ -2415,7 +2546,10 @@ class AnalyzeActivity:
             avg_gbps = bytes*8e-3 / elapsed
             print('%-10s %6d %7.2f %9.3f %8.2f %7.2f  %7.2f' % (
                     node, msgs, rate, liveFrac, avgLive, avg_gbps,
-                    avg_gbps/liveFrac))
+                    avg_gbps/liveFrac if liveFrac != 0 else 0))
+
+        print()
+        self.print_rates()
 
         if options.data:
             for node in get_sorted_nodes():
@@ -6983,6 +7117,66 @@ class AnalyzeOoo:
                 break
             print(info, end='')
             count += 1
+
+#------------------------------------------------
+# Analyzer: p99short
+#------------------------------------------------
+class AnalyzeP99short:
+    """
+    Selects the 1% of short RPCs (those with single-packet request and
+    response messages) and breaks down the delay both for the overall
+    RPCs and for their constituent packets.
+    """
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzePackets')
+
+    def output(self):
+        global rpcs
+
+        # <rtt, rpc> tuples for all short rpcs.
+        short_rpcs = []
+
+        for rpc in rpcs.values():
+            # Select only client RPCs, and make sure there is complete
+            # information for each RPC.
+            if rpc['id'] & 0x1:
+                continue
+            if not 'sendmsg' in rpc or not 'recvmsg_done' in rpc:
+                continue
+            peer = get_rpc_node(rpc['id'] ^ 1)
+            if not peer:
+                continue
+            if rpc['sendmsg'] < traces[peer]['first_time']:
+                continue
+            if rpc['recvmsg_done'] > traces[peer]['last_time']:
+                continue
+            if len(rpc['send_data_pkts']) != 1:
+                continue
+            if len(rpc['softirq_data_pkts']) != 1:
+                continue
+            short_rpcs.append([rpc['recvmsg_done'] - rpc['sendmsg'], rpc])
+
+        print('\n------------------')
+        print('Analyzer: p99short')
+        print('------------------')
+
+        if not short_rpcs:
+            print('Couldn\'t find any single-packet RPCs')
+            return
+        short_rpcs.sort(key=lambda t: t[0])
+        packets = []
+        slow_rpcs = []
+        for rtt, rpc in reversed(short_rpcs[99*len(short_rpcs)//100:]):
+            slow_rpcs.append(rpc)
+            packets.append(rpc['send_data_pkts'][0])
+            packets.append(rpc['softirq_data_pkts'][0])
+        print('The slowest 1% of short RPCs (those with a single packet for '
+                'request and')
+        print('response):')
+        print(print_rpcs(slow_rpcs, header=True), end='')
+        print('\nPackets from the slow RPCs:')
+        print(print_pkts(packets, header=True), end='')
 
 #------------------------------------------------
 # Analyzer: packet
