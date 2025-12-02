@@ -3146,7 +3146,12 @@ class AnalyzeDelay:
         self.app_sleep_wakeups = []
 
         # <delay, end time, node> for softirq->app handoffs when RPC was queued
-        self.app_queue_wakeups = []
+        # (for request messages, i.e. on server)
+        self.app_queue_req_wakeups = []
+
+        # <delay, end time, node> for softirq->app handoffs when RPC was queued
+        # (for response messages, i.e. on client)
+        self.app_queue_rsp_wakeups = []
 
         # An entry exists for RPC id if a handoff occurred while a
         # thread was polling
@@ -3189,8 +3194,12 @@ class AnalyzeDelay:
                 self.app_poll_wakeups.append([delay, time, trace['node']])
             del self.rpc_handoffs[id]
         elif id in self.rpc_queued and blocked == 0:
-            self.app_queue_wakeups.append([time - self.rpc_queued[id], time,
-                    trace['node']])
+            if id & 0x1:
+                self.app_queue_req_wakeups.append([time - self.rpc_queued[id],
+                        time, trace['node']])
+            else:
+                self.app_queue_rsp_wakeups.append([time - self.rpc_queued[id],
+                        time, trace['node']])
             del self.rpc_queued[id]
 
     def print_pkt_delays(self):
@@ -3541,31 +3550,34 @@ class AnalyzeDelay:
         app_poll.sort()
         app_sleep = self.app_sleep_wakeups
         app_sleep.sort()
-        app_queue = self.app_queue_wakeups
-        app_queue.sort()
+        app_queue_req = self.app_queue_req_wakeups
+        app_queue_req.sort()
+        app_queue_rsp = self.app_queue_rsp_wakeups
+        app_queue_rsp.sort()
         print('\nDelays in handing off from one core to another:')
-        print('                            Count   Min    P10    P50    P90    P99    '
-                'Max    Avg')
+        print('                               Count   Min    P10    P50    '
+                'P90    P99    Max    Avg')
         print('------------------------------------------------------------'
-                '---------------------')
+                '------------------------')
 
         def print_percentiles(label, data):
             num = len(data)
             if num == 0:
-                print('%-26s %6d' % (label, 0))
+                print('%-30s %6d' % (label, 0))
             else:
-                print('%-26s %6d %5.1f %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f'
+                print('%-30s %6d %5.1f %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f'
                     % (label, num, data[0][0], data[10*num//100][0],
                     data[50*num//100][0], data[90*num//100][0],
                     data[99*num//100][0], data[num-1][0], list_avg(data, 0)))
         print_percentiles('GRO to SoftIRQ:', soft)
         print_percentiles('SoftIRQ to polling app:', app_poll)
         print_percentiles('SoftIRQ to sleeping app:', app_sleep)
-        print_percentiles('SoftIRQ to app via queue:', app_queue)
+        print_percentiles('SoftIRQ to server via queue:', app_queue_req)
+        print_percentiles('SoftIRQ to client via queue:', app_queue_rsp)
 
         verbose = 'Worst-case handoff delays:\n'
-        verbose += 'Type                   Delay (us)    End Time       Node  Pctl\n'
-        verbose += '--------------------------------------------------------------\n'
+        verbose += 'Type                       Delay (us)    End Time       Node  Pctl\n'
+        verbose += '------------------------------------------------------------------\n'
 
         def print_worst(label, data):
             # The goal is to print about 10 records covering the 98th-100th
@@ -3579,7 +3591,7 @@ class AnalyzeDelay:
                 if i < 0:
                     break
                 time, delay, node = data[i]
-                result += '%-26s %6.1f   %9.3f %10s %5.1f\n' % (
+                result += '%-30s %6.1f   %9.3f %10s %5.1f\n' % (
                         label, time, delay, node,
                         100*i/(num-1) if num > 1 else 100)
             return result
@@ -3587,7 +3599,8 @@ class AnalyzeDelay:
         verbose += print_worst('GRO to SoftIRQ', soft)
         verbose += print_worst('SoftIRQ to polling app', app_poll)
         verbose += print_worst('SoftIRQ to sleeping app', app_sleep)
-        verbose += print_worst('SoftIRQ to app via queue', app_queue)
+        verbose += print_worst('SoftIRQ to server via queue', app_queue_req)
+        verbose += print_worst('SoftIRQ to client via queue', app_queue_rsp)
         return verbose
 
     def output(self):
