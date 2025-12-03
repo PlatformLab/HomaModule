@@ -252,6 +252,8 @@ grants = GrantDict()
 # total_length: Total length of the packet, including IP and TCP headers
 # ack:          The ack sequence number in the packet
 # xmit:         Time when ip*xmit was invoked for the packet
+# xmit2:        qdisc_xmit if it exists, otherwise xmit: a time when Homa
+#               has decided to transmit the packet (after any Homa queuing)
 # qdisc_xmit:   Time when homa_qdisc requeued a packet that was deferred
 #               because of NIC queue length (only present for deferred
 #               packets)
@@ -260,6 +262,7 @@ grants = GrantDict()
 #               happen until the packet has been fully transmitted.
 # gro:          Time when GRO received the packet
 # tx_node:      Node that sent the packet (corresponds to saddr)
+# tx_qid:       NIC channel on which packet was transmitted
 # rx_node:      Node that received the packet (corresponds to daddr)
 # retransmits:  Always empty (for compatibility with Homa packets)
 tcp_packets = {}
@@ -4974,20 +4977,20 @@ class AnalyzeIntervals:
 
         # See if packets include NIC xmit times
         nic_data = False
-        for pkt in packets.values():
+        for pkt in itertools.chain(packets.values(), tcp_packets.values()):
             if ('xmit' in pkt) and ('gro' in pkt):
                 if 'nic' in pkt:
                     nic_data = True
                 break
 
         # Extract information from packets
-        for pkt in packets.values():
+        for pkt in itertools.chain(packets.values(), tcp_packets.values()):
             if (self.tx_qid != None) and ((not 'tx_qid' in pkt)
                     or (pkt['tx_qid'] != self.tx_qid)):
                 continue
             tx_node = pkt['tx_node'] if 'tx_node' in pkt else None
             if not 'length' in pkt:
-                print('Packet with no length: %s' % (pkt))
+                print('Packet with no length: %s' % (pkt), file=sys.stderr)
                 continue
             length = pkt['length']
             txmit = pkt['xmit2'] if 'xmit2' in pkt else None
@@ -5014,8 +5017,8 @@ class AnalyzeIntervals:
             else:
                 tgro = None
 
-            # For most tx statistics, process only the overall TSO frame,
-            # not the individual segments
+            # For most tx statistics, process only the original TSO frame,
+            # not the generated segments
             if ('tso_length' in pkt):
                 tso_length = pkt['tso_length']
 
@@ -5036,13 +5039,12 @@ class AnalyzeIntervals:
                     interval = get_interval(tx_node, txmit)
                     interval['tx_pkts'] += 1
                     interval['tx_bytes'] += tso_length
-                    if 'nic' in pkt:
-                        add_to_intervals(tx_node, txmit, pkt['nic'],
+                    if tnic != None:
+                        add_to_intervals(tx_node, txmit, tnic,
                             'tx_qdisc', tso_length)
 
                 if tnic != None:
-                    nic_interval = get_interval(tx_node, tnic)
-                    node_xmits[tx_node].append([pkt['nic'],
+                    node_xmits[tx_node].append([tnic,
                             tso_length + data_overhead_bytes])
                     nic_interval['tx_nic_pkts'] += 1
                     nic_interval['tx_nic_bytes'] += tso_length
@@ -5113,7 +5115,9 @@ class AnalyzeIntervals:
                 else:
                     add_to_intervals(rx_node, traces[rx_node]['first_time'],
                             tsoftirq, 'rx_data_gro', length)
-            elif tgro != None:
+            elif tgro != None and pkt['id'] != 0:
+                # Note: TCP doesn't yet provide softirq times, hence the
+                # exclusion above.
                 add_to_intervals(rx_node, tgro, traces[rx_node]['last_time'],
                         'rx_data_gro', length)
 
@@ -6486,9 +6490,9 @@ class AnalyzeNicbacklog:
             f.write('# NIC backlog (packets passed to the NIC but not yet '
                     'returned to the\n')
             f.write('# kernel) as a function of time\n')
-            f.write('# Time:     Time of measurement (usecs)\n')
-            f.write('# NicPkts:  Packets currently owned by NIC\n')
-            f.write('# NicKB:    Kbytes of data in packets currently owned by NIC\n')
+            f.write('# Time:       Time of measurement (usecs)\n')
+            f.write('# NicPkts:    Packets currently owned by NIC\n')
+            f.write('# NicKB:      Kbytes of data in packets currently owned by NIC\n')
 
             f.write('# %-8s    Packets passed to NIC in last %d usecs\n' %
                     ('InP%d:' % (base_interval), base_interval))
@@ -7552,12 +7556,14 @@ class AnalyzePackets:
             data_bytes, total, ack):
         tcp_pkt = get_tcp_packet(saddr, sport, daddr, dport, sequence,
                 data_bytes, ack)
+        # if 'xmit' in tcp_pkt:
+        #     print('%9.3f: Duplicate TCP packet transmission on node %s (previous: %.3f)' % (t,
+        #             trace['node'], tcp_pkt['xmit']))
         node = trace['node']
         tcp_pkt['xmit'] = t
+        tcp_pkt['xmit2'] = t
         tcp_pkt['total_length'] = total
         tcp_pkt['tx_node'] = node
-        if sequence == 1749134782:
-            print('tt_xmit_tcp setting tx_node to %s' % (node))
         if not saddr in peer_nodes and saddr != '0x00000000':
             peer_nodes[saddr] = node
 
@@ -7567,6 +7573,7 @@ class AnalyzePackets:
                 data_bytes, ack)
         node = trace['node']
         tcp_pkt['qdisc_xmit'] = t
+        tcp_pkt['xmit2'] = t
         tcp_pkt['tx_node'] = node
         if sequence == 1749134782:
             print('tt_qdisc_tcp setting tx_node to %s' % (node))
