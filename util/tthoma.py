@@ -2247,6 +2247,29 @@ class Dispatcher:
                   '([0-9]+), total length ([0-9]+), ack ([-0-9]+)'
     })
 
+    def __txq_stop(self, trace, time, core, match, interests):
+        queue = match.group(1)
+        limit = int(match.group(2))
+        queued = int(match.group(3))
+        for interest in interests:
+            interest.tt_txq_stop(trace, time, core, queue, limit, queued)
+
+    patterns.append({
+        'name': 'txq_stop',
+        'regexp': r'netdev_tx_sent_queue stopped queue (0x[a-f0-9]+): limit '
+                '([0-9]+), queued ([0-9]+)'
+    })
+
+    def __txq_restart(self, trace, time, core, match, interests):
+        queue = match.group(1)
+        for interest in interests:
+            interest.tt_txq_restart(trace, time, core, queue)
+
+    patterns.append({
+        'name': 'txq_restart',
+        'regexp': r'netdev_tx_completed_queue restarted queue (0x[a-f0-9]+)'
+    })
+
 #------------------------------------------------
 # Analyzer: activity
 #------------------------------------------------
@@ -10515,6 +10538,123 @@ class AnalyzeTxpkts:
                     '------------------------------------------')
             print(node_info)
             print(q_details, end='')
+
+#------------------------------------------------
+# Analyzer: txqstop
+#------------------------------------------------
+class AnalyzeTxqstop:
+    """
+    Prints information about transmit queue stoppage, where netdev_tx
+    refuses to transmit packets on a dev_queue because there is too much
+    data that has been handed off to the NIC but not yet returned after
+    transmission.
+    """
+
+    def __init__(self, dispatcher):
+        # node -> list of events for that node. Each event is a tuple
+        # <time, queue, what>, where queue is the identifier for a
+        # dev_queue and what is either "stop" or "restart". Events are
+        # not guaranteed to be in time order.
+        self.events = defaultdict(list)
+
+        # node -> maximum queue length limit observed for that node
+        self.max_limit = defaultdict(lambda: 0)
+
+        # node -> maximum queue length limit observed for that node
+        self.min_limit = defaultdict(lambda: 1e20)
+
+    def init_trace(self, trace):
+        # queue identifier -> 1. An entry exists for a queue if a
+        # queue stoppage event has been seen for that queue (used to
+        # fill in missing stop events).
+        self.stopped = {}
+
+        # Name of node for the current trace file.
+        self.node = trace['node']
+
+    def  tt_txq_stop(self, trace, t, core, queue, limit, queued):
+        self.stopped[queue] = 1
+        self.events[self.node].append([t, queue, 'stop'])
+        if limit > self.max_limit[self.node]:
+            self.max_limit[self.node] = limit
+        if limit < self.min_limit[self.node]:
+            self.min_limit[self.node] = limit
+
+    def  tt_txq_restart(self, trace, t, core, queue):
+        if not queue in self.stopped:
+            self.events[self.node].append([trace['first_time'], queue, 'stop'])
+        self.events[self.node].append([t, queue, 'restart'])
+
+    def output(self):
+
+        print('\n-----------------')
+        print('Analyzer: txqstop')
+        print('-----------------')
+        print()
+        print('Statistics on dev_queues that have been stopped by Linux '
+                'because there')
+        print('are too many bytes of packet data currently in the NIC\'s '
+                'possession for')
+        print('that queue:')
+        print('Node:     Node whose data follows on this line')
+        print('Stopped:  Fraction of time when at least one txq was stopped')
+        print('Avg:      Average number of txqs stopped')
+        print('Stop1:    Fraction of time when 1 txq was stopped')
+        print('Stop2:    Fraction of time when 2 txqs were stopped')
+        print('Stop3:    Fraction of time when 3 txqs were stopped')
+        print('StopMany: Fraction of time when >3 txqs were stopped')
+        print('LimitMin: Minimum observed value of length limit for a txq')
+        print('LimitMax: Maximum observed value of length limit for a txq')
+        print()
+        print('Node    Stopped    Avg  Stop1 Stop2 Stop3 StopMany LimitMin LimitMax')
+
+        for node in get_sorted_nodes():
+            # queue identifier -> 1 if that queue is currently stopped;
+            # no entry if queue is running
+            stopped = {}
+
+            # Used to compute the average number of queues stopped; sum of
+            # (time_delta * stopped)
+            avg_stopped = 0
+
+            # Total time that [1, 2, 3, >3] queues were stopped.
+            stop_time = [0, 0, 0, 0]
+
+            # Time of last event processed.
+            prev_t = traces[node]['first_time']
+
+            if not self.events[node]:
+                print('%-8s   No queue stoppage events detected' % (node))
+                continue
+
+            for event in sorted(self.events[node], key = lambda t: t[0]):
+                t, queue, what = event
+
+                interval = t - prev_t
+                num_stopped = len(stopped)
+                if num_stopped > 0:
+                    avg_stopped += interval * num_stopped
+                    index = num_stopped - 1 if num_stopped <= 3 else 3
+                    stop_time[index] += interval
+                    # if num_stopped > 3:
+                    #     print('%9.3f: %d queues stopped on %s: %s' % (t,
+                    #             num_stopped, node, sorted(stopped.keys())))
+                if what == 'stop':
+                    stopped[queue] = 1
+                elif what == 'restart':
+                    if queue in stopped:
+                        del stopped[queue]
+                else:
+                    raise Exception('Bad \'what\' field in txqstop event: %s' %
+                            (what))
+                prev_t = t
+
+            total_t = prev_t - traces[node]['first_time']
+            print('%-8s  %5.3f %6.2f  %5.3f %5.3f %5.3f    %5.3f  %7d  %7d' % (
+                    node, sum(stop_time) / total_t, avg_stopped / total_t,
+                    stop_time[0] / total_t, stop_time[1] / total_t,
+                    stop_time[2] / total_t, stop_time[3] / total_t,
+                    self.min_limit[node], self.max_limit[node]))
 
 #------------------------------------------------
 # Analyzer: txsnapshot
