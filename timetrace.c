@@ -36,6 +36,12 @@ extern void       homa_trace(u64 u0, u64 u1, int i0, int i1);
 extern void       ltt_record_nop(struct tt_buffer *buffer, u64 timestamp,
 				 const char *format, u32 arg0, u32 arg1,
 				 u32 arg2, u32 arg3);
+extern void       (*ltt_record_sendmsg)(struct sock *sk, struct msghdr *msg);
+extern void       ltt_record_sendmsg_nop(struct sock *sk, struct msghdr *msg);
+extern void       (*ltt_record_tcp)(char *format, struct sk_buff *skb,
+				    __be32 saddr, __be32 daddr);
+extern void       ltt_record_tcp_nop(char *format, struct sk_buff *skb,
+				      __be32 saddr, __be32 daddr);
 #endif
 void       tt_inc_metric(int metric, u64 count);
 
@@ -139,6 +145,8 @@ int tt_init(char *proc_file)
 	tt_linux_freeze_count = &tt_freeze_count;
 	tt_linux_inc_metrics = tt_inc_metric;
 	tt_linux_printk = tt_printk;
+	ltt_record_sendmsg = tt_record_sendmsg;
+	ltt_record_tcp = tt_record_tcp;
 	tt_linux_dbg1 = tt_dbg1;
 	tt_linux_dbg2 = tt_dbg2;
 	tt_linux_dbg3 = tt_dbg3;
@@ -201,6 +209,8 @@ void tt_destroy(void)
 		tt_linux_buffers[i] = NULL;
 	tt_linux_inc_metrics = tt_linux_skip_metrics;
 	tt_linux_printk = tt_linux_nop;
+	ltt_record_sendmsg = ltt_record_sendmsg_nop;
+	ltt_record_tcp = ltt_record_tcp_nop;
 	tt_linux_dbg1 = (void (*)(char *, ...)) tt_linux_nop;
 	tt_linux_dbg2 = (void (*)(char *, ...)) tt_linux_nop;
 	tt_linux_dbg3 = (void (*)(char *, ...)) tt_linux_nop;
@@ -866,11 +876,13 @@ done:
  */
 void tt_dbg1(char *msg, ...)
 {
-	pr_err("tt_dbg1 starting\n");
-	if (atomic_read(&tt_frozen))
-		return;
-	tt_freeze();
-	tt_printk();
+	pr_err("printk is currently disabled in tt_dbg1");
+	return;
+	// pr_err("tt_dbg1 starting\n");
+	// if (atomic_read(&tt_frozen))
+	// 	return;
+	// tt_freeze();
+	// tt_printk();
 }
 
 /**
@@ -916,4 +928,87 @@ void tt_inc_metric(int metric, u64 count)
 			+ offsets[metric]);
 	*metric_addr += count;
 #endif /* See strip.py */
+}
+
+/**
+ * tt_record_sendmsg() - Invoked by tcp_sendmsg to create a timetrace
+ * record for the kernel call (if a new message is being started).
+ * @sk:      Socket on which tcp_sendmsg was invoked.
+ * msg:      The data to transmit on the socket (in user space).
+ */
+void tt_record_sendmsg(struct sock *sk, struct msghdr *msg)
+{
+	struct inet_sock *inet = inet_sk(sk);
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct iov_iter iter;
+	int header[3];
+	int copied;
+	int length;
+
+	/* This design assumes that cp_node is generating the requests,
+	 * so new messages will always start at the beginning of
+	 * msg (but in some cases it may take multiple calls to
+	 * sendmsg to transmit an entire message).
+	 */
+	if (!tp->homa_init) {
+		tp->homa_next_seq = tp->write_seq;
+		tp->homa_init = 1;
+	}
+
+	/* This function is intended only for use with requests generated
+	 * by cp_node, in which case new messages will always start at the
+	 * beginnign of msg (but but in some cases it may take multiple
+	 * calls to sendmsg to transmit an entire message). Check to see
+	 * if we're in the middle of a message, or if this isn't cp_node;
+	 * if so, do nothing.
+	 */
+	iter = msg->msg_iter;
+	if (iov_iter_count(&iter) < sizeof(header))
+		return;
+	copied = copy_from_iter(&header, sizeof(header), &iter);
+	if (copied != sizeof(header)) {
+		tt_record1("copy_from_iter returned %d in tt_record_sendmsg",
+			   copied);
+		return;
+	}
+	length = header[0];
+	if (length < iov_iter_count(&msg->msg_iter)) {
+		/* There isn't a Homa message at the expected place. Most
+		 * likely this isn't a Homa socket.
+		 */
+		return;
+	}
+	if (tp->homa_next_seq != tp->write_seq)
+		return;
+
+	tp->homa_next_seq += length;
+	tt_record2("tcp_sendmsg new message slot is %d, response %d",
+		   header[2] & 0xffff, (header[2] & 0x40000) ? 1 : 0);
+	tt_record4("tcp_sendmsg invoked for message from 0x%x to 0x%x, "
+		   "length %d, starting sequence %u",
+		   (htonl(inet->inet_saddr) << 16) + htons(inet->inet_sport),
+		   (htonl(inet->inet_daddr) << 16) + htons(inet->inet_dport),
+		   length, tp->write_seq);
+}
+
+/**
+ * tt_record_tcp() - Create a timetrace record for a TCP packet, formatting
+ * data in a standard way.
+ * @format:       Format string for tt_record4; must have % specs for
+ *                source, dest, length, and ack/seq, in that order.
+ * @skb:          Contains TCP packet with valid transport header.
+ * @saddr:        Source address for packet.
+ * @daddr:        Destination address for packet.
+ */
+void tt_record_tcp(char *format, struct sk_buff *skb, __be32 saddr,
+		   __be32 daddr)
+{
+	struct tcphdr *th;
+	int data_length;
+
+	th = (struct tcphdr*) skb_transport_header(skb);
+	data_length = skb->len - skb_transport_offset(skb) - th->doff * 4;
+	tt_record4(format, (ntohl(saddr) << 16) + ntohs(th->source),
+		   (ntohl(daddr) << 16) + ntohs(th->dest), data_length,
+		   data_length == 0 ? ntohl(th->ack_seq) : ntohl(th->seq));
 }

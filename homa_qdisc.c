@@ -598,21 +598,10 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 
 	pkt_len = qdisc_pkt_len(skb);
 	homa_qdisc_update_link_idle(qdev, pkt_len, -1);
-	if (ip_hdr(skb)->protocol == IPPROTO_TCP) {
-		struct tcphdr *th;
-
-		th = (struct tcphdr*) skb_transport_header(skb);
-		tt_record4("homa_qdisc_pacer requeued TCP packet "
-				"from 0x%08x:%d to 0x%08x:%d",
-				ntohl(ip_hdr(skb)->saddr), ntohs(th->source),
-				ntohl(ip_hdr(skb)->daddr), ntohs(th->dest));
-		tt_record4("homa_qdisc_pacer requeued TCP packet (2) "
-				"sequence %u, data bytes %d, ack %u, gso_size %d",
-				ntohl(th->seq),
-				skb->len - skb_transport_offset(skb) -
-				tcp_hdrlen(skb), ntohl(th->ack_seq),
-				skb_shinfo(skb)->gso_size);
-	}
+	if (ip_hdr(skb)->protocol == IPPROTO_TCP)
+		tt_record_tcp("homa_qdisc_pacer requeued TCP packet from "
+			"0x%x to 0x%x, data bytes %d, seq/ack %d",
+			skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
 
 	rcu_read_lock_bh();
 	txq = netdev_get_tx_queue(skb->dev, skb_get_queue_mapping(skb));
