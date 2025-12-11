@@ -1457,6 +1457,7 @@ class Dispatcher:
             # Parse each line in 2 phases: first the time and core information
             # that is common to all patterns, then the message, which will
             # select at most one pattern.
+            # print('\n%s' % (trace['line'].rstrip()))
             self.trace_lines += 1
             self.regex_tries += 1
             match = prefix_matcher.match(trace['line'])
@@ -1474,6 +1475,7 @@ class Dispatcher:
             if prefix in self.parse_table:
                 for pattern in self.parse_table[prefix]:
                     self.regex_tries += 1
+                    # print('  %s' % (pattern['regexp']))
                     match = pattern['cregexp'].match(msg)
                     if match:
                         pattern['matches'] += 1
@@ -1514,6 +1516,11 @@ class Dispatcher:
         print('(%.1f usec/line, %.1f usec/regex attempt)' % (
                 ((self.parse_ns/self.trace_lines)*1e-3),
                 ((self.parse_ns/self.regex_tries)*1e-3)))
+        sum = 0
+        for bucket in self.parse_table.values():
+            sum += len(bucket)
+        print('Parse table has %d patterns in %d buckets' % (
+                sum, len(self.parse_table)))
 
     def __build_parse_table(self):
         """
@@ -1540,7 +1547,11 @@ class Dispatcher:
                 else:
                     length = match.start()
                 if length < self.prefix_length:
-                    self.prefix_length = length;
+                    self.prefix_length = length
+                    if length == 0:
+                        print('Warning: parse table has only 1 bucket because '
+                                'of the following pattern:\n    %s' % (
+                                pattern['regexp']), file = sys.stderr)
 
         # Pass 2: fill in self.parse_table
         for pattern in self.patterns:
@@ -1698,7 +1709,7 @@ class Dispatcher:
 
     patterns.append({
         'name': 'nic_data',
-        'regexp': '(mlx|ice) sent homa data packet to ([^,]+), id ([0-9]+), '
+        'regexp': 'sent homa data packet via (mlx|ice) to ([^,]+), id ([0-9]+), '
                   'offset ([0-9]+), queue (0x[0-9a-f]+)'
     })
 
@@ -1712,22 +1723,22 @@ class Dispatcher:
 
     patterns.append({
         'name': 'nic_grant',
-        'regexp': '(mlx|ice) sent homa grant to ([^,]+), id ([0-9]+), '
+        'regexp': 'sent homa grant via (mlx|ice) to ([^,]+), id ([0-9]+), '
                   'offset ([0-9]+), queue (0x[0-9a-f]+)'
     })
 
     def __free_tx_skb(self, trace, time, core, match, interests):
-        id = int(match.group(2))
-        offset = int(match.group(3))
-        qid = int(match.group(4))
-        msg_length = int(match.group(5))
+        id = int(match.group(1))
+        offset = int(match.group(2))
+        qid = int(match.group(3))
+        msg_length = int(match.group(4))
         for interest in interests:
             interest.tt_free_tx_skb(trace, time, core, id, offset, qid,
                     msg_length)
 
     patterns.append({
         'name': 'free_tx_skb',
-        'regexp': '(mlx|ice) freeing tx skb for homa data, id ([0-9]+), '
+        'regexp': 'freeing tx skb for homa data, id ([0-9]+), '
                 'offset ([0-9]+), qid ([0-9]+), msg_length ([0-9]+)'
     })
 
@@ -2304,33 +2315,33 @@ class Dispatcher:
 
     patterns.append({
         'name': 'tcp_nic',
-        'regexp': '(mlx|ice) sent TCP packet from (0x[a-f0-9]+) to '
+        'regexp': 'sent TCP packet via (mlx|ice) from (0x[a-f0-9]+) to '
                 '(0x[a-f0-9]+), data bytes ([0-9]+), seq/ack ([0-9]+)'
     })
 
     def __tcp_free2(self, trace, time, core, match, interests):
-        self.core_saved[core]['tcp_free_qid'] = int(match.group(2))
+        self.core_saved[core]['tcp_free_qid'] = int(match.group(1))
 
     patterns.append({
         'name': 'tcp_free2',
-        'regexp': '(mlx|ice) freeing TCP skb for qid ([0-9]+)'
+        'regexp': 'freeing TCP skb for qid ([0-9]+)'
     })
 
     def __tcp_free(self, trace, time, core, match, interests):
         saved = self.core_saved[core]
         if not 'tcp_free_qid' in saved:
             return
-        source = match.group(2)
-        dest = match.group(3)
-        data_bytes = int(match.group(4))
-        seq_ack = int(match.group(5))
+        source = match.group(1)
+        dest = match.group(2)
+        data_bytes = int(match.group(3))
+        seq_ack = int(match.group(4))
         for interest in interests:
             interest.tt_tcp_free(trace, time, core, source, dest, data_bytes,
                     seq_ack, saved['tcp_free_qid'])
 
     patterns.append({
         'name': 'tcp_free',
-        'regexp': '(mlx|ice) freeing TCP skb from (0x[a-f0-9]+) to '
+        'regexp': 'freeing TCP skb from (0x[a-f0-9]+) to '
                 '(0x[a-f0-9]+), data bytes ([0-9]+), seq/ack ([0-9]+)'
     })
 
