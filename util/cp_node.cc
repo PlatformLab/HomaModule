@@ -482,7 +482,20 @@ struct message_header {
 	 * @length: total number of bytes in the message, including this
 	 * header.
 	 */
-	int length:30;
+	int32_t length;
+
+	/**
+	 * @cid: uniquely identifies the connection between a client
+	 * and a server.
+	 */
+	conn_id cid;
+
+	/**
+	 * @msg_id: created by client, returned by server so client can
+	 * match responses to requests; distinguishes among concurrent
+	 * outstanding requests from a client. Not unique across all time.
+	 */
+	uint16_t msg_id;
 
 	/** @freeze: true means the recipient should freeze its time trace. */
 	unsigned int freeze:1;
@@ -494,16 +507,12 @@ struct message_header {
 	unsigned int short_response:1;
 
 	/**
-	 * @cid: uniquely identifies the connection between a client
-	 * and a server.
+	 * @response: nonzero means this is a response messages, zero means
+	 * request
 	 */
-	conn_id cid;
+	unsigned int response:1;
 
-	/**
-	 * @msg_id: unique identifier for this message among all those
-	 * from a given client machine.
-	 */
-	uint32_t msg_id;
+	unsigned int reserved:13;
 };
 
 /**
@@ -1111,6 +1120,7 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 		if ((header->short_response) && (header->length > 100)) {
 			header->length = 100;
 		}
+		header->response = 1;
 
 		num_vecs = 0;
 		offset = 0;
@@ -1497,6 +1507,7 @@ void tcp_server::read(int fd, int pid)
 		}
 		if ((header->short_response) && (header->length > 100))
 			header->length = 100;
+		header->response = 1;
 		metrics->bytes_out += header->length;
 		if (!connections[fd]->send_message(header))
 			connections[fd]->set_epoll_events(epoll_fd,
@@ -2175,9 +2186,10 @@ void homa_client::sender()
 		rinfos[slot].request_length = header->length;
 		header->cid = server_conns[server];
 		header->cid.client_port = id;
+		header->msg_id = slot;
 		header->freeze = freeze[header->cid.server];
 		header->short_response = one_way;
-		header->msg_id = slot;
+		header->response = 0;
 		tt("sending request, cid 0x%08x, id %u, length %d",
 				header->cid, header->msg_id, header->length);
 
@@ -2588,6 +2600,7 @@ void tcp_client::sender()
 		header.msg_id = slot;
 		header.freeze = freeze[header.cid.server];
 		header.short_response = one_way;
+		header.response = 0;
 		size_t old_pending = connections[server]->pending();
 		tt("Sending TCP request, cid 0x%08x, id %u, length %d, pid %d",
 				header.cid, header.msg_id, header.length,
