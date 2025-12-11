@@ -133,11 +133,6 @@ def parse_tt(tt, node_num):
     first_time = None
     last_time = None
 
-    # core -> saddr:sport:daddr:dport for a TCP packet, derived from the
-    # first of two associated time trace records for an event. Saves info
-    # for use by the second record
-    tcp_id = defaultdict(lambda: None)
-
     for line in open(tt):
         num_records += 1
         match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] (.*)', line)
@@ -152,40 +147,23 @@ def parse_tt(tt, node_num):
 
         match = re.match('.* id ([-0-9.]+),.* offset ([-0-9.]+)', msg)
         if not match:
-            match = re.match('Transmitting TCP packet from ([^:]+):([0-9]+) to '
-                    '([^:]+):([0-9]+)', msg)
+            match = re.match('Transmitting TCP packet from (0x[a-f0-9]+) to '
+                    '(0x[a-f0-9]+), data bytes ([0-9]+), seq/ack ([0-9]+)', msg)
             if match:
-                tcp_id[core] = '%s:%s:%s:%s' % (match.group(1), match.group(2),
+                id = '%s:%s:%s:%s' % (match.group(1), match.group(2),
                         match.group(3), match.group(4))
+                send_tcp[id] = [time, node_num]
+                sent += 1
                 continue
 
-            match = re.match(r'Transmitting TCP packet .2. sequence ([-0-9]+), '
-                    'data bytes ([0-9]+), .* ack ([-0-9]+)', msg)
+            match = re.match('tcp_gro_receive got packet from '
+                    '(0x[a-f0-9]+) to (0x[a-f0-9]+), data bytes ([0-9]+), '
+                    'seq/ack ([0-9]+)', msg)
             if match:
-                if tcp_id[core] != None:
-                    id = '%s:%s:%s:%s' % (tcp_id[core], match.group(1),
-                            match.group(2), match.group(3))
-                    send_tcp[id] = [time, node_num]
-                    sent += 1
-                tcp_id[core] = None
-                continue
-
-            match = re.match('tcp_gro_receive got packet from ([^:]+):([0-9]+) '
-                    'to ([^:]+):([0-9]+)', msg)
-            if match:
-                tcp_id[core] = '%s:%s:%s:%s' % (match.group(1), match.group(2),
+                id = '%s:%s:%s:%s' % (match.group(1), match.group(2),
                         match.group(3), match.group(4))
-                continue
-
-            match = re.match(r'tcp_gro_receive .2. sequence ([-0-9]+), '
-                    'data bytes ([0-9]+), .* ack ([-0-9]+)', msg)
-            if match:
-                if tcp_id[core] != None:
-                    id = '%s:%s:%s:%s' % (tcp_id[core], match.group(1),
-                            match.group(2), match.group(3))
-                    recv_tcp[id] = [time, node_num]
-                    recvd += 1
-                tcp_id[core] = None
+                recv_tcp[id] = [time, node_num]
+                recvd += 1
                 continue
 
             match = re.match('retransmitting offset ([0-9.]+), .*id ([0-9.]+)',
@@ -344,7 +322,7 @@ def find_min_delays_alt(num_nodes):
     global send_ctl, recv_ctl, send_freeze, recv_freeze
     global min_delays, min_recv_times, addr_node_num
 
-    # Resend and busy packet are problematic because they are not unique:
+    # Resend and busy packets are problematic because they are not unique:
     # there can be several identical packets between the same pair of nodes.
     # Here's how this function matches up sends and receives:
     # * Start from freeze packets, which are unique; use them to compute
@@ -435,7 +413,7 @@ print('Trace file statistics:')
 print('File:      Name of trace file')
 print('Records:   Total number of timetrace records')
 print('Sends:     Total number of packets sent')
-print('Receives:  Total number of packets redeived (will be more than Sends')
+print('Receives:  Total number of packets received (will be more than Sends')
 print('           because of TSO)')
 print('Timespan:  Elapsed time between first and last timetrace records (ms)')
 print('\nFile          Records    Sends Receives Timespan')
@@ -485,10 +463,11 @@ while synced < num_nodes:
             # ref can potentially serve as reference for i.
             rtt = min_delays[ref][node] + min_delays[node][ref]
             if rtt < 0:
-                print('Negative RTT %.1f between %s (recv %.3f) and '
-                        '%s (recv %.3f),' % (rtt, node_names[ref],
-                        min_recv_times[node][ref], node_names[node],
-                        min_recv_times[ref][node]))
+                print('Negative RTT %.1f between %s (recv %.3f, delay %.3f) and '
+                        '%s (recv %.3f, delay %.3f),' % (rtt, node_names[ref],
+                        min_recv_times[node][ref], min_delays[node][ref],
+                        node_names[node], min_recv_times[ref][node],
+                        min_delays[ref][node]))
             if (rtt < best_rtt) and (rtt > 0):
                 best_node = node
                 best_ref = ref
