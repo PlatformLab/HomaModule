@@ -1124,7 +1124,8 @@ def scan_logs():
 
         for key in ["client_gbps", "client_kops", "server_gbps", "server_kops"]:
             if not key in totals:
-                log("%s missing in node log files" % (key))
+                log("%s missing in node log files for experiment %s" % (
+                        key, name))
                 totals[key] = 0
 
         log("\nClients for %s experiment: %d nodes, %.2f Gbps, %.1f Kops/sec "
