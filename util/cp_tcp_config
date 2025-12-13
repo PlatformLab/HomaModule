@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 # This cperf benchmark measures TCP and DCTCP while varying one or more
-# aspects of Homa's configuration (such as duty cycle).
+# aspects of Homa's configuration (such as number of server threads).
 # Type "cp_tcp_config --help" for documentation.
 
 from cperf import *
@@ -16,88 +16,86 @@ parser = get_parser(description=
         'varies.',
         usage='%(prog)s [options]')
 parser.add_argument('-c', '--config', dest='config',
-        choices=['cports', 'sports', 'threads'],
+        choices=['cports', 'nic_queue', 'sports', 'threads'],
         required = True,
         help='Aspect of configuration to change')
-parser.add_argument('--tcp', dest='tcp', type=boolean,
-        default=True, help="Boolean value: indicates whether measurements "
-                "should be run on TCP (default: true)")
 parser.add_argument('--dctcp', dest='dctcp', type=boolean,
         default=False, help="Boolean value:: indicates whether measurements "
                 "should be run on DCTCP (default: false)")
 options = parser.parse_args()
 init(options)
-servers = range(0, options.num_nodes)
-clients = range(0, options.num_nodes)
 
 if options.workload != "":
     load_info = [[options.workload, options.gbps]]
 
 specs = []
-if options.config == 'threads':
-    for client, server in [[3, 6], [4, 8], [5, 10], [6, 12], [7, 14]]:
-        o = copy.deepcopy(options)
-        o.tcp_server_ports = server
-        o.tcp_client_ports = client
-        name = "s%dc%d" % (server, client)
-        specs.append({'options': o, 'exp_name': name, 'label': name})
-elif options.config == 'cports':
+if options.config == 'cports':
     for ports in [2, 3, 4, 6, 8]:
-        o = copy.deepcopy(options)
-        o.tcp_client_ports = ports
-        specs.append({'options': o,
-                'exp_name': "cports%d" % (ports),
-                 'label': "%d client ports" % (ports)})
+        specs.append({'exp_name': "cports%d" % (ports),
+                'label': "%d client ports" % (ports),
+                'options': ['tcp_client_ports', ports]})
+elif options.config == 'nic_queue':
+    for usec in [5, 10, 20, 40]:
+        specs.append({'exp_name': "nicq%d" % (usec),
+                'label': r'NIC queue max %d µsec' % (usec),
+                'sysctl': ['.net.homa.max_nic_queue_ns', usec * 1000]})
 elif options.config == 'sports':
     for ports in [6, 9, 12, 15, 18]:
-        o = copy.deepcopy(options)
-        o.tcp_server_ports = ports
-        specs.append({'options': o,
-                'exp_name': "sports%d" % (ports),
-                 'label': "%d server ports" % (ports)})
+        specs.append({ 'exp_name': "sports%d" % (ports),
+                'label': "%d server ports" % (ports),
+                'options': ['tcp_server_ports', ports]})
+elif options.config == 'threads':
+    for client, server in [[3, 6], [4, 8], [5, 10], [6, 12], [7, 14]]:
+        name = "s%dc%d" % (server, client)
+        specs.append({'exp_name': name,
+                'label': name,
+                'options': ['tcp_server_ports', server,
+                'tcp_client_ports', client]})
 
+# sysctl parameter name -> old value to restore.
+old_values = {}
 if not options.plot_only:
-    congestion = get_sysctl_parameter("net.ipv4.tcp_congestion_control")
+    congestion = get_sysctl_parameter("net.ipv4.tcp_congestion_control",
+            options.nodes[0])
     try:
         # For each workload, run a set of experiments with different
         # configurations.
         for workload, bw in load_info:
-            o = copy.deepcopy(options)
-            o.protocol = "homa"
-            o.workload = workload
-            o.client_ports = 1
-            o.client_max = 1
-            o.server_ports = 1
-            o.server_nodes = 1
-            o.first_server = 1
-            o.unloaded = 500
-            start_servers(range(1, 2), o)
-            run_experiment("unloaded_" + workload, range(0, 1), o)
-
             for spec in specs:
-                o = options
-                if 'options' in spec:
-                    o = spec['options']
+                o = copy.deepcopy(options)
                 o.protocol = "tcp"
                 o.workload = workload
                 o.gbps = bw/2.0
-                start_servers(servers, o)
-                if options.tcp:
-                    set_sysctl_parameter("net.ipv4.tcp_congestion_control",
-                            "cubic", range(0, options.num_nodes))
-                    run_experiment("tcp_%s_%s" % (spec['exp_name'], workload),
-                            clients, o)
+                if 'sysctl' in spec:
+                    for i in range(0, len(spec['sysctl']), 2):
+                        name = spec['sysctl'][i]
+                        value = spec['sysctl'][i+1]
+                        if name not in old_values:
+                            old_values[name] = get_sysctl_parameter(name,
+                                    options.nodes[0])
+                        log("Setting %s = %s" % (name, value))
+                        set_sysctl_parameter(name, value, options.nodes)
+                if 'options' in spec:
+                    for i in range(0, len(spec['options']), 2):
+                        name = spec['options'][i]
+                        value = spec['options'][i+1]
+                        setattr(o, name, value)
+                exp_name = "%s_%s" % (spec['exp_name'], workload)
+                start_servers(exp_name, o.servers, o)
                 if options.dctcp:
                     set_sysctl_parameter("net.ipv4.tcp_congestion_control",
-                            "dctcp", range(0, options.num_nodes))
-                    run_experiment("dctcp_%s_%s" % (spec['exp_name'], workload),
-                            clients, o)
+                            "dctcp", options.nodes)
+                run_experiment("%s_%s" % (spec['exp_name'], workload),
+                        o.clients, o)
     except Exception as e:
         log(traceback.format_exc())
 
     print("Resetting TCP congestion control to %s" % (congestion))
     set_sysctl_parameter("net.ipv4.tcp_congestion_control", congestion,
-            range(0, options.num_nodes))
+            options.nodes)
+    for name, value in old_values.items():
+        print("Restoring %s to %s" % (name, value))
+        set_sysctl_parameter(name, value, options.nodes)
 
     log("Stopping nodes")
     stop_nodes()
@@ -105,66 +103,49 @@ if not options.plot_only:
 
 # Generate plots and reports
 for workload, bw in load_info:
-    set_unloaded("unloaded_" + workload)
-
     log("Generating slowdown plots for %s" % (workload))
-    if options.tcp:
-        title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
-                options.num_nodes, bw)
-        ax = start_plot_vs_msg_length(title, 1000,
-                "tcp_%s_%s" % (specs[0]['exp_name'], workload),
-                y_label="TCP Slowdown")
-        for spec in specs:
-            exp_name = "tcp_%s_%s" % (spec['exp_name'], workload)
-            plot_slowdown(ax, exp_name, "p99", spec['label']+' P99')
-        for spec in specs:
-            exp_name = "tcp_%s_%s" % (spec['exp_name'], workload)
-            plot_slowdown(ax, exp_name, "p50", spec['label']+' P50')
-        ax.legend(loc="upper right", prop={'size': 9})
-        plt.tight_layout()
-        plt.savefig("%s/reports/tcp_%s_%s.pdf" %
-                (options.log_dir, options.config, workload))
+    title = "%s, %d %s nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, get_node_type(), bw)
+    ax = start_plot_vs_msg_length(title, 1000,
+            "%s_%s" % (specs[0]['exp_name'], workload),
+            y_label="Slowdown")
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_slowdown(ax, exp_name, "p99", spec['label']+' P99')
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_slowdown(ax, exp_name, "p50", spec['label']+' P50')
+    ax.legend(loc="upper right", prop={'size': 9})
+    plt.tight_layout()
+    plt.savefig("%s/reports/%s_%s.pdf" %
+            (options.log_dir, options.config, workload))
 
-    if options.dctcp:
-        title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
-                options.num_nodes, bw)
-        ax = start_plot_vs_msg_length(title, 10000,
-                "dctcp_%s_%s" % (specs[0]['exp_name'], workload),
-                y_label="DCTCP Slowdown")
-        for spec in specs:
-            exp_name = "dctcp_%s_%s" % (spec['exp_name'], workload)
-            plot_slowdown(ax, exp_name, "p99", spec['label']+' P99')
-        for spec in specs:
-            exp_name = "dctcp_%s_%s" % (spec['exp_name'], workload)
-            plot_slowdown(ax, exp_name, "p50", spec['label']+' P50')
-        ax.legend(loc="upper right", prop={'size': 9})
-        plt.tight_layout()
-        plt.savefig("%s/reports/dctcp_%s_%s.pdf" %
-                (options.log_dir, options.config, workload))
+    log("Generating latency plots for %s" % (workload))
+    title = "%s, %d %s nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, get_node_type(), bw)
+    ax = start_plot_vs_msg_length(title, [10, 10000], "%s_%s" % (
+            specs[0]['exp_name'], workload), y_label=r'RTT (µsec)')
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_histogram(ax, exp_name, "p99", spec['label'] + ' P99')
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_histogram(ax, exp_name, "p50", spec['label'] + ' P50')
+    ax.legend(loc="lower right", prop={'size': 8})
+    plt.tight_layout()
+    plt.savefig("%s/reports/%s_%s_rtt.pdf" %
+            (options.log_dir, options.config, workload))
 
     log("Generating short message CDFs for %s" % (workload))
-    if options.tcp:
-        title = "%s %d nodes" % (workload.capitalize(), options.num_nodes)
-        start_cdf_plot(title, 10, 0.99e05, 1e-05, "TCP RTT (usecs)",
-                "Cumulative Fraction of Short Messages")
-        for spec in specs:
-            exp_name = "tcp_%s_%s" % (spec['exp_name'], workload)
-            x, y = get_short_cdf(exp_name)
-            plt.plot(x, y, label=spec['label'])
+    title = "%s, %d %s nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, get_node_type(), bw)
+    start_cdf_plot(title, 10, 0.99e05, 1e-05, "RTT (usecs)",
+            "Cumulative Fraction of Short Messages")
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        x, y = get_short_cdf(exp_name)
+        plt.plot(x, y, label=spec['label'])
 
-        plt.legend(loc="upper right", prop={'size': 9})
-        plt.savefig("%s/reports/tcp_%s_%s_cdfs.pdf" %
-                (options.log_dir, options.config, workload))
-
-    if options.dctcp:
-        title = "%s %d nodes" % (workload.capitalize(), options.num_nodes)
-        start_cdf_plot(title, 10, 0.99e05, 1e-05, "DCTCP RTT (usecs)",
-                "Cumulative Fraction of Short Messages")
-        for spec in specs:
-            exp_name = "dctcp_%s_%s" % (spec['exp_name'], workload)
-            x, y = get_short_cdf(exp_name)
-            plt.plot(x, y, label=spec['label'])
-
-        plt.legend(loc="upper right", prop={'size': 9})
-        plt.savefig("%s/reports/dctcp_%s_%s_cdfs.pdf" %
-                (options.log_dir, options.config, workload))
+    plt.legend(loc="upper right", prop={'size': 9})
+    plt.savefig("%s/reports/%s_%s_cdfs.pdf" %
+            (options.log_dir, options.config, workload))
