@@ -523,6 +523,51 @@ def extract_num(s):
         return int(match.group(1))
     return None
 
+def filter_tcp_rpcs(rpcs, msglen=None, rpc_start=None, rtt=None):
+    """
+    Returns a list of all the TCP RPCs that match a set of command-line
+    options
+    rpcs:      List of TCP RPCs to filter (must be entries in tcp_rpcs)
+    msglen:    If not None, filter on msglen (see --msglen arg)
+    rpc_start: If not None, filter on RPC start time (see --rpc-start arg)
+    rtt:       If not None, filter on round-trip time (see --rtt arg)
+    """
+    if msglen != None:
+        min_length, max_length = get_range(msglen,
+                option_name='--msglen', one_value=True)
+        if max_length == None:
+            max_length = min_length
+            min_length = 0
+    if rpc_start != None:
+        min_start, max_start = get_range(rpc_start,
+                parse_float=True, option_name='--rpc-start')
+    if rtt != None:
+        min_rtt, max_rtt = get_range(rtt, parse_float = True,
+                option_name='--rtt')
+
+    result = []
+    for rpc in rpcs:
+        if msglen != None:
+            if not 'req_length' in rpc:
+                continue
+            length = rpc['req_length']
+            if length < min_length or length > max_length:
+                continue
+        if rpc_start != None:
+            if not 'req_send' in rpc:
+                continue
+            start = rpc['req_send']
+            if start < min_start or start > max_start:
+                continue
+        if rtt != None:
+            if not 'req_send' in rpc or not 'resp_recvd' in rpc:
+                continue
+            rtt = rpc['resp_recvd'] - rpc['req_send']
+            if rtt < min_rtt or rtt > max_rtt:
+                continue
+        result.append(rpc)
+    return result
+
 def gbps(bytes, usecs):
     """
     Compute the data rate in Gbps for data transmitted or received in
@@ -715,7 +760,8 @@ def get_range(s, option_name=None, parse_float=False, one_value=True):
 
 def get_tcp_node(addr_port):
     """
-    Return the name of the node corresponding to the argument.
+    Return the name of the node corresponding to the argument, or None
+    if no corresponding node could be found.
     addr_port:     A hex string used in TCP timetrace entries: the lower
                    16 bits are a port number and the upper 16 bits are
                    the low 16 bits of a node's IP address.
@@ -725,7 +771,7 @@ def get_tcp_node(addr_port):
     key = addr_port[:-4]
     if key in ip_to_node:
         return ip_to_node[key]
-    return key
+    return None
 
 def get_tcp_packet(source, dest, data_bytes, seq_ack):
     """
@@ -907,20 +953,6 @@ def get_xmit_time(offset, rpc, rx_time=1e20):
         return fallback
     return xmit
 
-def percentile(data, pct, format, na):
-    """
-    Finds the element of data corresponding to a given percentile pct
-    (0 is first, 100 or more is last), formats it according to format,
-    and returns the result. Returns na if the list is empty. Data must
-    be sorted in percentile order
-    """
-    if len(data) == 0:
-        return na
-    i = int(pct*len(data)/100)
-    if i >= len(data):
-        i = len(data) - 1
-    return format % (data[i])
-
 def pkt_id(id, offset):
     return '%d:%d' % (id, offset)
 
@@ -1005,6 +1037,21 @@ def print_if(value, fmt, modifier=None):
             value = modifier(value)
         return fmt % (value)
     return ''
+
+def print_pctl(values, pctl, fmt):
+    """
+    Return a formatted string describing a given percentile from a list
+    of values.
+    values:      List of values, sorted from 0th percentile to 100th percentile.
+                 If empty then an empty string is returned.
+    pctl:        Desired percentile, from 0-1000 (e.g. 900 selects P90)
+    fmt:         printf-style formt string containing a single % specifier for
+                 the selected percentile.
+    """
+    if len(values) == 0:
+        return ''
+    ix = len(values) * pctl // 1000
+    return fmt % (values[ix] if ix < len(values) else values[-1])
 
 def print_pkts(pkts, header=True):
     """
@@ -1164,57 +1211,71 @@ def print_tcp_rpcs(rpcs, header=True):
         buf.write('Length:     Length of request message\n')
         buf.write('ReqSeq:     Sequence number of first byte of request\n')
         buf.write('RspSeq:     Sequence number of first byte of response\n')
-        buf.write('ReqNic:     Elapsed time from sendmsg until first '
+        buf.write('ReqXmit:    Elapsed time from sendmsg until first '
                 'request packet handed\n')
         buf.write('            off to NIC\n')
-        buf.write('ReqGRO:     Time from NIC handoff to GRO receipt for '
+        buf.write('ReqNet:     Time from NIC handoff to GRO receipt for '
                 'first request packet\n')
-        buf.write('ReqRecv:    Time from GRO for first request packet '
+        buf.write('ReqRecv:    Time from GRO for last request packet '
                 'until recvmsg completes\n')
         buf.write('            on server\n')
         buf.write('Srvc:       Time from recvmsg return on server until '
                 'sendmsg for response\n')
-        buf.write('RspNic:     Elapsed time from sendmsg of response until '
+        buf.write('RspXmit:    Elapsed time from sendmsg of response until '
                 'first packet handed\n')
         buf.write('            off to NIC\n')
-        buf.write('RspGRO:     Time from NIC handoff to GRO receipt for '
+        buf.write('RspNet:     Time from NIC handoff to GRO receipt for '
                 'first response packet\n')
-        buf.write('RspRecv:    Time from GRO for first response packet '
+        buf.write('RspRecv:    Time from GRO for last response packet '
                 'until End\n')
         buf.write('End:        Time when response was returned to client\n')
         buf.write('Rtt:        RspRecv - Start\n\n')
-        buf.write('Start     Client   Server     Length     ReqSeq     RspSeq  ')
-        buf.write('ReqNic ReqGRO ReqRecv   Srvc  ')
-        buf.write('RspNic RspGRO RspRecv       End     Rtt\n')
+        buf.write('Start     Client   Server     Length     ReqSeq     RspSeq ')
+        buf.write('ReqXmit ReqNet ReqRecv   Srvc ')
+        buf.write('RspXmit RspNet RspRecv       End     Rtt\n')
     for rpc in rpcs:
-        request_pkt = rpc['req_pkts'][0] if rpc['req_pkts'] else {}
-        response_pkt = rpc['resp_pkts'][0] if rpc['resp_pkts'] else {}
-        if 'nic' in request_pkt:
-            rqnic = '%.1f' % (request_pkt['nic'] - rpc['req_send'])
+        if rpc['req_pkts']:
+            first_req_pkt = rpc['req_pkts'][0]
+            last_req_pkt = rpc['req_pkts'][-1]
         else:
-            rqnic = ''
-        if 'gro' in request_pkt and 'nic' in request_pkt:
-            rqgro = '%.1f' % (request_pkt['gro'] - request_pkt['nic'])
+            first_req_pkt = []
+            last_req_pkt = []
+        if rpc['resp_pkts']:
+            first_resp_pkt = rpc['resp_pkts'][0]
+            last_resp_pkt = rpc['resp_pkts'][-1]
         else:
-            rqgro = ''
-        if 'gro' in request_pkt and 'req_recvd' in rpc:
-            rqrecv = '%.1f' % (rpc['req_recvd'] - request_pkt['gro'])
+            first_resp_pkt = []
+            last_resp_pkt = []
+        if 'resp_seq' in rpc:
+            resp_seq = '%d' % (rpc['resp_seq'])
+        else:
+            resp_seq = ''
+        if 'nic' in first_req_pkt:
+            rqxmit = '%.1f' % (first_req_pkt['nic'] - rpc['req_send'])
+        else:
+            rqxmit = ''
+        if 'gro' in first_req_pkt and 'nic' in first_req_pkt:
+            rqnet = '%.1f' % (first_req_pkt['gro'] - first_req_pkt['nic'])
+        else:
+            rqnet = ''
+        if 'gro' in last_req_pkt and 'req_recvd' in rpc:
+            rqrecv = '%.1f' % (rpc['req_recvd'] - last_req_pkt['gro'])
         else:
             rqrecv = ''
         if 'req_recvd' in rpc and 'resp_send' in rpc:
             srvc = '%.1f' % (rpc['resp_send'] - rpc['req_recvd'])
         else:
             srvc = ''
-        if 'nic' in response_pkt:
-            rspnic = '%.1f' % (response_pkt['nic'] - rpc['resp_send'])
+        if 'nic' in first_resp_pkt:
+            rspxmit = '%.1f' % (first_resp_pkt['nic'] - rpc['resp_send'])
         else:
-            rspnic = ''
-        if 'gro' in response_pkt and 'nic' in response_pkt:
-            rspgro = '%.1f' % (response_pkt['gro'] - response_pkt['nic'])
+            rspxmit = ''
+        if 'gro' in first_resp_pkt and 'nic' in first_resp_pkt:
+            rspnet = '%.1f' % (first_resp_pkt['gro'] - first_resp_pkt['nic'])
         else:
-            rspgro = ''
-        if 'gro' in response_pkt and 'resp_recvd' in rpc:
-            rsprecv = '%.1f' % (rpc['resp_recvd'] - response_pkt['gro'])
+            rspnet = ''
+        if 'gro' in last_resp_pkt and 'resp_recvd' in rpc:
+            rsprecv = '%.1f' % (rpc['resp_recvd'] - last_resp_pkt['gro'])
         else:
             rsprecv = ''
         if 'req_send' in rpc and 'resp_recvd' in rpc:
@@ -1225,12 +1286,12 @@ def print_tcp_rpcs(rpcs, header=True):
             end = '%.3f' % (rpc['resp_recvd'])
         else:
             end = ''
-        line = ('%9.3f  %-8s %-8s %7d %10d %10d' % (
+        line = ('%9.3f  %-8s %-8s %7d %10d %10s' % (
                 rpc['req_send'], get_tcp_node(rpc['client']),
                 get_tcp_node(rpc['server']), rpc['req_length'],
-                rpc['req_seq'], rpc['resp_seq']))
-        line += (' %7s %6s %7s %6s' % (rqnic, rqgro, rqrecv, srvc))
-        line += (' %7s %6s %7s %9s %7s' % (rspnic, rspgro, rsprecv, end, rtt))
+                rpc['req_seq'], resp_seq))
+        line += (' %7s %6s %7s %6s' % (rqxmit, rqnet, rqrecv, srvc))
+        line += (' %7s %6s %7s %9s %7s' % (rspxmit, rspnet, rsprecv, end, rtt))
         buf.write(line.rstrip())
         buf.write('\n')
     return buf.getvalue()
@@ -2163,16 +2224,6 @@ class Dispatcher:
         'name': 'qdisc_xmit',
         'regexp': 'homa_qdisc_pacer queuing homa data packet for id ([0-9]+), '
                 'offset ([-0-9]+)'
-    })
-
-    def __tcp_xmit(self, trace, time, core, match, interests):
-        length = int(match.group(1))
-        for interest in interests:
-            interest.tt_tcp_xmit(trace, time, core, length)
-
-    patterns.append({
-        'name': 'tcp_xmit',
-        'regexp': '__tcp_transmit_skb sent packet with ([0-9]+) bytes'
     })
 
     def __snapshot_clock(self, trace, time, core, match, interests):
@@ -5004,8 +5055,9 @@ class AnalyzeIntervals:
         self.tcp_xmits = defaultdict(list)
         return
 
-    def tt_tcp_xmit(self, trace, t, core, length):
-        self.tcp_xmits[trace['node']].append([t, length])
+    def tt_tcp_xmit(self, trace, t, core, source, dest, data_bytes,
+                    seq_ack):
+        self.tcp_xmits[trace['node']].append([t, data_bytes])
 
     def restrict_qid(self, qid):
         """
@@ -5166,6 +5218,9 @@ class AnalyzeIntervals:
             else:
                 tnic = None
                 if tx_node != None:
+                    if not tx_node in traces:
+                        print('Bogus node name %s. Packet: %s' % (tx_node, pkt))
+                        print('\nTraces: %s' % (traces))
                     nic_start = traces[tx_node]['first_time']
             if 'free_tx_skb' in pkt:
                 tfree = pkt['free_tx_skb']
@@ -7203,8 +7258,8 @@ class AnalyzeNicqueues:
     def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
         self.nodes[trace['node']].append([t, 34, 0, "homa_grant"])
 
-    def  tt_tcp_xmit(self, trace, t, core, length):
-        self.nodes[trace['node']].append([t, length, 0, "tcp"])
+    def  tt_tcp_xmit(self, trace, t, core, source, dest, data_bytes, seq_ack):
+        self.nodes[trace['node']].append([t, data_bytes, 0, "tcp"])
 
     def output(self):
         global options, traces, packets, dispatcher
@@ -7490,8 +7545,8 @@ class AnalyzeOoo:
 class AnalyzeP99short:
     """
     Selects the 1% of short RPCs (those with single-packet request and
-    response messages) and breaks down the delay both for the overall
-    RPCs and for their constituent packets.
+    response messages) with highest RTT and breaks down the delay both
+    for the overall RPCs and for their constituent packets.
     """
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
@@ -7967,13 +8022,17 @@ class AnalyzePackets:
         # with the same name.
         stream_pkts = defaultdict(list)
 
-        # Pass 1: divide data packets into buckets for uinidirectional
+        # Pass 1: divide data packets into buckets for unidirectional
         # streams, and also fill in a fiew fields.
         for pkt in tcp_packets.values():
             if not 'tx_node' in pkt:
-                pkt['tx_node'] = get_tcp_node(pkt['source'])
+                node = get_tcp_node(pkt['source'])
+                if node != None:
+                    pkt['tx_node'] = node
             if not 'rx_node' in pkt:
-                pkt['rx_node'] = get_tcp_node(pkt['dest'])
+                node = get_tcp_node(pkt['source'])
+                if node != None:
+                    pkt['rx_node'] = node
             if not 'length' in pkt:
                 if not 'tso_length' in pkt:
                     print('No tso_length in packet: %s' % (pkt))
@@ -10215,7 +10274,7 @@ class AnalyzeTcp_rpcs:
 
         # Find matching pairs of request and response messages and merge
         # them into single (and complete) RPCs.
-        for key, rpcs in self.rpcs.items():
+        for key, rpcs in list(self.rpcs.items()):
             # slot -> List of requests in the forward direction and responses
             # in the reverse direction for this slot and client-server pair,
             # sorted by sendmsg time.
@@ -10251,50 +10310,6 @@ class AnalyzeTcp_rpcs:
                     # Unmatchable trailing request
                     self.del_rpc(request)
 
-    def filter_rpcs(self, rpcs, options):
-        """
-        Returns a list of all the TCP RPCs that match a set of command-line
-        options
-        rpcs:      List of TCP RPCs to filter (must be entries in tcp_rpcs)
-        options:   Command-line options to use for filtering; see below for
-                   valid options
-        """
-        if options.msglen != None:
-            min_length, max_length = get_range(options.msglen,
-                    option_name='--msglen', one_value=True)
-            if max_length == None:
-                max_length = min_length
-                min_length = 0
-        if options.rpc_start != None:
-            min_start, max_start = get_range(options.rpc_start,
-                    parse_float=True, option_name='--rpc-start')
-        if options.rtt != None:
-            min_rtt, max_rtt = get_range(options.rtt, parse_float = True,
-                    option_name='--rtt')
-
-        result = []
-        for rpc in rpcs:
-            if options.msglen != None:
-                if not 'req_length' in rpc:
-                    continue
-                length = rpc['req_length']
-                if length < min_length or length > max_length:
-                    continue
-            if options.rpc_start != None:
-                if not 'req_send' in rpc:
-                    continue
-                start = rpc['req_send']
-                if start < min_start or start > max_start:
-                    continue
-            if options.rtt != None:
-                if not 'req_send' in rpc or not 'resp_recvd' in rpc:
-                    continue
-                rtt = rpc['resp_recvd'] - rpc['req_send']
-                if rtt < min_rtt or rtt > max_rtt:
-                    continue
-            result.append(rpc)
-        return result
-
     def output(self):
         global tcp_rpcs, options
 
@@ -10302,10 +10317,12 @@ class AnalyzeTcp_rpcs:
         print('Analyzer: tcp_rpcs')
         print('------------------')
 
-        print_rpcs = self.filter_rpcs(tcp_rpcs.values(), options)
-
         if (options.msglen != None or options.rpc_start != None or
                 options.rtt != None):
+            print_rpcs = filter_tcp_rpcs(tcp_rpcs.values(),
+                    msglen=options.msglen,
+                    rpc_start=options.rpc_start,
+                    rtt=options.rtt)
             print('%d TCP RPCs were selected using the following filters:' %
                     (len(print_rpcs)))
             if options.msglen:
@@ -10315,7 +10332,8 @@ class AnalyzeTcp_rpcs:
             if options.rtt:
                 print('    --rtt        %s' % (options.rtt))
         else:
-            print('There are %d TCP RPCs in the traces:' % (len(print_rpcs)))
+            print_rpcs = tcp_rpcs.values()
+            print('There are %d TCP RPCs in the traces' % (len(print_rpcs)))
 
         sort_keys = options.sort
         if sort_keys == None:
@@ -10335,6 +10353,79 @@ class AnalyzeTcp_rpcs:
                 raise Exception('Unknwon sort key \'%s\' for tcp_rpcs '
                         'analyzer' % (key))
 
+        # Collect and print overall statistics about the RPCs.
+        xmit = []
+        net = []
+        free = []
+        recv = []
+        srvc = []
+        rtt = []
+        for rpc in print_rpcs:
+            if rpc['req_pkts']:
+                first_req_pkt = rpc['req_pkts'][0]
+                last_req_pkt = rpc['req_pkts'][-1]
+            else:
+                first_req_pkt = []
+                last_req_pkt = []
+            if rpc['resp_pkts']:
+                first_resp_pkt = rpc['resp_pkts'][0]
+                last_resp_pkt = rpc['resp_pkts'][-1]
+            else:
+                first_resp_pkt = []
+                last_resp_pkt = []
+            if 'nic' in first_req_pkt:
+                xmit.append(first_req_pkt['nic'] - rpc['req_send'])
+            if 'nic' in first_resp_pkt:
+                xmit.append(first_resp_pkt['nic'] - rpc['resp_send'])
+            for pkt in itertools.chain(rpc['req_pkts'], rpc['resp_pkts']):
+                if 'gro' in pkt and 'nic' in pkt:
+                    net.append(pkt['gro'] - pkt['nic'])
+                if 'free_tx_skb' in pkt and 'nic' in pkt:
+                    free.append(pkt['free_tx_skb'] - pkt['nic'])
+            if 'gro' in last_req_pkt and 'req_recvd' in rpc:
+                recv.append(rpc['req_recvd'] - last_req_pkt['gro'])
+            if 'gro' in last_resp_pkt and 'resp_recvd' in rpc:
+                recv.append(rpc['resp_recvd'] - last_resp_pkt['gro'])
+            if 'req_recvd' in rpc and 'resp_send' in rpc:
+                srvc.append(rpc['resp_send'] - rpc['req_recvd'])
+            if 'req_send' in rpc and 'resp_recvd' in rpc:
+                rtt.append(rpc['resp_recvd'] - rpc['req_send'])
+        for l in [xmit, net, free, recv, srvc, rtt]:
+            l.sort()
+
+        print('\nOverall statistics about the selected RPCs. Most of these '
+                'statistics')
+        print('combine data from request messages and response messages.')
+        print('Xmit:     Time from sendmsg until driver queued first '
+                'packet for NIC')
+        print('Net:      Time from NIC handoff to GRO receipt for packets')
+        print('Free:     Time from when NIC received packet until packet '
+                'was returned')
+        print('          to Linux and freed')
+        print('Recv:     Time from GRO for last packet in a message '
+                'until recvmsg completes')
+        print('Srvc:     Time from recvmsg return on server until '
+                'sendmsg for response')
+        print('Rtt:      Total time from request sendmsg until recvmsg '
+                'completes for response\n')
+
+        print('               Min      P10      P50      P90      P99      Max')
+        pctls = [0, 100, 500, 900, 990, 1000]
+        print('Xmit      %8s %8s %8s %8s %8s %8s' % tuple(
+                print_pctl(xmit, p, '%.1f') for p in pctls))
+        print('Net       %8s %8s %8s %8s %8s %8s' % tuple(
+                print_pctl(net, p, '%.1f') for p in pctls))
+        print('Free      %8s %8s %8s %8s %8s %8s' % tuple(
+                print_pctl(free, p, '%.1f') for p in pctls))
+        print('Recv      %8s %8s %8s %8s %8s %8s' % tuple(
+                print_pctl(recv, p, '%.1f') for p in pctls))
+        print('Srvc      %8s %8s %8s %8s %8s %8s' % tuple(
+                print_pctl(srvc, p, '%.1f') for p in pctls))
+        print('Rtt       %8s %8s %8s %8s %8s %8s' % tuple(
+                print_pctl(rtt, p, '%.1f') for p in pctls))
+
+        # Print a summary line for each RPC.
+        print('\nSummary information for each selected RPC:')
         print(print_tcp_rpcs(print_rpcs, header = True), end='')
 
         if options.verbose:
@@ -10357,11 +10448,36 @@ class AnalyzeTemp:
     debugging. Consult the code to see what it does right now.
     """
     def __init__(self, dispatcher):
-        dispatcher.interest('AnalyzeRpcs')
-        dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcp_rpcs')
+        # dispatcher.interest('AnalyzeRpcs')
+        # dispatcher.interest('AnalyzePackets')
 
     def output(self):
-        self.output_slow_pkts()
+        global tcp_rpcs
+
+        qdisc = 0
+        rpcs = filter_tcp_rpcs(tcp_rpcs.values(), msglen='1500')
+        rtts = []
+        for rpc in rpcs:
+            if not 'req_send' in rpc or not 'resp_recvd' in rpc:
+                continue
+            if not rpc['req_pkts'] or not rpc['resp_pkts']:
+                continue
+            if ('qdisc_xmit' in rpc['req_pkts'][0] or
+                    'qdisc_xmit' in rpc['resp_pkts'][0]):
+                qdisc += 1
+                continue
+            rtts.append(rpc['resp_recvd'] - rpc['req_send'])
+
+        rtts.sort()
+        print('%d RPCS smaller than 1500 bytes left after filtering out '
+                '%d deferred' % (len(rtts), qdisc))
+        print('Min RTT: %8s' % (print_pctl(rtts, 0, '%.1f')))
+        print('P10:     %8s' % (print_pctl(rtts, 100, '%.1f')))
+        print('P50:     %8s' % (print_pctl(rtts, 500, '%.1f')))
+        print('P90:     %8s' % (print_pctl(rtts, 900, '%.1f')))
+        print('P99:     %8s' % (print_pctl(rtts, 990, '%.1f')))
+        print('Max RTT: %8s' % (print_pctl(rtts, 1000, '%.1f')))
 
     def output_slow_pkts(self):
         pkts = []
