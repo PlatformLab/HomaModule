@@ -487,14 +487,9 @@ void homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb)
 	u64 now = homa_clock();
 	unsigned long flags;
 
-	tt_record4("homa_qdisc deferring TCP packet from 0x%08x to 0x%08x, "
-			"ports %x, length %d",
-			ntohl(ip_hdr(skb)->saddr),
-			ntohl(ip_hdr(skb)->daddr),
-			(ntohs(tcp_hdr(skb)->source) << 16) +
-			ntohs(tcp_hdr(skb)->dest),
-			skb->len - skb_transport_offset(skb) -
-			tcp_hdrlen(skb));
+	tt_record_tcp("homa_qdisc deferring TCP packet from "
+		"0x%x to 0x%x, data bytes %d, seq/ack %u",
+		skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
 
 	spin_lock_irqsave(&qdev->defer_lock, flags);
 	__skb_queue_tail(&qdev->deferred_tcp, skb);
@@ -600,7 +595,7 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 	homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 	if (ip_hdr(skb)->protocol == IPPROTO_TCP)
 		tt_record_tcp("homa_qdisc_pacer requeued TCP packet from "
-			"0x%x to 0x%x, data bytes %d, seq/ack %d",
+			"0x%x to 0x%x, data bytes %d, seq/ack %u",
 			skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
 
 	rcu_read_lock_bh();
