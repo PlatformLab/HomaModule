@@ -157,6 +157,7 @@ ip_to_node = {}
 # offset is the offset in message of the first byte of the packet. Each
 # value is a dictionary containing the following fields (some may not
 # be present, depending on which events were present in the traces):
+# type:         Packet type: always 'data'
 # xmit:         Time when ip*xmit was invoked
 # qdisc_defer:  If the packet was deferred by homa_qdisc, gives the
 #               time when the deferral decision was made. This field
@@ -206,8 +207,8 @@ ip_to_node = {}
 class PacketDict(dict):
     def __missing__(self, key):
         id_str, offset_str = key.split(':')
-        self[key] = {'id': int(id_str), 'offset': int(offset_str),
-                'retransmits': []}
+        self[key] = {'type': 'data', 'id': int(id_str),
+                'offset': int(offset_str), 'retransmits': []}
         return self[key]
 packets = PacketDict()
 
@@ -220,6 +221,7 @@ recv_offsets = {}
 # the RPC id on the sending side and offset is the offset in message of
 # the first byte of the packet. Each value is a dictionary containing
 # the following fields:
+# type:         Packet type: always 'grant'
 # xmit:         Time when ip*xmit was invoked
 # nic:          Time when the the packet was handed off to the NIC
 # gro:          Time when GRO received (the first bytes of) the packet
@@ -235,8 +237,8 @@ recv_offsets = {}
 class GrantDict(dict):
     def __missing__(self, key):
         id_str, offset_str = key.split(':')
-        self[key] = {'id': int(id_str), 'offset': int(offset_str),
-                'increment': 0}
+        self[key] = {'type': 'grant', 'id': int(id_str),
+                'offset': int(offset_str), 'increment': 0}
         return self[key]
 grants = GrantDict()
 
@@ -244,8 +246,7 @@ grants = GrantDict()
 # It is created by AnalyzePackets. See get_tcp_packet for details on the keys
 # used to look up packets. Each value is a dictionary containing the following
 # fields:
-# id:           Always zero; this can be used to distinguish TCP packets from
-#               Homa packets, where there is always a nonzero id.
+# type:         Packet type: always 'tcp'
 # source:       Hex string identifying source port for the packet: lower 16
 #               bits are port number, upper 16 bits are low-order 16-bits of
 #               IPv4 address
@@ -638,6 +639,27 @@ def get_granted(rpc, time):
         return max_offset
     return None
 
+def get_hdr_length(pkt, tx=True):
+    """
+    Returns the total amount of header data for a packet (i.e. everything
+    except message data).
+    pkt:    A packet (either Homa data, Homa grant, or TCP)
+    tx:     If true, compute the total headers for the transmitted packet,
+            which can include multiple segments for TSO frames. If false,
+            compute the header for the (single) received packet.
+    """
+    global data_hdr_length, grant_pkt_length, tcp_hdr_length
+
+    pkt_type = pkt['type']
+    if pkt_type == 'data':
+        return data_hdr_length * (1 + tx * len(pkt['segments']))
+    elif pkt_type == 'tcp':
+        return tcp_hdr_length * (1 + tx * len(pkt['segments']))
+    elif pkt_type == 'grant':
+        return grant_pkt_length
+    else:
+        return 0
+
 def get_interval(node, usecs):
     """
     Returns the interval dictionary corresponding to the arguments. A
@@ -796,7 +818,7 @@ def get_tcp_packet(source, dest, data_bytes, seq_ack):
         key = f'{source} {dest} {seq_ack} ack'
     if key in tcp_packets:
         return tcp_packets[key]
-    pkt = {'id': 0, 'source': source, 'dest': dest, 'seq_ack': seq_ack,
+    pkt = {'type': 'tcp', 'source': source, 'dest': dest, 'seq_ack': seq_ack,
             'retransmits': [], 'segments': []}
     tcp_packets[key] = pkt
     return pkt
@@ -1053,36 +1075,40 @@ def print_pctl(values, pctl, fmt):
     ix = len(values) * pctl // 1000
     return fmt % (values[ix] if ix < len(values) else values[-1])
 
-def print_pkts(pkts, header=True):
+def print_pkts(pkts, header=True, comment=False):
     """
     Returns a string containing one line for each packet in pkts, which
-    contains various useful information about the packet. The entries in
-    pkts can be either Homa packets or TCP packets. If header is True
-    then the string also includes initial text describing the fields that
-    are printed on each line.
+    contains various useful information about the packet.
+    pkts:    Packets to print (either Homa packets or TCP packets)
+    header:  If True, the result string will include initial text describing
+             the fields that are printed on each line.
+    comment: If True, all of the initial lines except column headers will
+             be preceded by '# '.
     """
 
     buf = StringIO()
+    prefix = '# ' if comment else ''
     if header:
-        buf.write('# Source:     Node that sent packet\n')
-        buf.write('# Dest:       Node to which packet was sent\n')
-        buf.write('# Xmit:       Time when packet was passed to ip*xmit\n')
-        buf.write('# Qdisc:      Time when homa_qdisc requeued packet after '
-                'deferral, if any\n')
-        buf.write('# Id/Seq:     RPC identifier for Homa packets, sequence '
+        buf.write(prefix + 'Source:     Node that sent packet\n')
+        buf.write(prefix + 'Dest:       Node to which packet was sent\n')
+        buf.write(prefix + 'Xmit:       Time when packet was passed to ip*xmit\n')
+        buf.write(prefix + 'Qdisc:      Time when homa_qdisc requeued packet '
+                'after deferral, if any\n')
+        buf.write(prefix + 'Id/Seq:     RPC identifier for Homa packets, sequence '
                 'number for TCP\n')
-        buf.write('# Offset:     Offset of packet within message or "TCP" if '
-                'packet is TCP\n')
-        buf.write('# Length:     Size of packet (before segmentation)\n')
-        buf.write('# Qid:        Transmit queue on which packet was sent\n')
-        buf.write('# Nic:        Time when packet was queued for NIC\n')
-        buf.write('# NDelay:     Nic - Xmit\n')
-        buf.write('# Gro:        Time when packet was received by GRO\n')
-        buf.write('# GDelay:     Gro - Nic\n')
-        buf.write('# Free:       Time when sk_buff was released on sender\n')
-        buf.write('# FDelay:     Free - Nic\n')
-        buf.write('# Rx:         Number of times segments in the packet were '
-                'retransmitted\n\n')
+        buf.write(prefix + 'Offset:     Offset of packet within message or '
+                '"TCP" if packet is TCP\n')
+        buf.write(prefix + 'Length:     Size of packet (before segmentation)\n')
+        buf.write(prefix + 'Qid:        Transmit queue on which packet was sent\n')
+        buf.write(prefix + 'Nic:        Time when packet was queued for NIC\n')
+        buf.write(prefix + 'NDelay:     Nic - Xmit\n')
+        buf.write(prefix + 'Gro:        Time when packet was received by GRO\n')
+        buf.write(prefix + 'GDelay:     Gro - Nic\n')
+        buf.write(prefix + 'Free:       Time when sk_buff was released on '
+                'sender\n')
+        buf.write(prefix + 'FDelay:     Free - Nic\n')
+        buf.write(prefix + 'Rx:         Number of times segments in the packet '
+                'were retransmitted\n\n')
         buf.write('Source   Dest           Xmit      Qdisc     Id/Seq Offset')
         buf.write('  Length Qid        Nic  NDelay        Gro  GDelay')
         buf.write('       Free  FDelay Rx\n')
@@ -1115,7 +1141,7 @@ def print_pkts(pkts, header=True):
         line = '%-8s %-8s %10s %10s' % (pkt['tx_node'],
                 pkt['rx_node'] if 'rx_node' in pkt else "",
                 print_if(xmit, '%.3f'), qdisc_string)
-        if pkt['id'] != 0:
+        if pkt['type'] == 'data':
             line += ' %10d %6d' % (pkt['id'], pkt['offset'])
         else:
             # This is a TCP packet
@@ -3841,7 +3867,7 @@ class AnalyzeFilter:
         Returns True if pkt is a short TCP packet: it has some data, but
         no more than 1500 bytes.
         """
-        if pkt['id'] != 0:
+        if pkt['type'] == '':
             return False
         if not 'tso_length' in pkt:
             return False
@@ -5335,7 +5361,7 @@ class AnalyzeIntervals:
                 else:
                     add_to_intervals(rx_node, traces[rx_node]['first_time'],
                             tsoftirq, 'rx_data_gro', length)
-            elif tgro != None and pkt['id'] != 0:
+            elif tgro != None and pkt['type'] == 'homa':
                 # Note: TCP doesn't yet provide softirq times, hence the
                 # exclusion above.
                 add_to_intervals(rx_node, tgro, traces[rx_node]['last_time'],
@@ -7082,7 +7108,7 @@ class AnalyzeNicbacklog2:
                     queues_freed[qid] = 1
                     queue_packets[qid] -= 1
                     queue_bytes[qid] -= pkt['tso_length']
-                    if pkt['id'] == 0:
+                    if pkt['type'] == 'tcp':
                         queue_tcp_bytes[qid] -= pkt['tso_length']
                     if queue_packets[qid] == 0:
                         if queue_bytes[qid] != 0:
@@ -7092,7 +7118,7 @@ class AnalyzeNicbacklog2:
                 else:
                     queue_packets[qid] += 1
                     queue_bytes[qid] += pkt['tso_length']
-                    if pkt['id'] == 0:
+                    if pkt['type'] == 'tcp':
                         queue_tcp_bytes[qid] += pkt['tso_length']
                     free = (pkt['free_tx_skb'] if 'free_tx_skb' in pkt else
                             traces[node]['last_time'])
@@ -7382,6 +7408,188 @@ class AnalyzeNicqueues:
                     break
                 interval_end += interval
             file.close()
+
+#------------------------------------------------
+# Analyzer: nicsnapshot
+#------------------------------------------------
+class AnalyzeNicsnapshot:
+    """
+    Print information about the state of the NIC queues on a particular
+    node at a particular point in time. Requires the --time and --node
+    options. If --verbose is specified then all of the packets in the
+    position of the NIC at the reference time are printed.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzePackets')
+        require_options('nicsnapshot', 'time', 'node')
+
+    def output(self):
+        global options, packets, tcp_packets
+
+        # Queue id -> packets in queue at reference time.
+        id_pkts = defaultdict(list)
+
+        # Intervals to use for id_queued_interval and other variables.
+        intervals = [10, 20, 50, 100]
+
+        # Queue id -> dict of interval -> count, where interval is a time
+        # in usecs and count is the number of bytes that were handed
+        # off to the NIC for that queue in the interval preceding the
+        # reference time.
+        id_queued_interval = defaultdict(lambda: defaultdict(lambda: 0))
+
+        # Queue id -> dict of interval -> count, where interval is a time
+        # in usecs and count is the number of bytes in packets for that
+        # queue that were freed after transmission in the interval preceding
+        # the reference time.
+        id_freed_interval = defaultdict(lambda: defaultdict(lambda: 0))
+
+        # Queue id -> last packet freed for that queue before the reference
+        # time
+        id_last_freed = {}
+
+        # All packets active in the NIC at the reference time
+        all_active = []
+
+        # Scan all packets and fill in the variables above.
+        for pkt in itertools.chain(packets.values(), tcp_packets.values()):
+            if not 'tx_node' in pkt or pkt['tx_node'] != options.node:
+                continue
+            if not 'tso_length' in pkt:
+                continue
+            length = pkt['tso_length'] + get_hdr_length(pkt)
+            qid = pkt['tx_qid'] if 'tx_qid' in pkt else 'unknown'
+            nic = pkt['nic'] if 'nic' in pkt else None
+            free = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
+            if (nic != None and free != None and nic < options.time
+                    and free > options.time):
+                all_active.append(pkt)
+                id_pkts[qid].append(pkt)
+            for i in intervals:
+                if (nic != None and nic < options.time and
+                        nic >= (options.time - i)):
+                    id_queued_interval[qid][i] += length
+                if (free != None and free < options.time and
+                        free >= (options.time - i)):
+                    id_freed_interval[qid][i] += length
+            if free != None and free < options.time:
+                if (not qid in id_last_freed or
+                        id_last_freed[qid]['free_tx_skb'] < free):
+                    id_last_freed[qid] = pkt
+
+        intervals = [10, 20, 50, 100]
+
+        print('\n---------------------')
+        print('Analyzer: nicsnapshot')
+        print('---------------------')
+        print('Information about the state of the NIC queues on %s at time %.3f:'
+                % (options.node, options.time))
+        print('Qid:       Identifier of transmit queue')
+        print('Pkts:      Packets in Qid at the reference time')
+        print('KB:        Kbytes of packet data in Qid at the reference time')
+        print('Oldest:    Time when the oldest packet in Qid was handed '
+                'off to the NIC')
+        print('ODiff:     Time difference between Oldest and reference time '
+                '(usecs)')
+        print('RecFree:   Most recent time when a packet for Qid was returned '
+                'to Linux and freed')
+        print('RFDiff:    Time difference between RecFree and reference time '
+                '(usecs)')
+        print('QXX:       Kbytes of packet data handed off to NIC for Qid '
+                'in the XX usecs')
+        print('           precending the reference time')
+        print('FXX:       Kbytes of packet data freed after transmission '
+                'in the XX usecs')
+        print('           precending the reference time')
+        print()
+        print('  Qid Pkts     KB     Oldest   ODiff   RecFree  RFDiff', end='')
+        for i in intervals:
+            print('%7s' % ('Q%d' % (i)), end='')
+        for i in intervals:
+            print('%7s' % ('F%d' % (i)), end='')
+        print()
+
+        # Interval (usecs) -> total bytes handed off to the NIC (for any
+        # queue) within that interval of the reference time.
+        total_interval_bytes = defaultdict(lambda: 0)
+        nic_oldest = {'nic': 1e20}
+        total_bytes = 0
+        total_pkts = 0
+
+        qids = sorted(id_pkts.keys() | id_queued_interval.keys() |
+                id_freed_interval.keys())
+        for qid in qids:
+            pkts = id_pkts[qid]
+            oldest_queued = None
+            q_bytes = 0
+            total_pkts += len(pkts)
+
+            for pkt in pkts:
+                nic = pkt['nic']
+                if oldest_queued == None or nic < oldest_queued['nic']:
+                    oldest_queued = pkt
+                if nic < nic_oldest['nic']:
+                    nic_oldest = pkt
+                length = pkt['tso_length'] + get_hdr_length(pkt)
+                q_bytes += length
+                total_bytes += length
+
+            if qid in id_last_freed:
+                t = id_last_freed[qid]['free_tx_skb']
+                freed = '%.3f' % (t)
+                free_diff = '%.1f' % (options.time - t)
+            else:
+                freed = ''
+                free_diff = ''
+            if oldest_queued != None:
+                old_queue_time = '%.3f' % (oldest_queued['nic'])
+                odiff = '%.1f' % (options.time - oldest_queued['nic'])
+            else:
+                old_queue_time = ''
+                odiff = ''
+            line = '%5d %4d %6.1f  %9s %7s %9s %7s' % (qid, len(pkts),
+                    q_bytes*1e-3, old_queue_time, odiff, freed, free_diff)
+            for i in intervals:
+                bytes = id_queued_interval[qid][i]
+                if bytes != 0:
+                    msg = '%.1f' % (bytes*1e-3)
+                else:
+                    msg = ''
+                line += '%7s' % (msg)
+            for i in intervals:
+                bytes = id_freed_interval[qid][i]
+                if bytes != 0:
+                    msg = '%.1f' % (bytes*1e-3)
+                else:
+                    msg = ''
+                line += '%7s' % (msg)
+            print(line.rstrip())
+        if id_last_freed:
+            rec_free = max(pkt['free_tx_skb'] for pkt in id_last_freed.values())
+            freed = '%.3f' % (rec_free)
+            free_diff = '%.1f' % (options.time - rec_free)
+        else:
+            freed = ''
+            free_diff = ''
+        print('Total %4d %6.1f  %9.3f %7.1f %9s %7s' % (total_pkts, total_bytes*1e-3,
+                nic_oldest['nic'], options.time - nic_oldest['nic'],
+                freed, free_diff), end='')
+        for i in intervals:
+            print('%7.1f' % (
+                    sum(q[i] for q in id_queued_interval.values())*1e-3),
+                    end='')
+        for i in intervals:
+            print('%7.1f' % (
+                    sum(q[i] for q in id_freed_interval.values())*1e-3),
+                    end='')
+        print()
+
+        if options.verbose:
+            print('\nDetails for all of the packets owned by the NIC at time %.1f:'
+                    % (options.time))
+            all_active.sort(key=lambda pkt: [pkt['tx_qid'], pkt['nic']])
+            print(print_pkts(all_active, header=True), end='')
 
 #------------------------------------------------
 # Analyzer: ooo
@@ -7967,7 +8175,6 @@ class AnalyzePackets:
         tcp_pkt['xmit'] = t
         tcp_pkt['xmit2'] = t
         tcp_pkt['tso_length'] = data_bytes
-        tcp_pkt['total_length'] = data_bytes + tcp_hdr_length
         tcp_pkt['tx_node'] = node
         set_tcp_ip_node(source, node)
 
@@ -7977,7 +8184,6 @@ class AnalyzePackets:
         tcp_pkt['qdisc_xmit'] = t
         tcp_pkt['xmit2'] = t
         tcp_pkt['tso_length'] = data_bytes
-        tcp_pkt['total_length'] = data_bytes + tcp_hdr_length
         tcp_pkt['tx_node'] = node
         set_tcp_ip_node(source, node)
 
@@ -8006,7 +8212,6 @@ class AnalyzePackets:
         node = trace['node']
         tcp_pkt['length'] = data_bytes
         tcp_pkt['gro'] = t
-        tcp_pkt['total_length'] = data_bytes + tcp_hdr_length
         tcp_pkt['rx_node'] = node
         set_tcp_ip_node(dest, node)
 
@@ -8451,7 +8656,7 @@ class AnalyzeQbytes:
                                     'q_homa_sched', length)
                     else:
                         add_to_intervals(rx_node, q_start, gro, 'q_tcp',
-                                pkt['total_length'])
+                                pkt['length'] + tcp_hdr_length)
 
     def init_axis(self, ax, x_min, x_max, y_max, size=10):
         """
@@ -10717,7 +10922,7 @@ class AnalyzeTemp2:
                 continue
             bytes = pkt['tso_length']
             data_bytes += bytes
-            if pkt['id'] == 0:
+            if pkt['type'] == 0:
                 total_bytes += bytes + tcp_headers
             else:
                 total_bytes += bytes + homa_headers
@@ -11217,7 +11422,7 @@ class AnalyzeTxpkts:
             f.write('# Generated at %s.\n' %
                     (time.strftime('%I:%M %p on %m/%d/%Y')))
             f.write('# Data packets transmitted from %s:\n' % (node))
-            f.write(print_pkts(pkts))
+            f.write(print_pkts(pkts, comment=True))
             f.close()
 
             def print_type(delays):
