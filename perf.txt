@@ -2,6 +2,18 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+65. (December 2025) The pacer does not prevent NIC queue buildup. Under
+"-w w4 -b 80" on cc620 machines (Intel NICs) it is not unusual to see
+periods of 1ms or longer with more than 500 Kbytes of packet data queued
+in the NIC. This happens because the NIC cannot always sustain 100 Gbps of
+output. Even with large amounts of queued data, the NIC completion rate varies
+between 85 and 100 Gbps. Since the pacer will queue data at almost 100 Gbps,
+the NIC queue builds when there is a large backlog of data; over time, the
+queue for data tends to move from the pacer to the NIC. The pacer limit rate
+would have to be reduced considerably to eliminate this problem (e.g., 85 Gbps
+instead of 99 Gbps?) but that would waste a lot of NIC bandwidth since there
+are many times when the NIC can transmit at nearly 100 Gbps.
+
 64. (November 2025) Separating pacer traffic from non-paced traffic in
 homa_qdisc (use tx queue 0 for paced traffic; non-paced traffic is spread
 across other queues, using default queues except that traffic for queue 0
