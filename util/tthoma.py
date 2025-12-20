@@ -7614,9 +7614,9 @@ class AnalyzeNicsnapshot:
 #------------------------------------------------
 class AnalyzeNictx:
     """
-    Analyze NIC throughput for packet transmission and generate plots
-    of throughput as a function of number of bytes queued in the NIC
-    and number of active NIC queues. Requires the --plot option
+    Analyze various factors related to NIC queueing and throughput for packet
+    transmission; generate graphs displaying these factors. Requires the
+    --plot option.
     """
 
     def __init__(self, dispatcher):
@@ -7644,167 +7644,136 @@ class AnalyzeNictx:
                 node_pkts[node].append(pkt)
                 type_counts[pkt['type']] += 1
 
-        # List of <queues, bytes, pkts, freed, queued> tuples, one for each
-        # interval across all nodes, where queues is the number of tx queues
-        # in the NIC with packets at the start of the interval, bytes is
-        # the number of packet bytes queued in the NIC at the start of
-        # the interval, pkts is the total number of queued packets at the
-        # start of the interval, freed is the number of packet bytes freed
-        # after transmission during the interval, and queued is the number
-        # of new packet bytes queued during the interval.
+        # List of <queues, bytes, pkts, freed, queued, qdisc> tuples, one for
+        # each interval across all nodes:
+        # queues:   The number of tx queues in the NIC with packets at the
+        #           start of the interval
+        # bytes:    The number of packet bytes queued in the NIC at the start
+        #           of the interval
+        # pkts:     The total number of queued packets at the start of the
+        #           interval
+        # freed:    The number of packet bytes freed after transmission during
+        #           the interval
+        # queued:   The number of new packet bytes queued during the interval
+        # qdisc:    The number of bytes in packets that are queued in the
+        #           qdisc system (they have been passed to ip*xmit but have
+        #           not been handed off to the NIC)
         intervals = []
 
-        # Process node_pkts, one node at a time, to populate intervals.
+        # node -> dict containing data series for plotting:
+        # t:       list of time values for the other data series
+        # qdisc:   for each t, kbytes queued in qdiscs or NIC at t
+        # nic:     for each t, kbytes queued in the NIC at t
+        node_data = defaultdict(lambda: {'t': [], 'qdisc': [], 'nic': []})
+
+        # Process the packets in each node separately in order to populate
+        # intervals and node_data.
         for node in get_sorted_nodes():
-            # heapq with one entry for each packet currently in the NIC's
-            # possession. Each entry is a <free, index, pkt> tuple,
-            # where free is the packet's free_tx_skb time, index is the
-            # packet's index in the list of all packets (for resolving sorting
-            # ties), and pkt is the packet.
-            active = []
+            # List of <time, type, pkt>, where time is the time when an
+            # event occurred, type indicates what happened ('xmit',
+            # 'nic', or 'freed'), and pkt is the packet for which the
+            # particular event occurred. The list is eventually sorted
+            # in time order.
+            events = []
+
+            # Generate list of interesting events.
+            first_time = traces[node]['first_time']
+            last_time = traces[node]['last_time']
+            for pkt in node_pkts[node]:
+                events.append([pkt['xmit'] if 'xmit' in pkt else first_time,
+                        'xmit', pkt])
+                events.append([pkt['nic'] if 'nic' in pkt else first_time,
+                        'nic', pkt])
+                events.append([pkt['free_tx_skb'] if 'free_tx_skb' in pkt
+                        else last_time, 'freed', pkt])
+            events.sort(key=lambda t: t[0])
+
+            # Process the events in time order to generate statistics.
 
             # qid -> count of packets currently owned by this queue.
             qid_packets = defaultdict(lambda: 0)
 
-            # Total bytes owned by NIC
+            # qid -> count of bytes currently owned by this queue.
+            qid_bytes = defaultdict(lambda: 0)
+
+            # Total bytes currently owned by NIC
             nic_bytes = 0
 
-            # Total packets owned by NIC
+            # Total packets currently owned by NIC
             nic_pkts = 0
 
-            # The next tuple that will be added to intervals.
-            next = [0, 0, 0, 0, 0]
+            # Total bytes that have been passed to ip*xmit but have not
+            # yet been queued in the NIC (they are queued in the qdisc system).
+            qdisc_bytes = 0
 
-            pkts = sorted(node_pkts[node], key = lambda pkt :
-                    pkt['nic'] if 'nic' in pkt else -1e20)
-            cur = 0
-            t = traces[node]['first_time']
-            interval_end = (math.ceil(traces[node]['first_time'] /
-                    options.interval) * options.interval)
+            # The next tuple that will be added to intervals.
+            next = [0, 0, 0, 0, 0, 0]
 
             # True means there was at least one point in the current interval
             # where the total # of bytes queued in the NIC dropped below
             # a threshold value.
             below_threshold = False
 
-            interval_pkts = []
+            t = traces[node]['first_time']
+            interval_end = (math.ceil(first_time / options.interval) *
+                    options.interval)
 
-            # Each iteration of this loop processes one event: either a
-            # packet handed off to the NIC or a packet freed.
-            while True:
-                # Decide on next event
-                if cur < len(pkts):
-                    pkt = pkts[cur]
-                    if 'nic' in pkt:
-                        nic = pkt['nic']
-                    else:
-                        nic = traces[node]['first_time']
-                else:
-                    nic = None
-                if nic != None and (not active or active[0][0] > nic):
-                    free_event = False
-                    t = nic
-                    cur += 1
-                elif active:
-                    t, _, pkt = heapq.heappop(active)
-                    free_event = True
-                else:
-                    break
+            data = node_data[node]
 
+            for t, event, pkt in events:
                 # Handle end of interval(s)
                 while t >= interval_end:
-                    if traces[node]['first_time'] <= (interval_end -
-                            options.interval):
+                    if first_time <= (interval_end - options.interval):
                         gbps_in = next[4] * 8e-3 / options.interval
                         gbps_out = next[3] * 8e-3 / options.interval
-                        # if gbps_in >= gbps_out + 5:
-                        if gbps_in > 100:
+                        if 0 and gbps_in > 100:
                             print('%9.1f %s has %.1f KB queued data, tput %.1f '
                                     'Gbps, input %.1f Gbps'
                                     % (interval_end, node, nic_bytes * 1e-3,
                                     gbps_out, gbps_in))
                         if not below_threshold:
                             intervals.append(next)
+                        data['t'].append(interval_end)
+                        data['qdisc'].append((qdisc_bytes + nic_bytes) * 1e-3)
+                        data['nic'].append(nic_bytes * 1e-3)
                     active_queues = sum(n > 0 for n in qid_packets.values())
-                    next = [active_queues, nic_bytes, nic_pkts, 0, 0]
+                    next = [active_queues, nic_bytes, nic_pkts, 0, 0,
+                            qdisc_bytes]
                     below_threshold = False
-                    interval_pkts = []
                     interval_end += options.interval
 
-                # Update statistics with current event
+                # Process event
                 qid = pkt['tx_qid']
                 if pkt['type'] == 'grant':
                     length = get_hdr_length(pkt)
                 else:
                     length = pkt['tso_length'] + get_hdr_length(pkt)
-                if free_event:
+                if event == 'xmit':
+                    qdisc_bytes += length
+                elif event == 'nic':
+                    qid_packets[qid] += 1
+                    qid_bytes[qid] += length
+                    nic_pkts += 1
+                    nic_bytes += length
+                    qdisc_bytes -= length
+                    if 'nic' in pkt:
+                        next[4] += length
+                elif event == 'freed':
                     qid_packets[qid] -= 1
+                    qid_bytes[qid] -= length
                     nic_pkts -= 1
                     nic_bytes -= length
                     # if nic_bytes < 1000000:
                     #     below_threshold = True
                     next[3] += length
                 else:
-                    qid_packets[qid] += 1
-                    nic_pkts += 1
-                    nic_bytes += length
-                    if 'nic' in pkt:
-                        interval_pkts.append(pkt)
-                        next[4] += length
-                    free_event = (pkt['free_tx_skb'] if 'free_tx_skb' in pkt else
-                            traces[node]['last_time'])
-                    heapq.heappush(active, [free_event, cur, pkt])
+                    raise Exception('unknown event type %s' % event)
 
-        # Generate scatter plots of throughput vs. queues occupied, NIC bytes,
-        # and NIC pkts.
-        occupied = []
-        kbytes = []
-        num_pkts = []
-        gbps = []
-        for queues, bytes, pkts, freed, queued in intervals:
-            occupied.append(queues)
-            kbytes.append(bytes * 1e-3)
-            num_pkts.append(pkts)
-            gbps.append(freed * 8e-3 / options.interval)
-
-        fig = plt.figure(figsize=[6,4])
-        ax = fig.add_subplot(111)
-        ax.set_xlim(0, 30)
-        ax.set_xlabel('# Nic Queues Occupied')
-        ax.set_ylim(0, 120)
-        ax.set_ylabel('Tx Completion Rate(Gbps)')
-        ax.scatter(occupied, gbps, marker='o', s=1)
-        plt.tight_layout()
-        plt.savefig('%s/nictx_vs_queues_scat.pdf' % (options.plot))
-
-        fig = plt.figure(figsize=[6,4])
-        ax = fig.add_subplot(111)
-        ax.set_xlim(0, 2500)
-        ax.set_xlabel('KBytes in NIC Queues')
-        ax.set_ylim(0, 120)
-        ax.set_ylabel('Tx Completion Rate (Gbps)')
-        ax.scatter(kbytes, gbps, marker='o', s=1)
-        plt.tight_layout()
-        plt.savefig('%s/nictx_vs_kb_scat.pdf' % (options.plot))
-
-        fig = plt.figure(figsize=[6,4])
-        ax = fig.add_subplot(111)
-        ax.set_xlim(0, 30)
-        ax.set_xlabel('# Packets Owned by NIC')
-        ax.set_ylim(0, 120)
-        ax.set_ylabel('Tx Completion Rate (Gbps)')
-        ax.scatter(num_pkts, gbps, marker='o', s=1)
-        plt.tight_layout()
-        plt.savefig('%s/nictx_vs_pkts_scat.pdf' % (options.plot))
-
-        # Now generate point plots with mean and standard deviation for
-        # buckets of similar intervals.
-
-        # Throughput vs. number of active queues
+        # Plot throughput vs. number of active queues
         xmax = 30
         x = range(xmax)
         buckets = [[] for _ in x]
-        for queues, bytes, pkts, freed, queued in intervals:
+        for queues, bytes, pkts, freed, queued, qdisc in intervals:
             if queues < xmax:
                 buckets[queues].append(freed * 8e-3 / options.interval)
         y = []
@@ -7831,12 +7800,12 @@ class AnalyzeNictx:
         plt.tight_layout()
         plt.savefig('%s/nictx_vs_queues.pdf' % (options.plot))
 
-        # Throughput vs. Kbytes owned by NIC
+        # Plot throughput vs. Kbytes owned by NIC
         xmax = 2500
         bucket_size = 100
         x = range(0, xmax, bucket_size)
         buckets = [[] for _ in x]
-        for queues, bytes, pkts, freed, queued in intervals:
+        for queues, bytes, pkts, freed, queued, qdisc in intervals:
             kb = bytes//1000
             if kb < xmax:
                 buckets[kb//bucket_size].append(freed * 8e-3 / options.interval)
@@ -7863,11 +7832,11 @@ class AnalyzeNictx:
         plt.tight_layout()
         plt.savefig('%s/nictx_vs_kb.pdf' % (options.plot))
 
-        # Throughput vs. packets owned by NIC
+        # Plot throughput vs. packets owned by NIC
         xmax = 30
         x = range(xmax)
         buckets = [[] for _ in x]
-        for queues, bytes, pkts, freed, queued in intervals:
+        for queues, bytes, pkts, freed, queued, qdisc in intervals:
             if pkts < xmax:
                 buckets[pkts].append(freed * 8e-3 / options.interval)
         y = []
@@ -7928,7 +7897,7 @@ class AnalyzeNictx:
         # Generate CDF of KBytes in queued packets.
         kb = [i[1] * 1e-3 for i in intervals]
         kb.sort()
-        y = [i / len(tput) for i in range(len(tput))]
+        y = [i / len(kb) for i in range(len(kb))]
         fig = plt.figure(figsize=[6,4])
         ax = fig.add_subplot(111)
         ax.set_xlim(0, 1500)
@@ -7940,10 +7909,25 @@ class AnalyzeNictx:
         plt.tight_layout()
         plt.savefig('%s/nictx_kb_cdf.pdf' % (options.plot))
 
+        # Generate CDF of KBytes in packets queued in a qdisc.
+        kb = [i[5] * 1e-3 for i in intervals]
+        kb.sort()
+        y = [i / len(kb) for i in range(len(kb))]
+        fig = plt.figure(figsize=[6,4])
+        ax = fig.add_subplot(111)
+        ax.set_xlim(0, 1500)
+        ax.set_xlabel('Kbytes in Packets Queued in a Qdisc')
+        ax.set_ylim(0, 5000)
+        ax.set_ylabel('KBytes Queued')
+        plt.grid(which="major", axis="y")
+        plt.plot(kb, y)
+        plt.tight_layout()
+        plt.savefig('%s/nictx_qdisc_cdf.pdf' % (options.plot))
+
         # Generate CDF of queued packets for intervals.
         pkts = [i[2] for i in intervals]
         pkts.sort()
-        y = [i / len(active) for i in range(len(active))]
+        y = [i / len(pkts) for i in range(len(pkts))]
         fig = plt.figure(figsize=[6,4])
         ax = fig.add_subplot(111)
         ax.set_xlim(0, 50)
@@ -7971,6 +7955,35 @@ class AnalyzeNictx:
         plt.tight_layout()
         plt.savefig('%s/nictx_input_cdf.pdf' % (options.plot))
 
+        # Generate time-series plot showing queuing in the qdisc and NIC
+        # for each node.
+        x_min = get_last_start()
+        x_max = get_first_end()
+        nodes = get_sorted_nodes()
+        maxy = max(max(node_data[node]['qdisc']) for node in nodes)
+        fig, axes = plt.subplots(nrows=len(nodes), ncols=1, sharex=False,
+                figsize=[8, len(nodes)*2])
+        for i in range(len(nodes)):
+            node = nodes[i]
+            ax = axes[i]
+            ax.set_xlim(x_min, x_max)
+            ax.set_xlabel('Time')
+            ax.set_ylim(0, maxy)
+            ax.set_ylabel('Kbytes Queued')
+            ax.grid(which="major", axis="y")
+            ax.plot(node_data[node]['t'], node_data[node]['qdisc'],
+                    color=color_blue, label='Nic + Qdisc')
+            ax.plot(node_data[node]['t'], node_data[node]['nic'],
+                    color=color_red, label='Nic')
+        legend_handles = [
+            matplotlib.lines.Line2D([], [], color=c, marker='o',
+                    linestyle='None', markersize=8, label=label)
+            for c, label in [[color_blue, 'Nic + Qdisc'],
+                    [color_red, 'Nic']]
+        ]
+        fig.legend(handles=legend_handles)
+        plt.tight_layout()
+        plt.savefig("%s/nictx_qtrends.pdf" % (options.plot), bbox_inches='tight')
 
         print('\n---------------')
         print('Analyzer: nictx')
@@ -11061,30 +11074,18 @@ class AnalyzeTemp:
     def output(self):
         global packets, grants, tcp_packets
 
-        nic_idle = -1e20
-        range_pkts = []
-        for pkt in tcp_packets.values():
-            if not 'tx_node' in pkt or pkt['tx_node'] != 'node5':
-                continue
+        selected = []
+        for pkt in itertools.chain(packets.values(), grants.values(),
+                tcp_packets.values()):
             if not 'nic' in pkt or not 'tso_length' in pkt:
                 continue
-            nic = pkt['nic']
-            if nic < -500 or nic > 1000:
+            if not 'xmit' in pkt:
                 continue
-            range_pkts.append(pkt)
-        range_pkts.sort(key=lambda pkt: pkt['nic'])
-        for pkt in range_pkts:
-            nic = pkt['nic']
-            length = pkt['tso_length'] + get_hdr_length(pkt) + 24
-            xmit_usecs = length * 8e-5
-            if nic_idle < nic:
-                nic_idle = nic + xmit_usecs
-            else:
-                nic_idle += xmit_usecs
-            print('%9.3f: C%02d length %5d, xmit %.2f us (%5.0f cycles), '
-                    'new nic_idle %.3f (queue %5.1f us, %5.0f cycles)' % (
-                    nic, pkt['nic_core'], length, xmit_usecs, xmit_usecs*2100,
-                    nic_idle, nic_idle - nic, (nic_idle - nic)*2100))
+            if pkt['nic'] - pkt['xmit'] > 5:
+                selected.append(pkt)
+
+        selected.sort(key=lambda pkt: pkt['xmit'])
+        print(print_pkts(selected, header=True), end='')
 
     def output_slow_pkts(self):
         pkts = []
