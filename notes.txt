@@ -1,9 +1,18 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* (12/12/25) Something is wrong with the xl170 cluster: both Homa and TCP
+  are showing considerably worse performance than previously. I tried multiple
+  different clusters, and tried backing out to older versions of Homa and
+  Linux, but the problems don't go away.
+
 * Performance problems to track down:
   * On xl170s, both TCP and Homa run slower with qdisc than pacer (P99 for
     TCP small packets increases by 50%)
+  * P99 latency for W4 short packets is considerably worse with IPv6 than IPv4
+    (c6620).
+  * On c6620 cluster, "cp_node client --workload 500000" gets 20 GBps each
+    way with TCP but only 15 Gbps with Homa.
 
 * Move interest cleanup code from homa_sock to a new function in
   homa_interest. Also move wakeup code from homa_rpc_handoff.
