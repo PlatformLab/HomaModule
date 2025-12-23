@@ -38,11 +38,18 @@ struct homa_qdisc {
 	int ix;
 
 	/**
-	 * @num_deferred_tcp: Count of the number of TCP packets for this
-	 * qdisc that are currently in qdev->deferred_tcp. Incremented and
-	 * decremented without holding a lock.
+	 * @deferred_tcp: List of non-Homa packets for this qdisc that have
+	 * been deferred because of NIC overload, in order of arrival.
+	 * Synchronize with qdev->defer_lock.
 	 */
-	atomic_t num_deferred_tcp;
+	struct sk_buff_head deferred_tcp;
+
+	/**
+	 * @defer_links: Used to link this object into qdev->deferred_qdiscs
+	 * when deferred_tcp is nonempty. This will be an empty list if
+	 * deferred_tcp is nonempty. Synchronized with qdev->defer_lock.
+	 */
+	struct list_head defer_links;
 };
 
 /**
@@ -98,11 +105,18 @@ struct homa_qdisc_dev {
 	struct rb_root_cached deferred_rpcs;
 
 	/**
-	 * @deferred_tcp: List of all non-Homa packets that have been deferred
-	 * because of NIC overload, in order of when they were deferred.
-	 * The internal lock isn't used (defer_lock is used instead)
+	 * @deferred_qdiscs: List of all homa_qdiscs with non-Homa packets
+	 * that have been deferred because of NIC overload.
 	 */
-	struct sk_buff_head deferred_tcp;
+	struct list_head deferred_qdiscs;
+
+	/**
+	 * @next_qdisc: Points to either the defer_links field in a homa_qdisc
+	 * or to deferred_qdiscs above. Used to select the next non-Homa packet
+	 * for transmission. Note: this may refer to deferred_qdiscs even when
+	 * deferred_qdiscs is nonempty.
+	 */
+	struct list_head *next_qdisc;
 
 	/**
 	 * @last_defer: The most recent homa_clock() time when a packet was
@@ -124,7 +138,8 @@ struct homa_qdisc_dev {
 
 	/**
 	 * @defer_lock: Synchronizes access to information about deferred
-	 * packets, including deferred_rpcs, deferred_tcp, and last_defer.
+	 * packets, including deferred_rpcs, deferred_qdiscs, next_qdisc,
+	 * last_defer, and some information in homa_qdiscs.
 	 */
 	spinlock_t defer_lock;
 
@@ -308,7 +323,7 @@ static inline void homa_qdisc_rpc_init(struct homa_rpc_qdisc *qrpc)
 static inline bool homa_qdisc_any_deferred(struct homa_qdisc_dev *qdev)
 {
 	return rb_first_cached(&qdev->deferred_rpcs) ||
-	       !skb_queue_empty(&qdev->deferred_tcp);
+	       !list_empty(&qdev->deferred_qdiscs);
 }
 
 /**
