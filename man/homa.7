@@ -692,20 +692,23 @@ affect performance. Note that queues can sometimes form even with values less
 than 100, since most NICs cannot transmit at full link speed under all
 conditions.
 .TP
-.IR max_nic_queue_ns
-An integer value specifying a NIC queue length in units of nanoseconds
-(how long it will take the existing packets in the queue
-to be fully transmitted).
-If the NIC queue is longer than this, Homa will wait to queue additional
-packets until the queue length drops below this value.
-This parameter is used to throttle the NIC output queue in order to
-implement SRPT more accurately for outbound messages.
+.IR max_nic_est_backlog_usecs
+This value is used to prevent the buildup of large queues of packets
+waiting to be transmitted in the NIC. Homa keeps a running
+estimate of how many bytes are currently queued in the NIC, assuming
+the NIC transmits at full link speed. If the queue gets long enough
+that it will take more than
+.I max_nic_est_backlog_usecs
+microseconds to transmit all of the queued data, Homa will wait to queue
+additional packets until the estimated queue length drops below this value.
+Large NIC queues are bad because
+they interfere with Homa's SRPT scheduling policy.
 Once a packet has been queued in the NIC, Homa cannot schedule a
 higher priority back in front of it; the longer the queue, the
 longer the delay for a newly arriving high priority packet.
 Lower values for this parameter reduce preemption lag and result in
 a better approximation of SRPT, but the value must be high enough to
-queue the next packet before
+allow time to queue the next packet before
 the NIC becomes idle; otherwise, output bandwidth will be lost.
 .TP
 .IR max_overcommit

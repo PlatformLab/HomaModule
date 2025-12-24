@@ -142,7 +142,7 @@ TEST_F(homa_pacer, homa_pacer_check_nic_q__success)
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 9000);
 	mock_clock = 8000;
-	self->homa.qshared->max_nic_queue_cycles = 1000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 1000;
 	EXPECT_EQ(1, homa_pacer_check_nic_q(self->homa.pacer,
 					    crpc->msgout.packets, false));
 	EXPECT_EQ(9500, atomic64_read(&self->homa.pacer->link_idle_time));
@@ -159,7 +159,7 @@ TEST_F(homa_pacer, homa_pacer_check_nic_q__queue_full)
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 9000);
 	mock_clock = 7999;
-	self->homa.qshared->max_nic_queue_cycles = 1000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 1000;
 	EXPECT_EQ(0, homa_pacer_check_nic_q(self->homa.pacer,
 					    crpc->msgout.packets, false));
 	EXPECT_EQ(9000, atomic64_read(&self->homa.pacer->link_idle_time));
@@ -176,7 +176,7 @@ TEST_F(homa_pacer, homa_pacer_check_nic_q__queue_full_but_force)
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 9000);
 	mock_clock = 7999;
-	self->homa.qshared->max_nic_queue_cycles = 1000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 1000;
 	EXPECT_EQ(1, homa_pacer_check_nic_q(self->homa.pacer,
 					    crpc->msgout.packets, true));
 	EXPECT_EQ(9500, atomic64_read(&self->homa.pacer->link_idle_time));
@@ -193,7 +193,7 @@ TEST_F(homa_pacer, homa_pacer_check_nic_q__queue_empty)
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 9000);
 	mock_clock = 10000;
-	self->homa.qshared->max_nic_queue_cycles = 1000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 1000;
 	EXPECT_EQ(1, homa_pacer_check_nic_q(self->homa.pacer,
 					    crpc->msgout.packets, true));
 	EXPECT_EQ(10500, atomic64_read(&self->homa.pacer->link_idle_time));
@@ -219,7 +219,7 @@ TEST_F(homa_pacer, homa_pacer_main__xmit_data)
 
 	homa_pacer_manage_rpc(crpc1);
 	homa_pacer_manage_rpc(crpc2);
-	self->homa.qshared->max_nic_queue_cycles = 3000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 3000;
 	mock_clock_tick = 200;
 	unit_hook_register(exit_idle_hook);
 	hook_pacer = self->homa.pacer;
@@ -253,7 +253,7 @@ TEST_F(homa_pacer, homa_pacer_main__rpc_arrives_while_sleeping)
 	mock_clock_tick = 200;
 	unit_hook_register(manage_hook);
 	hook_rpc = crpc;
-	self->homa.qshared->max_nic_queue_cycles = 2000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 2000;
 
 	unit_log_clear();
 	homa_pacer_main(self->homa.pacer);
@@ -288,7 +288,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__basics)
 	homa_pacer_manage_rpc(crpc1);
 	homa_pacer_manage_rpc(crpc2);
 	homa_pacer_manage_rpc(crpc3);
-	self->homa.qshared->max_nic_queue_cycles = 2000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 2000;
 	unit_log_clear();
 	homa_pacer_xmit(self->homa.pacer);
 	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400",
@@ -308,7 +308,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__pacer_already_active)
 			       self->client_id, 10000, 1000);
 
 	homa_pacer_manage_rpc(crpc);
-	self->homa.qshared->max_nic_queue_cycles = 2000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 2000;
 	mock_trylock_errors = 1;
 	unit_log_clear();
 	homa_pacer_xmit(self->homa.pacer);
@@ -326,7 +326,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__nic_queue_fills)
 			       self->client_id, 10000, 1000);
 
 	homa_pacer_manage_rpc(crpc);
-	self->homa.qshared->max_nic_queue_cycles = 2001;
+	self->homa.qshared->max_nic_est_backlog_cycles = 2001;
 	mock_clock = 10000;
 	atomic64_set(&self->homa.pacer->link_idle_time, 12000);
 	unit_log_clear();
@@ -340,7 +340,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__nic_queue_fills)
 }
 TEST_F(homa_pacer, homa_pacer_xmit__queue_empty)
 {
-	self->homa.qshared->max_nic_queue_cycles = 2000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 2000;
 	unit_log_clear();
 	homa_pacer_xmit(self->homa.pacer);
 	unit_log_throttled(&self->homa);
@@ -367,7 +367,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__xmit_fifo)
 	homa_pacer_manage_rpc(crpc3);
 
 	/* First attempt: pacer->fifo_count doesn't reach zero. */
-	self->homa.qshared->max_nic_queue_cycles = 1300;
+	self->homa.qshared->max_nic_est_backlog_cycles = 1300;
 	self->homa.pacer->fifo_count = 200;
 	self->homa.qshared->fifo_fraction = 150;
 	mock_clock= 13000;
@@ -406,7 +406,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__rpc_removed_from_queue_before_locked)
 			       self->client_id, 10000, 1000);
 
 	homa_pacer_manage_rpc(crpc);
-	self->homa.qshared->max_nic_queue_cycles = 10000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 10000;
 	unit_log_clear();
 	unit_hook_register(unmanage_hook);
 	hook_rpc = crpc;
@@ -431,7 +431,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__remove_from_queue)
 
 	homa_pacer_manage_rpc(crpc1);
 	homa_pacer_manage_rpc(crpc2);
-	self->homa.qshared->max_nic_queue_cycles = 2000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 2000;
 	unit_log_clear();
 
 	/* First call completes id 2, but id 4 is still in the queue. */
@@ -445,7 +445,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__remove_from_queue)
 
 	/* Second call completes id 4, queue now empty. */
 	unit_log_clear();
-	self->homa.qshared->max_nic_queue_cycles = 10000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 10000;
 	homa_pacer_xmit(self->homa.pacer);
 	EXPECT_STREQ("xmit DATA 600@1400; removing id 4 from throttled list",
 		     unit_log_get());

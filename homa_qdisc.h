@@ -196,17 +196,18 @@ struct homa_qdisc_shared {
 	int fifo_fraction;
 
 	/**
-	 * @max_nic_queue_ns: Limits the NIC queue length: we won't queue
-	 * up a packet for transmission if link_idle_time is this many
-	 * nanoseconds in the future (or more). Set externally via sysctl.
+	 * @max_nic_est_backlog_usecs: Limits the NIC queue length: we won't
+	 * queue packets in the NIC for transmission if link_idle_time is
+	 * this many nanoseconds in the future (or more). Set externally via
+	 * sysctl.
 	 */
-	int max_nic_queue_ns;
+	int max_nic_est_backlog_usecs;
 
 	/**
-	 * @max_nic_queue_cycles: Same as max_nic_queue_ns except in
-	 * homa_clock() units.
+	 * @max_nic_est_backlog_cycles: Same as max_nic_est_backlog_usecs
+	 * except in homa_clock() units.
 	 */
-	int max_nic_queue_cycles;
+	int max_nic_est_backlog_cycles;
 
 	/**
 	 * @defer_min_bytes: If a packet has fewer bytes than this, then it

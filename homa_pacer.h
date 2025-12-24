@@ -113,8 +113,8 @@ static inline void homa_pacer_check(struct homa_pacer *pacer)
 	 * to queue new packets; if the NIC queue becomes more than half
 	 * empty, then we will help out here.
 	 */
-	if ((homa_clock() + (pacer->homa->qshared->max_nic_queue_cycles >> 1)) <
-			atomic64_read(&pacer->link_idle_time))
+	if ((homa_clock() + (pacer->homa->qshared->max_nic_est_backlog_cycles >>
+			     1)) < atomic64_read(&pacer->link_idle_time))
 		return;
 	tt_record("homa_check_pacer calling homa_pacer_xmit");
 	homa_pacer_xmit(pacer);

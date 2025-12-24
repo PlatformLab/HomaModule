@@ -643,7 +643,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__defer_homa_packet)
 	/* First packet is deferred because the NIC queue is full. */
 	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
 	q = qdisc_priv(qdisc);
-	idle = mock_clock + 1 + self->homa.qshared->max_nic_queue_cycles + 1;
+	idle = mock_clock + 1 + self->homa.qshared->max_nic_est_backlog_cycles + 1;
 	atomic64_set(&q->qdev->link_idle_time, idle);
 	skb = new_test_skb(srpc, &self->addr, 0, 1500);
 	to_free = NULL;
@@ -1415,7 +1415,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__spin_until_link_idle)
 	mock_clock = 0;
 	mock_clock_tick = 1000;
 	atomic64_set(&qdev->link_idle_time, 10000);
-	self->homa.qshared->max_nic_queue_cycles = 3500;
+	self->homa.qshared->max_nic_est_backlog_cycles = 3500;
 	unit_log_clear();
 	unit_hook_register(xmit_hook);
 	xmit_clock = 0;
@@ -1457,7 +1457,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__return_after_one_packet)
 		     unit_log_get());
 
 	mock_clock = atomic64_read(&qdev->link_idle_time);
-	self->homa.qshared->max_nic_queue_cycles = 100;
+	self->homa.qshared->max_nic_est_backlog_cycles = 100;
 	unit_log_clear();
 
 	homa_qdisc_pacer(qdev, false);
@@ -1593,7 +1593,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__both_protocols_have_packets_choose_tcp)
 	 * packet is transmitted.
 	 */
 	atomic64_set(&qdev->link_idle_time, 1000000);
-	qdev->hnet->homa->qshared->max_nic_queue_cycles = 10000;
+	qdev->hnet->homa->qshared->max_nic_est_backlog_cycles = 10000;
 	mock_clock = 1000000 - 10000 + 100;
 
 	homa_qdisc_pacer(qdev, false);
@@ -1623,7 +1623,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__xmit_multiple_packets)
 	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 5000, 1300));
 	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
 	qdev->hnet->homa->qshared->homa_share = 40;
-	qdev->hnet->homa->qshared->max_nic_queue_cycles = 100000;
+	qdev->hnet->homa->qshared->max_nic_est_backlog_cycles = 100000;
 
 	homa_qdisc_pacer(qdev, false);
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
@@ -1684,7 +1684,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_check__enqueue_packet)
 
 	atomic64_set(&qdev->link_idle_time, 20000);
 	mock_clock = 15000;
-	self->homa.qshared->max_nic_queue_cycles = 12000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 12000;
 
 	homa_qdisc_pacer_check(&self->homa);
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
@@ -1707,7 +1707,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_check__no_deferred_rpcs)
 
 	atomic64_set(&qdev->link_idle_time, 20000);
 	mock_clock = 15000;
-	self->homa.qshared->max_nic_queue_cycles = 12000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 12000;
 
 	homa_qdisc_pacer_check(&self->homa);
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
@@ -1733,7 +1733,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_check__lag_not_long_enough)
 
 	atomic64_set(&qdev->link_idle_time, 20000);
 	mock_clock = 13000;
-	self->homa.qshared->max_nic_queue_cycles = 12000;
+	self->homa.qshared->max_nic_est_backlog_cycles = 12000;
 
 	homa_qdisc_pacer_check(&self->homa);
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
@@ -1775,12 +1775,12 @@ TEST_F(homa_qdisc, homa_qdev_update_sysctl__cant_get_link_speed_from_dev)
 	homa_qdisc_qdev_put(qdev);
 }
 
-TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__max_nic_queue_cycles)
+TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__max_nic_est_backlog_cycles)
 {
-	self->homa.qshared->max_nic_queue_ns = 6000;
+	self->homa.qshared->max_nic_est_backlog_usecs = 6;
 	self->homa.link_mbps = 10000;
 	homa_qdisc_update_sysctl_deps(self->homa.qshared);
-	EXPECT_EQ(6000, self->homa.qshared->max_nic_queue_cycles);
+	EXPECT_EQ(6000, self->homa.qshared->max_nic_est_backlog_cycles);
 }
 TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__limit_homa_share)
 {

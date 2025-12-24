@@ -16,7 +16,7 @@ parser = get_parser(description=
         'varies.',
         usage='%(prog)s [options]')
 parser.add_argument('-c', '--config', dest='config',
-        choices=['cports', 'nic_queue', 'sports', 'threads'],
+        choices=['cports', 'nic_backlog', 'sports', 'threads'],
         required = True,
         help='Aspect of configuration to change')
 parser.add_argument('--dctcp', dest='dctcp', type=boolean,
@@ -34,11 +34,11 @@ if options.config == 'cports':
         specs.append({'exp_name': "cports%d" % (ports),
                 'label': "%d client ports" % (ports),
                 'options': ['tcp_client_ports', ports]})
-elif options.config == 'nic_queue':
+elif options.config == 'nic_backlog':
     for usec in [5, 10, 20, 40]:
         specs.append({'exp_name': "nicq%d" % (usec),
                 'label': r'NIC queue max %d µsec' % (usec),
-                'sysctl': ['.net.homa.max_nic_queue_ns', usec * 1000]})
+                'sysctl': ['.net.homa.max_nic_est_backlog_usecs', usec]})
 elif options.config == 'sports':
     for ports in [6, 9, 12, 15, 18]:
         specs.append({ 'exp_name': "sports%d" % (ports),

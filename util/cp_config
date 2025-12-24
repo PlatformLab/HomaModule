@@ -19,7 +19,7 @@ parser.add_argument('-c', '--config', dest='config',
         choices=['balance', 'buffers', 'busy_usecs', 'client_threads',
                 'dctcp_buffers', 'defer_min_bytes', 'fifo', 'gbps',
                 'gen2', 'gen3', 'grant_policy', 'gro_busy_usecs', 'load',
-                'max_gro', 'max_gso', 'mtu', 'nic_queue',
+                'max_gro', 'max_gso', 'mtu', 'nic_backlog',
                 'poll', 'ports', 'prios', 'receivers', 'repeat',
                 'tcp_buffers', 'throttle', 'time', 'unsched_bytes'],
         required = True,
@@ -193,12 +193,12 @@ elif options.config == 'mtu':
                 'label': 'MTU %d' % (length),
                 'mtu': length
                 })
-elif options.config == 'nic_queue':
+elif options.config == 'nic_backlog':
     # Vary the limit on an NIC queue length
     for micros in [1, 2, 5, 10, 10000]:
         specs.append({'exp_name': 'nic_%d' % (micros),
                 'label': 'nic queue %d us' % (micros),
-                'sysctl': ['.net.homa.max_nic_queue_ns', micros*1000]
+                'sysctl': ['.net.homa.max_nic_est_backlog_usecs', micros]
                 })
 elif options.config == 'poll':
     # Vary the polling interval

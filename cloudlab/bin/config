@@ -488,7 +488,7 @@ def config_homa(mod):
     set_sysctl("num_priorities", "8")
     link_mbps = get_link_speed()
     set_sysctl ("link_mbps", str(link_mbps))
-    set_sysctl("max_nic_queue_ns", "5000")
+    set_sysctl("max_nic_est_backlog_usecs", "5")
     if link_mbps == 10000:
         set_sysctl("unsched_bytes", "30000")
         set_sysctl("window", "50000")

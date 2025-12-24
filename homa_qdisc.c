@@ -27,8 +27,8 @@
 #define OFFSET(field) ((void *)offsetof(struct homa_qdisc_shared, field))
 static struct ctl_table homa_qdisc_ctl_table[] = {
 	{
-		.procname	= "max_nic_queue_ns",
-		.data		= OFFSET(max_nic_queue_ns),
+		.procname	= "max_nic_est_backlog_usecs",
+		.data		= OFFSET(max_nic_est_backlog_usecs),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_qdisc_dointvec
@@ -148,7 +148,7 @@ struct homa_qdisc_shared *homa_qdisc_shared_alloc(void)
 	mutex_init(&qshared->mutex);
 	INIT_LIST_HEAD(&qshared->qdevs);
 	qshared->fifo_fraction = 50;
-	qshared->max_nic_queue_ns = 5000;
+	qshared->max_nic_est_backlog_usecs = 5;
 	qshared->defer_min_bytes = 1000;
 	qshared->homa_share = 50;
 	qshared->max_link_usage = 99;
@@ -419,7 +419,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		}
 		if (!homa_qdisc_any_deferred(qdev) &&
 		    homa_qdisc_update_link_idle(qdev, pkt_len,
-						qshared->max_nic_queue_cycles))
+				qshared->max_nic_est_backlog_cycles))
 			goto enqueue;
 		homa_qdisc_defer_tcp(q, skb);
 		return NET_XMIT_SUCCESS;
@@ -446,7 +446,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 
 	if (!homa_qdisc_any_deferred(qdev) &&
 	    homa_qdisc_update_link_idle(qdev, pkt_len,
-					qshared->max_nic_queue_cycles))
+					qshared->max_nic_est_backlog_cycles))
 		goto enqueue;
 
 	/* This packet needs to be deferred until the NIC queue has
@@ -854,7 +854,8 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool help)
 		/* If the NIC queue is too long, wait until it gets shorter. */
 		now = homa_clock();
 		idle_time = atomic64_read(&qdev->link_idle_time);
-		while ((now + qdev->hnet->homa->qshared->max_nic_queue_cycles) <
+		while ((now +
+		        qdev->hnet->homa->qshared->max_nic_est_backlog_cycles) <
 		       idle_time) {
 			/* If we've xmitted at least one packet then
 			 * return (this helps with testing and also
@@ -925,7 +926,7 @@ void homa_qdisc_pacer_check(struct homa *homa)
 	u64 now = homa_clock();
 	int max_cycles;
 
-	max_cycles = homa->qshared->max_nic_queue_cycles;
+	max_cycles = homa->qshared->max_nic_est_backlog_cycles;
 	rcu_read_lock();
 	list_for_each_entry_rcu(qdev, &homa->qshared->qdevs, links) {
 		if (!homa_qdisc_any_deferred(qdev))
@@ -933,7 +934,7 @@ void homa_qdisc_pacer_check(struct homa *homa)
 
 		/* The ">> 1" means that we only help out if the NIC queue has
 		 * dropped below half of its maximum allowed capacity. This
-		 * gives the pacer thread the first shot at queuting new
+		 * gives the pacer thread the first shot at queuing new
 		 * packets.
 		 */
 		if (now + (max_cycles >> 1) <
@@ -1028,8 +1029,8 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 {
 	struct homa_qdisc_dev *qdev;
 
-	qshared->max_nic_queue_cycles =
-			homa_ns_to_cycles(qshared->max_nic_queue_ns);
+	qshared->max_nic_est_backlog_cycles = homa_ns_to_cycles(1000 *
+			qshared->max_nic_est_backlog_usecs);
 
 	if (qshared->homa_share < 0)
 		qshared->homa_share = 0;

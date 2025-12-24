@@ -87,8 +87,9 @@ int homa_pacer_check_nic_q(struct homa_pacer *pacer, struct sk_buff *skb,
 	while (1) {
 		clock = homa_clock();
 		idle = atomic64_read(&pacer->link_idle_time);
-		if ((clock + pacer->homa->qshared->max_nic_queue_cycles) < idle &&
-		    !force && !(pacer->homa->flags & HOMA_FLAG_DONT_THROTTLE))
+		if ((clock + pacer->homa->qshared->max_nic_est_backlog_cycles) <
+		    idle && !force &&
+		    !(pacer->homa->flags & HOMA_FLAG_DONT_THROTTLE))
 			return 0;
 		if (!list_empty(&pacer->throttled_rpcs)) {
 			INC_METRIC(pacer_homa_packets, 1);
@@ -173,7 +174,8 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 	while (1) {
 		queue_cycles = atomic64_read(&pacer->link_idle_time) -
 					     homa_clock();
-		if (queue_cycles >= pacer->homa->qshared->max_nic_queue_cycles)
+		if (queue_cycles >=
+		    pacer->homa->qshared->max_nic_est_backlog_cycles)
 			break;
 		if (list_empty(&pacer->throttled_rpcs))
 			break;

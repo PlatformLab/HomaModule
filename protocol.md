@@ -254,7 +254,7 @@ which violates SRPT.
 To prevent this problem, Homa employs a *pacer* mechanism. Homa
 maintains a running estimate of how many bytes have been passed to the
 NIC but not yet transmitted (the *NIC backlog*). If this exceeds a
-threshold value (specified in units of time with the `max_nic_queue_ns`
+threshold value (specified in units of time with the `max_nic_est_backlog_usecs`
 parameter) then no more packets will be transmitted until the
 NIC backlog drops below the limit. Homa maintains a *throttled list*,
 which contains outgoing messages that have packets ready to transmit.
