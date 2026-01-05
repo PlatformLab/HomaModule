@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2020-2022 Homa Developers
+# Copyright (c) 2020-2026 Homa Developers
 # SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 # This cperf benchmark measures TCP and DCTCP while varying one or more
@@ -12,11 +12,12 @@ from cperf import *
 load_info = [["w2", 3.2], ["w3", 14], ["w4", 20], ["w5", 20]]
 
 parser = get_parser(description=
-        'Measures Homa slowdown as the number of available priority levels '
-        'varies.',
+        'Measures TCP performance as a function of various system '
+        'configuration parameters.',
         usage='%(prog)s [options]')
 parser.add_argument('-c', '--config', dest='config',
-        choices=['cports', 'nic_backlog', 'sports', 'threads'],
+        choices=['cports', 'max_nic_queue', 'nic_backlog', 'sports',
+                'threads'],
         required = True,
         help='Aspect of configuration to change')
 parser.add_argument('--dctcp', dest='dctcp', type=boolean,
@@ -34,6 +35,12 @@ if options.config == 'cports':
         specs.append({'exp_name': "cports%d" % (ports),
                 'label': "%d client ports" % (ports),
                 'options': ['tcp_client_ports', ports]})
+elif options.config == 'max_nic_queue':
+    # Vary the limit on length of any individual NIC queue
+    for usecs in [10, 20, 40, 80]:
+        specs.append({'exp_name': 'nicq_%d' % (usecs),
+                'label': 'max_nic_queue_usecs %d' % (usecs),
+                'sysctl': ['.net.homa.max_nic_queue_usecs', usecs]})
 elif options.config == 'nic_backlog':
     for usec in [5, 10, 20, 40]:
         specs.append({'exp_name': "nicq%d" % (usec),

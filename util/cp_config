@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2020-2023 Homa Developers
+# Copyright (c) 2020-2026 Homa Developers
 # SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
 # This cperf benchmark measures Homa slowdown while varying one or more
@@ -19,7 +19,7 @@ parser.add_argument('-c', '--config', dest='config',
         choices=['balance', 'buffers', 'busy_usecs', 'client_threads',
                 'dctcp_buffers', 'defer_min_bytes', 'fifo', 'gbps',
                 'gen2', 'gen3', 'grant_policy', 'gro_busy_usecs', 'load',
-                'max_gro', 'max_gso', 'mtu', 'nic_backlog',
+                'max_gro', 'max_gso', 'max_nic_queue', 'mtu', 'nic_backlog',
                 'poll', 'ports', 'prios', 'receivers', 'repeat',
                 'tcp_buffers', 'throttle', 'time', 'unsched_bytes'],
         required = True,
@@ -186,6 +186,12 @@ elif options.config == 'max_gso':
                 'label': 'max_gso_size %d' % (count),
                 'sysctl': ['.net.homa.max_gso_size', count]
                 })
+elif options.config == 'max_nic_queue':
+    # Vary the limit on length of any individual NIC queue
+    for usecs in [5, 10, 20, 40]:
+        specs.append({'exp_name': 'nicq_%d' % (usecs),
+                'label': 'max_nic_queue_usecs %d' % (usecs),
+                'sysctl': ['.net.homa.max_nic_queue_usecs', usecs]})
 elif options.config == 'mtu':
     # Vary the maximum packet size
     for length in [1500, 3000, 5000, 7000, 9000]:
@@ -195,7 +201,7 @@ elif options.config == 'mtu':
                 })
 elif options.config == 'nic_backlog':
     # Vary the limit on an NIC queue length
-    for micros in [1, 2, 5, 10, 10000]:
+    for micros in [5, 10, 20, 100, 10000]:
         specs.append({'exp_name': 'nic_%d' % (micros),
                 'label': 'nic queue %d us' % (micros),
                 'sysctl': ['.net.homa.max_nic_est_backlog_usecs', micros]
