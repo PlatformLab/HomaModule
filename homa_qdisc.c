@@ -7,8 +7,56 @@
  * - It implements the SRPT policy for Homa traffic (highest priority goes
  *   to the message with the fewest bytes remaining to transmit).
  * - It manages TCP traffic as well as Homa traffic, so that TCP doesn't
- *   result in long NIC queues.
+ *   create long NIC queues.
  * - When queues do build up, it balances output traffic between Homa and TCP.
+ */
+
+/* PACING:
+ *
+ * Preventing congestion in the NIC is essential for a proper implementation
+ * of SRPT (otherwise a short message could get stuck behind a long message
+ * in the NIC). This file implements a two-part strategy:
+ *
+ * First, it paces output traffic so that packets are passed to the NIC at
+ * a data rate no more than the uplink bandwidth. It implements this by
+ * keeping a variable qdev->link_idle_time, which is an estimate of when
+ * the NIC will have finished transmitting all data that has been passed to
+ * it (assuming transmission at full link speed). If this time gets too far
+ * into the future (determined by the max_nic_est_backlog_usecs sysctl
+ * variable) then Homa stops handing off packets to the NIC until link_idle_time
+ * is no longer too far in the future.
+ *
+ * Unfortunately, this technique is not adequate by itself because NICs
+ * cannot always transmit at full link bandwidth; for example, measurements
+ * of Intel NICs in December 2025 showed NIC output as low as 80% of link
+ * bandwidth even with a large backlog of (mixed-size) output packets. As a
+ * result, with this approach alone NIC queues frequently build up
+ * (measurements showed total NIC backlogs of 5 MB or more under high
+ * network load). If the pacing rate is reduced to a level where the NIC
+ * could always keep up, it would sacrifice link bandwidth in situations
+ * where the NIC can transmit at closer to line rate.
+ *
+ * Thus Homa also uses a second approach, which is based on information
+ * maintained by the dynamic queue limits mechanism (DQL). DQL keeps
+ * counters for each netdev_queue that indicate how many bytes are in the
+ * NIC's possession for each queue (i.e. packets that have been passed
+ * to the NIC but not yet returned after transmission). If the number of
+ * outstanding bytes for any queue exceeds a limit (determined by the
+ * max_nic_queue_usecs sysctl parameter) then the NIC is considered
+ * congested and Homa will stop queuing more packets until the congestion
+ * subsides.
+ *
+ * It might seem that the second approach is sufficient by itself, so the
+ * first approach is not needed. Unfortunately, updates to the DQL counters
+ * don't happen until packets are actually transmitted. This means that a
+ * a large burst of packets could pass through the qdisc mechanism before the
+ * DQL counters are updated, resulting in significant queue buildup before
+ * the counters get updated.  The first technique prevents this from
+ * happening.
+ *
+ * There is one additional twist, which is that the rate limits above do
+ * not apply to small packets. The reasons for this are explained in a comment
+ * in homa_qdisc_enqueue.
  */
 
 #include "homa_impl.h"
@@ -17,7 +65,6 @@
 #include "timetrace.h"
 
 #include <linux/ethtool.h>
-#include <net/pkt_sched.h>
 
 /* Used to enable sysctl access to configuration parameters related to
  * homa_qdisc. The @data fields are actually offsets within a struct
@@ -29,6 +76,13 @@ static struct ctl_table homa_qdisc_ctl_table[] = {
 	{
 		.procname	= "max_nic_est_backlog_usecs",
 		.data		= OFFSET(max_nic_est_backlog_usecs),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_qdisc_dointvec
+	},
+	{
+		.procname	= "max_nic_queue_usecs",
+		.data		= OFFSET(max_nic_queue_usecs),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_qdisc_dointvec
@@ -149,6 +203,7 @@ struct homa_qdisc_shared *homa_qdisc_shared_alloc(void)
 	INIT_LIST_HEAD(&qshared->qdevs);
 	qshared->fifo_fraction = 50;
 	qshared->max_nic_est_backlog_usecs = 5;
+	qshared->max_nic_queue_usecs = 20;
 	qshared->defer_min_bytes = 1000;
 	qshared->homa_share = 50;
 	qshared->max_link_usage = 99;
@@ -369,6 +424,8 @@ void homa_qdisc_destroy(struct Qdisc *qdisc)
 		kfree_skb_reason(__skb_dequeue(&q->deferred_tcp),
 				 SKB_DROP_REASON_QDISC_DROP);
 	list_del_init(&q->defer_links);
+	if (q->qdev->congested_qdisc == q)
+		q->qdev->congested_qdisc = NULL;
 	spin_unlock_irqrestore(&q->qdev->defer_lock, flags);
 	homa_qdisc_qdev_put(q->qdev);
 }
@@ -390,6 +447,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	struct homa_data_hdr *h;
 	int pkt_len;
 	int offset;
+
+	homa_qdisc_update_congested(q);
 
 	/* This function tries to transmit short packets immediately for both
 	 * Homa and TCP, even when the NIC queue is long. This is because
@@ -417,7 +476,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 			homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 			goto enqueue;
 		}
-		if (!homa_qdisc_any_deferred(qdev) &&
+		if (!READ_ONCE(qdev->congested_qdisc) &&
+		    !homa_qdisc_any_deferred(qdev) &&
 		    homa_qdisc_update_link_idle(qdev, pkt_len,
 				qshared->max_nic_est_backlog_cycles))
 			goto enqueue;
@@ -444,7 +504,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		goto enqueue;
 	}
 
-	if (!homa_qdisc_any_deferred(qdev) &&
+	if (!READ_ONCE(qdev->congested_qdisc) &&
+	    !homa_qdisc_any_deferred(qdev) &&
 	    homa_qdisc_update_link_idle(qdev, pkt_len,
 					qshared->max_nic_est_backlog_cycles))
 		goto enqueue;
@@ -619,6 +680,7 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 			"0x%x to 0x%x, data bytes %d, seq/ack %u",
 			skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
 	homa_qdisc_schedule_skb(skb, qdisc_from_priv(q));
+	homa_qdisc_update_congested(q);
 	return pkt_len;
 }
 
@@ -699,10 +761,12 @@ int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 	rcu_read_lock_bh();
 	txq = netdev_get_tx_queue(skb->dev, skb_get_queue_mapping(skb));
 	qdisc = rcu_dereference_bh(txq->qdisc);
-	if (qdisc->ops == &homa_qdisc_ops)
+	if (qdisc->ops == &homa_qdisc_ops) {
 		homa_qdisc_schedule_skb(skb, qdisc);
-	else
+		homa_qdisc_update_congested(qdisc_priv(qdisc));
+	} else {
 		kfree_skb_reason(skb, SKB_DROP_REASON_QDISC_DROP);
+	}
 	rcu_read_unlock_bh();
 	return pkt_len;
 }
@@ -828,19 +892,21 @@ int homa_qdisc_pacer_main(void *device)
  * well, to increase the likelihood that we keep the link busy. Those other
  * invocations are not guaranteed to happen, so the pacer thread provides a
  * backstop.
- * @qdev:    The device on which to transmit.
- * @help:    True means this function was invoked from homa_qdisc_pacer_check
- *           rather than homa_qdisc_pacer_main (indicating that the pacer
- *           thread wasn't keeping up and needs help).
+ * @qdev:       The device on which to transmit.
+ * @dont_spin:  If true, then return immediately if the NIC is congested,
+ *              rather than spinning until congestion drops. If this value
+ *              is false, then the caller must not be running at SoftIRQ
+ *              level, and it must not have acquired a lock that disables
+ *              BH processing (otherwise this function can self-deadlock).
  */
-void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool help)
+void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool dont_spin)
 {
-	int i, xmit_bytes;
+	int i, xmit_bytes, max_cycles;
 
 	/* Make sure only one instance of this function executes at a
 	 * time.
 	 */
-	if (!spin_trylock_bh(&qdev->pacer_mutex))
+	if (!spin_trylock(&qdev->pacer_mutex))
 		return;
 
 	/* Each iteration through the following loop sends one packet. We
@@ -848,23 +914,37 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool help)
 	 * time spent in one call to this function (see note in
 	 * homa_qdisc_pacer_main about interfering with softirq handlers).
 	 */
+	max_cycles = qdev->hnet->homa->qshared->max_nic_est_backlog_cycles;
 	for (i = 0; i < 5; i++) {
 		u64 idle_time, now;
 
-		/* If the NIC queue is too long, wait until it gets shorter. */
+		/* If the NIC is congested, wait for the congestion to
+		 * subside.
+		 */
 		now = homa_clock();
 		idle_time = atomic64_read(&qdev->link_idle_time);
-		while ((now +
-		        qdev->hnet->homa->qshared->max_nic_est_backlog_cycles) <
-		       idle_time) {
+		while (1) {
+			struct homa_qdisc *congested;
+
+			congested = READ_ONCE(qdev->congested_qdisc);
+			if (congested &&
+			    homa_qdisc_bytes_pending(congested)
+			    <= qdev->max_nic_queue_bytes) {
+				WRITE_ONCE(qdev->congested_qdisc, NULL);
+				congested = NULL;
+			}
+			if (!congested && (now + max_cycles) >= idle_time)
+				break;
+
 			/* If we've xmitted at least one packet then
 			 * return (this helps with testing and also
 			 * allows homa_qdisc_pacer_main to yield the core).
 			 */
-			if (i != 0)
+			if (i != 0 || dont_spin)
 				goto done;
 			cpu_relax();
 			now = homa_clock();
+			UNIT_HOOK("pacer spin");
 		}
 
 		/* Note: when we get here, it's possible that the NIC queue is
@@ -904,12 +984,12 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool help)
 					qdev->hnet->homa->qshared->homa_share;
 			}
 		}
-		if (help)
+		if (dont_spin)
 			INC_METRIC(pacer_help_bytes, xmit_bytes);
 		INC_METRIC(pacer_xmit_cycles, homa_clock() - now);
 	}
 done:
-	spin_unlock_bh(&qdev->pacer_mutex);
+	spin_unlock(&qdev->pacer_mutex);
 }
 
 /**
@@ -1017,6 +1097,9 @@ void homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev)
 	tmp2 = 10ULL * homa->qshared->max_link_usage * qdev->link_mbps;
 	do_div(tmp, tmp2);
 	qdev->cycles_per_mibyte = tmp;
+
+	qdev->max_nic_queue_bytes = (homa->qshared->max_nic_queue_usecs *
+				     qdev->link_mbps) >> 3;
 }
 
 /**

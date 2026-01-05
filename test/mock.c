@@ -2447,6 +2447,7 @@ void mock_teardown(void)
 	memset(mock_devices, 0, sizeof(mock_devices));
 	mock_peer_free_no_fail = 0;
 	mock_link_mbps = 10000;
+	memset(&mock_net_queue, 0, sizeof(mock_net_queue));
 	mock_queue_index = 0;
 	mock_netif_schedule_calls = 0;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
