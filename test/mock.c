@@ -2022,11 +2022,13 @@ struct sk_buff *mock_raw_skb(struct in6_addr *saddr, int protocol, int length)
 		ipv6_hdr(skb)->version = 6;
 		ipv6_hdr(skb)->saddr = *saddr;
 		ipv6_hdr(skb)->nexthdr = protocol;
+		skb->protocol = htons(ETH_P_IPV6);
 	} else {
 		ip_hdr(skb)->version = 4;
 		ip_hdr(skb)->saddr = saddr->in6_u.u6_addr32[3];
 		ip_hdr(skb)->protocol = protocol;
 		ip_hdr(skb)->check = 0;
+		skb->protocol = htons(ETH_P_IP);
 	}
 	skb->users.refs.counter = 1;
 	skb->_skb_refdst = 0;

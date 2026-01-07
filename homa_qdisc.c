@@ -391,7 +391,7 @@ int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 	if (IS_ERR(qdev))
 		return PTR_ERR(qdev);
 
-	q->sch = sch;
+	q->qdisc = sch;
 	q->qdev = qdev;
 	q->ix = -1;
 	for (i = 0; i < qdev->dev->num_tx_queues; i++) {
@@ -451,30 +451,29 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	homa_qdisc_update_congested(q);
 
 	/* This function tries to transmit short packets immediately for both
-	 * Homa and TCP, even when the NIC queue is long. This is because
-	 * (a) we don't want to delay Homa control packets, (b) the pacer's
-	 * single thread doesn't have enough throughput to handle all the short
-	 * packets at high load (whereas processing here happens concurrently
-	 * on multiple cores), and (c) there is no way to generate enough
-	 * short packets to cause NIC queue buildup, so bypassing the pacer
-	 * won't impact the SRPT mechanism significantly.
+	 * Homa and TCP, even when the NIC queue is long. We do this because
+	 * (a) it reduces tail latency significantly for short packets,
+	 * (b) there is no way to generate enough short packets to cause NIC
+	 * queue buildup, and (c) the pacer's single thread doesn't have
+	 * enough throughput to handle all the short packets at high load
+	 * (whereas processing here happens concurrently on multiple cores).
 	 */
 	qshared = qdev->hnet->homa->qshared;
 	pkt_len = qdisc_pkt_len(skb);
 	if (!is_homa_pkt(skb)) {
 		/* This is a TCP packet (or something else other than Homa).
-		 * In order to maintain the order of packets within a stream
-		 * we must defer short packets if there are other packets
-		 * already deferred for this qdisc.
+		 * Defer short TCP packets only if they are in the same flow
+		 * as a previously deferred packet for this qdisc.
 		 */
 		INC_METRIC(qdisc_tcp_packets, 1);
-		if (!skb_queue_empty(&q->deferred_tcp)) {
+		if (pkt_len < qshared->defer_min_bytes) {
+			if (skb_queue_empty(&q->deferred_tcp) ||
+			    homa_qdisc_can_bypass(skb, q)) {
+				homa_qdisc_update_link_idle(qdev, pkt_len, -1);
+				goto enqueue;
+			}
 			homa_qdisc_defer_tcp(q, skb);
 			return NET_XMIT_SUCCESS;
-		}
-		if (pkt_len < qshared->defer_min_bytes) {
-			homa_qdisc_update_link_idle(qdev, pkt_len, -1);
-			goto enqueue;
 		}
 		if (!READ_ONCE(qdev->congested_qdisc) &&
 		    !homa_qdisc_any_deferred(qdev) &&
@@ -533,6 +532,81 @@ enqueue:
 	if (unlikely(sch->q.qlen >= READ_ONCE(sch->limit)))
 		return qdisc_drop(skb, sch, to_free);
 	return qdisc_enqueue_tail(skb, sch);
+}
+
+/**
+ * homa_qdisc_can_bypass() - Determine whether it is OK to transmit a given
+ * TCP packet before those already deferred for a qdisc.
+ * @q:       New packet
+ * @q:       Qdisc with deferred TCP packets
+ * Return:   True if skb can be transmitted before the packets in @list
+ *           without violating reordering rules.
+ */
+bool homa_qdisc_can_bypass(struct sk_buff *skb, struct homa_qdisc *q)
+{
+	struct sk_buff *skb2;
+	__be32 daddr, daddr2;
+	__be16 source, dest;
+	bool result;
+	int element;
+
+	/* Collect information from skb. If it isn't a TCP packet then
+	 * reordering constraints are unknown so deny reordering.
+	 */
+	if (skb->protocol == htons(ETH_P_IP)) {
+		if (ip_hdr(skb)->protocol != IPPROTO_TCP)
+			return false;
+		daddr = ip_hdr(skb)->daddr;
+	} else if (skb->protocol == htons(ETH_P_IPV6)) {
+		if (ipv6_hdr(skb)->nexthdr != IPPROTO_TCP)
+			return false;
+		daddr = ipv6_hdr(skb)->daddr.in6_u.u6_addr32[0] ^
+		         ipv6_hdr(skb)->daddr.in6_u.u6_addr32[1] ^
+			 ipv6_hdr(skb)->daddr.in6_u.u6_addr32[2] ^
+			 ipv6_hdr(skb)->daddr.in6_u.u6_addr32[3];
+	} else {
+		return false;
+	}
+
+	/* If skb is an ack (i.e. no payload) then reordering is fine. */
+	if ((skb->len - skb_transport_offset(skb) - tcp_hdrlen(skb)) == 0)
+		return true;
+
+	/* If any packets in the list are TCP packets on the same flow
+	 * then deny reordering. The flow check is overconservative, in that
+	 * it may sometimes deny even when the flows aren't the same.
+	 */
+	source = tcp_hdr(skb)->source;
+	dest = tcp_hdr(skb)->dest;
+	element = 0;
+	result = true;
+	spin_lock_bh(&q->qdev->defer_lock);
+	skb_queue_walk(&q->deferred_tcp, skb2) {
+		element++;
+		if (skb2->protocol == htons(ETH_P_IP)) {
+			if (ip_hdr(skb2)->protocol != IPPROTO_TCP)
+				continue;
+			daddr2 = ip_hdr(skb2)->daddr;
+		} else if (skb2->protocol == htons(ETH_P_IPV6)) {
+			if (ipv6_hdr(skb2)->nexthdr != IPPROTO_TCP)
+				continue;
+			daddr2 = ipv6_hdr(skb2)->daddr.in6_u.u6_addr32[0] ^
+				 ipv6_hdr(skb2)->daddr.in6_u.u6_addr32[1] ^
+				 ipv6_hdr(skb2)->daddr.in6_u.u6_addr32[2] ^
+				 ipv6_hdr(skb2)->daddr.in6_u.u6_addr32[3];
+
+		} else {
+			continue;
+		}
+
+		if (daddr == daddr2 && dest == tcp_hdr(skb2)->dest &&
+		    source == tcp_hdr(skb2)->source) {
+			result = false;
+			break;
+		}
+	}
+	spin_unlock_bh(&q->qdev->defer_lock);
+	return result;
 }
 
 /**

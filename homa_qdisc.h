@@ -26,8 +26,8 @@
  * the homa queuing discipline.
  */
 struct homa_qdisc {
-	/** @sch: The Qdisc that this structure is associated with. */
-	struct Qdisc *sch;
+	/** @qdisc: The Qdisc that this structure is associated with. */
+	struct Qdisc *qdisc;
 
 	/** @qdev: Info shared among all qdiscs for a net_device. */
 	struct homa_qdisc_dev *qdev;
@@ -289,6 +289,8 @@ struct homa_rcu_kfreer {
 };
 
 void            homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev);
+bool            homa_qdisc_can_bypass(struct sk_buff *skb,
+				      struct homa_qdisc *q);
 void            homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev,
 				      struct sk_buff *skb);
 void            homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb);
