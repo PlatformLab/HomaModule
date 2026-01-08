@@ -334,7 +334,7 @@ void print_help(const char *name)
 	printf("                      (defaults to <protocol>_<workload>)\n");
 	printf("    --first-port      Lowest port number to use (default: 4000 for Homa,\n");
 	printf("                      5000 for TCP)\n");
-	printf("    --iovec           Use homa_replyv instead of homa_reply\n");
+	printf("    --iovec           Use iovecs for reply instead of a single buffer\n");
 	printf("    --ipv6            Use IPv6 instead of IPv4\n");
 	printf("    --pin             All server threads will be restricted to run only\n"
 	        "                      on the givevn core\n");
@@ -1139,7 +1139,7 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 		homa_args.id = receiver.id();
 		result = sendmsg(fd, &msghdr, 0);
 		if (result < 0) {
-			log(NORMAL, "FATAL: homa_reply failed for server "
+			log(NORMAL, "FATAL: sendmsg failed for server "
 					"port %d: %s\n",
 					port, strerror(errno));
 			fatal();
