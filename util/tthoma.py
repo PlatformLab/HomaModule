@@ -292,7 +292,7 @@ tcp_packets = {}
 #                high 16 bits are the low-order bits of the client's IP address
 # server:        Server port (same format as client)
 # slot:          Slot allocated by cp_node on the client for the message;
-#                used to differentiate concurrente RPCs between the same
+#                used to differentiate concurrent RPCs between the same
 #                client and server ports
 # req_send:      Time when tcp_sendmsg was invoked for the first bytes of
 #                the request
@@ -1103,7 +1103,11 @@ def print_pkts(pkts, header=True, comment=False):
                 'number for TCP\n')
         buf.write(prefix + 'Offset:     Offset of packet within message or '
                 '"TCP" if packet is TCP\n')
-        buf.write(prefix + 'Length:     Size of packet (before segmentation)\n')
+        buf.write(prefix + 'Length:     Size of packet; for the first segment '
+                'generated from a TSO\n')
+        buf.write(prefix + '            frame this is the size of the TSO '
+                'frame; for other segments\n')
+        buf.write(prefix + '            it is the size of the received packet\n')
         buf.write(prefix + 'Qid:        Transmit queue on which packet was sent\n')
         buf.write(prefix + 'Nic:        Time when packet was queued for NIC\n')
         buf.write(prefix + 'NDelay:     Nic - Xmit\n')
@@ -1358,8 +1362,8 @@ def sort_pkts(pkts, key):
                 option); must be 'Xmit', 'Nic', 'Gro', 'SoftIRQ', or 'Free'
     """
 
-    sort_keys = {'Xmit': 'xmit', 'Nic': 'nic', 'Gro': 'gro',
-            'SoftIRQ': 'softirq', 'Free': 'free_tx_skb'}
+    sort_keys = {'Xmit': 'xmit', 'Qdisc': 'qdisc_xmit', 'Nic': 'nic',
+            'Gro': 'gro', 'SoftIRQ': 'softirq', 'Free': 'free_tx_skb'}
     if not key in sort_keys:
         raise Exception('Invalid sort option %s: must be one of %s' % (
                 key, sort_keys.keys()))
@@ -6670,6 +6674,7 @@ class AnalyzeNicbacklog:
 
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
         require_options('nicbacklog', 'data')
 
     def output(self):
@@ -6996,6 +7001,7 @@ class AnalyzeNicbacklog2:
 
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
         require_options('nicbacklog2', 'data')
 
     def output(self):
@@ -7163,6 +7169,7 @@ class AnalyzeNicpkts:
 
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
         require_options('nicpkts', 'data')
 
     def print_active(self, f, active, free_index):
@@ -7440,6 +7447,7 @@ class AnalyzeNicsnapshot:
 
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
         require_options('nicsnapshot', 'time', 'node')
 
     def output(self):
@@ -7621,6 +7629,7 @@ class AnalyzeNictx:
 
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
         require_options('nictx', 'plot')
 
     def output(self):
@@ -7915,10 +7924,10 @@ class AnalyzeNictx:
         y = [i / len(kb) for i in range(len(kb))]
         fig = plt.figure(figsize=[6,4])
         ax = fig.add_subplot(111)
-        ax.set_xlim(0, 1500)
+        ax.set_xlim(0, 5000)
         ax.set_xlabel('Kbytes in Packets Queued in a Qdisc')
-        ax.set_ylim(0, 5000)
-        ax.set_ylabel('KBytes Queued')
+        ax.set_ylim(0, 1.0)
+        ax.set_ylabel('Fraction of Intervals')
         plt.grid(which="major", axis="y")
         plt.plot(kb, y)
         plt.tight_layout()
@@ -7957,8 +7966,8 @@ class AnalyzeNictx:
 
         # Generate time-series plot showing queuing in the qdisc and NIC
         # for each node.
-        x_min = get_last_start()
-        x_max = get_first_end()
+        x_min = get_first_time()
+        x_max = get_last_time()
         nodes = get_sorted_nodes()
         maxy = max(max(node_data[node]['qdisc']) for node in nodes)
         fig, axes = plt.subplots(nrows=len(nodes), ncols=1, sharex=False,
@@ -8576,110 +8585,6 @@ class AnalyzePackets:
         g['increment'] = increment
         g['rx_node'] = trace['node']
 
-    def tt_tcp_xmit(self, trace, t, core, source, dest, data_bytes, seq_ack):
-        global tcp_hdr_length
-
-        tcp_pkt = get_tcp_packet(source, dest, data_bytes, seq_ack)
-        # if 'xmit' in tcp_pkt:
-        #     print('%9.3f: Duplicate TCP packet transmission on node %s (previous: %.3f)' % (t,
-        #             trace['node'], tcp_pkt['xmit']))
-        node = trace['node']
-        tcp_pkt['xmit'] = t
-        tcp_pkt['xmit2'] = t
-        tcp_pkt['tso_length'] = data_bytes
-        tcp_pkt['tx_node'] = node
-        tcp_pkt['tx_core'] = core
-        set_tcp_ip_node(source, node)
-
-    def tt_tcp_qdisc(self, trace, t, core, source, dest, data_bytes, seq_ack):
-        tcp_pkt = get_tcp_packet(source, dest, data_bytes, seq_ack)
-        node = trace['node']
-        tcp_pkt['qdisc_xmit'] = t
-        tcp_pkt['xmit2'] = t
-        tcp_pkt['tso_length'] = data_bytes
-        tcp_pkt['tx_node'] = node
-        set_tcp_ip_node(source, node)
-
-    def tt_tcp_nic(self, trace, t, core, source, dest, data_bytes, seq_ack):
-        tcp_pkt = get_tcp_packet(source, dest, data_bytes, seq_ack)
-        node = trace['node']
-        tcp_pkt['nic'] = t
-        tcp_pkt['tso_length'] = data_bytes
-        tcp_pkt['tx_node'] = node
-        tcp_pkt['nic_core'] = core
-        set_tcp_ip_node(source, node)
-
-    def tt_tcp_free(self, trace, t, core, source, dest, data_bytes, seq_ack,
-            qid):
-        tcp_pkt = get_tcp_packet(source, dest, data_bytes, seq_ack)
-        node = trace['node']
-        tcp_pkt['free_tx_skb'] = t
-        tcp_pkt['tso_length'] = data_bytes
-        tcp_pkt['tx_qid'] = qid
-        tcp_pkt['tx_node'] = node
-        set_tcp_ip_node(source, node)
-
-    def tt_tcp_gro(self, trace, t, core, source, dest, data_bytes, seq_ack):
-        global tcp_hdr_length
-
-        tcp_pkt = get_tcp_packet(source, dest, data_bytes, seq_ack)
-        node = trace['node']
-        tcp_pkt['length'] = data_bytes
-        tcp_pkt['gro'] = t
-        tcp_pkt['rx_node'] = node
-        set_tcp_ip_node(dest, node)
-
-    def cleanup_tcp_pkts(self):
-        """
-        This method post-processes all of the TCP packets to fill in missing
-        fields.
-        """
-        global tcp_packets
-
-        # <source, dest> -> list of data packets (nonzero length) from
-        # source to dest, where source and dest come from fields in packets
-        # with the same name.
-        stream_pkts = defaultdict(list)
-
-        # Pass 1: divide data packets into buckets for unidirectional
-        # streams, and also fill in a fiew fields.
-        for pkt in tcp_packets.values():
-            if not 'tx_node' in pkt:
-                node = get_tcp_node(pkt['source'])
-                if node != None:
-                    pkt['tx_node'] = node
-            if not 'rx_node' in pkt:
-                node = get_tcp_node(pkt['source'])
-                if node != None:
-                    pkt['rx_node'] = node
-            if not 'length' in pkt:
-                if not 'tso_length' in pkt:
-                    print('No tso_length in packet: %s' % (pkt))
-                pkt['length'] = pkt['tso_length']
-
-            if pkt['length'] == 0:
-                continue
-            stream_pkts[f"{pkt['source']} {pkt['dest']}"].append(pkt)
-
-        # Pass 2: process the packets in a stream in sequence order, in
-        # order to copy information from a source TSO packet into each of
-        # the segments generated from it.
-        for pkts in stream_pkts.values():
-            tso_pkt = None
-            tso_end = None
-            for pkt in sorted(pkts, key = lambda pkt: pkt['seq_ack']):
-                if 'tso_length' in pkt:
-                    tso_pkt = pkt
-                    tso_end = pkt['seq_ack'] + pkt['tso_length']
-                    continue
-                if tso_pkt == None or pkt['seq_ack'] >= tso_end:
-                    continue
-                tso_pkt['segments'].append(pkt)
-                for field in ['xmit', 'qdisc_xmit', 'xmit2', 'tx_qid',
-                        'nic', 'free_tx_skb']:
-                    if field in tso_pkt:
-                        pkt[field] = tso_pkt[field]
-
     def analyze(self):
         """
         Try to deduce missing packet fields, such as message length.
@@ -8770,8 +8675,6 @@ class AnalyzePackets:
                         pkt['segments'].append(pkt2)
         for pid, pkt in new_pkts:
             packets[pid] = pkt
-
-        self.cleanup_tcp_pkts()
 
 #------------------------------------------------
 # Analyzer: pairs
@@ -9008,6 +8911,7 @@ class AnalyzeQbytes:
     def __init__(self, dispatcher):
         require_options('qbytes', 'plot')
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzeMinlatency')
         dispatcher.interest('AnalyzeIntervals')
@@ -10760,7 +10664,7 @@ class AnalyzeTcp_rpcs:
     """
 
     def __init__(self, dispatcher):
-        dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
 
         # "source dest" -> list of entries in tcp_rpcs whose client and
         # server fields match source and dest.
@@ -10959,13 +10863,13 @@ class AnalyzeTcp_rpcs:
             sort_keys = 'Start'
         for key in sort_keys.split():
             if key == 'Start':
-                print_rpcs.sort(key = lambda rpc:
+                print_rpcs = sorted(print_rpcs, key = lambda rpc:
                         rpc['req_send'] if 'req_send' in rpc else 1e20)
             elif key == 'End':
-                print_rpcs.sort(key = lambda rpc:
+                print_rpcs = sorted(print_rpcs, key = lambda rpc:
                         rpc['resp_recvd'] if 'resp_recvd' in rpc else 1e20)
             elif key == 'Rtt':
-                print_rpcs.sort(reverse = True, key = lambda rpc:
+                print_rpcs = sorted(print_rpcs, reverse = True, key = lambda rpc:
                         rpc['resp_recvd'] - rpc['req_send']
                         if 'resp_recvd' in rpc and 'req_send' in rpc else 0)
             else:
@@ -11049,14 +10953,366 @@ class AnalyzeTcp_rpcs:
 
         if options.verbose:
             first = True
-            print('\nPackets from the selected RPCs (in the same RPC order as')
-            print('above):')
+            print('\nPackets from the selected RPCs (in the same RPC order as '
+                    'above):')
             for rpc in print_rpcs:
                 if not first:
                     print()
                 print(print_pkts(rpc['req_pkts'], header=first), end='')
                 print(print_pkts(rpc['resp_pkts'], header=False), end='')
                 first = False
+
+#------------------------------------------------
+# Analyzer: tcpdelay
+#------------------------------------------------
+class AnalyzeTcpdelay:
+    """
+    Prints information about various delays in the transmission of
+    TCP packets.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeTcppackets')
+
+    def get_pkt_delays(self, pkt, delays):
+        """
+        Extract delays from a TCP packet, add to lists in delays.
+        """
+
+        # Note: negative delays below are probably caused by retransmits;
+        # ignore them.
+        if 'xmit' in pkt:
+            if ('nic' in pkt):
+                delay = pkt['nic'] - pkt['xmit']
+                if (delay >= 0):
+                    delays['nic'].append(delay)
+            if 'qdisc_xmit' in pkt:
+                delay = pkt['qdisc_xmit'] - pkt['xmit']
+                if (delay >= 0):
+                    delays['qdisc'].append(delay)
+        if 'nic' in pkt:
+            if 'gro' in pkt:
+                delay = pkt['gro'] - pkt['nic']
+                if (delay >= 0):
+                    delays['gro'].append(delay)
+            if 'free_tx_skb' in pkt:
+                delay = pkt['free_tx_skb'] - pkt['nic']
+                if (delay >= 0):
+                    delays['free'].append(delay)
+        if 'free_tx_skb' in pkt and 'gro' in pkt:
+                delay = pkt['gro'] - pkt['free_tx_skb']
+                if (delay >= 0):
+                    delays['net'].append(delay)
+        if 'xmit' in pkt and 'gro' in pkt:
+                delay = pkt['gro'] - pkt['xmit']
+                if (delay >= 0):
+                    delays['total'].append(delay)
+
+    def output(self):
+        global tcp_packets
+
+        # Each of the following dictionaries holds lists of delays
+        # experienced by TCP packets; each variable covers a different
+        # range of packet lengths. The dictionary keys are:
+        # nic:      Delay from 'xmit' to 'nic'
+        # qdisc:    Delay from 'xmit' to 'qdisc_xmit' if 'qdisc_xmit' is
+        #           present, else 0
+        # gro:      Delay from 'nic' to 'gro'
+        # free:     Delay from 'nic' to 'free_tx_skb'
+        # net:      Delay from 'free_tx_skb' to 'gro'
+        # total:    Delay from 'nic' to 'gro'
+        short = defaultdict(list)
+        medium = defaultdict(list)
+        long = defaultdict(list)
+        ack = defaultdict(list)
+
+        short_limit = 1500
+        medium_limit = 10000
+        for pkt in tcp_packets.values():
+            if not 'tso_length' in pkt:
+                continue
+            tso_length = pkt['tso_length']
+            if tso_length == 0:
+                self.get_pkt_delays(pkt, ack)
+            elif tso_length <= short_limit:
+                self.get_pkt_delays(pkt, short)
+            elif tso_length <= medium_limit:
+                self.get_pkt_delays(pkt, medium)
+            else:
+                self.get_pkt_delays(pkt, long)
+
+        print('\n------------------')
+        print('Analyzer: tcpdelay')
+        print('------------------')
+        print('Delays in the transmission of TCP packets (all times in usecs):')
+        print('Xmit:     Time from ip*xmit call until driver queued packet for NIC')
+        print('Qdisc:    Time from ip*xmit call until homa_qdisc released '
+                'packet for')
+        print('          transmission (deferred packets only)')
+        print('Gro:      Time from when NIC received packet until GRO started '
+                'processing')
+        print('Free:     Time from when NIC received packet until packet was '
+                'returned to Linux')
+        print('          and freed (large values caused by queuing in NIC)')
+        print('Net:      Slight underestimate of time from when NIC '
+                'transmitted packet')
+        print('          until GRO processing started (Gro - Free)')
+        print('Total:    Time from ip*xmit call until GRO started processing')
+
+        def print_pcts(delays):
+            if not delays:
+                return '     0'
+            delays.sort()
+            return '%6d %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f' % (
+                    len(delays), delays[0], delays[10*len(delays)//100],
+                    delays[50*len(delays)//100], delays[90*len(delays)//100],
+                    delays[99*len(delays)//100], delays[len(delays)-1],
+                    sum(delays)/len(delays))
+        print('\nPhase     Count    Min    P10    P50    P90    P99    Max    Avg')
+        print('----------------------------------------------------------------')
+
+        print('Data packets <= %d bytes:' % (short_limit))
+        print('Xmit     %s' % print_pcts(short['nic']))
+        print('Qdisc    %s' % print_pcts(short['qdisc']))
+        print('Gro      %s' % print_pcts(short['gro']))
+        print('Free     %s' % print_pcts(short['free']))
+        print('Net      %s' % print_pcts(short['net']))
+        print('Total    %s' % print_pcts(short['total']))
+
+        print('\nData packets %d-%d bytes:' % (short_limit + 1, medium_limit))
+        print('Xmit     %s' % print_pcts(medium['nic']))
+        print('Qdisc    %s' % print_pcts(medium['qdisc']))
+        print('Gro      %s' % print_pcts(medium['gro']))
+        print('Free     %s' % print_pcts(medium['free']))
+        print('Net      %s' % print_pcts(medium['net']))
+        print('Total    %s' % print_pcts(medium['total']))
+
+        print('\nData packets > %d bytes:' % (medium_limit))
+        print('Xmit     %s' % print_pcts(long['nic']))
+        print('Qdisc    %s' % print_pcts(long['qdisc']))
+        print('Gro      %s' % print_pcts(long['gro']))
+        print('Free     %s' % print_pcts(long['free']))
+        print('Net      %s' % print_pcts(long['net']))
+        print('Total    %s' % print_pcts(long['total']))
+
+        print('\nAcks:')
+        print('Xmit     %s' % print_pcts(ack['nic']))
+        print('Qdisc    %s' % print_pcts(ack['qdisc']))
+        print('Gro      %s' % print_pcts(ack['gro']))
+        print('Free     %s' % print_pcts(ack['free']))
+        print('Net      %s' % print_pcts(ack['net']))
+        print('Total    %s' % print_pcts(ack['total']))
+
+        # Print stats for P98-99 small packets
+        p99 = defaultdict(list)
+        delays = sorted(short['total'])
+        if delays:
+            min_delay = delays[98*len(delays)//100]
+            max_delay = delays[99*len(delays)//100]
+            for pkt in tcp_packets.values():
+                if not 'tso_length' in pkt or not 'xmit' in pkt or not 'gro' in pkt:
+                    continue
+                if pkt['tso_length'] > short_limit:
+                    continue
+                delay = pkt['gro'] - pkt['xmit']
+                if delay >= min_delay and delay <= max_delay:
+                    self.get_pkt_delays(pkt, p99)
+
+            print('\nP98-P99 packets <= %d bytes:' % (short_limit))
+            print('Xmit     %s' % print_pcts(p99['nic']))
+            print('Qdisc    %s' % print_pcts(p99['qdisc']))
+            print('Gro      %s' % print_pcts(p99['gro']))
+            print('Free     %s' % print_pcts(p99['free']))
+            print('Net      %s' % print_pcts(p99['net']))
+            print('Total    %s' % print_pcts(p99['total']))
+
+        # Print stats for P98-99 medium packets
+        p99 = defaultdict(list)
+        delays = sorted(medium['total'])
+        if delays:
+            min_delay = delays[98*len(delays)//100]
+            max_delay = delays[99*len(delays)//100]
+            for pkt in tcp_packets.values():
+                if not 'tso_length' in pkt or not 'xmit' in pkt or not 'gro' in pkt:
+                    continue
+                tso_length = pkt['tso_length']
+                if tso_length <= short_limit or tso_length > medium_limit:
+                    continue
+                delay = pkt['gro'] - pkt['xmit']
+                if delay >= min_delay and delay <= max_delay:
+                    self.get_pkt_delays(pkt, p99)
+
+            print('\nP98-P99 packets %d-%d bytes:' % (short_limit + 1, medium_limit))
+            print('Xmit     %s' % print_pcts(p99['nic']))
+            print('Qdisc    %s' % print_pcts(p99['qdisc']))
+            print('Gro      %s' % print_pcts(p99['gro']))
+            print('Free     %s' % print_pcts(p99['free']))
+            print('Net      %s' % print_pcts(p99['net']))
+            print('Total    %s' % print_pcts(p99['total']))
+
+        # Print stats for P98-99 long packets
+        p99 = defaultdict(list)
+        delays = sorted(long['total'])
+        if delays:
+            min_delay = delays[98*len(delays)//100]
+            max_delay = delays[99*len(delays)//100]
+            for pkt in tcp_packets.values():
+                if not 'tso_length' in pkt or not 'xmit' in pkt or not 'gro' in pkt:
+                    continue
+                tso_length = pkt['tso_length']
+                if tso_length <= medium_limit:
+                    continue
+                delay = pkt['gro'] - pkt['xmit']
+                if delay >= min_delay and delay <= max_delay:
+                    self.get_pkt_delays(pkt, p99)
+
+            print('\nP98-P99 packets > %d bytes:' % (medium_limit))
+            print('Xmit     %s' % print_pcts(p99['nic']))
+            print('Qdisc    %s' % print_pcts(p99['qdisc']))
+            print('Gro      %s' % print_pcts(p99['gro']))
+            print('Free     %s' % print_pcts(p99['free']))
+            print('Net      %s' % print_pcts(p99['net']))
+            print('Total    %s' % print_pcts(p99['total']))
+
+        # Print stats for P98-99 acks
+        p99 = defaultdict(list)
+        delays = sorted(ack['total'])
+        if delays:
+            min_delay = delays[98*len(delays)//100]
+            max_delay = delays[99*len(delays)//100]
+            for pkt in tcp_packets.values():
+                if not 'tso_length' in pkt or not 'xmit' in pkt or not 'gro' in pkt:
+                    continue
+                tso_length = pkt['tso_length']
+                if tso_length != 0:
+                    continue
+                delay = pkt['gro'] - pkt['xmit']
+                if delay >= min_delay and delay <= max_delay:
+                    self.get_pkt_delays(pkt, p99)
+
+            print('\nAcks:')
+            print('Xmit     %s' % print_pcts(p99['nic']))
+            print('Qdisc    %s' % print_pcts(p99['qdisc']))
+            print('Gro      %s' % print_pcts(p99['gro']))
+            print('Free     %s' % print_pcts(p99['free']))
+            print('Net      %s' % print_pcts(p99['net']))
+            print('Total    %s' % print_pcts(p99['total']))
+
+#------------------------------------------------
+# Analyzer: tcppackets
+#------------------------------------------------
+class AnalyzeTcppackets:
+    """
+    Collects information about each TCP packet but doesn't generate any
+    output. The data it collects is used by other analyzers.
+    """
+
+    def __init__(self, dispatcher):
+        return
+
+    def tt_tcp_xmit(self, trace, t, core, source, dest, data_bytes, seq_ack):
+        global tcp_hdr_length
+
+        tcp_pkt = get_tcp_packet(source, dest, data_bytes, seq_ack)
+        # if 'xmit' in tcp_pkt:
+        #     print('%9.3f: Duplicate TCP packet transmission on node %s (previous: %.3f)' % (t,
+        #             trace['node'], tcp_pkt['xmit']))
+        node = trace['node']
+        tcp_pkt['xmit'] = t
+        tcp_pkt['xmit2'] = t
+        tcp_pkt['tso_length'] = data_bytes
+        tcp_pkt['tx_node'] = node
+        tcp_pkt['tx_core'] = core
+        set_tcp_ip_node(source, node)
+
+    def tt_tcp_qdisc(self, trace, t, core, source, dest, data_bytes, seq_ack):
+        tcp_pkt = get_tcp_packet(source, dest, data_bytes, seq_ack)
+        node = trace['node']
+        tcp_pkt['qdisc_xmit'] = t
+        tcp_pkt['xmit2'] = t
+        tcp_pkt['tso_length'] = data_bytes
+        tcp_pkt['tx_node'] = node
+        set_tcp_ip_node(source, node)
+
+    def tt_tcp_nic(self, trace, t, core, source, dest, data_bytes, seq_ack):
+        tcp_pkt = get_tcp_packet(source, dest, data_bytes, seq_ack)
+        node = trace['node']
+        tcp_pkt['nic'] = t
+        tcp_pkt['tso_length'] = data_bytes
+        tcp_pkt['tx_node'] = node
+        tcp_pkt['nic_core'] = core
+        set_tcp_ip_node(source, node)
+
+    def tt_tcp_free(self, trace, t, core, source, dest, data_bytes, seq_ack,
+            qid):
+        tcp_pkt = get_tcp_packet(source, dest, data_bytes, seq_ack)
+        node = trace['node']
+        tcp_pkt['free_tx_skb'] = t
+        tcp_pkt['tso_length'] = data_bytes
+        tcp_pkt['tx_qid'] = qid
+        tcp_pkt['tx_node'] = node
+        set_tcp_ip_node(source, node)
+
+    def tt_tcp_gro(self, trace, t, core, source, dest, data_bytes, seq_ack):
+        global tcp_hdr_length
+
+        tcp_pkt = get_tcp_packet(source, dest, data_bytes, seq_ack)
+        node = trace['node']
+        tcp_pkt['length'] = data_bytes
+        tcp_pkt['gro'] = t
+        tcp_pkt['rx_node'] = node
+        set_tcp_ip_node(dest, node)
+
+    def analyze(self):
+        """
+        This method post-processes all of the TCP packets to fill in missing
+        fields.
+        """
+        global tcp_packets
+
+        # <source, dest> -> list of data packets (nonzero length) from
+        # source to dest, where source and dest come from fields in packets
+        # with the same name.
+        stream_pkts = defaultdict(list)
+
+        # Pass 1: divide data packets into buckets for unidirectional
+        # streams, and also fill in a fiew fields.
+        for pkt in tcp_packets.values():
+            if not 'tx_node' in pkt:
+                node = get_tcp_node(pkt['source'])
+                if node != None:
+                    pkt['tx_node'] = node
+            if not 'rx_node' in pkt:
+                node = get_tcp_node(pkt['source'])
+                if node != None:
+                    pkt['rx_node'] = node
+            if not 'length' in pkt:
+                if not 'tso_length' in pkt:
+                    print('No tso_length in packet: %s' % (pkt))
+                pkt['length'] = pkt['tso_length']
+
+            if pkt['length'] == 0:
+                continue
+            stream_pkts[f"{pkt['source']} {pkt['dest']}"].append(pkt)
+
+        # Pass 2: process the packets in a stream in sequence order, in
+        # order to copy information from a source TSO packet into each of
+        # the segments generated from it.
+        for pkts in stream_pkts.values():
+            tso_pkt = None
+            tso_end = None
+            for pkt in sorted(pkts, key = lambda pkt: pkt['seq_ack']):
+                if 'tso_length' in pkt:
+                    tso_pkt = pkt
+                    tso_end = pkt['seq_ack'] + pkt['tso_length']
+                    continue
+                if tso_pkt == None or pkt['seq_ack'] >= tso_end:
+                    continue
+                tso_pkt['segments'].append(pkt)
+                for field in ['xmit', 'qdisc_xmit', 'xmit2', 'tx_qid',
+                        'nic', 'free_tx_skb']:
+                    if field in tso_pkt:
+                        pkt[field] = tso_pkt[field]
 
 #------------------------------------------------
 # Analyzer: temp
@@ -11069,22 +11325,20 @@ class AnalyzeTemp:
     def __init__(self, dispatcher):
         # dispatcher.interest('AnalyzeTcp_rpcs')
         # dispatcher.interest('AnalyzeRpcs')
-        dispatcher.interest('AnalyzePackets')
+        # dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
 
     def output(self):
         global packets, grants, tcp_packets
 
         selected = []
-        for pkt in itertools.chain(packets.values(), grants.values(),
-                tcp_packets.values()):
-            if not 'nic' in pkt or not 'tso_length' in pkt:
+        for pkt in tcp_packets.values():
+            if not 'tso_length' in pkt:
                 continue
-            if not 'xmit' in pkt:
-                continue
-            if pkt['nic'] - pkt['xmit'] > 5:
+            if pkt['tso_length'] <= 1500:
                 selected.append(pkt)
 
-        selected.sort(key=lambda pkt: pkt['xmit'])
+        selected.sort(key=lambda pkt: pkt['xmit'] if 'xmit' in pkt else 1e20)
         print(print_pkts(selected, header=True), end='')
 
     def output_slow_pkts(self):
@@ -11307,6 +11561,7 @@ class AnalyzeTemp2:
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
 
     def output(self):
         global packets
@@ -11647,6 +11902,7 @@ class AnalyzeTxpkts:
         global options
         require_options('txpkts', 'data')
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
 
     def output(self):
         global packets, tcp_packets, options, traces
