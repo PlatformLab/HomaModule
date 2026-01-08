@@ -341,7 +341,7 @@ void print_help(const char *name)
 	printf("    --protocol        Transport protocol to use: homa or tcp (default: %s)\n",
 			protocol);
 	printf("    --port-threads    Number of server threads to service each port\n"
-		"                      (Homa only, default: %d)\n",
+		"                      (default: %d)\n",
 			port_threads);
 	printf("    --ports           Number of ports to listen on (default: %d)\n\n",
 			server_ports);
@@ -1219,7 +1219,7 @@ std::vector<tcp_server *> tcp_servers;
  *                requests.
  * @id:           Unique identifier for this server.
  * @num_threads:  Number of threads to service this listening socket and
- *                all of the other sockets excepted from it.
+ *                all of the other sockets accepted from it.
  * @experiment:   Name of the experiment in which this server is participating.
  */
 tcp_server::tcp_server(int port, int id, int num_threads,
