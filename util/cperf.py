@@ -740,6 +740,9 @@ def run_experiment(name, clients, options):
             vlog("Recording initial metrics")
             for id in exp_nodes:
                 do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
+    if options.protocol == "tcp" or options.protocol == "dctcp":
+        log("Waiting for TCP to warm up...")
+        time.sleep(15)
     if not "no_rtt_files" in options:
         do_cmd("dump_times /dev/null %s" % (name), clients)
     if options.protocol == "homa" and options.tt_freeze:
@@ -914,6 +917,9 @@ def run_experiments(*args):
     if homa_clients:
         # Wait a bit so that homa_prio can set priorities appropriately
         time.sleep(2)
+    if tcp_nodes:
+        log("Waiting for TCP to warm up...")
+        time.sleep(15)
     if homa_nodes:
         if stripped:
             vlog("Skipping metrics initialization (Homa is stripped)")
