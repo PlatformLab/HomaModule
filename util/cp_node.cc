@@ -1868,8 +1868,11 @@ void client::record(uint64_t end_time, message_header *header)
 	}
 	rinfo *r = &rinfos[header->msg_id];
 	if (!r->active) {
-		log(NORMAL, "ERROR: response arrived for inactive msg_id %u\n",
-			header->msg_id);
+		int *int_hdr = reinterpret_cast<int *>(header);
+		log(NORMAL, "ERROR: response arrived for inactive msg_id %u, "
+				"header 0x%x, 0x%x, 0x%x\n",
+				header->msg_id, int_hdr[0], int_hdr[1],
+				int_hdr[2]);
 		return;
 	}
 	rtt = end_time - r->start_time;
