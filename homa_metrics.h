@@ -287,6 +287,13 @@ struct homa_metrics {
 	u64 napi_cycles;
 
 	/**
+	 * @linux_softirqd_actions: total number of times that a SoftIRQ
+	 * action was taken in the softirqd daemon thread (slow path) rather
+	 * than in the bottom-half SoftIRQ handler.
+	 */
+	u64 linux_softirqd_actions;
+
+	/**
 	 * @send_cycles: total time spent executing the homa_sendmsg kernel
 	 * call handler to send requests.
 	 */
