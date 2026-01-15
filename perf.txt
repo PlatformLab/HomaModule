@@ -2,6 +2,176 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+67. (January 2025) Performance variation over reboots. On the c6620 CloudLab
+cluster, both Homa and TCP performance seems to vary from reboot to reboot.
+Performance is relatively consistent between reboots. However, after
+observing this phenomenon one day, it completely disappeared the next day
+(reboots consistent result in "fast" behavior). There was a CloudLab datacenter
+shutdown overnight... perhaps that somehow changed the behavior?
+
+Each line below represents one reboot of a c6620 cluster running this command:
+
+cp_vs_tcp -w w4 -b 80 -s 20 -l /ouster/logs/test -n 6 --skip 0 --tcp yes
+--port-threads 3 --port-receivers 3 --client-ports 5 --server-ports 2
+--tcp-client-ports 10 --tcp-server-ports 20
+
+The command was run once with the old pacer and once with homa_qdisc
+enabled. In addition, for the "Both" measurements, cp_both was used
+to run Homa and TCP simultaneously (with homa_qdisc enabled):
+
+cp_both -w w4 -b 80 -s 20 -l /ouster/logs/test -n 6 --skip 0 --homa-gbps 40
+--port-threads 3 --port-receivers 3 --client-ports 5 --server-ports 2
+--tcp-client-ports 10 --tcp-server-ports 20
+
+Each measurement includes average slowdown and P99 short-message latency,
+as printed by cp_vs_tcp on the "avg slowdown" line.
+
+Homa no qdisc  TCP no qdisc   Homa Qdisc   Tcp Qdisc   Homa Both    TCP Both
+ Avg   P99      Avg    P99     Avg   P99   Avg   P99   Avg   P99   Avg   P99
+----------------------------------------------------------------------------
+3.30    97     11.68  1258    3.30    90  10.91  850  3.67   125   9.09  766
+3.30    97     11.73  1277    3.29    90  10.72  816  3.69   125   9.17  768
+3.30    97     11.62  1273    3.31    91  10.77  837  3.68   125   9.15  784
+3.30    98     11.71  1268    3.30    90  10.75  828  3.68   124   9.15  769
+3.31    99     11.64  1268    3.60    97  11.54  906  4.38   144  11.60  892
+3.34   101     11.71  1253    3.35    94  10.92  860  3.71   125   9.19  774
+3.85   135     12.40  1501    4.08   117  12.04  961  4.77   158  13.19 1003
+3.94   143     12.53  1555    3.92   107  11.87  961  5.12   204  14.28 1126
+4.20   255     12.86  1694    4.20   133  12.71 1053
+
+The following experiments were run repeatedly without rebooting the nodes
+(two different reboots separated by a blank line):
+
+Homa no qdisc  TCP no qdisc   Homa Qdisc   Tcp Qdisc   Homa Both    TCP Both
+ Avg   P99      Avg    P99     Avg   P99   Avg   P99   Avg   P99   Avg   P99
+----------------------------------------------------------------------------
+3.30    97     11.73  1277    3.29    90  10.72  816  3.69   125   9.17  768
+3.30    97     11.74  1270    3.31    90  10.72  823  3.67   125   9.05  764
+3.30    97     11.68  1259    3.30    90  10.92  852  3.67   124   9.11  762
+3.30    97     11.68  1267    3.30    90  10.79  831  3.69   125   9.21  766
+3.29    97     11.74  1291    3.30    90  10.79  837  3.68   125   9.12  767
+3.29    97     11.75  1276    3.30    90  10.68  814  3.68   125   9.16  773
+
+3.97   138     12.72  1599    4.06   110  12.33 1002  4.91   173  13.78 1083
+4.07   146     12.74  1632    4.03   112  12.04  966  4.72   162  13.49 1020
+4.09   150     12.63  1577    4.06   114  12.43 1013  5.05   181  14.41 1145
+4.08   148     12.59  1557    4.11   114  12.33 1000  5.02   177  14.39 1093
+4.17   180     12.65  1603    3.94   106  12.20  988  4.95   178  14.30 1130
+3.99   132     12.74  1629    4.05   111  12.25  989  5.01   172  14.01 1085
+4.02   143     12.53  1558    4.09   113  11.91  959  5.10   191  15.18 1208
+3.89   126     12.54  1590    4.28   120  12.08  981  5.14   182  14.07 1111
+
+66. (January 2025) Evaluated benchmarking parameters for 100 Gbps networks
+(c6620 CloudLab cluster).  Overall, for W4 the best parameters for Homa are:
+
+--port-threads 3 --port-receivers 3 --client-ports 5 --server-ports 2
+('--client-ports 4 --server-ports 2' and '--client-ports 3 --server-ports 3'
+are about the same)
+
+and for Tcp:
+
+--tcp-client-ports 10 --tcp-server-ports 20
+
+Here are more detailed measurements:
+Thr:       --port-threads and --port-receivers
+CPorts:    --client-ports
+SPorts:    --server-ports
+TcpCP:     --tcp-client-ports
+TcpSP:     --tcp-server-ports
+HomaS:     Average slowdown for Homa
+HomaP99:   P99 latency for short messages for Homa (usecs)
+TcpS:      Average slowdown for TCP
+TcpP99:    P99 latency for short messages for TCP (usecs)
+
+Homa under cp_vs_tcp with homa_qdisc (c6620, 6 nodes):
+Note: these measurements were taken with a "good" boot configuration
+-w  -b  Thr  CPorts  SPorts  HomaS  HomaP99
+-------------------------------------------
+w3  34   2      3       3     1.98     142
+w3  34   2      4       4     1.77      98
+w3  34   2      5       5     1.67      76
+w3  34   2      6       6     1.68      72
+w3  34   2      7       7     1.69      69      max tput (47.4 Gbps)
+w3  34   2      8       8     1.70      69
+
+w4  80   3      5       1     3.44     170
+w4  80   3      4       2     3.36      94
+w4  80   3      5       2     3.35      94
+w4  80   3      3       3     3.41      96
+w4  80   3      4       4     3.51      99
+w4  80   3      5       5     3.53     100
+w4  80   3      3       5     3.58     104
+w4  80   3      5       3     3.43      94
+w4  80   2      4       4     3.43     109
+w4  80   2      5       5     3.43     103
+w4  80   2      6       6     3.47     102
+w4  80   2      7       7     3.51     104
+
+w5  80   2      6       4     8.04     177
+w5  80   3      4       2     7.74     136
+w5  80   3      3       3     8.25     141
+w5  80   3      4       4     8.42     141
+
+TCP under cp_vs_tcp with homa_qdisc (c6620, 6 nodes):
+Note: these measurements were taken with a "good" boot configuration
+-w  -b    TcpCP  TcpSP  TcpS  TcpP99
+------------------------------------
+w3  34      4       8   3.10    445
+w3  34      5      10   3.72    516
+w3  34      6      12   3.50    430
+w3  34      7      14   3.53    390
+w3  34      8      16   3.63    368             max tput (42.7 Gbps)
+w3  34      9      18   3.80    361
+
+w4  80      2       4  25.31   4040
+w4  80      3       6  13.83   1790
+w4  80      4       8  12.42   1536
+w4  80      5      10  12.23   1461
+w4  80      6      12  12.28   1342
+w4  80      7      14  11.68   1105
+w4  80      8      16  11.40    980
+w4  80      9      18  10.87    872
+w4  80     10      20  10.79    843
+w4  80     12      24  11.41    821
+w4  80     15      30  15.74    915
+
+w5  80      6      12  16.00   1927
+w5  80      8      16  15.80   1866
+w5  80     10      20  15.27   1636
+w5  80     12      24  15.38   1478
+
+Explored configuration for cp_both (c6620 cluster, -w w4 -b 80):
+Note: these measurements were taken with a "good" boot configuration
+(Hgbps is the --homa_gbps parameter)
+
+HGbps  Thr  CPorts  SPorts  TcpCP  TcpSP  HomaS  HomaP99  TcpS  TcpP99
+----------------------------------------------------------------------
+5       3      1       1       8     16    5.02   268    10.83   929
+5       3      2       2      10     20    4.54   205    10.50   842
+5       3      3       3      12     24    4.45   179    11.07   818
+5       3      4       2      10     15    4.23   173    10.23   892
+5       3      5       2      12     12    3.95   136    10.18   932
+5       3      6       2       8     24    4.36   181    10.30   830
+5       2      4       2      16     16    4.02   148    10.52   856
+5       2      5       2      16     20    4.32   182    11.40   844
+
+20      3      4       2      10     20    3.93   154    10.14   828
+20      3      5       2      10     20    3.86   146    10.06   815
+20      3      5       3      10     20    3.89   145    10.13   824
+
+40      3      5       2      10     20    3.71   125     9.19   774
+40      3      5       3      10     20    3.71   124     9.21   763
+40      3      5       3       8     16    3.72   126     8.99   794
+
+60      3      4       2      10     20    3.48   106     7.60   643
+60      3      5       2      10     20    3.47   104     7.62   647
+60      3      5       3      10     20    3.48   103     7.60   635
+
+75      3      4       2      10     20    3.27    94     7.38   560
+75      3      5       2      10     20    3.24    93     7.36   553
+75      3      5       3       3      6    3.42    93     7.04   602
+75      3      5       3       8     16    3.31    91     7.21   565
+
 65. (December 2025) The pacer does not prevent NIC queue buildup. Under
 "-w w4 -b 80" on cc620 machines (Intel NICs) it is not unusual to see
 periods of 1ms or longer with more than 500 Kbytes of packet data queued
@@ -996,7 +1166,7 @@ Event                                                               Median
 1. Without RPS enabled, Homa performance is limited by a single core handling
    all softirq actions. In order for RPS to work well, Homa must implement
    its own hash function for mapping packets to cores (the default IP hasher
-   doesn't know about Homa ports, so it considers only the peer IP address.
+   doesn't know about Homa ports, so it considers only the peer IP address).
    However, with RPS, packets can get spread out over too many cores, which
    causes poor latency when there is a single client and the server is
    underloaded.
