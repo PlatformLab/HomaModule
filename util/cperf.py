@@ -16,6 +16,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+from pathlib import Path
 import platform
 import re
 import shutil
@@ -72,28 +73,63 @@ baseline_rtts = {"xl170": 15, "c6620": 25, "c6525-25g": 25, "c6525-100g": 25,
         "default": 25}
 
 # Defaults for command-line options; assumes that servers and clients
-# share nodes.
+# share nodes. Individual benchmarks may override some of these values.
+# 'None' values will eventually be replaced with values from defaults_25g
+# or defaults_100g.
 default_defaults = {
     'gbps':                0.0,
     # Note: very large numbers for client_max hurt Homa throughput with
     # unlimited load (throttle queue inserts take a long time).
     'client_max':          200,
-    'client_ports':        3,
+    'client_ports':        None,
     'log_dir':             'logs/' + time.strftime('%Y%m%d%H%M%S'),
     'mtu':                 0,
     'no_trunc':            '',
     'protocol':            'homa',
-    'port_receivers':      3,
-    'port_threads':        3,
+    'port_receivers':      None,
+    'port_threads':        None,
     'seconds':             30,
-    'server_ports':        3,
-    'tcp_client_ports':    4,
-    'tcp_port_receivers':  1,
-    'tcp_server_ports':    8,
-    'tcp_port_threads':    1,
+    'server_ports':        None,
+    'tcp_client_ports':    None,
+    'tcp_port_receivers':  None,
+    'tcp_server_ports':    None,
+    'tcp_port_threads':    None,
     'unsched':             0,
     'unsched_boost':       0.0,
     'workload':            ''
+}
+
+# These defaults are used for 25 Gbps networks.
+defaults_25g = {
+    'client_ports':        3,
+    'port_receivers':      3,
+    'port_threads':        3,
+    'server_ports':        3,
+    'tcp_client_ports':    4,
+    'tcp_port_receivers':  1,
+    'tcp_port_threads':    1,
+    'tcp_server_ports':    8,
+}
+
+# These defaults are used for 100 Gbps networks.
+defaults_100g = {
+    'client_ports':        5,
+    'port_receivers':      3,
+    'port_threads':        3,
+    'server_ports':        2,
+    'tcp_client_ports':    10,
+    'tcp_port_receivers':  1,
+    'tcp_port_threads':    1,
+    'tcp_server_ports':    20,
+}
+
+# Maps from CloudLab node type ('xl170', 'c6620', etc.) to defaults
+# appropriate for that cluster type.
+type_defaults = {
+    'xl170':       defaults_25g,
+    'c6620':       defaults_100g,
+    'c6525-25g':   defaults_25g,
+    'c6525-100g':  defaults_100g
 }
 
 # Keys are experiment names, and each value is the digested data for that
@@ -193,6 +229,26 @@ def get_parser(description, usage, defaults = {}):
                     are defaults; used to modify the defaults for some of the
                     options (there is a default default for each option).
     """
+
+    # Configure defaults for this particular node type (e.g. network speed)
+    p = Path("/var/emulab/boot/nodetype")
+    if p.is_file():
+        type = p.read_text().strip()
+        if type in type_defaults:
+            node_defaults = type_defaults[type]
+        else:
+            print("Couldn't find option defaults for node type '%s'; "
+                    "using 100 Gbps defaults" % (type), file=sys.stderr)
+            node_defaults = defaults_100g
+    else:
+        print("Couldn't read node type from /var/emulab/boot/nodetype; "
+                "using 100 Gbps defaults")
+        node_defaults = defaults_100g
+    for key, value in node_defaults.items():
+        # Only set default if the application hasn't already specified a value
+        if default_defaults[key] == None:
+            default_defaults[key] = value
+
     for key in default_defaults:
         if not key in defaults:
             defaults[key] = default_defaults[key]
@@ -742,7 +798,7 @@ def run_experiment(name, clients, options):
                 do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
     if options.protocol == "tcp" or options.protocol == "dctcp":
         log("Waiting for TCP to warm up...")
-        time.sleep(15)
+        time.sleep(10)
     if not "no_rtt_files" in options:
         do_cmd("dump_times /dev/null %s" % (name), clients)
     if options.protocol == "homa" and options.tt_freeze:
@@ -919,7 +975,7 @@ def run_experiments(*args):
         time.sleep(2)
     if tcp_nodes:
         log("Waiting for TCP to warm up...")
-        time.sleep(15)
+        time.sleep(10)
     if homa_nodes:
         if stripped:
             vlog("Skipping metrics initialization (Homa is stripped)")
