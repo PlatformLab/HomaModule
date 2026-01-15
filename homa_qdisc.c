@@ -32,9 +32,9 @@
  * bandwidth even with a large backlog of (mixed-size) output packets. As a
  * result, with this approach alone NIC queues frequently build up
  * (measurements showed total NIC backlogs of 5 MB or more under high
- * network load). If the pacing rate is reduced to a level where the NIC
- * could always keep up, it would sacrifice link bandwidth in situations
- * where the NIC can transmit at closer to line rate.
+ * network load, even with DQL). If the pacing rate is reduced to a level
+ * where the NIC could always keep up, it would sacrifice link bandwidth in
+ * situations where the NIC can transmit at closer to line rate.
  *
  * Thus Homa also uses a second approach, which is based on information
  * maintained by the dynamic queue limits mechanism (DQL). DQL keeps
@@ -44,7 +44,8 @@
  * outstanding bytes for any queue exceeds a limit (determined by the
  * max_nic_queue_usecs sysctl parameter) then the NIC is considered
  * congested and Homa will stop queuing more packets until the congestion
- * subsides.
+ * subsides. This reduces worst-case total NIC queuing by 2-3x (as of
+ * January 2026).
  *
  * It might seem that the second approach is sufficient by itself, so the
  * first approach is not needed. Unfortunately, updates to the DQL counters
@@ -57,6 +58,13 @@
  * There is one additional twist, which is that the rate limits above do
  * not apply to small packets. The reasons for this are explained in a comment
  * in homa_qdisc_enqueue.
+ *
+ * In case you're wondering "why don't you just use DQL?", the DQL mechanism
+ * is inadequate in two ways. First, it allows large queues to accumulate in
+ * the NIC. Second, when queues build up, Homa wants to know so it can
+ * throttle long messages more than short ones. DQL provides no feedback
+ * to qdiscs; it simply stops the entire output queue, throttling short and
+ * long messages alike. This interferes with Homa's SRPT scheduler.
  */
 
 #include "homa_impl.h"
