@@ -416,6 +416,12 @@ struct homa_metrics {
 	u64 pacer_homa_bytes;
 
 	/**
+	 * @pacer_fifo_bytes: total number of bytes in Homa packets that
+	 * were transmitted using FIFO priority rather than SRPC.
+	 */
+	u64 pacer_fifo_bytes;
+
+	/**
 	 * @pacer_tcp_packets: total number of TCP packets that were
 	 * transmitted by homa_qdisc_pacer (they were deferred because of
 	 * NIC queue overload).

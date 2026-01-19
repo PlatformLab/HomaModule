@@ -701,6 +701,10 @@ void homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev, struct homa_rpc *rpc)
 	rb_link_node(&rpc->qrpc.rb_node, parent, new);
 	rb_insert_color_cached(&rpc->qrpc.rb_node, &qdev->deferred_rpcs,
 			       leftmost);
+
+	if (qdev->oldest_rpc && rpc->msgout.init_time <
+				qdev->oldest_rpc->msgout.init_time)
+		qdev->oldest_rpc = rpc;
 }
 
 /**
@@ -763,6 +767,34 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 }
 
 /**
+ * homa_qdisc_get_oldest() - Find and return the oldest Homa RPC with deferred
+ * packets for a qdev.
+ * @qdev:    Info about deferred RPCs is stored here.
+ * Return:   See above. NULL is returned if there are no deferred RPCs in qdev.
+ */
+struct homa_rpc *homa_qdisc_get_oldest(struct homa_qdisc_dev *qdev)
+{
+	struct rb_node *node;
+	struct homa_rpc *rpc;
+	u64 oldest_time;
+
+	if (qdev->oldest_rpc)
+		return qdev->oldest_rpc;
+	qdev->oldest_rpc = NULL;
+	oldest_time = ~0;
+
+	for (node = rb_first_cached(&qdev->deferred_rpcs); node;
+	     node = rb_next(node)) {
+		rpc = container_of(node, struct homa_rpc, qrpc.rb_node);
+		if (rpc->msgout.init_time < oldest_time) {
+			oldest_time = rpc->msgout.init_time;
+			qdev->oldest_rpc = rpc;
+		}
+	}
+	return qdev->oldest_rpc;
+}
+
+/**
  * homa_qdisc_get_deferred_homa() - Return the highest-priority deferred Homa
  * packet and dequeue it from the structures that manage deferred packets.
  * @qdev:    Info about deferred packets is stored here.
@@ -776,6 +808,7 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 	struct homa_rpc *rpc;
 	struct rb_node *node;
 	struct sk_buff *skb;
+	bool fifo = false;
 	int bytes_left;
 
 	spin_lock_bh(&qdev->defer_lock);
@@ -785,21 +818,43 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 		return NULL;
 	}
 	qrpc = container_of(node, struct homa_rpc_qdisc, rb_node);
-	skb = skb_dequeue(&qrpc->packets);
-	if (skb_queue_len(&qrpc->packets) == 0)
-		rb_erase_cached(node, &qdev->deferred_rpcs);
-
-	/* Update qrpc->bytes_left. This can change the priority of the RPC
-	 * in qdev->deferred_rpcs, but the RPC was already the highest-
-	 * priority one and its priority only gets higher, so its position
-	 * in the rbtree won't change (thus we don't need to remove and
-	 * reinsert it).
-	 */
 	rpc = container_of(qrpc, struct homa_rpc, qrpc);
+	if (qdev->srpt_bytes <= 0 &&
+	    qdev->hnet->homa->qshared->fifo_fraction != 0) {
+		fifo = true;
+		rpc = homa_qdisc_get_oldest(qdev);
+		qrpc = &rpc->qrpc;
+		node = &qrpc->rb_node;
+	}
+	skb = skb_dequeue(&qrpc->packets);
+	if (skb_queue_len(&qrpc->packets) == 0) {
+		rb_erase_cached(node, &qdev->deferred_rpcs);
+		if (rpc == qdev->oldest_rpc)
+			qdev->oldest_rpc = NULL;
+	}
+
+	/* Update qrpc->tx_left and qdev->srpt_bytes. This can increase the
+	 * priority of the RPC in qdev->deferred_rpcs; if this is the FIFO RPC
+	 * then we have to remove it from the tree and reinsert it to make
+	 * sure it's in the right position (if this isn't the FIFO RPC then
+	 * it's position won't change because it is already highest priority).
+	 */
 	info = homa_get_skb_info(skb);
 	bytes_left = rpc->msgout.length - (info->offset + info->data_bytes);
 	if (bytes_left < qrpc->tx_left)
 		qrpc->tx_left = bytes_left;
+	if (fifo) {
+		if (skb_queue_len(&qrpc->packets) > 0) {
+			rb_erase_cached(node, &qdev->deferred_rpcs);
+			homa_qdisc_insert_rb(qdev, rpc);
+		}
+		qdev->srpt_bytes += (qdisc_pkt_len(skb) *
+				     qdev->hnet->homa->qshared->fifo_weight) >>
+		                    HOMA_FIFO_WEIGHT_SHIFT;
+		INC_METRIC(pacer_fifo_bytes, qdisc_pkt_len(skb));
+	} else {
+		qdev->srpt_bytes -= qdisc_pkt_len(skb);
+	}
 
 	if (!homa_qdisc_any_deferred(qdev)) {
 		INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
@@ -1154,6 +1209,12 @@ void homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev)
 			qdev->link_mbps = ksettings.base.speed;
 	}
 
+	/* Must reset srpt_bytes: if qshared->fifo_fraction was previously
+	 * zero, srpt_bytes could be an enormous negative number. Without
+	 * a reset, the pacer could transmit exclusively FIFO for a long time.
+	 */
+	qdev->srpt_bytes = 0;
+
 	/* Compute cycles_per_mibyte based on the link speed (mibytes/sec)
 	 * and max_link_usage:
 	 *
@@ -1188,6 +1249,13 @@ void homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev)
 void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 {
 	struct homa_qdisc_dev *qdev;
+	u64 tmp;
+
+	if (qshared->fifo_fraction > 0) {
+		tmp = (1000 - qshared->fifo_fraction) << HOMA_FIFO_WEIGHT_SHIFT;
+		do_div(tmp, qshared->fifo_fraction);
+		qshared->fifo_weight = tmp;
+	}
 
 	qshared->max_nic_est_backlog_cycles = homa_ns_to_cycles(1000 *
 			qshared->max_nic_est_backlog_usecs);

@@ -301,6 +301,8 @@ char *homa_metrics_print(void)
 		  "Homa packets transmitted by the pacer\n");
 		M("pacer_homa_bytes", m->pacer_homa_bytes,
 		  "Homa bytes transmitted by the pacer (including headers)\n");
+		M("pacer_fifo_bytes", m->pacer_fifo_bytes,
+		  "Homa bytes transmitted using FIFO priority (including headers)\n");
 		M("pacer_tcp_packets", m->pacer_tcp_packets,
 		  "TCP packets transmitted by the pacer\n");
 		M("pacer_tcp_bytes", m->pacer_tcp_bytes,

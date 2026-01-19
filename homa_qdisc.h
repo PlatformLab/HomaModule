@@ -108,6 +108,19 @@ struct homa_qdisc_dev {
 	struct rb_root_cached deferred_rpcs;
 
 	/**
+	 * @oldest_rpc: The RPC in deferred_rpcs with the oldest init_time, or
+	 * NULL if not currently known.
+	 */
+	struct homa_rpc *oldest_rpc;
+
+	/**
+	 * @srpt_bytes: The number of bytes that should be transmitted from
+	 * SRPT packets before transmitting a FIFO packet. <= 0 means
+	 * the next packet transmission should be FIFO.
+	 */
+	s64 srpt_bytes;
+
+	/**
 	 * @deferred_qdiscs: List of all homa_qdiscs with non-Homa packets
 	 * that have been deferred because of NIC overload.
 	 */
@@ -217,6 +230,16 @@ struct homa_qdisc_shared {
 	int fifo_fraction;
 
 	/**
+	 * @fifo_weight: Determines how much qdev->fifo_count is updated
+	 * when a FIFO packet is transmitted (for each FIFO byte transmitted,
+	 * @fifo_weight >> HOMA_FIFO_WEIGHT_SHIFT SRPT bytes should be
+	 * transmitted); computed from @fifo_fraction. Valid only if
+	 * fifo_fraction is nonzero.
+	 */
+	int fifo_weight;
+#define HOMA_FIFO_WEIGHT_SHIFT 10
+
+	/**
 	 * @max_nic_est_backlog_usecs: Limits the NIC queue length: we won't
 	 * queue packets in the NIC for transmission if link_idle_time is
 	 * this many nanoseconds in the future (or more). Set externally via
@@ -302,6 +325,8 @@ int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
 void            homa_qdisc_free_homa(struct homa_qdisc_dev *qdev);
 struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev);
+struct homa_rpc *
+		homa_qdisc_get_oldest(struct homa_qdisc_dev *qdev);
 int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
 void            homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev,
