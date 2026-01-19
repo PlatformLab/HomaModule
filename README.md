@@ -123,6 +123,18 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant changes
+- January 2026: introduced new 'homa_qdisc' queuing discpline to improve
+  performance when TCP and Homa run simultaneously. Results on c6620 CloudLab
+  cluster (100 Gbps network):
+  - Without homa_qdisc, if Homa and TCP run together, Homa performance
+    suffers (4x increase for P99 for short messages) but TCP performance
+    improves.
+  - Homa_qdisc improves performance for both Homa and TCP, whether
+    running stand-alone or together.
+  - homa_qdisc improves Homa short message P99 3x when running together
+    with TCP, but P99 is still slower than Homa standalone.
+  - TCP performance improves when running together with Homa, with or
+    without homa_qdisc.
 - November 2025: upgraded to Linux 6.17.8.
 - October 2025: added the HOMAIOCINFO ioctl for retrieving status
   information about a Homa socket. See man/homa.7 for details.

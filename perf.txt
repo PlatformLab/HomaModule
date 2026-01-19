@@ -2,6 +2,35 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+68. (January 2025) Performance snapshot with and without pacer, using
+c6620 CloudLab nodes, "-w w4 -b 80 -s 20 -n 6". cp_vs_tcp is used unless
+cp_both is indicated.
+
+AvgSlow:    "avg slowdown" from cp_vs_tcp log output
+Min:        "min" from cp_vs_tcp "avg slowdown" line
+P50:        "P50" from cp_vs_tcp "avg slowdown" line
+P99:        "P99" from cp_vs_tcp "avg slowdown" line
+P99L:       P99 for 1 MB messages, from *_w4.data file
+MaxT:       Throughput under "-b100"
+
+                             AvgSlow   Min    P50     P99  P99L   MaxT
+Homa (old pacer)                3.33  22.1   50.9    98.5  3284   96.6
+homa (homa_qdisc)               3.31  21.1   50.6    90.7  3698   94.6
+Homa (cp_both, old_pacer)       4.56  23.6   56.4   379.6  4182
+homa (cp_both, homa_qdisc)      3.72  23.5   53.6   124.6  4021
+TCP  (no homa_qdisc)           11.81  32.9  180.4  1271.6  5235   94.8
+TCP  (homa_qdisc)              10.80  32.6  157.1   832.6  4627   95.7
+TCP  (cp_both, old pacer)       9.22  31.4  151.6   839.2  3062
+TCP  (cp_both, homa_qdisc)      9.13  32.9  136.5   762.5  4127
+
+Summary:
+* Without homa_qdisc, Homa P99 suffers a lot under cp_both; with homa_qdisc
+  it improves 3x, but is still 30% slower than running without TCP.
+* homa_qdisc improves TCP performance even when running without Homa.
+* TCP performance is better running with Homa than standalone.
+* Homa_qdisc reduces Homa's maximum throughput slightly, increases TCP's
+  maximum throughput slightly.
+
 67. (January 2025) Performance variation over reboots. On the c6620 CloudLab
 cluster, both Homa and TCP performance seems to vary from reboot to reboot.
 Performance is relatively consistent between reboots. However, after
