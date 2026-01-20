@@ -9,54 +9,28 @@ Notes for Homa implementation in Linux:
 * Performance problems to track down:
   * On xl170s, both TCP and Homa run slower with qdisc than pacer (P99 for
     TCP small packets increases by 50%)
-  * P99 latency for W4 short packets is considerably worse with IPv6 than IPv4
-    (c6620).
   * On c6620 cluster, "cp_node client --workload 500000" gets 20 GBps each
     way with TCP but only 15 Gbps with Homa.
+
+* Significant new functionality:
+  * Run Homa SoftIRQ on the GRO core? This would eliminate the latency and
+    cache overheads of switching cores, and RSS already provides adequate
+    load balancing. Possibly even invoke GRO during SoftIRQ?
+  * Don't transmit client port number. Instead, vary the contents of this
+    field to generate packet spraying.
+  * Implement zero-copy for output (may work only on client side).
+  * Change grant mechanism so that each message is either entirely
+    scheduled or entirely unscheduled (see July 2024 note below).
+  * Fix Homa to ensure at-most-once semantics (see "execution multiple
+    times" below).
+  * Implement some of the ideas from SIRD to reduce buffer utilization.
+  * Refactor the granting mechanism to grant separately for each device.
 
 * Move interest cleanup code from homa_sock to a new function in
   homa_interest. Also move wakeup code from homa_rpc_handoff.
 
 * Find a way to reduce pacer core utilization? It currently takes about 0.7
   core when running at high load. Maybe use polling threads instead?
-
-* Use skb_attempt_defer_free once it has been properly exported.
-
-* Thoughts on making TCP and Homa play better together:
-  * Goals:
-    * Keep the NIC tx queue from growing long.
-    * Share bandwidth fairly between TCP and Homa
-    * If one protocol is using a lot less bandwidth, give it preference
-      for transmission?
-    * Balance queue lengths for the protocols?
-  * Approach #1: analogous to "fair share" CPU scheduling
-    * Keep separate tx queues for Homa and TCP
-    * Try to equalize the queue lengths while pacing packets at
-      network speed?
-    * Keep track of lengths for each of many queues
-    * Each queue paces itself based on relative lengths
-    * Do all pacing centrally, call back to individual queues for output?
-  * Approach #2:
-    * Keep track of recent bandwidth consumed by each protocol; when there
-      is overload, restrict each protocol to its fraction of recent bandwidth.
-    * "Consumed" has to be measured in terms of bytes offered, not bytes
-      actually transmitted (otherwise a protocol could get "stuck" at a low
-      transmittion rate?).
-  * Approach #3: token bucket
-    * Use a token bucket for each protocol with 50% of available bandwidth
-      (or maybe less?). Split any extra available bandwidth among the
-      protocols. Maybe adjust rates for the token buckets based on recent
-      traffic?
-  * Also consider the amount of data that is "stuck" in the NIC?
-
-* Consider eliminating SoftIRQ: process packets completely at NAPI level?
-  * This eliminates the latency and cache overheads of switching cores
-    for SoftIRQ
-  * Should also help with tail latency: eliminates one opportunity for
-    hot-spots
-  * Load balancing should still be fine (especially if port number is used
-    for packet spraying)
-  * Or, always do SoftIRQ processing on same node as NAPI?
 
 * Eliminate use of link_mbps in homa_grant.c; perhaps replace with
   configuration parameter fifo_mbps? Maybe the grant mechanism needs
@@ -69,15 +43,9 @@ Notes for Homa implementation in Linux:
     napi_reuse_skb (return GRO_MERGED_FREE?). See also napi_get_frags (used
     by the driver?).
   * Apparently TCP has a faster way of eventually freeing the merged skb
-    (return things to the allocating core): see tcp_eat_recv_skb?
-
-* Remedies to consider for the performance problems at 100 Gbps, where
-  one tx channel gets very backed up:
-  * Implement zero-copy on output in order to reduce memory bandwidth
-    consumption (presumed with this will increase throughput?)
-  * Reserve one channel for the pacer, and don't send non-paced packets
-    on that channel; this should eliminate the latency problems caused
-    by short messages getting queued on that channel
+    (return things to the allocating core): see tcp_eat_recv_skb.
+  * This uses the function skb_attempt_defer_free, which is not currently
+    exported for extensions.
 
 * Rework cp_node so that there aren't separate senders and receivers on the
   client. Instead, have each client thread send, then conditionally receive,
@@ -106,14 +74,6 @@ Notes for Homa implementation in Linux:
     freed.
   * Eventually SoftIRQ wakes up to handle the original packet, which re-creates
     the RPC and it gets serviced a second time.
-
-* Use vmap to map the user-space buffer pool so that the kernel can use
-  memcpy rather than copy_to_user?
-
-* For W3, throttle_min_bytes is a problem: a significant fraction of all
-  transmitted bytes aren't being counted; as a result, the NIC queue
-  can build up. Reducing throttle_min_bytes from 1000 to 200 reduced P99
-  short message latency from 250 us to 200 us.
 
 * Don't understand why W3 performance is so variable under Gen3. Also,
   it's worth comparing tthoma output for W4 and W3 under Gen2; e.g.,
@@ -197,10 +157,6 @@ Notes for Homa implementation in Linux:
 * recvmsg doesn't seem to return an address if there is an error? May
   need to return the address in a different place?
 
-* IPv6 issues:
-  * See if error checking made syscalls slower.
-  * GSO always uses SKB_GSO_TCPV6; sometimes it should be V4.
-
 * Pinning memory: see mm.h and mm/gup.c
   * get_user_page
   * get_user_pages
@@ -211,14 +167,6 @@ Notes for Homa implementation in Linux:
     (just find the oldest message that doesn't have a pity grant)? Also,
     it doesn't look like homa_grant_fifo is keeping track of pity grants
     precisely; perhaps add another RPC field for this?
-  * Re-implement the duty-cycle mechanism. Use a generalized pacer to
-    control grants:
-    * Parameters:
-      * Allowable throughput
-      * Max accumulation of credits
-    * Methods:
-      * Request (current time, amount) (possibly 2 stages: isItOk and doIt?)
-    * Or, just reduce the link speed and let the pacer handler this?
   * Perhaps limit the number of polling threads per socket, to solve
     the problems with having lots of receiver threads?
   * Move some reaping to the pacer? It has time to spare
@@ -238,15 +186,6 @@ Notes for Homa implementation in Linux:
     everything up to the latest received offset.
   * Try more aggressive retries (e.g. if a missing packet is sufficiently
     long ago, don't wait for timeout).
-  * Eliminate hot spots involving NAPI:
-    * Arrange for incoming bursts to be divided into batches where
-      alternate batches do their NAPI on 2 different cores.
-    * To do this, use TCP for Homa!
-      * Send Homa packets using TCP, and use different ports to force
-        different NAPI cores
-      * Interpose on the TCP packet reception hooks, and redirect
-        real TCP packets back to TCP.
-  * Consider replacing grantable list with a heap?
   * Unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in
     struct proto and struct proto_ops.
@@ -258,7 +197,6 @@ Notes for Homa implementation in Linux:
     * Socket not supported on server (or server process ends while
       processing request).
     * Server timeout
-  * Is it safe to use non-locking skb queue functions?
   * Is the RCU usage for sockets safe? In particular, how long is it safe
     to use a homa_sock returned by homa_find_socket? Could it be deleted from
     underneath us? This question may no longer be relevant, given the
@@ -266,16 +204,12 @@ Notes for Homa implementation in Linux:
   * Can a packet input handler be invoked multiple times concurrently?
   * What is audit_sockaddr? Do I need to invoke it when I read sockaddrs
     from user space?
-  * When a struct homa is destroyed, all of its sockets end up in an unsafe
-    state in terms of their socktab links.
   * Clean up ports and ips in unit_homa_incoming.c
   * Plug into Linux capability mechanism (man(7) capabilities)
   * Don't return any errors on sends?
   * Homa-RAMCloud doesn't retransmit bytes if it transmitted other bytes
     recently; should HomaModule do the same? Otherwise, will retransmit
     for requests whose service time is just about equal to the resend timer.
-  * Check tcp_transmit_skb to make sure we are doing everything we need to
-    do with skbuffs (e.g., update sk_wmem_alloc?)
   * Add support for cgroups (e.g. to manage memory allocation)
 
 * Questions for Linux experts:
