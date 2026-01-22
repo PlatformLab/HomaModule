@@ -54,8 +54,7 @@ FIXTURE_SETUP(homa_hijack)
 		.urgent = HOMA_HIJACK_URGENT,
 		.sender_id = cpu_to_be64(1002)
 	};
-	self->header.message_length = htonl(10000);
-	self->header.incoming = htonl(10000);
+	self->header.msg_length = htonl(10000);
 	self->header.seg.offset = htonl(4000);
 	INIT_LIST_HEAD(&self->empty_list);
 	self->tcp_offloads.callbacks.gro_receive = test_tcp_gro_receive;

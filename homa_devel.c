@@ -172,17 +172,17 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		offset = ntohl(h->seg.offset);
 #ifndef __STRIP__ /* See strip.py */
 		used = homa_snprintf(buffer, buf_len, used,
-				     ", message_length %d, offset %d, data_length %d, incoming %d",
-				     ntohl(h->message_length), offset,
-				     seg_length, ntohl(h->incoming));
+				     ", msg_length %d, offset %d, data_length %d",
+				     ntohl(h->msg_length), offset,
+				     seg_length);
 		if (ntohs(h->cutoff_version) != 0)
 			used = homa_snprintf(buffer, buf_len, used,
 					     ", cutoff_version %d",
 					     ntohs(h->cutoff_version));
 #else /* See strip.py */
 		used = homa_snprintf(buffer, buf_len, used,
-				     ", message_length %d, offset %d, data_length %d",
-				     ntohl(h->message_length), offset,
+				     ", msg_length %d, offset %d, data_length %d",
+				     ntohl(h->msg_length), offset,
 				     seg_length);
 #endif /* See strip.py */
 		if (h->retransmit)
@@ -278,6 +278,16 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		}
 		break;
 	}
+#ifndef __STRIP__ /* See strip.py */
+	case START_MSG: {
+		struct homa_start_msg_hdr *h;
+
+		h = (struct homa_start_msg_hdr *)header;
+		used = homa_snprintf(buffer, buf_len, used, ", msg_length %d",
+				     ntohl(h->msg_length));
+		break;
+	}
+#endif /* See strip.py */
 	}
 
 	buffer[buf_len - 1] = 0;
@@ -348,12 +358,11 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 		struct homa_resend_hdr *h = (struct homa_resend_hdr *)header;
 
 #ifndef __STRIP__ /* See strip.py */
-		snprintf(buffer, buf_len, "RESEND %d-%d@%d", ntohl(h->offset),
-			 ntohl(h->offset) + ntohl(h->length) - 1,
-			 h->priority);
+		snprintf(buffer, buf_len, "RESEND %d, %d @%d", ntohl(h->offset),
+			 ntohl(h->length), h->priority);
 #else /* See strip.py */
-		snprintf(buffer, buf_len, "RESEND %d-%d", ntohl(h->offset),
-			 ntohl(h->offset) + ntohl(h->length) - 1);
+		snprintf(buffer, buf_len, "RESEND %d, %d", ntohl(h->offset),
+			 ntohl(h->length));
 #endif /* See strip.py */
 		break;
 	}
@@ -377,6 +386,16 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 	case ACK:
 		snprintf(buffer, buf_len, "ACK");
 		break;
+#ifndef __STRIP__ /* See strip.py */
+	case START_MSG: {
+		struct homa_start_msg_hdr *h;
+
+		h = (struct homa_start_msg_hdr *)header;
+		snprintf(buffer, buf_len, "START_MSG %d",
+			 ntohl(h->msg_length));
+		break;
+	}
+#endif /* See strip.py */
 	default:
 		snprintf(buffer, buf_len, "unknown packet type 0x%x",
 			 common->type);
@@ -565,6 +584,10 @@ char *homa_symbol_for_type(uint8_t type)
 		return "NEED_ACK";
 	case ACK:
 		return "ACK";
+#ifndef __STRIP__ /* See strip.py */
+	case START_MSG:
+		return "START_MSG";
+#endif /* See strip.py */
 	}
 	return "??";
 }

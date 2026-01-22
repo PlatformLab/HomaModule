@@ -16,19 +16,22 @@ struct unit_hash;
 /**
  * enum unit_rpc_state - used as the @state argument to unit_client_rpc
  * and unit_server_rpc.
- * UNIT_OUTGOING -      RPC state is RPC_OUTGOING, no packets have been sent.
- * UNIT_RCVD_ONE_PKT -  RPC state is RPC_INCOMING, a single packet has
- *                      been received.
- * UNIT_RCVD_MSG -      RPC state is RPC_INCOMING, the entire message has
- *                      been received.
- * UNIT_IN_SERVICE -    RPC state is RPC_IN_SERVICE (only valid for
- *                      unit_server_rpc).
+ * UNIT_OUTGOING -       PC state is RPC_OUTGOING, no packets have been sent.
+ * UNIT_RCVD_START_MSG - RPC state is RPC_INCOMING, START_MSG has been
+ *                       received but no data.
+ * UNIT_RCVD_ONE_PKT -   RPC state is RPC_INCOMING, a single data packet has
+ *                       been received.
+ * UNIT_RCVD_MSG -       RPC state is RPC_INCOMING, the entire message has
+ *                       been received.
+ * UNIT_IN_SERVICE -     RPC state is RPC_IN_SERVICE (only valid for
+ *                       unit_server_rpc).
  */
 enum unit_rpc_state {
 	UNIT_OUTGOING       = 21,
-	UNIT_RCVD_ONE_PKT   = 22,
-	UNIT_RCVD_MSG       = 23,
-	UNIT_IN_SERVICE     = 24,
+	UNIT_RCVD_START_MSG = 22,
+	UNIT_RCVD_ONE_PKT   = 23,
+	UNIT_RCVD_MSG       = 24,
+	UNIT_IN_SERVICE     = 25,
 };
 
 static inline u8 *unit_frag_first_byte(skb_frag_t *frag)

@@ -238,7 +238,9 @@ bool mock_ipv6 = true;
 /* The value to use for mock_ipv6 in each test unless overridden. */
 bool mock_ipv6_default;
 
-/* List of priorities for all outbound packets. */
+/* Information about priorities for outbound packets is appended to
+ * this string.
+ */
 char mock_xmit_prios[1000];
 int mock_xmit_prios_offset;
 
@@ -2202,7 +2204,7 @@ void mock_put_page(struct page *page)
  * @daddr:        IPv6 address to use as the destination of the packet, in
  *                network byte order.
  * @protocol:     Protocol to use in the IP header, such as IPPROTO_HOMA.
- * @length:       How many bytes of space to allocated after the IP header.
+ * @length:       How many bytes of space to allocate after the IP header.
  * Return:        The new packet buffer, initialized as if the packet just
  *                arrived from the network and is about to be processed at
  *                transport level (e.g. there will be an IP header before
@@ -2551,6 +2553,11 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		case ACK:
 			header_size = sizeof(struct homa_ack_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
+		case START_MSG:
+			header_size = sizeof(struct homa_start_msg_hdr);
+			break;
+#endif /* See strip.py */
 		default:
 			header_size = sizeof(struct homa_common_hdr);
 			break;

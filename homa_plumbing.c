@@ -412,7 +412,8 @@ static u16 header_lengths[] = {
 	sizeof(struct homa_cutoffs_hdr),
 	sizeof(struct homa_freeze_hdr),
 	sizeof(struct homa_need_ack_hdr),
-	sizeof(struct homa_ack_hdr)
+	sizeof(struct homa_ack_hdr),
+	sizeof(struct homa_start_msg_hdr)
 };
 #else /* See strip.py */
 static u16 header_lengths[] = {
@@ -424,7 +425,8 @@ static u16 header_lengths[] = {
 	0,
 	0,
 	sizeof(struct homa_need_ack_hdr),
-	sizeof(struct homa_ack_hdr)
+	sizeof(struct homa_ack_hdr),
+	0
 };
 #endif /* See strip.py */
 
@@ -479,6 +481,9 @@ int __init homa_load(void)
 #endif /* See strip.py */
 	BUILD_BUG_ON(sizeof(struct homa_need_ack_hdr) > HOMA_MAX_HEADER);
 	BUILD_BUG_ON(sizeof(struct homa_ack_hdr) > HOMA_MAX_HEADER);
+#ifndef __STRIP__ /* See strip.py */
+	BUILD_BUG_ON(sizeof(struct homa_start_msg_hdr) > HOMA_MAX_HEADER);
+#endif /* See strip.py */
 
 	/* Extra constraints on data packets:
 	 * - Ensure minimum header length so Homa doesn't have to worry about
@@ -1246,9 +1251,15 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			   : tt_addr(addr->in6.sin6_addr),
 			   ntohs(addr->in6.sin6_port), rpc->id, length);
 		rpc->completion_cookie = args.completion_cookie;
+		homa_message_out_init(rpc, msg->msg_iter.count);
+#ifndef __STRIP__ /* See strip.py */
+		if (rpc->msgout.granted == 0)
+			homa_xmit_start_msg(rpc, msg->msg_iter.count);
+#endif /* See strip.py */
 		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result)
 			goto error;
+		homa_xmit_data(rpc);
 		args.id = rpc->id;
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_alloc_client. */
 
@@ -1301,11 +1312,17 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		rpc->state = RPC_OUTGOING;
 
+		homa_message_out_init(rpc, msg->msg_iter.count);
+#ifndef __STRIP__ /* See strip.py */
+		if (rpc->msgout.granted == 0)
+			homa_xmit_start_msg(rpc, msg->msg_iter.count);
+#endif /* See strip.py */
 		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result && rpc->state != RPC_DEAD) {
 			hsk->error_msg = "error copying response message data from user space";
 			goto error;
 		}
+		homa_xmit_data(rpc);
 		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 #ifndef __STRIP__ /* See strip.py */
@@ -1650,7 +1667,7 @@ int homa_softirq(struct sk_buff *skb)
 		 * if it contains an entire short message.
 		 */
 		if (h->type != DATA || ntohl(((struct homa_data_hdr *)h)
-				->message_length) < 1400) {
+				->msg_length) < 1400) {
 			UNIT_LOG("; ", "homa_softirq shortcut type 0x%x",
 				 h->type);
 			*prev_link = skb->next;
@@ -1699,7 +1716,8 @@ discard:
 		*prev_link = NULL;
 		*other_link = NULL;
 #ifdef __UNIT_TEST__
-		UNIT_LOG("; ", "id %lld, offsets", homa_local_id(h->sender_id));
+		UNIT_LOG("; ", "homa_softirq id %lld, offsets",
+			 homa_local_id(h->sender_id));
 		for (skb2 = packets; skb2; skb2 = skb2->next) {
 			struct homa_data_hdr *h3 = (struct homa_data_hdr *)
 					skb2->data;

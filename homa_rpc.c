@@ -103,7 +103,7 @@ error:
  * @hsk:      Socket that owns this RPC.
  * @source:   IP address (network byte order) of the RPC's client.
  * @h:        Header for the first data packet received for this RPC; used
- *            to initialize the RPC.
+ *            to initialize the RPC. Must have type DATA or START_MSG.
  *
  * Return:  A pointer to a new RPC, which is locked, or a negative errno
  *          if an error occurred. If there is already an RPC corresponding
@@ -111,12 +111,13 @@ error:
  */
 struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 				       const struct in6_addr *source,
-				       struct homa_data_hdr *h)
+				       struct homa_common_hdr *h)
 	__cond_acquires(srpc->bucket->lock)
 {
-	u64 id = homa_local_id(h->common.sender_id);
+	u64 id = homa_local_id(h->sender_id);
 	struct homa_rpc_bucket *bucket;
 	struct homa_rpc *srpc = NULL;
+	int msg_length;
 	int err;
 
 	if (!hsk->buffer_pool)
@@ -129,7 +130,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	homa_bucket_lock(bucket, id);
 	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
 		if (srpc->id == id &&
-		    srpc->dport == ntohs(h->common.sport) &&
+		    srpc->dport == ntohs(h->sport) &&
 		    ipv6_addr_equal(&srpc->route->peer->addr, source)) {
 			/* RPC already exists; just return it instead
 			 * of creating a new RPC.
@@ -165,7 +166,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 		srpc->route = NULL;
 		goto error;
 	}
-	srpc->dport = ntohs(h->common.sport);
+	srpc->dport = ntohs(h->sport);
 	srpc->id = id;
 	srpc->msgin.length = -1;
 	srpc->msgout.length = -1;
@@ -179,14 +180,16 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_time = homa_clock();
 #ifndef __STRIP__ /* See strip.py */
-	tt_record2("Incoming message for id %d has %d unscheduled bytes",
-		   srpc->id, ntohl(h->incoming));
-#endif /* See strip.py */
-#ifndef __STRIP__ /* See strip.py */
-	err = homa_message_in_init(srpc, ntohl(h->message_length),
-				   ntohl(h->incoming));
+	if (h->type == DATA) {
+		msg_length = ntohl(((struct homa_data_hdr *)h)->msg_length);
+		err = homa_message_in_init(srpc, msg_length, msg_length);
+	} else {
+		msg_length = ntohl(((struct homa_start_msg_hdr *)h)->msg_length);
+		err = homa_message_in_init(srpc, msg_length, 0);
+	}
 #else /* See strip.py */
-	err = homa_message_in_init(srpc, ntohl(h->message_length));
+	msg_length = ntohl(((struct homa_data_hdr *)h)->msg_length);
+	err = homa_message_in_init(srpc, msg_length);
 #endif /* See strip.py */
 	if (err != 0)
 		goto error;
@@ -201,7 +204,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
 	homa_sock_unlock(hsk);
-	if (ntohl(h->seg.offset) == 0 && srpc->msgin.num_bpages > 0) {
+	if (h->type == DATA && srpc->msgin.num_bpages > 0) {
 		set_bit(RPC_PKTS_READY, &srpc->flags);
 		homa_rpc_handoff(srpc);
 	}
@@ -811,7 +814,7 @@ void homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info)
 		info->tx_sent = rpc->msgout.next_xmit_offset;
 #ifndef __STRIP__ /* See strip.py */
 		info->tx_granted = rpc->msgout.granted;
-		info->tx_prio = rpc->msgout.sched_priority;
+		info->tx_prio = rpc->msgout.priority;
 #else /* See strip.py */
 		info->tx_granted = rpc->msgout.length;
 #endif /* See strip.py */

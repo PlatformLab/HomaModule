@@ -121,8 +121,7 @@ FIXTURE_SETUP(homa_grant)
 		.type = DATA,
 		.sender_id = cpu_to_be64(self->client_id)
 	};
-	self->data.message_length = htonl(10000);
-	self->data.incoming = htonl(10000);
+	self->data.msg_length = htonl(10000);
 	unit_log_clear();
 	self->incoming_delta = 0;
 }
@@ -1279,28 +1278,6 @@ TEST_F(homa_grant, homa_grant_try_send__rpc_not_grantable)
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, atomic_read(&grant->total_incoming));
 }
-TEST_F(homa_grant, homa_grant_try_send__rpc_fully_granted)
-{
-	struct homa_grant *grant = self->homa.grant;
-	struct homa_rpc *rpc;
-
-	rpc = test_rpc_mngd(self, 100, self->server_ip, 20000);
-	rpc->msgin.bytes_remaining = 19900;
-	rpc->msgin.granted = 1300;
-	rpc->msgin.rec_incoming = 200;
-	grant->max_incoming = 100000;
-	grant->window = 1200;
-	atomic_set(&grant->total_incoming, 500);
-	unit_log_clear();
-
-	homa_rpc_lock(rpc);
-	homa_grant_try_send(grant, rpc, true);
-	homa_rpc_unlock(rpc);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1300, rpc->msgin.granted);
-	EXPECT_EQ(200, rpc->msgin.rec_incoming);
-	EXPECT_EQ(500, atomic_read(&grant->total_incoming));
-}
 TEST_F(homa_grant, homa_grant_try_send__reduce_grant_because_of_message_end)
 {
 	struct homa_grant *grant = self->homa.grant;
@@ -1322,6 +1299,28 @@ TEST_F(homa_grant, homa_grant_try_send__reduce_grant_because_of_message_end)
 	EXPECT_EQ(20000, rpc->msgin.granted);
 	EXPECT_EQ(900, rpc->msgin.rec_incoming);
 	EXPECT_EQ(1200, atomic_read(&grant->total_incoming));
+}
+TEST_F(homa_grant, homa_grant_try_send__rpc_fully_granted)
+{
+	struct homa_grant *grant = self->homa.grant;
+	struct homa_rpc *rpc;
+
+	rpc = test_rpc_mngd(self, 100, self->server_ip, 20000);
+	rpc->msgin.bytes_remaining = 19900;
+	rpc->msgin.granted = 1300;
+	rpc->msgin.rec_incoming = 200;
+	grant->max_incoming = 100000;
+	grant->window = 1200;
+	atomic_set(&grant->total_incoming, 500);
+	unit_log_clear();
+
+	homa_rpc_lock(rpc);
+	homa_grant_try_send(grant, rpc, true);
+	homa_rpc_unlock(rpc);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1300, rpc->msgin.granted);
+	EXPECT_EQ(200, rpc->msgin.rec_incoming);
+	EXPECT_EQ(500, atomic_read(&grant->total_incoming));
 }
 TEST_F(homa_grant, homa_grant_try_send__max_incoming_exceeded)
 {

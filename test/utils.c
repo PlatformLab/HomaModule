@@ -54,6 +54,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		return NULL;
 	tx_msg = kmalloc(req_length, GFP_ATOMIC);
 	unit_fill_data(tx_msg, req_length, 0);
+	homa_message_out_init(crpc, req_length);
 	if (homa_tx_copy_from_user(crpc, unit_iov_iter(tx_msg, req_length),
 				   false) != 0) {
 		homa_rpc_end(crpc);
@@ -68,6 +69,22 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		return crpc;
 	crpc->msgout.next_xmit_offset = crpc->msgout.length;
 
+	if (state == UNIT_RCVD_START_MSG) {
+		struct homa_start_msg_hdr start;
+		memset(&start, 0, sizeof(start));
+		start.common = (struct homa_common_hdr){
+			.sport = htons(server_port),
+			.dport = htons(hsk->port),
+			.type = START_MSG,
+			.sender_id = cpu_to_be64(id ^ 1)
+		};
+		start.msg_length = htonl(resp_length);
+
+		homa_dispatch_pkts(mock_skb_alloc(server_ip, client_ip,
+				   &start.common, 0, 0));
+		return crpc;
+	}
+
 	struct homa_data_hdr h;
 	memset(&h, 0, sizeof(h));
 	h.common = (struct homa_common_hdr){
@@ -76,10 +93,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		.type = DATA,
 		.sender_id = cpu_to_be64(id ^ 1)
 	};
-	h.message_length = htonl(resp_length);
-#ifndef __STRIP__ /* See strip.py */
-	h.incoming = htonl(10000);
-#endif /* See strip.py */
+	h.msg_length = htonl(resp_length);
 
 	this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
@@ -308,9 +322,29 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		struct in6_addr *server_ip, int client_port, int id,
 		int req_length, int resp_length)
 {
-	int bytes_received;
 	struct homa_data_hdr h;
+	struct homa_rpc *srpc;
+	int bytes_received;
 	int status;
+
+	if (state == UNIT_RCVD_START_MSG) {
+		struct homa_start_msg_hdr start;
+		memset(&start, 0, sizeof(start));
+		start.common = (struct homa_common_hdr){
+			.sport = htons(client_port),
+			.dport = htons(hsk->port),
+			.type = START_MSG,
+			.sender_id = cpu_to_be64(id ^ 1)
+		};
+		start.msg_length = htonl(req_length);
+
+		homa_dispatch_pkts(mock_skb_alloc(client_ip, server_ip,
+				   &start.common, 0, 0));
+		srpc = homa_rpc_find_server(hsk, client_ip, id);
+		if (srpc)
+			homa_rpc_unlock(srpc);
+		return srpc;
+	}
 
 	memset(&h, 0, sizeof(h));
 	h.common = (struct homa_common_hdr){
@@ -319,11 +353,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		.type = DATA,
 		.sender_id = cpu_to_be64(id ^ 1)
 	};
-	h.message_length = htonl(req_length);
-#ifndef __STRIP__ /* See strip.py */
-	h.incoming = htonl(10000);
-#endif /* See strip.py */
-	struct homa_rpc *srpc = homa_rpc_alloc_server(hsk, client_ip, &h);
+	h.msg_length = htonl(req_length);
+	srpc = homa_rpc_alloc_server(hsk, client_ip, &h.common);
 
 	if (IS_ERR(srpc))
 		return NULL;
@@ -351,6 +382,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	if (state == UNIT_IN_SERVICE)
 		return srpc;
 	homa_rpc_lock(srpc);
+	homa_message_out_init(srpc, resp_length);
 	status = homa_tx_copy_from_user(srpc, unit_iov_iter((void *) 2000,
 				        resp_length), false);
 	homa_rpc_unlock(srpc);

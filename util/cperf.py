@@ -541,8 +541,6 @@ def start_nodes(ids, options):
                     set_sysctl_parameter(".net.homa.next_id",
                             str(10000000*(id+1)), [id])
                 if not options.no_homa_prio:
-                    log("Starting homa_prio on node%d with log file %s/homa_prio-%d.log" %
-                            (id, log_dir, id))
                     f = open("%s/homa_prio-%d.log" % (log_dir,id), "w")
                     homa_prios[id] = subprocess.Popen(["ssh", "-o",
                             "StrictHostKeyChecking=no", "node%d" % (id), "sudo",

@@ -135,6 +135,7 @@ int      homa_pool_free_bufs(struct homa_pool *pool, int num_buffers,
 			     u32 *buffers);
 int      homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 			      u64 region_size);
+void     homa_pool_wakeup_rpc(struct homa_rpc *rpc);
 
 /**
  * homa_pool_unlink() - Remove an RPC from any lists related to buffer

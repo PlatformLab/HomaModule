@@ -9,6 +9,7 @@ Invoke with the --help option for documentation.
 """
 
 from collections import defaultdict, deque
+import copy
 from functools import cmp_to_key
 from glob import glob
 import heapq
@@ -76,6 +77,16 @@ import time
 # send_data_pkts:    List of outgoing data packets, sorted in order of
 #                    'xmit'.
 # send_grant_pkts:   List of all outgoing grant packets
+# start_msg_xmit:    List of times when START_MSG packets for this RPC's
+#                    outgoing message were passed to ip*xmit
+# start_msg_nic:     List of times when START_MSG packets for this RPC's
+#                    outgoing message were queued in the NIC
+# start_msg_free:    List of times when START_MSG packets for this RPC's
+#                    outgoing message were freed after transmission
+# start_msg_gro:     List of times when START_MSG packets for this RPC's
+#                    incoming message were processed by GRO
+# start_msg_softirq: List of times when START_MSG packets for this RPC's
+#                    incoming message were processed by SoftIRQ
 # tx_live:           Range of times [start, end] when the outgoing message was
 #                    partially transmitted. Starts when homa_sendmsg is called,
 #                    ends when last data packet is transmitted by the NIC.
@@ -108,7 +119,12 @@ class RpcDict(dict):
             'ip_xmits': {},
             'resend_rx': [],
             'resend_tx': [],
-            'retransmits': {}
+            'retransmits': {},
+            'start_msg_xmit': [],
+            'start_msg_nic': [],
+            'start_msg_free': [],
+            'start_msg_gro': [],
+            'start_msg_softirq': []
         }
         self[id] = new_rpc
         return new_rpc
@@ -205,7 +221,7 @@ packets = PacketDict()
 # filled in by AnalyzePackets and AnalyzeRpcs.
 recv_offsets = {}
 
-# This variable holds information about every grant packet in the traces.
+# This variable holds information about every GRANT packet in the traces.
 # It is created by AnalyzePackets. Keys have the form id:offset where id is
 # the RPC id on the sending side and offset is the offset in message of
 # the first byte of the packet. Each value is a dictionary containing
@@ -1890,6 +1906,19 @@ class Dispatcher:
     # match:        The match object returned by re.match
     # interests:    The list of objects to notify for this event
 
+    def __gro_start(self, trace, time, core, match, interests):
+        peer = match.group(1)
+        id = int(match.group(2))
+        msg_length = int(match.group(3))
+        for interest in interests:
+            interest.tt_gro_start(trace, time, core, peer, id, msg_length)
+
+    patterns.append({
+        'name': 'gro_start',
+        'regexp': 'homa_gro_receive got START_MSG from ([^,]+), id ([0-9]+), '
+                  'msg_length ([0-9]+)'
+    })
+
     def __gro_data(self, trace, time, core, match, interests):
         peer = match.group(1)
         id = int(match.group(2))
@@ -1929,6 +1958,17 @@ class Dispatcher:
         'name': 'gro_ctl',
         'regexp': 'homa_gro_receive got packet from (0x[0-9a-f]+) id ([0-9]+), '
                 'type (0x[0-9a-f]+)'
+    })
+
+    def __softirq_start(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        msg_length = int(match.group(2))
+        for interest in interests:
+            interest.tt_softirq_start(trace, time, core, id, msg_length)
+
+    patterns.append({
+        'name': 'softirq_start',
+        'regexp': 'processing START_MSG for id ([0-9]+), msg_length ([0-9]+)'
     })
 
     def __softirq_data(self, trace, time, core, match, interests):
@@ -1971,6 +2011,21 @@ class Dispatcher:
         'name': 'ip_xmit',
         'regexp': 'calling ip.*_xmit: peer ([^,]+), id ([0-9]+), '
                   'offset ([0-9]+), length ([0-9]+)'
+    })
+
+    def __send_start(self, trace, time, core, match, interests):
+        daddr = match.group(1)
+        dport = int(match.group(2))
+        id = int(match.group(3))
+        msg_length = int(match.group(4))
+        for interest in interests:
+            interest.tt_send_start(trace, time, core, id, msg_length, daddr,
+                    dport)
+
+    patterns.append({
+        'name': 'send_start',
+        'regexp': r'Sending START_MSG to (0x[a-f0-9]+):([0-9]+) for '
+                   'id ([0-9]+), length ([0-9]+)'
     })
 
     def __send_data(self, trace, time, core, match, interests):
@@ -2017,6 +2072,21 @@ class Dispatcher:
                   'id ([0-9]+), offset ([0-9]+), qid ([0-9]+) \(([^)]+)\)'
     })
 
+    def __nic_start(self, trace, time, core, match, interests):
+        peer = match.group(2)
+        id = int(match.group(3))
+        msg_length = int(match.group(4))
+        tx_queue = match.group(5)
+        for interest in interests:
+            interest.tt_nic_start(trace, time, core, peer, id, msg_length,
+                                  tx_queue)
+
+    patterns.append({
+        'name': 'nic_start',
+        'regexp': 'sent START_MSG via (mlx|ice) to ([^,]+), id ([0-9]+), '
+                  'length ([0-9]+), queue (0x[0-9a-f]+)'
+    })
+
     def __nic_data(self, trace, time, core, match, interests):
         peer = match.group(2)
         id = int(match.group(3))
@@ -2043,6 +2113,17 @@ class Dispatcher:
         'name': 'nic_grant',
         'regexp': 'sent homa grant via (mlx|ice) to ([^,]+), id ([0-9]+), '
                   'offset ([0-9]+), queue (0x[0-9a-f]+)'
+    })
+
+    def __free_start(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        qid = int(match.group(2))
+        for interest in interests:
+            interest.tt_free_start(trace, time, core, id, qid)
+
+    patterns.append({
+        'name': 'free_start',
+        'regexp': 'freeing tx skb for START_MSG, id ([0-9]+), qid ([0-9]+)'
     })
 
     def __free_tx_skb(self, trace, time, core, match, interests):
@@ -2193,12 +2274,12 @@ class Dispatcher:
         'regexp': 'homa_gro_.* chose core ([0-9]+)'
     })
 
-    def __softirq_start(self, trace, time, core, match, interests):
+    def __softirq_invoked(self, trace, time, core, match, interests):
         for interest in interests:
-            interest.tt_softirq_start(trace, time, core)
+            interest.tt_softirq_invoked(trace, time, core)
 
     patterns.append({
-        'name': 'softirq_start',
+        'name': 'softirq_invoked',
         'regexp': 'homa_softirq starting'
     })
 
@@ -2277,17 +2358,6 @@ class Dispatcher:
     patterns.append({
         'name': 'retransmit',
         'regexp': 'retransmitting offset ([0-9]+), length ([0-9]+), id ([0-9]+)'
-    })
-
-    def __unsched(self, trace, time, core, match, interests):
-        id = int(match.group(1))
-        num_bytes = int(match.group(2))
-        for interest in interests:
-            interest.tt_unsched(trace, time, core, id, num_bytes)
-
-    patterns.append({
-        'name': 'unsched',
-        'regexp': 'Incoming message for id ([0-9]+) has ([0-9]+) unscheduled'
     })
 
     def __lock_wait(self, trace, time, core, match, interests):
@@ -3775,7 +3845,7 @@ class AnalyzeDelay:
     def tt_gro_handoff(self, trace, time, core, softirq_core):
         self.gro_handoffs[softirq_core].append(time)
 
-    def tt_softirq_start(self, trace, time, core):
+    def tt_softirq_invoked(self, trace, time, core):
         if not self.gro_handoffs[core]:
             return
         self.softirq_wakeups.append([time - self.gro_handoffs[core][0], time,
@@ -4725,12 +4795,10 @@ class AnalyzeGrants:
             if 'sendmsg' in rpc:
                 if id^1 in rpcs:
                     other = rpcs[id^1]
-                else:
-                    other = {}
-                if 'unsched' in other:
                     unsched = other['unsched']
                 else:
-                    unsched = max_unsched;
+                    other = {}
+                    unsched = 0
                     if 'out_length' in rpc:
                         if rpc['out_length'] < max_unsched:
                             unsched = rpc['out_length']
@@ -5978,9 +6046,7 @@ class AnalyzeIntervals:
 
             # rx_grantable
             in_length = rpc['in_length']
-            if rpc['send_grant_pkts'] or (('unsched' in rpc) and (in_length != None)
-                    and (in_length > rpc['unsched']) or (('granted' in rpc)
-                    and (in_length != None) and (rpc['granted'] < in_length))):
+            if rpc['send_grant_pkts'] or rpc['unsched'] == 0:
                 start = traces[rpc['node']]['first_time']
                 if rpc['softirq_data_pkts']:
                     start = rpc['softirq_data_pkts'][0]['softirq']
@@ -9662,7 +9728,7 @@ class AnalyzeQbytes:
                     elif pkt_type == 'data':
                         rpc = rpcs[pkt['id']^1]
                         length = pkt['length'] + data_hdr_length
-                        if 'unsched' in rpc and pkt['offset'] < rpc['unsched']:
+                        if rpc['unsched'] != 0:
                             add_to_intervals(rx_node, q_start, gro,
                                     'q_homa_unsched', length)
                         else:
@@ -9827,8 +9893,9 @@ class AnalyzeQbytes:
                 label='Homa unscheduled data', color=color_blue)
         ax.step(time_data, total_sched_data, where='pre',
                 label='Homa scheduled data', color=color_brown)
-        ax.step(time_data, total_tcp_data, where='pre',
-                label='TCP', color=color_green)
+        if max_tcp > 0:
+            ax.step(time_data, total_tcp_data, where='pre',
+                    label='TCP', color=color_green)
         for i in range(len(nodes)):
             node = nodes[i]
             data = node_data[node]
@@ -9838,7 +9905,8 @@ class AnalyzeQbytes:
             ax.step(time_data, data['grant'], where='pre', color=color_red)
             ax.step(time_data, data['unsched'], where='pre', color=color_blue)
             ax.step(time_data, data['sched'], where='pre', color=color_brown)
-            ax.step(time_data, data['tcp'], where='pre', color=color_green)
+            if max['tcp'] > 0:
+                ax.step(time_data, data['tcp'], where='pre', color=color_green)
         fig.legend(loc='lower center', ncol=4, bbox_to_anchor=(0.5, -0.02),
                 frameon=False, prop={'size': 9})
         # plt.legend(loc="upper left", prop={'size': 9})
@@ -10210,12 +10278,6 @@ class AnalyzeRpcs:
         global rpcs
         rpcs[id]['copy_in_done'] = t
 
-    def tt_unsched(self, trace, t, core, id, num_bytes):
-        global rpcs, max_unsched
-        rpcs[id]['unsched'] = num_bytes
-        if num_bytes > max_unsched:
-            max_unsched = num_bytes
-
     def tt_rpc_end(self, trace, t, core, id, port):
         global rpcs
         rpc = rpcs[id]
@@ -10246,11 +10308,36 @@ class AnalyzeRpcs:
         rpc['out_length'] = length
         rpc['sent'] = sent
 
+    def tt_send_start(self, trace, t, core, id, msg_length, daddr, dport):
+        global rpcs
+        rpc = rpcs[id]
+        rpc['start_msg_xmit'].append(t)
+
+    def tt_nic_start(self, trace, t, core, peer, id, msg_length, tx_queue):
+        global rpcs
+        rpc = rpcs[id]
+        rpc['start_msg_nic'].append(t)
+
+    def tt_free_start(self, trace, t, core, id, qid):
+        global rpcs
+        rpc = rpcs[id]
+        rpc['start_msg_free'].append(t)
+
+    def tt_gro_start(self, trace, t, core, peer, id, msg_length):
+        global rpcs
+        rpc = rpcs[id]
+        rpc['start_msg_gro'].append(t)
+
+    def tt_softirq_start(self, trace, t, core, id, msg_length):
+        global rpcs
+        rpc = rpcs[id]
+        rpc['start_msg_softirq'].append(t)
+
     def analyze(self):
         """
         Fill in various additional information related to RPCs
         """
-        global rpcs, traces, ip_to_node
+        global rpcs, traces, ip_to_node, max_unsched
 
         for id, rpc in rpcs.items():
             peer_id = id ^ 1
@@ -10294,6 +10381,12 @@ class AnalyzeRpcs:
                     sender = rpcs[sender_id]
                     if 'out_length' in sender:
                         rpc['in_length'] = sender['out_length']
+            rpc['unsched'] = 0
+            if (not rpc['start_msg_softirq'] and not rpc['send_grant_pkts'] and
+                    rpc['in_length']):
+                rpc['unsched'] = rpc['in_length']
+                if rpc['unsched'] > max_unsched:
+                    max_unsched = rpc['unsched']
 
     def output(self):
         global rpcs, options
@@ -10993,8 +11086,7 @@ class AnalyzeRxsnapshot:
                            in order of offset
         grants:            List of all the grant packets in this RPC,
                            sorted in order of offset
-        unsched:           Number of bytes of unscheduled incoming data,
-                           or 0 if unknown
+        unsched:           Number of bytes of unscheduled incoming data
         min_time:          Lowest "interesting" time seen in any packet
                            for this RPC
         lost:              Number of packets that appear to have been lost
@@ -11044,8 +11136,7 @@ class AnalyzeRxsnapshot:
                 'pre_grant_xmit': 0, 'post_grant_xmit': 1e20,
                 'pre_grant_gro': 0, 'post_grant_gro': 1e20,
                 'pre_grant_softirq': 0, 'post_grant_softirq': 1e20,
-                'lost': 0, 'min_time': 1e20, 'unsched': max_unsched,
-                'cur_prio': -1
+                'lost': 0, 'min_time': 1e20, 'cur_prio': -1
         })
 
         def check_live(tx_id, node, t, receive):
@@ -11163,10 +11254,8 @@ class AnalyzeRxsnapshot:
 
             # Deduce missing grant fields where possible.
             next_stage = 0
-            unsched = 0
-            if 'unsched' in rx_rpc:
-                unsched = rx_rpc['unsched']
-                live_rpc['unsched'] = unsched
+            unsched = rx_rpc['unsched']
+            live_rpc['unsched'] = unsched
             if 'granted' in rx_rpc and live_rpc['post_grant_softirq'] >= 1e19:
                 live_rpc['post_grant_softirq'] = rx_rpc['granted']
             if (unsched > 0 and live_rpc['pre_xmit'] > unsched and
@@ -11354,7 +11443,7 @@ class AnalyzeRxsnapshot:
                 (len(live_rpcs)))
         print('Id:        RPC identifier on the receiver side')
         print('Peer:      Sending node')
-        print('Start:     Time first data packet received in SoftIRQ')
+        print('Start:     Time first packet for message received in SoftIRQ')
         print('Length:    Length of incoming message, if known')
         print('Gxmit:     Highest offset for which grant has been passed '
                 'to ip_*xmit')
@@ -11374,7 +11463,11 @@ class AnalyzeRxsnapshot:
                 'processed by SoftIRQ')
         print('Copied:    Offset just after last data byte that has been '
                 'copied to user space')
-        print('Incoming:  Gxmit - SoftIrq')
+        print('Incoming:  Bytes that will arrive in the future without needing '
+                'additional')
+        print('           grants (GXmit - SoftIRQ for scheduled messages, '
+                'Length - SoftIRQ')
+        print('           for unscheduled)')
         print('Gaps:      Bytes in packets with offset < SoftIRQ that have '
                 'not yet')
         print('           been processed by SoftIRQ')
@@ -11420,7 +11513,9 @@ class AnalyzeRxsnapshot:
                 remaining = rx_rpc['in_length'] - received
             else:
                 remaining = ''
-            if rx_rpc['softirq_data_pkts']:
+            if rx_rpc['start_msg_softirq']:
+                start = '%.3f' % (rx_rpc['start_msg_softirq'][0])
+            elif rx_rpc['softirq_data_pkts']:
                 start = '%.3f' % (rx_rpc['softirq_data_pkts'][0]['softirq'])
             else:
                 start = ''
@@ -13504,104 +13599,166 @@ class AnalyzeTimeline:
     """
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
+
+        # event -> string message to print for that event on the client.
+        self.client_msgs = {
+            'first_data_xmit':        'first request packet to IP',
+            'first_data_nic':         'first request packet to NIC',
+            'start_msg_xmit':         'start_msg to IP',
+            'start_msg_nic':          'start_msg to NIC',
+            'first_grant_softirq':    'softirq gets first grant',
+            'last_data_nic':          'last request packet to NIC',
+            'first_gro':              'gro gets first response packet',
+            'first_softirq':          'softirq gets first response pkt',
+            'start_msg_gro':          'gro gets start_msg packet',
+            'start_msg_softirq':      'softrirq gets start_msg packet',
+            'first_grant_xmit':       'first grant to IP',
+            'first_grant_nic':        'first grant to NIC',
+            'last_gro':               'gro gets last response packet',
+            'recvmsg_done':           'homa_recvmsg returns response',
+            'copy_out_start':         'finished copying to user space',
+            'copy_out_done':          'started copying to user space',
+            'copy_in_done':           'finished copying req into pkts',
+        }
+
+        # event -> string message to print for that event on the server.
+        self.server_msgs = copy.deepcopy(self.client_msgs)
+        self.server_msgs['first_gro'] =       'gro gets first request packet'
+        self.server_msgs['first_softirq'] =   'softirq gets first request pkt'
+        self.server_msgs['last_gro'] =        'gro gets last request packet'
+        self.server_msgs['sendmsg_response'] ='homa_sendmsg response'
+        self.server_msgs['first_data_xmit'] = 'first response packet to IP'
+        self.server_msgs['first_data_nic'] =  'first response packet to NIC'
+        self.server_msgs['last_data_nic'] =   'last response packet to NIC'
+
         return
+
+    def get_events(self, rpc):
+        """
+        Extracts from rpc all relevaent events for one side of an RPC (can
+        be either client or server); returns a list of <event, time> tuples
+        where event is an event name and time is the absolute time when
+        that event occurred.
+        """
+
+        result = []
+        result.append(['first_data_xmit', rpc['send_data_pkts'][0]['xmit']])
+        result.append(['first_data_nic', rpc['send_data_pkts'][0]['nic']])
+        if rpc['start_msg_xmit']:
+            result.append(['start_msg_xmit', rpc['start_msg_xmit'][0]])
+        if rpc['start_msg_nic']:
+            result.append(['start_msg_nic', rpc['start_msg_nic'][0]])
+        if rpc['softirq_grant_pkts']:
+            result.append(['first_grant_softirq',
+                    rpc['softirq_grant_pkts'][0]['softirq']])
+        result.append(['last_data_nic', rpc['send_data_pkts'][-1]['nic']])
+        if rpc['start_msg_gro']:
+            result.append(['start_msg_gro', rpc['start_msg_gro'][0]])
+        if rpc['start_msg_softirq']:
+            result.append(['start_msg_softirq', rpc['start_msg_softirq'][0]])
+        result.append(['first_gro', rpc['gro_data_pkts'][0]['gro']])
+        result.append(['first_softirq',
+                rpc['softirq_data_pkts'][0]['softirq']])
+        if rpc['send_grant_pkts']:
+            result.append(['first_grant_xmit', rpc['send_grant_pkts'][0]['xmit']])
+            result.append(['first_grant_nic', rpc['send_grant_pkts'][0]['nic']])
+        result.append(['last_gro', rpc['gro_data_pkts'][-1]['gro']])
+        result.append(['recvmsg_done', rpc['recvmsg_done']])
+
+        # Handle events that are unique to the server side
+        if rpc['id'] & 1:
+            result.append(['sendmsg_response', rpc['sendmsg']])
+
+        return result
+
+    def get_extra_events(self, rpc):
+        """
+        Similar to get_events, but collects additional events to be
+        displayed separately from the main events (e.g. copying data).
+        """
+
+        result = []
+        result.append(['copy_in_done', rpc['copy_in_done']])
+        result.append(['copy_out_start', rpc['copy_out_start']])
+        result.append(['copy_out_done', rpc['copy_out_done']])
+        return result
+
+    def accumulate_times(self, events, start, times):
+        """
+        Add information from the events argument to the times argument.
+        events:  Event list of the form returned by get_events for an
+                 RPC.
+        start:   Starting time for the RPC.
+        times:   Dictionary with the structure of client_times (see below);
+                 event information gets added here.
+        """
+
+        events.sort(key=lambda t: t[1])
+        prev_time = start
+        for event, t in events:
+            time_entry = times[event]
+            time_entry[0].append(t - start)
+            time_entry[1].append(t - prev_time)
+            prev_time = t
+
+    def print_events(self, times, msgs):
+        """
+        Print timing information.
+        times: Dictionary with the structure of client_times (see below);
+               contains timing information for various events.
+        msgs:  Event name -> description of that event, for printing.
+        """
+
+        # List of <event, avg, P90, delta, deltaP90>, where event is
+        # an event name, avg and P90 give average/P90 values for the
+        # event's time relative to RPC start, and delta/deltaP90 do the
+        # same for the event's time relative to the previous event.
+        events = []
+
+        # Aggregate the information for each event.
+        for name, times in times.items():
+            sorted_times = sorted(times[0])
+            sorted_deltas = sorted(times[1])
+            events.append([name, sum(sorted_times)/len(sorted_times),
+                    sorted_times[len(sorted_times)*9//10],
+                    sum(sorted_deltas)/len(sorted_deltas),
+                    sorted_deltas[len(sorted_deltas)*9//10]])
+
+        # Print the events in order of median time from RPC start.
+        events.sort(key=lambda t: t[1])
+        for name, avg, p90, delta, delta_p90 in events:
+            print('%-32s Avg %7.1f us (+%7.1f us)  P90 %7.1f us (+%7.1f us)' %
+                    (msgs[name], avg, delta, p90, delta_p90))
 
     def output(self):
         global rpcs
         num_rpcs = 0
+
         print('\n-------------------')
         print('Analyzer: timeline')
         print('-------------------')
 
-        # These tables describe the phases of interest. Each sublist is
-        # a <label, name, lambda> triple, where the label is human-readable
-        # string for the phase, the name selects an element of an RPC, and
-        # the lambda extracts a time from the RPC element.
-        client_phases = [
-            ['first request packet to IP',     'send_data_pkts',
-                    lambda x : x[0].get('xmit')],
-            ['first request packet to NIC',    'send_data_pkts',
-                    lambda x : x[0].get('nic')],
-            ['gro gets first grant',           'gro_grant_pkts',
-                    lambda x : x[0].get('gro')],
-            ['softirq gets first grant',       'softirq_grant_pkts',
-                    lambda x : x[0].get('softirq')],
-            ['last request packet to NIC',      'send_data_pkts',
-                    lambda x : x[-1].get('nic')],
-            ['gro gets first response packet', 'gro_data_pkts',
-                    lambda x : x[0].get('gro')],
-            ['softirq gets first response pkt','softirq_data_pkts',
-                    lambda x : x[0].get('softirq')],
-            ['first grant to IP',              'send_grant_pkts',
-                    lambda x : x[0].get('xmit')],
-            ['first grant to NIC',              'send_grant_pkts',
-                    lambda x : x[0].get('nic')],
-            ['gro gets last response packet',  'gro_data_pkts',
-                    lambda x : x[-1].get('gro')],
-            ['homa_recvmsg returning',         'recvmsg_done',
-                    lambda x : x]
-        ]
-        client_extra = [
-            ['finished copying req into pkts', 'copy_in_done',
-                    lambda x : x],
-            ['started copying to user space',  'copy_out_start',
-                    lambda x : x],
-            ['finished copying to user space', 'copy_out_done',
-                    lambda x : x]
-        ]
+        # event name -> <times, deltas> where time and deltas are lists
+        # containing one element for each RPC where that client event
+        # occurred. Time is the time of the event relative to the RPC
+        # start, and delta is the elapsed time between the previous event
+        # for the RPC and this one.
+        client_times = defaultdict(lambda: [[], []])
 
-        server_phases = [
-            ['gro gets first request packet',  'gro_data_pkts',
-                    lambda x : x[0].get('gro')],
-            ['softirq gets first request pkt', 'softirq_data_pkts',
-                    lambda x : x[0].get('softirq')],
-            ['first grant to IP',              'send_grant_pkts',
-                    lambda x : x[0].get('xmit')],
-            ['first grant to NIC',              'send_grant_pkts',
-                    lambda x : x[0].get('nic')],
-            ['gro gets last request packet',   'gro_data_pkts',
-                    lambda x : x[-1].get('gro')],
-            ['homa_recvmsg returning',         'recvmsg_done',
-                    lambda x : x],
-            ['homa_sendmsg response',          'sendmsg',
-                    lambda x : x],
-            ['first response packet to IP',    'send_data_pkts',
-                    lambda x : x[0].get('xmit')],
-            ['first response packet to NIC',   'send_data_pkts',
-                    lambda x : x[0].get('nic')],
-            ['gro gets first grant',           'gro_grant_pkts',
-                    lambda x : x[0].get('gro')],
-            ['softirq gets first grant',       'softirq_grant_pkts',
-                    lambda x : x[0].get('softirq')],
-            ['last response packet to NIC',      'send_data_pkts',
-                    lambda x : x[-1].get('nic')]
-        ]
-        server_extra = [
-            ['started copying to user space', 'copy_out_start',
-                    lambda x : x],
-            ['finished copying to user space','copy_out_done',
-                    lambda x : x],
-            ['finished copying resp into pkts','copy_in_done',
-                    lambda x : x]
-        ]
+        # Same meaning as client_times, except for server side.
+        server_times = defaultdict(lambda: [[], []])
 
-        # One entry in each of these lists for each phase of the RPC,
-        # values are lists of times from RPC start (or previous phase)
-        client_totals = []
-        client_deltas = []
-        client_extra_totals = []
-        client_extra_deltas = []
-        server_totals = []
-        server_deltas = []
-        server_extra_totals = []
-        server_extra_deltas = []
+        # Same meaning, but with auxiliary data (copying to/from user space)
+        client_extra_times = defaultdict(lambda: [[], []])
+        server_extra_times = defaultdict(lambda: [[], []])
 
-        # Collect statistics from all of the RPCs.
+        # Loop over all the client-side RPCs to collect statistics.
         for id, crpc in rpcs.items():
-            # Find matching and complete pairs of client-side and
-            # serve-side RPCs.
             if id & 1:
                 continue
+
+            # Make sure that we have a matching and complete pair of
+            # client-side and server-side RPCs.
             if not ((id^1) in rpcs):
                 continue
             srpc = rpcs[id^1]
@@ -13612,71 +13769,22 @@ class AnalyzeTimeline:
                     (not crpc['send_data_pkts'])):
                 continue
             num_rpcs += 1
-
             start = crpc['sendmsg']
-            self.__collect_stats(client_phases, crpc, start, client_totals,
-                    client_deltas)
-            self.__collect_stats(client_extra, crpc, start, client_extra_totals,
-                    client_extra_deltas)
-            self.__collect_stats(server_phases, srpc, start, server_totals,
-                    server_deltas)
-            self.__collect_stats(server_extra, srpc, start, server_extra_totals,
-                    server_extra_deltas)
+            self.accumulate_times(self.get_events(crpc), start, client_times)
+            self.accumulate_times(self.get_extra_events(crpc), start,
+                    client_extra_times)
+            self.accumulate_times(self.get_events(srpc), start, server_times)
+            self.accumulate_times(self.get_extra_events(srpc), start,
+                    server_extra_times)
 
-        if client_totals:
-            print('\nTimeline for clients (%d RPCs):\n' % (num_rpcs))
-            self.__print_phases(client_phases, client_totals, client_deltas)
-            print('')
-            self.__print_phases(client_extra, client_extra_totals,
-                    client_extra_deltas)
-        if server_totals:
-            print('\nTimeline for servers (%d RPCs):\n' % (num_rpcs))
-            self.__print_phases(server_phases, server_totals, server_deltas)
-            print('')
-            self.__print_phases(server_extra, server_extra_totals,
-                    server_extra_deltas)
-
-    def __collect_stats(self, phases, rpc, start, totals, deltas):
-        """
-        Utility method used by print to aggregate delays within an RPC
-        into buckets corresponding to different phases of the RPC.
-        phases:     Describes the phases to aggregate
-        rpc:        Dictionary containing information about one RPC
-        start:      Starting time for RPC on client-side
-        totals:     Total delays from start of the RPC are collected here
-        deltas:     Delays from one phase to the next are collected here
-        """
-
-        while len(phases) > len(totals):
-            totals.append([])
-            deltas.append([])
-        prev = start
-        for i in range(len(phases)):
-            label, name, func = phases[i]
-            if name in rpc:
-                rpc_phase = rpc[name]
-                if rpc_phase:
-                    t = func(rpc_phase)
-                    if t != None:
-                        totals[i].append(t - start)
-                        deltas[i].append(t - prev)
-                        prev = t
-
-    def __print_phases(self, phases, totals, deltas):
-        """
-        Utility method used by print to print out summary statistics
-        aggregated by __phase_stats
-        """
-        for i in range(0, len(phases)):
-            label = phases[i][0]
-            if not totals[i]:
-                print('%-32s (no events)' % (label))
-                continue
-            elapsed = sorted(totals[i])
-            gaps = sorted(deltas[i])
-            print('%-32s Avg %7.1f us (+%7.1f us)  P90 %7.1f us (+%7.1f us)' %
-                (label, sum(elapsed)/len(elapsed), sum(gaps)/len(gaps),
-                elapsed[9*len(elapsed)//10], gaps[9*len(gaps)//10]))
+        print('\nTimeline for clients (%d RPCs):\n' % (num_rpcs))
+        self.print_events(client_times, self.client_msgs)
+        print('')
+        self.print_events(client_extra_times, self.client_msgs)
+        print('\nTimeline for servers (%d RPCs):\n' % (num_rpcs))
+        self.print_events(server_times, self.server_msgs)
+        print('')
+        self.print_events(server_extra_times, self.server_msgs)
 
 #------------------------------------------------
 # Analyzer: torqs
@@ -13813,7 +13921,7 @@ class AnalyzeTorqs:
             if pkt['type'] == 'data':
                 got_homa = True
                 rpc = rpcs[pkt['id']]
-                if 'unsched' in rpc and pkt['offset'] < rpc['unsched']:
+                if pkt['offset'] < rpc['unsched']:
                     unsched = bytes
             tcp = 0
             if pkt['type'] == 'tcp':

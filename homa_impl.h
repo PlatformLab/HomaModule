@@ -713,14 +713,15 @@ int      homa_dointvec(const struct ctl_table *table, int write,
 		       void *buffer, size_t *lenp, loff_t *ppos);
 void     homa_incoming_sysctl_changed(struct homa *homa);
 int      homa_ioc_abort(struct socket *sock, unsigned long arg);
-int      homa_message_in_init(struct homa_rpc *rpc, int length,
-			      int unsched);
+int      homa_message_in_init(struct homa_rpc *rpc, int length, int unsched);
 void     homa_prios_changed(struct homa *homa);
+void     homa_start_msg_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 int      homa_sysctl_softirq_cores(const struct ctl_table *table,
 				   int write, void *buffer, size_t *lenp,
 				   loff_t *ppos);
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			       int length);
+void     homa_xmit_start_msg(struct homa_rpc *rpc, int length);
 #else /* See strip.py */
 int      homa_message_in_init(struct homa_rpc *rpc, int length);
 #endif /* See strip.py */

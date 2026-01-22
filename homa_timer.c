@@ -4,6 +4,62 @@
  * and timeouts.
  */
 
+/* Homa Retransmission Strategy:
+ *
+ * (This documentation is referenced in several other places in the Homa code)
+ *
+ * As a general rule, retransmission of lost packets is receiver-driven in
+ * Homa: the receiver notices that it has not received expected message
+ * data within an expected time window, so it issues RESEND packets to
+ * request retransmission. However, there are some situations where the
+ * receiver may not even be aware that data is incoming (for example, if
+ * all of the initial packets of a request message are lost); these
+ * situations require special handling.
+ *
+ * The bullet points below walk through the life of an RPC, showing how
+ * packet loss at each point is handled. If you see this comment in a
+ * version of Homa where the packet type START_MSG is not defined, then
+ * there will be no START_MSG packets and all messages will be unscheduled.
+ *
+ * 1. The START_MSG packet for a scheduled request is lost: the client notices
+ *    that it has not received any grants from the peer, so it retransmits the
+ *    START_MSG.
+ * 2. All of the DATA packets for an unscheduled request are lost, so the server
+ *    has no knowledge of the RPC: the client sends a RESEND packet for the
+ *    response; the server returns an RPC_UNKNOWN packet; then the client
+ *    retransmits the entire request message.
+ * 3. DATA packets for a request are lost, but the server has received at
+ *    least one DATA or START_MSG packet: the server's homa_timer notices
+ *    an excessive delay in the arrival of data and sends RESEND packet(s)
+ *    to request retransmission.
+ * 4. The START_MSG packet for a scheduled response is lost: the client sends
+ *    a RESEND packet for the response; the server then retransmits the
+ *    START_MSG packet (it sends START_MSG rather than DATA so that the client
+ *    knows it must issue grants for the message).
+ * 5. All of the DATA packets for an unscheduled response are lost: the
+ *    client sends a RESEND packet for the response; the server then
+ *    retransmits the response message.
+ * 6. DATA packets for a response are lost, but the client has received at
+ *    least one DATA or START_MSG packet: the client's homa_timer notices
+ *    an excessive delay in the arrival of data and sends RESEND packet(s)
+ *    to request retransmission.
+ *
+ * To the client, cases 2, 4, and 5 are initially indistinguishable and
+ * are all handled the same way, by issuing a RESEND for the entire response.
+ *
+ * There are some situations where a RESEND packet is sent but the
+ * recipient has not yet transmitted the "missing" packets (intentionally).
+ * For example, if the server application takes a long time to generate a
+ * response message, the client may issue a RESEND (this appears like cases 2,
+ * 4, and 5). Another example is if the sender of a message has not sent
+ * packets because it has been using its uplink bandwidth for higher priority
+ * messages. In cases like this, when a RESEND packet arrives the recipient
+ * returns a BUSY packet to indicate that it cannot (or has chosen not to)
+ * send the desired packets. When a recipient receives a BUSY packet it resets
+ * its timeout mechanism (it will eventually issue aditional RESENDs if the
+ * desired packets do not arrive, but it will wait longer before doing so).
+ */
+
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
@@ -47,6 +103,9 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 		}
 	}
 
+	/* Check for conditions under which it isn't a problem if we haven't
+	 * heard from the peer.
+	 */
 	if (rpc->state == RPC_INCOMING) {
 #ifndef __STRIP__ /* See strip.py */
 		if ((rpc->msgin.length - rpc->msgin.bytes_remaining)

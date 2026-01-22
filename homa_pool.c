@@ -549,24 +549,40 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			   atomic_read(&pool->free_bpages),
 			   pool->bpages_needed);
 		homa_pool_alloc_msg(rpc);
-#ifndef __STRIP__ /* See strip.py */
-		if (rpc->msgin.num_bpages > 0) {
-			struct homa_resend_hdr resend;
-
-			/* To "wake up" the RPC, request retransmission of
-			 * all the packets that were dropped. Use the
-			 * next-to-highest priority level to provide a priority
-			 * boost without interfering with the highest priority
-			 * traffic such as control packets.
-			 */
-			resend.offset = htonl(0);
-			resend.length = htonl(-1);
-			resend.priority = homa_high_priority(rpc->hsk->homa);
-			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
-		}
-#endif /* See strip.py */
+		if (rpc->msgin.num_bpages > 0)
+			homa_pool_wakeup_rpc(rpc);
 		homa_rpc_unlock(rpc);
 	}
+}
+
+/**
+ * homa_pool_wakeup_rpc() - This function is invoked when an RPC that had
+ * blocked waiting for buffer space finally gets the space it needs. It
+ * arranges for transmission of the RPC's data to resume.
+ * @rpc:    RPC to wake up
+ */
+void homa_pool_wakeup_rpc(struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
+{
+	struct homa_resend_hdr resend;
+
+#ifndef __STRIP__ /* See strip.py */
+	/* If the RPC is scheduled, all we have to do is issue a grant. */
+	if (test_bit(RPC_GRANTABLE, &rpc->flags)) {
+		homa_grant_check_rpc(rpc);
+		return;
+	}
+#endif /* See strip.py */
+
+	/* Unscheduled: must ask for the message to be retransmitted. Use
+	 * the next-to-highest priority level to provide a priority boost
+	 * without interfering with the highest priority traffic such as
+	 * control packets.
+	 */
+	resend.offset = htonl(0);
+	resend.length = htonl(rpc->msgin.length);
+	resend.priority = homa_high_priority(rpc->hsk->homa);
+	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 }
 
 /**

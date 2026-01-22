@@ -54,8 +54,7 @@ FIXTURE_SETUP(homa_offload)
 		.type = DATA,
 		.sender_id = cpu_to_be64(1000)
 	};
-	self->header.message_length = htonl(10000);
-	self->header.incoming = htonl(10000);
+	self->header.msg_length = htonl(10000);
 	self->header.seg.offset = htonl(2000);
 	for (i = 0; i < GRO_HASH_BUCKETS; i++) {
 		INIT_LIST_HEAD(&self->napi.gro.hash[i].list);
@@ -143,8 +142,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	h.common.dport = htons(server_port);
 	h.common.type = DATA;
 	h.common.sender_id = cpu_to_be64(client_id);
-	h.message_length = htonl(10000);
-	h.incoming = htonl(10000);
+	h.msg_length = htonl(10000);
 	h.seg.offset = htonl(2000);
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
@@ -172,8 +170,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	EXPECT_EQ(0, homa_metrics_per_cpu()->gro_data_bypasses);
 
 	/* Third attempt: bypass should happen. */
-	h.message_length = htonl(1400);
-	h.incoming = htonl(1400);
+	h.msg_length = htonl(1400);
 	cur_offload_core->last_gro = 400;
 	skb3 = mock_skb_alloc(&self->src_ip, &self->dst_ip, &h.common, 1400,
 			      4000);
@@ -217,7 +214,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	h.common.dport = htons(self->hsk.port);
 	h.common.sender_id = cpu_to_be64(client_id);
 	h.common.type = GRANT;
-	h.offset = htonl(12000);
+	h.offset = htonl(1000);
 	h.priority = 3;
 
 	/* First attempt: HOMA_GRO_FAST_GRANTS not enabled. */
@@ -235,7 +232,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	result = homa_gro_receive(&self->empty_list, skb2);
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_grant_bypasses);
-	EXPECT_SUBSTR("xmit DATA 1400@11200", unit_log_get());
+	EXPECT_SUBSTR("xmit DATA 1400@0", unit_log_get());
 
 	/* Third attempt: core is too busy for fast grants. */
 	cur_offload_core->last_gro = 600;
@@ -354,8 +351,8 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 	EXPECT_EQ(3, NAPI_GRO_CB(self->skb2)->count);
 
 	unit_log_frag_list(self->skb2, 1);
-	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1002, message_length 10000, offset 6000, data_length 1400, incoming 10000; "
-			"DATA from 196.168.0.1:40000, dport 88, id 1004, message_length 10000, offset 7000, data_length 1400, incoming 10000",
+	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1002, msg_length 10000, offset 6000, data_length 1400; "
+			"DATA from 196.168.0.1:40000, dport 88, id 1004, msg_length 10000, offset 7000, data_length 1400",
 			unit_log_get());
 }
 TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)

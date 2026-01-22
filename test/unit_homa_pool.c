@@ -762,8 +762,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__reset_bpages_needed)
 	EXPECT_EQ(0, crpc2->msgin.num_bpages);
 	EXPECT_EQ(2, pool->bpages_needed);
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
+TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_unscheduled)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
@@ -773,52 +772,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 	/* Queue up an RPC that needs 2 bpages. */
 	atomic_set(&pool->free_bpages, 0);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
-			&self->server_ip, 4000, 98, 1000, 2*HOMA_BPAGE_SIZE);
-	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(0, crpc->msgin.num_bpages);
-	EXPECT_EQ(2, pool->bpages_needed);
-	EXPECT_EQ(-1, crpc->msgin.active_ix);
-
-	/* Free the required pages. */
-	unit_log_clear();
-	atomic_set(&pool->free_bpages, 2);
-	homa_pool_check_waiting(pool);
-	EXPECT_EQ(2, crpc->msgin.num_bpages);
-	EXPECT_STREQ("xmit RESEND 0--2@6", unit_log_get());
-}
-TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_only_one_priority_level)
-{
-	struct homa_pool *pool = self->hsk.buffer_pool;
-	struct homa_rpc *crpc;
-
-	mock_check_bpool_leaks = false;
-
-	/* Queue up an RPC that needs 2 bpages. */
-	atomic_set(&pool->free_bpages, 0);
-	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
-			&self->server_ip, 4000, 98, 1000, 2*HOMA_BPAGE_SIZE);
-	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(0, crpc->msgin.num_bpages);
-	EXPECT_EQ(2, pool->bpages_needed);
-	self->homa.num_priorities = 1;
-
-	/* Free the required pages. */
-	unit_log_clear();
-	atomic_set(&pool->free_bpages, 2);
-	homa_pool_check_waiting(pool);
-	EXPECT_EQ(2, crpc->msgin.num_bpages);
-	EXPECT_STREQ("xmit RESEND 0--2@0", unit_log_get());
-}
-TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_no_need_for_grants)
-{
-	struct homa_pool *pool = self->hsk.buffer_pool;
-	struct homa_rpc *crpc;
-
-	mock_check_bpool_leaks = false;
-
-	atomic_set(&pool->free_bpages, 0);
-	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
-			&self->server_ip, 4000, 98, 1000, 5000);
+			&self->server_ip, 4000, 98, 1000, 2000);
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
 	EXPECT_EQ(1, pool->bpages_needed);
@@ -829,10 +783,33 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_no_need_for_grant
 	atomic_set(&pool->free_bpages, 2);
 	homa_pool_check_waiting(pool);
 	EXPECT_EQ(1, crpc->msgin.num_bpages);
-	EXPECT_STREQ("xmit RESEND 0--2@6", unit_log_get());
-	EXPECT_EQ(-1, crpc->msgin.active_ix);
+	EXPECT_SUBSTR("xmit RESEND 0, 2000 @6", unit_log_get());
 }
-#endif /* See strip.py */
+TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_scheduled)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	struct homa_rpc *crpc;
+
+	mock_check_bpool_leaks = false;
+
+	/* Queue up an RPC that needs 2 bpages. */
+	atomic_set(&pool->free_bpages, 0);
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_START_MSG, &self->client_ip,
+			&self->server_ip, 4000, 98, 1000, 2*HOMA_BPAGE_SIZE);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(0, crpc->msgin.num_bpages);
+	EXPECT_EQ(2, pool->bpages_needed);
+	EXPECT_EQ(-1, crpc->msgin.active_ix);
+
+	/* Free the required pages. */
+	unit_log_clear();
+	atomic_set(&pool->free_bpages, 2);
+	self->homa.grant->window_param = 50000;
+	homa_grant_update_sysctl_deps(self->homa.grant);
+	homa_pool_check_waiting(pool);
+	EXPECT_EQ(2, crpc->msgin.num_bpages);
+	EXPECT_SUBSTR("xmit GRANT 50000@0", unit_log_get());
+}
 TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
@@ -854,6 +831,36 @@ TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(4, pool->bpages_needed);
+}
+
+TEST_F(homa_pool, homa_pool_wakeup_rpc__scheduled)
+{
+	struct homa_rpc *srpc;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_START_MSG, &self->client_ip,
+			&self->server_ip, 4000, 101, 20000, 100);
+	ASSERT_NE(NULL, srpc);
+	srpc->msgin.granted = 0;
+
+	unit_log_clear();
+	homa_rpc_lock(srpc);
+	homa_pool_wakeup_rpc(srpc);
+	EXPECT_STREQ("xmit GRANT 20000@0", unit_log_get());
+	homa_rpc_unlock(srpc);
+}
+TEST_F(homa_pool, homa_pool_wakeup_rpc__unscheduled)
+{
+	struct homa_rpc *srpc;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			&self->server_ip, 4000, 101, 200, 100);
+	ASSERT_NE(NULL, srpc);
+
+	unit_log_clear();
+	homa_rpc_lock(srpc);
+	homa_pool_wakeup_rpc(srpc);
+	EXPECT_STREQ("xmit RESEND 0, 200 @6", unit_log_get());
+	homa_rpc_unlock(srpc);
 }
 
 TEST_F(homa_pool, homa_pool_avail_bytes__no_region)

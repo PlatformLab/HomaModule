@@ -204,9 +204,9 @@ TEST_F(homa_timer, homa_timer_check_rpc__request_retransmission)
 	homa_rpc_lock(crpc);
 	homa_timer_check_rpc(crpc);
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
+	EXPECT_STREQ("xmit RESEND 1400, 3600 @7", unit_log_get());
 #else /* See strip.py */
-	EXPECT_STREQ("xmit RESEND 1400-9999", unit_log_get());
+	EXPECT_STREQ("xmit RESEND 1400, 8600", unit_log_get());
 #endif /* See strip.py */
 
 	/* Third call: not yet time for next resend. */
@@ -221,9 +221,9 @@ TEST_F(homa_timer, homa_timer_check_rpc__request_retransmission)
 	homa_timer_check_rpc(crpc);
 	homa_rpc_unlock(crpc);
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
+	EXPECT_STREQ("xmit RESEND 1400, 3600 @7", unit_log_get());
 #else /* See strip.py */
-	EXPECT_STREQ("xmit RESEND 1400-9999", unit_log_get());
+	EXPECT_STREQ("xmit RESEND 1400, 8600", unit_log_get());
 #endif /* See strip.py */
 }
 
@@ -248,9 +248,9 @@ TEST_F(homa_timer, homa_timer__basics)
 	homa_timer(&self->homa);
 	EXPECT_EQ(3, crpc->silent_ticks);
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
+	EXPECT_STREQ("xmit RESEND 1400, 3600 @7", unit_log_get());
 #else /* See strip.py */
-	EXPECT_STREQ("xmit RESEND 1400-4999", unit_log_get());
+	EXPECT_STREQ("xmit RESEND 1400, 3600", unit_log_get());
 #endif /* See strip.py */
 
 	/* Don't send another RESEND (resend_interval not reached). */

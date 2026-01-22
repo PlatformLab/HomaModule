@@ -803,11 +803,13 @@ void homa_grant_try_send(struct homa_grant *grant, struct homa_rpc *rpc,
 	/* See if we can issue a new grant for the RPC. */
 	received = rpc->msgin.length - rpc->msgin.bytes_remaining;
 	delta = received + grant->window - rpc->msgin.granted;
-	if (delta <= 0)
-		/* The RPC already has a full window of grant. */
-		return;
 	if (delta > (rpc->msgin.length - rpc->msgin.granted))
 		delta = rpc->msgin.length - rpc->msgin.granted;
+	if (delta <= 0)
+		/* The RPC already has a full window of grant (or the
+		 * entire message is granted).
+		 */
+		return;
 	avl_incoming = grant->max_incoming -
 		       atomic_read(&grant->total_incoming);
 	if (avl_incoming <= 0 ||
