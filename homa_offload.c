@@ -359,6 +359,8 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 			   h_new->common.type, priority);
 #endif /* See strip.py */
 	}
+	if (homa->gro_policy & 0x100)
+		goto bypass;
 
 	/* The GRO mechanism tries to separate packets onto different
 	 * gro_lists by hash. This is bad for us, because we want to batch
@@ -619,7 +621,10 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 	//		NAPI_GRO_CB(skb)->count);
 
 	per_cpu(homa_offload_core, smp_processor_id()).held_skb = NULL;
-	if (homa->gro_policy & HOMA_GRO_GEN3) {
+	if (homa->gro_policy & 0x200) {
+		tt_record("Set softirq CPU to current core");
+		homa_set_softirq_cpu(skb, smp_processor_id());
+	} else if (homa->gro_policy & HOMA_GRO_GEN3) {
 		homa_gro_gen3(homa, skb);
 	} else if (homa->gro_policy & HOMA_GRO_GEN2) {
 		homa_gro_gen2(homa, skb);

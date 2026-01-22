@@ -38,8 +38,11 @@ static struct sk_buff *new_test_skb(struct homa_rpc *rpc,
 	};
 	data.message_length = htonl(rpc->msgout.length);
 	data.seg.offset = htonl(offset);
-	skb = mock_skb_alloc(saddr, &data.common,
-			     length + sizeof(struct homa_skb_info), 0);
+	skb = mock_raw_skb(saddr, IPPROTO_HOMA, sizeof(data) + length +
+						sizeof(*info));
+	memcpy(skb_put(skb, sizeof(data)), &data, sizeof(data));
+	if (length != 0)
+		unit_fill_data(skb_put(skb, length), length, 0);
 	info = homa_get_skb_info(skb);
 	info->rpc = rpc;
 	info->data_bytes = length;
@@ -606,6 +609,30 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__defer_tcp_packet_because_of_link_idle_tim
 	EXPECT_EQ(NULL, to_free);
 	EXPECT_EQ(1, skb_queue_len(&q->deferred_tcp));
 	EXPECT_EQ(1000000, atomic64_read(&q->qdev->link_idle_time));
+}
+TEST_F(homa_qdisc, homa_qdisc_enqueue__empty_data_packet)
+{
+	struct homa_qdisc *q = init_qdisc(self->qdiscs[3]);
+	struct sk_buff *skb, *to_free;
+	struct homa_rpc *srpc;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->client_port,
+			       self->server_id, 100, 20000);
+	ASSERT_NE(NULL, srpc);
+
+	atomic64_set(&q->qdev->link_idle_time, 1000000);
+	skb = new_test_skb(srpc, &self->addr, 0, 0);
+	to_free = NULL;
+	unit_log_clear();
+
+	EXPECT_EQ(NET_XMIT_SUCCESS,
+		  homa_qdisc_enqueue(skb, q->qdisc, &to_free));
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_FALSE(homa_qdisc_any_deferred(q->qdev));
+	EXPECT_EQ(1, q->qdisc->q.qlen);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_LT(1000000, atomic64_read(&q->qdev->link_idle_time));
 }
 TEST_F(homa_qdisc, homa_qdisc_enqueue__short_homa_message)
 {

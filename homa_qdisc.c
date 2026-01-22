@@ -504,8 +504,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	 */
 	h = (struct homa_data_hdr *)skb_transport_header(skb);
 	offset = homa_get_offset(h);
-	if (h->common.type != DATA || ntohl(h->message_length) <
-				      qshared->defer_min_bytes) {
+	if (h->common.type != DATA || homa_data_len(skb) == 0 ||
+	    ntohl(h->message_length) < qshared->defer_min_bytes) {
 		homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 		goto enqueue;
 	}

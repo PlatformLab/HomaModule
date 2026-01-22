@@ -726,8 +726,7 @@ int      homa_init(struct homa *homa);
 int      homa_ioc_info(struct socket *sock, unsigned long arg);
 int      homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
 int      homa_load(void);
-int      homa_message_out_fill(struct homa_rpc *rpc,
-			       struct iov_iter *iter, int xmit);
+int      homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter);
 void     homa_message_out_init(struct homa_rpc *rpc, int length);
 void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			   struct homa_rpc *rpc);
@@ -788,6 +787,7 @@ int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 void     homa_xmit_data(struct homa_rpc *rpc, bool force);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			  int priority);
+void     homa_xmit_grant_request(struct homa_rpc *rpc, int length);
 #else /* See strip.py */
 int      homa_message_in_init(struct homa_rpc *rpc, int unsched);
 void     homa_resend_data(struct homa_rpc *rpc, int start, int end);

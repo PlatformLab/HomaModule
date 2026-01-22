@@ -204,7 +204,9 @@ bool mock_ipv6 = true;
 /* The value to use for mock_ipv6 in each test unless overridden. */
 bool mock_ipv6_default;
 
-/* List of priorities for all outbound packets. */
+/* Information about priorities for outbound packets is appended to
+ * this string.
+ */
 char mock_xmit_prios[1000];
 int mock_xmit_prios_offset;
 
@@ -1978,7 +1980,7 @@ void mock_put_page(struct page *page)
  * @saddr:        IPv6 address to use as the sender of the packet, in
  *                network byte order.
  * @protocol:     Protocol to use in the IP header, such as IPPROTO_HOMA.
- * @length:       How many bytes of space to allocated after the IP header.
+ * @length:       How many bytes of space to allocate after the IP header.
  * Return:        The new packet buffer, initialized as if the packet just
  *                arrived from the network and is about to be processed at
  *                transport level (e.g. there will be an IP header before

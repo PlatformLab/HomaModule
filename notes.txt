@@ -1,6 +1,14 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Notes for new granting mechanism:
+  * Replace homa_data_hdr with a boolean @granted? Or eliminate completely
+    (receiver can figure out whether message is unscheduled)?
+  * Update tthoma.py (e.g. unscheduled)
+  * What happens if probe packet is lost? Retransmit probe?
+  * Update homa_prio.cc
+  * Compile with __STRIP__
+
 * (12/12/25) Something is wrong with the xl170 cluster: both Homa and TCP
   are showing considerably worse performance than previously. I tried multiple
   different clusters, and tried backing out to older versions of Homa and
@@ -36,7 +44,7 @@ Notes for Homa implementation in Linux:
   configuration parameter fifo_mbps? Maybe the grant mechanism needs
   to be net_device-specific?
 
-* Eliminate HOMA_FLAG_DONT_THROTTLE
+* Eliminate HOMA_FLAG_DONT_THROTTLE (only needed for old pacer)
 
 * Optimizations for skb freeing:
   * In GRO, merge page frags out of skbs and return skbs to napi with
@@ -52,7 +60,7 @@ Notes for Homa implementation in Linux:
   then send again, etc. Hmmm, I believe there is a reason why this won't
   work, but I have forgotten what it is.
 
-* (July 2024) Found throughput problem in 2-node "--workload 50000 --one-way"
+* (July 2024) Found throughput problem in 2-node "--workload 500000 --one-way"
   benchmark. The first packet for message N doesn't get sent until message
   N-1 has been completely transmitted. This results in a gap between the
   completion of message N and the arrival of a grant for message N+1, which

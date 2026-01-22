@@ -282,7 +282,7 @@ TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 	ASSERT_NE(NULL, dead);
 	homa_rpc_end(dead);
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(31, self->hsk.dead_skbs);
+	EXPECT_EQ(30, self->hsk.dead_skbs);
 #else /* See strip.py */
 	EXPECT_EQ(30, self->hsk.dead_skbs);
 #endif /* See strip.py */
@@ -291,7 +291,7 @@ TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 	self->homa.dead_buffs_limit = 32;
 	homa_timer(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(31, self->hsk.dead_skbs);
+	EXPECT_EQ(30, self->hsk.dead_skbs);
 #else /* See strip.py */
 	EXPECT_EQ(30, self->hsk.dead_skbs);
 #endif /* See strip.py */
@@ -300,7 +300,7 @@ TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 	self->homa.dead_buffs_limit = 15;
 	homa_timer(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(11, self->hsk.dead_skbs);
+	EXPECT_EQ(10, self->hsk.dead_skbs);
 #else /* See strip.py */
 	EXPECT_EQ(10, self->hsk.dead_skbs);
 #endif /* See strip.py */

@@ -91,24 +91,15 @@ struct homa_message_out {
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
-	 * @unscheduled: Initial bytes of message that we'll send
-	 * without waiting for grants.
-	 */
-	int unscheduled;
-
-	/**
-	 * @granted: Total number of bytes we are currently permitted to
-	 * send, including unscheduled bytes; must wait for grants before
-	 * sending bytes at or beyond this position. Never larger than
-	 * @length.
+	 * @granted: Total number of initial bytes we are currently permitted
+	 * to send; must wait for grants before sending bytes at or beyond
+	 * this position. For unscheduled messages, equals @length. Never
+	 * larger than @length.
 	 */
 	int granted;
 
-	/**
-	 * @sched_priority: Priority level to use for future scheduled
-	 * packets.
-	 */
-	u8 sched_priority;
+	/** @priority: Priority level to use for transmitted packets. */
+	u8 priority;
 #endif /* See strip.py */
 
 	/**

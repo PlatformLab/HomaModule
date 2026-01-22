@@ -51,7 +51,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	crpc = homa_rpc_alloc_client(hsk, &server_addr);
 	if (IS_ERR(crpc))
 		return NULL;
-	if (homa_message_out_fill(crpc, unit_iov_iter(NULL, req_length), 0)) {
+	if (homa_message_out_fill(crpc, unit_iov_iter(NULL, req_length))) {
 		homa_rpc_end(crpc);
 		return NULL;
 	}
@@ -427,7 +427,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		return srpc;
 	homa_rpc_lock(srpc);
 	status = homa_message_out_fill(srpc, unit_iov_iter((void *) 2000,
-				       resp_length), 0);
+				       resp_length));
 	homa_rpc_unlock(srpc);
 	if (status != 0)
 		goto error;

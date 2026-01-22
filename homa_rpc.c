@@ -796,7 +796,7 @@ void homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info)
 		info->tx_sent = rpc->msgout.next_xmit_offset;
 #ifndef __STRIP__ /* See strip.py */
 		info->tx_granted = rpc->msgout.granted;
-		info->tx_prio = rpc->msgout.sched_priority;
+		info->tx_prio = rpc->msgout.priority;
 #else /* See strip.py */
 		info->tx_granted = rpc->msgout.length;
 #endif /* See strip.py */

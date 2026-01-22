@@ -830,6 +830,14 @@ TEST_F(homa_plumbing, homa_sendmsg__request_sent_successfully)
 	EXPECT_EQ(88888, crpc->completion_cookie);
 	homa_rpc_unlock(crpc);
 }
+TEST_F(homa_plumbing, homa_sendmsg__request_grants_for_scheduled_message)
+{
+	self->homa.unsched_bytes = 100;
+	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_SUBSTR("xmit DATA 0@0", unit_log_get());
+	ASSERT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__request_metrics)
 {
@@ -895,6 +903,18 @@ TEST_F(homa_plumbing, homa_sendmsg__response_wrong_state)
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_sendmsg__request_grants_for_scheduled_response)
+{
+	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
+			self->server_ip, self->client_port, self->server_id,
+			2000, 100);
+	self->sendmsg_args.id = self->server_id;
+	self->homa.unsched_bytes = 100;
+	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_SUBSTR("xmit DATA 0@0", unit_log_get());
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_sendmsg__homa_message_out_fill_returns_error)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
@@ -934,6 +954,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_succeeds)
 	self->sendmsg_args.id = self->server_id;
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_SUBSTR("xmit DATA 200@0", unit_log_get());
 	EXPECT_EQ(RPC_OUTGOING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }

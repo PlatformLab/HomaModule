@@ -30,9 +30,10 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 	rpc->msgout.length = length;
 	rpc->msgout.next_xmit = &rpc->msgout.packets;
 #ifndef __STRIP__ /* See strip.py */
-	rpc->msgout.unscheduled = rpc->hsk->homa->unsched_bytes;
-	if (rpc->msgout.unscheduled > length)
-		rpc->msgout.unscheduled = length;
+	rpc->msgout.priority = homa_unsched_priority(rpc->hsk->homa, rpc->peer,
+						     length);
+	if (rpc->hsk->homa->unsched_bytes >= length)
+		rpc->msgout.granted = length;
 #endif /* See strip.py */
 	rpc->msgout.init_time = homa_clock();
 }
@@ -165,7 +166,7 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	h->common.checksum = 0;
 	h->common.sender_id = cpu_to_be64(rpc->id);
 	h->message_length = htonl(rpc->msgout.length);
-	IF_NO_STRIP(h->incoming = htonl(rpc->msgout.unscheduled));
+	IF_NO_STRIP(h->incoming = htonl(rpc->msgout.granted));
 	h->ack.client_id = 0;
 	homa_peer_get_acks(rpc->peer, 1, &h->ack);
 	IF_NO_STRIP(h->cutoff_version = rpc->peer->cutoff_version);
@@ -226,25 +227,21 @@ error:
 }
 
 /**
- * homa_message_out_fill() - Initializes information for sending a message
+ * homa_message_out_fill() - Initialize information for sending a message
  * for an RPC (either request or response); copies the message data from
- * user space and (possibly) begins transmitting the message.
+ * user space.
  * @rpc:     RPC for which to send message; this function must not
  *           previously have been called for the RPC. Must be locked. The RPC
  *           will be unlocked while copying data, but will be locked again
  *           before returning.
  * @iter:    Describes location(s) of message data in user space.
- * @xmit:    Nonzero means this method should start transmitting packets;
- *           transmission will be overlapped with copying from user space.
- *           Zero means the caller will initiate transmission after this
- *           function returns.
  *
  * Return:   0 for success, or a negative errno for failure. It is possible
  *           for the RPC to be freed while this function is active. If that
  *           happens, copying will cease, -EINVAL will be returned, and
  *           rpc->state will be RPC_DEAD. Sets rpc->hsk->error_msg on errors.
  */
-int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
+int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter)
 	__must_hold(rpc->bucket->lock)
 {
 	/* Geometry information for packets:
@@ -314,16 +311,12 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	max_gso_data = segs_per_gso * max_seg_data;
 	UNIT_LOG("; ", "mtu %d, max_seg_data %d, max_gso_data %d",
 		 mtu, max_seg_data, max_gso_data);
-
-#ifndef __STRIP__ /* See strip.py */
-	rpc->msgout.granted = rpc->msgout.unscheduled;
-#endif /* See strip.py */
 	homa_skb_stash_pages(rpc->hsk->homa, rpc->msgout.length);
 
 	/* Each iteration of the loop below creates one GSO packet. */
 #ifndef __STRIP__ /* See strip.py */
 	tt_record3("starting copy from user space for id %d, length %d, unscheduled %d",
-		   rpc->id, rpc->msgout.length, rpc->msgout.unscheduled);
+		   rpc->id, rpc->msgout.length, rpc->msgout.granted != 0);
 #else /* See strip.py */
 	tt_record2("starting copy from user space for id %d, length %d",
 		   rpc->id, rpc->msgout.length);
@@ -336,15 +329,6 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		homa_rpc_unlock(rpc);
 		skb_data_bytes = max_gso_data;
 		offset = rpc->msgout.length - bytes_left;
-#ifndef __STRIP__ /* See strip.py */
-		if (offset < rpc->msgout.unscheduled &&
-		    (offset + skb_data_bytes) > rpc->msgout.unscheduled) {
-			/* Insert a packet boundary at the unscheduled limit,
-			 * so we don't transmit extra data.
-			 */
-			skb_data_bytes = rpc->msgout.unscheduled - offset;
-		}
-#endif /* See strip.py */
 		if (skb_data_bytes > bytes_left)
 			skb_data_bytes = bytes_left;
 		skb = homa_tx_data_pkt_alloc(rpc, iter, offset, skb_data_bytes,
@@ -371,33 +355,11 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		rpc->msgout.skb_memory += skb->truesize;
 		rpc->msgout.copied_from_user = rpc->msgout.length - bytes_left;
 		rpc->msgout.first_not_tx = rpc->msgout.packets;
-#ifndef __STRIP__ /* See strip.py */
-		/* The code below improves pipelining for long messages
-		 * by overlapping transmission with copying from user space.
-		 * This is a bit tricky because sending the packets takes
-		 * a significant amount time. On high-speed networks (e.g.
-		 * 100 Gbps and above), copying from user space is the
-		 * bottleneck, so transmitting the packets here will slow
-		 * that down. Thus, we only transmit the unscheduled packets
-		 * here, to fill the pipe. Packets after that can be
-		 * transmitted by SoftIRQ in response to incoming grants;
-		 * this allows us to use two cores: this core copying data
-		 * and the SoftIRQ core sending packets.
-		 */
-		if (offset < rpc->msgout.unscheduled && xmit)
-			homa_xmit_data(rpc, false);
-#endif /* See strip.py */
 	}
 	tt_record2("finished copy from user space for id %d, length %d",
 		   rpc->id, rpc->msgout.length);
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
 	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
-	if (xmit)
-#ifndef __STRIP__ /* See strip.py */
-		homa_xmit_data(rpc, false);
-#else /* See strip.py */
-		homa_xmit_data(rpc);
-#endif /* See strip.py */
 	return 0;
 
 error:
@@ -543,6 +505,23 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 
 #ifndef __STRIP__ /* See strip.py */
 /**
+ * homa_xmit_grant_request() - Send an initial empty data packet for an outgoing
+ * RPC so that the peer will (eventually) send grants for the RPC.
+ * @rpc:      RPC for which grants are needed: must not be an unscheduled RPC.
+ * @length:   Number of bytes in outgoing message.
+ */
+void homa_xmit_grant_request(struct homa_rpc *rpc, int length)
+{
+	struct homa_data_hdr h;
+
+	memset(&h, 0, sizeof(h));
+	h.message_length = htonl(length);
+	h.incoming = 0;
+	IF_NO_STRIP(h.cutoff_version = rpc->peer->cutoff_version);
+	homa_xmit_control(DATA, &h, sizeof(h), rpc);
+}
+
+/**
  * homa_xmit_data() - If an RPC has outbound data packets that are permitted
  * to be transmitted according to the scheduling mechanism, arrange for
  * them to be sent (some may be sent immediately; others may be sent
@@ -603,11 +582,7 @@ void homa_xmit_data(struct homa_rpc *rpc)
 			}
 		}
 
-		if (rpc->msgout.next_xmit_offset < rpc->msgout.unscheduled)
-			priority = homa_unsched_priority(homa, rpc->peer,
-							 rpc->msgout.length);
-		else
-			priority = rpc->msgout.sched_priority;
+		priority = rpc->msgout.priority;
 #endif /* See strip.py */
 		rpc->msgout.next_xmit = &(homa_get_skb_info(skb)->next_skb);
 		length = homa_get_skb_info(skb)->data_bytes;

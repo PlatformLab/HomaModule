@@ -942,6 +942,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__basics)
 	struct homa_rpc_info info;
 
 	crpc->completion_cookie = 1111;
+	crpc->msgout.priority = 4;
 
 	homa_rpc_get_info(crpc, &info);
 	EXPECT_EQ(AF_INET6, info.peer.in6.sin6_family);
@@ -955,7 +956,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__basics)
 	EXPECT_EQ(1000, info.tx_length);
 	EXPECT_EQ(1000, info.tx_sent);
 	EXPECT_EQ(1000, info.tx_granted);
-	IF_NO_STRIP(EXPECT_EQ(0, info.tx_prio));
+	IF_NO_STRIP(EXPECT_EQ(4, info.tx_prio));
 	EXPECT_EQ(20000, info.rx_length);
 	EXPECT_EQ(18600, info.rx_remaining);
 	EXPECT_EQ(0, info.rx_gaps);
@@ -986,7 +987,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__tx_incomplete)
 
 	crpc->msgout.granted = 4000;
 	crpc->msgout.next_xmit_offset = 1400;
-	crpc->msgout.sched_priority = 5;
+	crpc->msgout.priority = 5;
 
 	homa_rpc_get_info(crpc, &info);
 	EXPECT_EQ(5000, info.tx_length);

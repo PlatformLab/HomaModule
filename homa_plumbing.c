@@ -1216,9 +1216,18 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			   : tt_addr(addr->in6.sin6_addr),
 			   ntohs(addr->in6.sin6_port), rpc->id, length);
 		rpc->completion_cookie = args.completion_cookie;
-		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
+#ifndef __STRIP__ /* See strip.py */
+		if (msg->msg_iter.count > hsk->homa->unsched_bytes)
+			homa_xmit_grant_request(rpc, msg->msg_iter.count);
+#endif /* See strip.py */
+		result = homa_message_out_fill(rpc, &msg->msg_iter);
 		if (result)
 			goto error;
+#ifndef __STRIP__ /* See strip.py */
+		homa_xmit_data(rpc, false);
+#else /* See strip.py */
+		homa_xmit_data(rpc);
+#endif /* See strip.py */
 		args.id = rpc->id;
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_alloc_client. */
 
@@ -1271,9 +1280,18 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		rpc->state = RPC_OUTGOING;
 
-		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
+#ifndef __STRIP__ /* See strip.py */
+		if (msg->msg_iter.count > hsk->homa->unsched_bytes)
+			homa_xmit_grant_request(rpc, msg->msg_iter.count);
+#endif /* See strip.py */
+		result = homa_message_out_fill(rpc, &msg->msg_iter);
 		if (result && rpc->state != RPC_DEAD)
 			goto error;
+#ifndef __STRIP__ /* See strip.py */
+		homa_xmit_data(rpc, false);
+#else /* See strip.py */
+		homa_xmit_data(rpc);
+#endif /* See strip.py */
 		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 #ifndef __STRIP__ /* See strip.py */

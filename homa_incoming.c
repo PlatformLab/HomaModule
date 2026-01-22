@@ -177,6 +177,12 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		goto discard;
 	}
 
+	if (length == 0)
+		/* This is the initial packet for a scheduled message; its
+		 * only purpose is to trigger grant generation.
+		 */
+		goto discard;
+
 	if (start == rpc->msgin.recv_end) {
 		/* Common case: packet is sequential. */
 		rpc->msgin.recv_end += length;
@@ -775,7 +781,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			if (new_offset > rpc->msgout.length)
 				rpc->msgout.granted = rpc->msgout.length;
 		}
-		rpc->msgout.sched_priority = h->priority;
+		rpc->msgout.priority = h->priority;
 		homa_xmit_data(rpc, false);
 	}
 	consume_skb(skb);
