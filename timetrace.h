@@ -136,7 +136,6 @@ ssize_t   tt_proc_read(struct file *file, char __user *user_buf,
 		       size_t length, loff_t *offset);
 int       tt_proc_release(struct inode *inode, struct file *file);
 loff_t    tt_proc_lseek(struct file *file, loff_t offset, int whence);
-void      tt_record_sendmsg(struct sock *sk, struct msghdr *msg);
 void      tt_record_tcp(char *format, struct sk_buff *skb, __be32 saddr,
 			__be32 daddr);
 extern struct    tt_buffer *tt_buffers[];
