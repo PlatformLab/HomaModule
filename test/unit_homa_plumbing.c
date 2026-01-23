@@ -835,7 +835,7 @@ TEST_F(homa_plumbing, homa_sendmsg__request_grants_for_scheduled_message)
 	self->homa.unsched_bytes = 100;
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_SUBSTR("xmit DATA 0@0", unit_log_get());
+	EXPECT_SUBSTR("xmit NEED_GRANT 200", unit_log_get());
 	ASSERT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 #ifndef __STRIP__ /* See strip.py */
@@ -912,7 +912,7 @@ TEST_F(homa_plumbing, homa_sendmsg__request_grants_for_scheduled_response)
 	self->homa.unsched_bytes = 100;
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_SUBSTR("xmit DATA 0@0", unit_log_get());
+	EXPECT_SUBSTR("xmit NEED_GRANT 200", unit_log_get());
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_sendmsg__homa_message_out_fill_returns_error)

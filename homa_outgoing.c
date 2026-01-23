@@ -505,20 +505,18 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 
 #ifndef __STRIP__ /* See strip.py */
 /**
- * homa_xmit_grant_request() - Send an initial empty data packet for an outgoing
+ * homa_xmit_need_grant() - Send an initial empty data packet for an outgoing
  * RPC so that the peer will (eventually) send grants for the RPC.
  * @rpc:      RPC for which grants are needed: must not be an unscheduled RPC.
  * @length:   Number of bytes in outgoing message.
  */
-void homa_xmit_grant_request(struct homa_rpc *rpc, int length)
+void homa_xmit_need_grant(struct homa_rpc *rpc, int length)
 {
-	struct homa_data_hdr h;
+	struct homa_need_grant_hdr h;
 
 	memset(&h, 0, sizeof(h));
-	h.message_length = htonl(length);
-	h.incoming = 0;
-	IF_NO_STRIP(h.cutoff_version = rpc->peer->cutoff_version);
-	homa_xmit_control(DATA, &h, sizeof(h), rpc);
+	h.length = htonl(length);
+	homa_xmit_control(NEED_GRANT, &h, sizeof(h), rpc);
 }
 
 /**

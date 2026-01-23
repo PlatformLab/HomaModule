@@ -426,7 +426,8 @@ static u16 header_lengths[] = {
 	sizeof(struct homa_cutoffs_hdr),
 	sizeof(struct homa_freeze_hdr),
 	sizeof(struct homa_need_ack_hdr),
-	sizeof(struct homa_ack_hdr)
+	sizeof(struct homa_ack_hdr),
+	sizeof(struct homa_need_grant_hdr)
 };
 #else /* See strip.py */
 static u16 header_lengths[] = {
@@ -438,7 +439,8 @@ static u16 header_lengths[] = {
 	0,
 	0,
 	sizeof(struct homa_need_ack_hdr),
-	sizeof(struct homa_ack_hdr)
+	sizeof(struct homa_ack_hdr),
+	0
 };
 #endif /* See strip.py */
 
@@ -497,6 +499,9 @@ int __init homa_load(void)
 #endif /* See strip.py */
 	BUILD_BUG_ON(sizeof(struct homa_need_ack_hdr) > HOMA_MAX_HEADER);
 	BUILD_BUG_ON(sizeof(struct homa_ack_hdr) > HOMA_MAX_HEADER);
+#ifndef __STRIP__ /* See strip.py */
+	BUILD_BUG_ON(sizeof(struct homa_need_grant_hdr) > HOMA_MAX_HEADER);
+#endif /* See strip.py */
 
 	/* Extra constraints on data packets:
 	 * - Ensure minimum header length so Homa doesn't have to worry about
@@ -1218,7 +1223,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		rpc->completion_cookie = args.completion_cookie;
 #ifndef __STRIP__ /* See strip.py */
 		if (msg->msg_iter.count > hsk->homa->unsched_bytes)
-			homa_xmit_grant_request(rpc, msg->msg_iter.count);
+			homa_xmit_need_grant(rpc, msg->msg_iter.count);
 #endif /* See strip.py */
 		result = homa_message_out_fill(rpc, &msg->msg_iter);
 		if (result)
@@ -1282,7 +1287,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 
 #ifndef __STRIP__ /* See strip.py */
 		if (msg->msg_iter.count > hsk->homa->unsched_bytes)
-			homa_xmit_grant_request(rpc, msg->msg_iter.count);
+			homa_xmit_need_grant(rpc, msg->msg_iter.count);
 #endif /* See strip.py */
 		result = homa_message_out_fill(rpc, &msg->msg_iter);
 		if (result && rpc->state != RPC_DEAD)

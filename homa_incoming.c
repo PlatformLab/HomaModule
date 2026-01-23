@@ -450,9 +450,9 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 #define MAX_ACKS 10
 #endif /* __UNIT_TEST__ */
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
-	u64 id = homa_local_id(h->common.sender_id);
-	int dport = ntohs(h->common.dport);
+	struct homa_common_hdr *h = (struct homa_common_hdr *)skb->data;
+	u64 id = homa_local_id(h->sender_id);
+	int dport = ntohs(h->dport);
 	struct homa_rpc *rpc = NULL;
 	struct homa_sock *hsk;
 	struct homa_net *hnet;
@@ -469,8 +469,8 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 			icmp_send(skb, ICMP_DEST_UNREACH,
 				  ICMP_PORT_UNREACH, 0);
 		tt_record3("Discarding packet(s) for unknown port %u, id %llu, type %d",
-			   dport, homa_local_id(h->common.sender_id),
-			   h->common.type);
+			   dport, homa_local_id(h->sender_id),
+			   h->type);
 		while (skb) {
 			next = skb->next;
 			kfree_skb(skb);
@@ -515,7 +515,8 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 		if (!rpc) {
 			if (!homa_is_client(id)) {
 				/* We are the server for this RPC. */
-				if (h->common.type == DATA) {
+				if (h->type == DATA ||
+				    h->type == NEED_GRANT) {
 					int created;
 
 					/* Create a new RPC if one doesn't
@@ -541,34 +542,34 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 		}
 		if (unlikely(!rpc)) {
 #ifndef __STRIP__ /* See strip.py */
-			if (h->common.type != CUTOFFS &&
-			    h->common.type != NEED_ACK &&
+			if (h->type != CUTOFFS &&
+			    h->type != NEED_ACK &&
 #else /* See strip.py */
-			if (h->common.type != NEED_ACK &&
+			if (h->type != NEED_ACK &&
 #endif /* See strip.py */
-			    h->common.type != ACK &&
-			    h->common.type != RESEND) {
+			    h->type != ACK &&
+			    h->type != RESEND) {
 				tt_record4("Discarding packet for unknown RPC, id %u, type %d, peer 0x%x:%d",
-					   id, h->common.type, tt_addr(saddr),
-					   ntohs(h->common.sport));
+					   id, h->type, tt_addr(saddr),
+					   ntohs(h->sport));
 #ifndef __STRIP__ /* See strip.py */
-				if (h->common.type != GRANT ||
+				if (h->type != GRANT ||
 				    homa_is_client(id))
 					INC_METRIC(unknown_rpcs, 1);
 #endif /* See strip.py */
 				goto discard;
 			}
 		} else {
-			if (h->common.type == DATA ||
+			if (h->type == DATA ||
 #ifndef __STRIP__ /* See strip.py */
-			    h->common.type == GRANT ||
+			    h->type == GRANT ||
 #endif /* See strip.py */
-			    h->common.type == BUSY)
+			    h->type == BUSY)
 				rpc->silent_ticks = 0;
 			rpc->peer->outstanding_resends = 0;
 		}
 
-		switch (h->common.type) {
+		switch (h->type) {
 		case DATA:
 			homa_data_pkt(skb, rpc);
 			INC_METRIC(packets_received[DATA - DATA], 1);
@@ -609,6 +610,12 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 			INC_METRIC(packets_received[ACK - DATA], 1);
 			homa_ack_pkt(skb, hsk, rpc);
 			break;
+#ifndef __STRIP__ /* See strip.py */
+		case NEED_GRANT:
+			INC_METRIC(packets_received[NEED_GRANT - DATA], 1);
+			homa_need_grant_pkt(skb, rpc);
+			break;
+#endif /* See strip.py */
 		default:
 			INC_METRIC(unknown_packet_types, 1);
 			goto discard;

@@ -728,7 +728,7 @@ TEST_F(homa_outgoing, homa_xmit_unknown)
 	kfree_skb(skb);
 }
 
-TEST_F(homa_outgoing, homa_xmit_grant_request)
+TEST_F(homa_outgoing, homa_xmit_need_grant)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
@@ -736,9 +736,8 @@ TEST_F(homa_outgoing, homa_xmit_grant_request)
 
 	mock_xmit_log_verbose = 1;
 	unit_log_clear();
-	homa_xmit_grant_request(crpc, 2500);
-	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1234, "
-		     "message_length 2500, offset 0, data_length 0, incoming 0",
+	homa_xmit_need_grant(crpc, 2500);
+	EXPECT_STREQ("xmit NEED_GRANT from 0.0.0.0:40000, dport 99, id 1234, length 2500",
 		     unit_log_get());
 }
 #endif /* See strip.py */

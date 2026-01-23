@@ -787,7 +787,7 @@ int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 void     homa_xmit_data(struct homa_rpc *rpc, bool force);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			  int priority);
-void     homa_xmit_grant_request(struct homa_rpc *rpc, int length);
+void     homa_xmit_need_grant(struct homa_rpc *rpc, int length);
 #else /* See strip.py */
 int      homa_message_in_init(struct homa_rpc *rpc, int unsched);
 void     homa_resend_data(struct homa_rpc *rpc, int start, int end);

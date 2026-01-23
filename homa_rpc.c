@@ -107,7 +107,7 @@ error:
  * @hsk:      Socket that owns this RPC.
  * @source:   IP address (network byte order) of the RPC's client.
  * @h:        Header for the first data packet received for this RPC; used
- *            to initialize the RPC.
+ *            to initialize the RPC. Must have type DATA or NEED_GRANT.
  * @created:  Will be set to 1 if a new RPC was created and 0 if an
  *            existing RPC was found.
  *
@@ -117,10 +117,10 @@ error:
  */
 struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 				       const struct in6_addr *source,
-				       struct homa_data_hdr *h, int *created)
+				       struct homa_common_hdr *h, int *created)
 	__cond_acquires(srpc->bucket->lock)
 {
-	u64 id = homa_local_id(h->common.sender_id);
+	u64 id = homa_local_id(h->sender_id);
 	struct homa_rpc_bucket *bucket;
 	struct homa_rpc *srpc = NULL;
 	int err;
@@ -135,7 +135,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	homa_bucket_lock(bucket, id);
 	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
 		if (srpc->id == id &&
-		    srpc->dport == ntohs(h->common.sport) &&
+		    srpc->dport == ntohs(h->sport) &&
 		    ipv6_addr_equal(&srpc->peer->addr, source)) {
 			/* RPC already exists; just return it instead
 			 * of creating a new RPC.
@@ -161,7 +161,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 		srpc->peer = NULL;
 		goto error;
 	}
-	srpc->dport = ntohs(h->common.sport);
+	srpc->dport = ntohs(h->sport);
 	srpc->id = id;
 	srpc->msgin.length = -1;
 	srpc->msgout.length = -1;

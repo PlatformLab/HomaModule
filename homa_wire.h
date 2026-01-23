@@ -35,12 +35,16 @@ enum homa_packet_type {
 #endif /* See strip.py */
 	NEED_ACK           = 0x17,
 	ACK                = 0x18,
-	MAX_OP             = 0x18,
+#ifndef __STRIP__ /* See strip.py */
+	NEED_GRANT         = 0x19,
+#endif /* See strip.py */
+	MAX_OP             = 0x19,
 	/* If you add a new type here, you must also do the following:
 	 * 1. Change MAX_OP so it is the highest valid opcode
 	 * 2. Add support for the new opcode in homa_print_packet,
 	 *    homa_print_packet_short, homa_symbol_for_type, and mock_skb_alloc.
 	 * 3. Add the header length to header_lengths in homa_plumbing.c.
+	 * 4. Add length validation for the header in homa_load.
 	 */
 };
 
@@ -385,17 +389,16 @@ struct homa_grant_hdr {
 	struct homa_common_hdr common;
 
 	/**
-	 * @offset: Byte offset within the message.
-	 *
-	 * The sender should now transmit all data up to (but not including)
-	 * this offset ASAP, if it hasn't already.
+	 * @offset: Byte offset within the message. The sender should now
+	 * transmit all data packets with starting offset less than this
+	 * that haven't already been transmitted.
 	 */
 	__be32 offset;
 
 	/**
 	 * @priority: The sender should use this priority level for all future
-	 * MESSAGE_FRAG packets for this message, until a GRANT is received
-	 * with higher offset. Larger numbers indicate higher priorities.
+	 * DATA packets for this message, until a GRANT is received with higher
+	 * offset. Larger numbers indicate higher priorities.
 	 */
 	u8 priority;
 } __packed;
@@ -531,6 +534,27 @@ struct homa_ack_hdr {
 	/** @acks: Info about RPCs that are no longer active. */
 	struct homa_ack acks[HOMA_MAX_ACKS_PER_PKT];
 } __packed;
+
+#ifndef __STRIP__ /* See strip.py */
+/**
+ * struct homa_need_grant_hdr - Wire format for NEED_GRANT packets.
+ *
+ * A NEED_GRANT packet is sent to begin the transmission of a scheduled
+ * message, so that the receiver knows that the message exists and can begin
+ * sending GRANTs for the message. The sender will not send DATA packets
+ * until it receives GRANTs. NEED_GRANT packets are not used for unscheduled
+ * messages: the sender sends DATA packets without waiting for GRANTs.
+ */
+struct homa_need_grant_hdr {
+	/** @common: Fields common to all packet types. */
+	struct homa_common_hdr common;
+
+	/**
+	 * @length: Length of the message, in bytes.
+	 */
+	__be32 length;
+} __packed;
+#endif /* See strip.py */
 
 /**
  * homa_local_id(): given an RPC identifier from an input packet (which

@@ -5,9 +5,12 @@ Notes for Homa implementation in Linux:
   * Replace homa_data_hdr with a boolean @granted? Or eliminate completely
     (receiver can figure out whether message is unscheduled)?
   * Update tthoma.py (e.g. unscheduled)
-  * What happens if probe packet is lost? Retransmit probe?
+  * What happens if probe packet is lost? Retransmit probe? Must modify
+    homa_request_retrans. May also need to modify homa_rpc_unknown_pkt
   * Update homa_prio.cc
   * Compile with __STRIP__
+  * Double-check the calculation of incoming in homa_rpc_alloc_server.
+  * Reduce tt_record calls in homa_grant.c?
 
 * (12/12/25) Something is wrong with the xl170 cluster: both Homa and TCP
   are showing considerably worse performance than previously. I tried multiple

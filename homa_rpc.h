@@ -183,7 +183,7 @@ struct homa_message_in {
 	/**
 	 * @rank: Position of this RPC in homa->grant->active_rpcs, or -1
 	 * if not in homa->grant->active_rpcs. Managed by homa_grant.c;
-	 * unsafe to access unless holding homa->grant->lock.
+	 * unsafe to modify unless holding homa->grant->lock.
 	 */
 	int rank;
 
@@ -196,7 +196,7 @@ struct homa_message_in {
 
 	/**
 	 * @prev_grant: Offset in the last GRANT packet sent for this RPC
-	 * (initially set to unscheduled bytes). Managed by homa_grant.c.
+	 * (initially 0).
 	 */
 	int prev_grant;
 

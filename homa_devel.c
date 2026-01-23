@@ -284,6 +284,16 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		}
 		break;
 	}
+#ifndef __STRIP__ /* See strip.py */
+	case NEED_GRANT: {
+		struct homa_need_grant_hdr *h;
+
+		h = (struct homa_need_grant_hdr *)header;
+		used = homa_snprintf(buffer, buf_len, used, ", length %d",
+				     ntohl(h->length));
+		break;
+	}
+#endif /* See strip.py */
 	}
 
 	buffer[buf_len - 1] = 0;
@@ -386,6 +396,15 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 	case ACK:
 		snprintf(buffer, buf_len, "ACK");
 		break;
+#ifndef __STRIP__ /* See strip.py */
+	case NEED_GRANT: {
+		struct homa_need_grant_hdr *h;
+
+		h = (struct homa_need_grant_hdr *)header;
+		snprintf(buffer, buf_len, "NEED_GRANT %d", ntohl(h->length));
+		break;
+	}
+#endif /* See strip.py */
 	default:
 		snprintf(buffer, buf_len, "unknown packet type 0x%x",
 			 common->type);
@@ -548,6 +567,10 @@ char *homa_symbol_for_type(uint8_t type)
 		return "NEED_ACK";
 	case ACK:
 		return "ACK";
+#ifndef __STRIP__ /* See strip.py */
+	case NEED_GRANT:
+		return "NEED_GRANT";
+#endif /* See strip.py */
 	}
 	return "??";
 }

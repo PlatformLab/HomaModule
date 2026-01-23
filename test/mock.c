@@ -2249,6 +2249,11 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr,
 		case ACK:
 			header_size = sizeof(struct homa_ack_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
+		case NEED_GRANT:
+			header_size = sizeof(struct homa_need_grant_hdr);
+			break;
+#endif /* See strip.py */
 		default:
 			header_size = sizeof(struct homa_common_hdr);
 			break;
