@@ -840,6 +840,7 @@ while i < len(sys.argv):
         config_nic()
         config_power()
         config_rps()
+        config_qdisc()
     elif arg == "ecn_threshold":
         if i >= len(sys.argv):
             raise Exception("No argument provided for 'ecn_threshold' command");
