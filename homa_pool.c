@@ -539,8 +539,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			resend.length = htonl(-1);
 			resend.priority = homa_high_priority(rpc->hsk->homa);
 			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
-			if (rpc->msgin.granted < rpc->msgin.length)
-				homa_grant_manage_rpc(rpc);
+			homa_grant_check_rpc(rpc);
 		}
 #endif /* See strip.py */
 		homa_rpc_unlock(rpc);

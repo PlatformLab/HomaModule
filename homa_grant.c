@@ -140,7 +140,7 @@ void homa_grant_free(struct homa_grant *grant)
 
 /**
  * homa_grant_init_rpc() - Initialize grant-related information for an
- * RPC's incoming message (may add the RPC to grant priority queues).
+ * RPC's incoming message.
  * @rpc:          RPC being initialized. Grant-related fields in msgin
  *                are assumed to be zero.  Must be locked by caller.
  * @unsched:      Number of unscheduled bytes in the incoming message for @rpc.
@@ -149,18 +149,10 @@ void homa_grant_init_rpc(struct homa_rpc *rpc, int unsched)
 	__must_hold(rpc->bucket->lock)
 {
 	rpc->msgin.rank = -1;
-	if (unsched >= rpc->msgin.length) {
-		rpc->msgin.granted = rpc->msgin.length;
-		rpc->msgin.prev_grant = rpc->msgin.granted;
-		return;
-	}
+	if (unsched >= rpc->msgin.length)
+		unsched = rpc->msgin.length;
 	rpc->msgin.granted = unsched;
 	rpc->msgin.prev_grant = unsched;
-	if (rpc->msgin.num_bpages != 0)
-		/* Can't issue grants unless buffer space has been allocated
-		 * for the message.
-		 */
-		homa_grant_manage_rpc(rpc);
 }
 
 /**
@@ -443,7 +435,8 @@ position_peer:
  * homa_grant_manage_rpc() - Insert an RPC into the priority-based data
  * structures for managing grantable RPCs (active_rpcs or grantable_peers).
  * Ensures that the RPC will be sent grants as needed.
- * @rpc:    The RPC to add. Must be locked by caller.
+ * @rpc:    The RPC to add. Must be locked by caller. May already be
+ *          inserted into the grant structures.
  */
 void homa_grant_manage_rpc(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
@@ -452,9 +445,12 @@ void homa_grant_manage_rpc(struct homa_rpc *rpc)
 	struct homa_rpc *bumped;
 	u64 time = homa_clock();
 
-	BUG_ON(rpc->msgin.rank >= 0 || !list_empty(&rpc->grantable_links));
-
 	homa_grant_lock(grant);
+
+	if (rpc->msgin.rank >= 0 || !list_empty(&rpc->grantable_links)) {
+		homa_grant_unlock(grant);
+		return;
+	}
 
 	INC_METRIC(grantable_rpcs_integral, grant->num_grantable_rpcs *
 		   (time - grant->last_grantable_change));
@@ -681,9 +677,10 @@ void homa_grant_send(struct homa_rpc *rpc, int priority)
 
 /**
  * homa_grant_check_rpc() - This function is responsible for generating
- * grant packets.  Is invoked whenever a data packet arrives for RPC; it
- * checks the state of that RPC (as well as other RPCs) and generates
- * grant packets as appropriate.
+ * grant packets.  It is invoked when the state of an RPC has changed in
+ * ways that might permit grants to be issued (either to this RPC or other
+ * RPCs), such as the arrival of a DATA packet. It reviews the state of
+ * grants and issues grant packets as appropriate.
  * @rpc:    RPC to check. Must be locked by the caller.
  */
 void homa_grant_check_rpc(struct homa_rpc *rpc)
@@ -732,6 +729,17 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		   rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,
 		   rpc->msgin.length);
 	INC_METRIC(grant_check_calls, 1);
+
+	/* Races can cause the test below to invoke homa_grant_manage_rpc when
+	 * rpc is already managed, but it will never fail to invoke
+	 * homa_grant_manage_rpc if the RPC is unmanaged. This is an
+	 * optimization to reduce the number of times the grant lock must
+	 * be acquired.
+	 */
+	if (rpc->msgin.granted < rpc->msgin.length &&
+	    READ_ONCE(rpc->msgin.rank) < 0 &&
+	    list_empty(&rpc->grantable_links))
+		homa_grant_manage_rpc(rpc);
 
 	needy_rank = INT_MAX;
 	now = homa_clock();

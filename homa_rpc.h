@@ -205,7 +205,7 @@ struct homa_message_in {
 
 	/**
 	 * @prev_grant: Offset in the last GRANT packet sent for this RPC
-	 * (initially set to unscheduled bytes).
+	 * (initially set to unscheduled bytes). Managed by homa_grant.c.
 	 */
 	int prev_grant;
 
@@ -421,8 +421,7 @@ struct homa_rpc {
 	/**
 	 * @grantable_links: Used to link this RPC into peer->grantable_rpcs.
 	 * If this RPC isn't in peer->grantable_rpcs, this is an empty
-	 * list pointing to itself. Must hold homa->grant->lock when
-	 * accessing.
+	 * list pointing to itself. Must hold homa->grant->lock when accessing.
 	 */
 	struct list_head grantable_links;
 #endif /* See strip.py */
