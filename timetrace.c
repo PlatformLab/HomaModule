@@ -238,9 +238,21 @@ void tt_freeze(void)
  */
 void tt_unfreeze(void)
 {
+	int i;
+
 	pr_err("%s invoked\n", __func__);
 	if (atomic_xchg(&tt_frozen, 0) == 1) {
+		/* Clear the timetraces to prevent large gaps. */
+		mutex_lock(&tt_mutex);
+		for (i = 0; i < nr_cpu_ids; i++) {
+			struct tt_buffer *buffer = tt_buffers[i];
+
+			buffer->events[tt_buffer_size - 1].format = NULL;
+			atomic_set(&buffer->next_index, 0);
+		}
+		mutex_unlock(&tt_mutex);
 		atomic_dec(&tt_freeze_count);
+		tt_record("tt_unfreeze reset timetraces");
 	}
 }
 
@@ -562,6 +574,7 @@ int tt_proc_release(struct inode *inode, struct file *file)
 			}
 		}
 		atomic_dec(&tt_freeze_count);
+		tt_record("tt_proc_release unfroze timetraces");
 	}
 
 	mutex_unlock(&tt_mutex);

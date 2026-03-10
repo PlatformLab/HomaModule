@@ -300,5 +300,5 @@ TEST_F(timetrace, tt_proc_release__unfreeze)
 	EXPECT_EQ(0, tt_freeze_count.counter);
 	EXPECT_FALSE(atomic_read(&tt_frozen));
 	EXPECT_EQ(NULL, tt_buffers[1]->events[3].format);
-	EXPECT_EQ(0, atomic_read(&tt_buffers[1]->next_index));
+	EXPECT_EQ(1, atomic_read(&tt_buffers[1]->next_index));
 }
