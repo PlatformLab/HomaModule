@@ -17,9 +17,23 @@ extern int mock_max_skb_frags;
 #define HOMA_MAX_SKB_FRAGS MAX_SKB_FRAGS
 #endif
 
+/* This function was added to later versions of the kernel, but isn't
+ * available in this version.
+ */
+static inline void skb_len_add(struct sk_buff *skb, int delta)
+{
+	skb->len += delta;
+	skb->data_len += delta;
+	skb->truesize += delta;
+}
+
 static void frag_page_set(skb_frag_t *frag, struct page *page)
 {
+#ifdef CONFIG_NETMEM
 	frag->netmem = page_to_netmem(page);
+#else
+	__skb_frag_set_page(frag, page);
+#endif
 }
 
 /**
@@ -190,7 +204,7 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 		frag = &shinfo->frags[shinfo->nr_frags - 1];
 		if (skb_frag_page(frag) == skb_core->skb_page &&
 		    skb_core->page_inuse < skb_core->page_size &&
-		    (frag->offset + skb_frag_size(frag)) ==
+		    (frag->page_offset + skb_frag_size(frag)) ==
 			    skb_core->page_inuse) {
 			if ((skb_core->page_size - skb_core->page_inuse) <
 			    actual_size)
@@ -220,7 +234,7 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 	shinfo->nr_frags++;
 	frag_page_set(frag, skb_core->skb_page);
 	get_page(skb_core->skb_page);
-	frag->offset = skb_core->page_inuse;
+	frag->page_offset = skb_core->page_inuse;
 	*length = actual_size;
 	skb_frag_size_set(frag, actual_size);
 	result = page_address(skb_frag_page(frag)) + skb_core->page_inuse;
@@ -418,7 +432,7 @@ int homa_skb_append_from_skb(struct homa *homa, struct sk_buff *dst_skb,
 		dst_shinfo->nr_frags++;
 		frag_page_set(dst_frag, skb_frag_page(src_frag));
 		get_page(skb_frag_page(src_frag));
-		dst_frag->offset = src_frag->offset
+		dst_frag->page_offset = src_frag->page_offset
 				+ (offset - src_frag_offset);
 		skb_frag_size_set(dst_frag, chunk_size);
 		offset += chunk_size;
@@ -567,9 +581,9 @@ void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
 		chunk_size = skb_frag_size(frag) - (offset - frag_offset);
 		if (chunk_size > length)
 			chunk_size = length;
-		memcpy(dst, page_address(skb_frag_page(frag)) + frag->offset
-				+ (offset - frag_offset),
-				chunk_size);
+		memcpy(dst, page_address(skb_frag_page(frag)) +
+			    frag->page_offset + (offset - frag_offset),
+		       chunk_size);
 		offset += chunk_size;
 		length -= chunk_size;
 		dst += chunk_size;
@@ -585,7 +599,7 @@ void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
 void homa_skb_release_pages(struct homa *homa)
 {
 	int i, max_low_mark, min_pages, release, release_max;
-	struct homa_page_pool *max_pool;
+	struct homa_page_pool *max_pool = NULL;
 	u64 now = homa_clock();
 
 	if (now < homa->skb_page_free_time)

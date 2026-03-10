@@ -41,7 +41,6 @@ FIXTURE(homa_plumbing) {
 	struct msghdr sendmsg_hdr;
 	struct homa_sendmsg_args sendmsg_args;
 	char buffer[2000];
-	sockptr_t optval;
 	union sockaddr_in_union addr;
 };
 FIXTURE_SETUP(homa_plumbing)
@@ -98,11 +97,8 @@ FIXTURE_SETUP(homa_plumbing)
 			2, 200);
 	self->sendmsg_hdr.msg_control = &self->sendmsg_args;
 	self->sendmsg_hdr.msg_controllen = sizeof(self->sendmsg_args);
-	self->sendmsg_hdr.msg_control_is_user = 1;
 	self->sendmsg_args.id = 0;
 	self->sendmsg_args.completion_cookie = 0;
-	self->optval.user = (void *) 0x100000;
-	self->optval.is_kernel = 0;
 	unit_log_clear();
 	if (self->homa.wmem_max == 0)
 		printf("homa_plumbing fixture set wmem_max 0\n");
@@ -510,14 +506,14 @@ TEST_F(homa_plumbing, homa_socket__homa_sock_init_failure)
 TEST_F(homa_plumbing, homa_setsockopt__bad_level)
 {
 	EXPECT_EQ(ENOPROTOOPT, -homa_setsockopt(&self->hsk.sock, 0, 0,
-		self->optval, sizeof(struct homa_rcvbuf_args)));
+		(void *)0x100000, sizeof(struct homa_rcvbuf_args)));
 	EXPECT_STREQ("homa_setsockopt invoked with level not IPPROTO_HOMA",
 		     self->hsk.error_msg);
 }
 TEST_F(homa_plumbing, homa_setsockopt__recvbuf_bad_optlen)
 {
 	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_RCVBUF, self->optval,
+			SO_HOMA_RCVBUF, (void *)0x100000,
 			sizeof(struct homa_rcvbuf_args) - 1));
 	EXPECT_STREQ("invalid optlen argument: must be sizeof(struct homa_rcvbuf_args)",
 		     self->hsk.error_msg);
@@ -526,7 +522,7 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_copy_from_sockptr_fails)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_RCVBUF, self->optval,
+			SO_HOMA_RCVBUF, (void *)0x100000,
 			sizeof(struct homa_rcvbuf_args)));
 	EXPECT_STREQ("invalid address for homa_rcvbuf_args",
 		     self->hsk.error_msg);
@@ -535,10 +531,9 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_region_not_writable)
 {
 	struct homa_rcvbuf_args args = {0x100000, 5*HOMA_BPAGE_SIZE};
 
-	self->optval.user = &args;
 	mock_copy_to_user_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_RCVBUF, self->optval,
+			SO_HOMA_RCVBUF, (void *)&args,
 			sizeof(struct homa_rcvbuf_args)));
 	EXPECT_STREQ("receive buffer region is not writable",
 		     self->hsk.error_msg);
@@ -551,11 +546,10 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_success)
 	args.start = (((uintptr_t)(buffer + PAGE_SIZE - 1))
 			& ~(PAGE_SIZE - 1));
 	args.length = 64*HOMA_BPAGE_SIZE;
-	self->optval.user = &args;
 	homa_pool_free(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_RCVBUF, self->optval,
+			SO_HOMA_RCVBUF, (void *)&args,
 			sizeof(struct homa_rcvbuf_args)));
 	EXPECT_EQ(args.start, (uintptr_t)self->hsk.buffer_pool->region);
 	EXPECT_EQ(64, self->hsk.buffer_pool->num_bpages);
@@ -566,7 +560,7 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_success)
 TEST_F(homa_plumbing, homa_setsockopt__server_bad_optlen)
 {
 	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SERVER, self->optval, sizeof(int) - 1));
+			SO_HOMA_SERVER, (void *)0x100000, sizeof(int) - 1));
 	EXPECT_STREQ("invalid optlen argument: must be sizeof(int)",
 		     self->hsk.error_msg);
 }
@@ -574,7 +568,7 @@ TEST_F(homa_plumbing, homa_setsockopt__server_copy_from_sockptr_fails)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SERVER, self->optval, sizeof(int)));
+			SO_HOMA_SERVER, (void *)0x100000, sizeof(int)));
 	EXPECT_STREQ("invalid address for SO_HOMA_SERVER value",
 		     self->hsk.error_msg);
 }
@@ -582,20 +576,19 @@ TEST_F(homa_plumbing, homa_setsockopt__server_success)
 {
 	int arg = 7;
 
-	self->optval.user = &arg;
 	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SERVER, self->optval, sizeof(int)));
+			SO_HOMA_SERVER, (void *)&arg, sizeof(int)));
 	EXPECT_EQ(1, self->hsk.is_server);
 
 	arg = 0;
 	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SERVER, self->optval, sizeof(int)));
+			SO_HOMA_SERVER, (void *)&arg, sizeof(int)));
 	EXPECT_EQ(0, self->hsk.is_server);
 }
 TEST_F(homa_plumbing, homa_setsockopt__bad_optname)
 {
 	EXPECT_EQ(ENOPROTOOPT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA, 0,
-		self->optval, sizeof(struct homa_rcvbuf_args)));
+		(void *)0x100000, sizeof(struct homa_rcvbuf_args)));
 	EXPECT_STREQ("setsockopt option not supported by Homa",
 		     self->hsk.error_msg);
 }
@@ -719,15 +712,6 @@ TEST_F(homa_plumbing, homa_sendmsg__msg_name_null)
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_STREQ("no msg_name passed to sendmsg",
-		     self->hsk.error_msg);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_sendmsg__msg_control_not_in_user_space)
-{
-	self->sendmsg_hdr.msg_control_is_user = 0;
-	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
-		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_STREQ("msg_control argument for sendmsg isn't in user space",
 		     self->hsk.error_msg);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -955,7 +939,7 @@ TEST_F(homa_plumbing, homa_recvmsg__wrong_args_length)
 {
 	self->recvmsg_hdr.msg_controllen -= 1;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("invalid msg_controllen in recvmsg",
 		     self->hsk.error_msg);
 }
@@ -963,7 +947,7 @@ TEST_F(homa_plumbing, homa_recvmsg__cant_read_args)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("invalid address for msg_control argument to recvmsg",
 		     self->hsk.error_msg);
 }
@@ -974,21 +958,21 @@ TEST_F(homa_plumbing, homa_recvmsg__clear_cookie)
 	self->recvmsg_args.completion_cookie = 12345;
 	self->recvmsg_args.num_bpages = 1000000;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, self->recvmsg_args.completion_cookie);
 }
 TEST_F(homa_plumbing, homa_recvmsg__num_bpages_too_large)
 {
 	self->recvmsg_args.num_bpages = HOMA_MAX_BPAGES + 1;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("num_pages exceeds HOMA_MAX_BPAGES", self->hsk.error_msg);
 }
 TEST_F(homa_plumbing, homa_recvmsg__reserved_not_zero)
 {
 	self->recvmsg_args.reserved = 1;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("reserved fields in homa_recvmsg_args must be zero",
 		     self->hsk.error_msg);
 }
@@ -998,7 +982,7 @@ TEST_F(homa_plumbing, homa_recvmsg__no_buffer_pool)
 
 	self->hsk.buffer_pool = NULL;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("SO_HOMA_RECVBUF socket option has not been set",
 		     self->hsk.error_msg);
 	self->hsk.buffer_pool = saved_pool;
@@ -1014,7 +998,7 @@ TEST_F(homa_plumbing, homa_recvmsg__release_buffers)
 	self->recvmsg_args.bpage_offsets[1] = HOMA_BPAGE_SIZE;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, 1, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[1].refs));
 }
@@ -1025,7 +1009,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_in_release_buffers)
 			self->hsk.buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
 
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, 1, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("error while releasing buffer pages",
 		     self->hsk.error_msg);
 }
@@ -1034,7 +1018,7 @@ TEST_F(homa_plumbing, homa_recvmsg__private_rpc_doesnt_exist)
 	self->recvmsg_args.id = 99;
 
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("invalid RPC id passed to recvmsg",
 		     self->hsk.error_msg);
 }
@@ -1050,7 +1034,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_private)
 	self->recvmsg_args.id = crpc->id;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, 1, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("error while waiting for private RPC to complete",
 		     self->hsk.error_msg);
 	EXPECT_EQ(0, self->recvmsg_args.id);
@@ -1069,7 +1053,7 @@ TEST_F(homa_plumbing, homa_recvmsg__private_rpc_has_error)
 	self->recvmsg_args.id = crpc->id;
 
 	EXPECT_EQ(ETIMEDOUT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, 1, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("RPC failed", self->hsk.error_msg);
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -1077,7 +1061,7 @@ TEST_F(homa_plumbing, homa_recvmsg__private_rpc_has_error)
 TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_shared)
 {
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, 1, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("error while waiting for shared RPC to complete",
 		     self->hsk.error_msg);
 }
@@ -1090,7 +1074,7 @@ TEST_F(homa_plumbing, homa_recvmsg__MSG_DONT_WAIT)
 	EXPECT_NE(NULL, crpc);
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk,
-			&self->recvmsg_hdr, 0, MSG_DONTWAIT,
+			&self->recvmsg_hdr, 0, MSG_DONTWAIT, 1,
 			&self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("error while waiting for shared RPC to complete",
 		     self->hsk.error_msg);
@@ -1114,7 +1098,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	crpc->completion_cookie = 44444;
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(44444, self->recvmsg_args.completion_cookie);
 	EXPECT_EQ(AF_INET, self->addr.in4.sin_family);
@@ -1145,7 +1129,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 	crpc->completion_cookie = 44444;
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(44444, self->recvmsg_args.completion_cookie);
 	EXPECT_EQ(AF_INET6, self->addr.in6.sin6_family);
@@ -1168,7 +1152,7 @@ TEST_F(homa_plumbing, homa_recvmsg__rpc_has_error)
 	homa_rpc_abort(crpc, -ETIMEDOUT);
 
 	EXPECT_EQ(ETIMEDOUT, -homa_recvmsg(&self->hsk.inet.sk,
-			&self->recvmsg_hdr, 0, 0,
+			&self->recvmsg_hdr, 0, 0, 0,
 			&self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("RPC failed", self->hsk.error_msg);
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
@@ -1192,7 +1176,7 @@ TEST_F(homa_plumbing, homa_recvmsg__add_ack)
 
 	peer = crpc->peer;
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(1, peer->num_acks);
 }
 TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
@@ -1203,7 +1187,7 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 
 	EXPECT_NE(NULL, srpc);
 	EXPECT_EQ(100, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
 	EXPECT_EQ(0, srpc->peer->num_acks);
@@ -1219,7 +1203,7 @@ TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
 	srpc->error = -ENOMEM;
 
 	EXPECT_EQ(ENOMEM, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -1239,7 +1223,7 @@ TEST_F(homa_plumbing, homa_recvmsg__reap_because_of_SOCK_NOSPACE)
 
 	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
 	EXPECT_EQ(0, self->hsk.dead_skbs);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls));
@@ -1255,7 +1239,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_args)
 	mock_copy_to_user_errors = 1;
 
 	EXPECT_EQ(EFAULT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("couldn't update homa_recvmsg_args argument to recvmsg: read-only?",
 		     self->hsk.error_msg);
 	EXPECT_EQ(0, self->recvmsg_args.id);
@@ -1272,7 +1256,7 @@ TEST_F(homa_plumbing, homa_recvmsg__copy_back_args_even_after_error)
 	self->recvmsg_args.bpage_offsets[1] = HOMA_BPAGE_SIZE;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, 1, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, self->recvmsg_args.num_bpages);
 }
 
@@ -1478,7 +1462,7 @@ TEST_F(homa_plumbing, homa_err_handler_v4__port_unreachable)
 	icmp->data = skb_tail_pointer(icmp);
 	memcpy(skb_put(icmp, failed->len), failed->head, failed->len);
 
-	EXPECT_EQ(0, homa_err_handler_v4(icmp, 111));
+	homa_err_handler_v4(icmp, 111);
 	EXPECT_EQ(ENOTCONN, -crpc->error);
 
 	kfree_skb(icmp);
@@ -1506,7 +1490,7 @@ TEST_F(homa_plumbing, homa_err_handler_v4__host_unreachable)
 	icmp->data = skb_tail_pointer(icmp);
 	memcpy(skb_put(icmp, failed->len), failed->head, failed->len);
 
-	EXPECT_EQ(0, homa_err_handler_v4(icmp, 111));
+	homa_err_handler_v4(icmp, 111);
 	EXPECT_EQ(EHOSTUNREACH, -crpc->error);
 
 	kfree_skb(icmp);
@@ -1530,8 +1514,8 @@ TEST_F(homa_plumbing, homa_err_handler_v6__port_unreachable)
 	memcpy(skb_put(icmp, failed->len), skb_network_header(failed),
 	       failed->len);
 
-	EXPECT_EQ(0, homa_err_handler_v6(icmp, NULL, ICMPV6_DEST_UNREACH,
-					 ICMPV6_PORT_UNREACH, 0, 111));
+	homa_err_handler_v6(icmp, NULL, ICMPV6_DEST_UNREACH,
+			    ICMPV6_PORT_UNREACH, 0, 111);
 	EXPECT_EQ(ENOTCONN, -crpc->error);
 
 	kfree_skb(icmp);
@@ -1554,8 +1538,8 @@ TEST_F(homa_plumbing, homa_err_handler_v6__protocol_not_supported)
 	memcpy(skb_put(icmp, failed->len), skb_network_header(failed),
 	       failed->len);
 
-	EXPECT_EQ(0, homa_err_handler_v6(icmp, NULL, ICMPV6_PARAMPROB,
-					 ICMPV6_UNK_NEXTHDR, 0, 111));
+	homa_err_handler_v6(icmp, NULL, ICMPV6_PARAMPROB,
+					 ICMPV6_UNK_NEXTHDR, 0, 111);
 	EXPECT_EQ(EPROTONOSUPPORT, -crpc->error);
 
 	kfree_skb(icmp);

@@ -1,6 +1,7 @@
 # Makefile to run unit tests for Homa
 
-LINUX_VERSION ?= $(shell uname -r)
+LINUX_VERSION := 4.18.0+
+# LINUX_VERSION ?= $(shell uname -r)
 KDIR ?= /lib/modules/$(LINUX_VERSION)/build
 LINUX_SRC_DIR ?= /ouster/linux-stable
 CC ?= gcc
@@ -37,7 +38,8 @@ endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS)
+CFLAGS :=    $(WARNS) -Wstrict-prototypes -Wno-pointer-sign -MD -no-pie \
+		-g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
 
 TEST_SRCS :=  unit_homa_incoming.c \

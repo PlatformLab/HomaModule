@@ -18,9 +18,10 @@ static inline u32 murmurhash3(const void *data, u32 len, u32 seed)
 	const u32 c2 = 0x1b873593;
 	const u32 *key = data;
 	u32 h = seed;
+	size_t i;
 
 	len = len >> 2;
-	for (size_t i = 0; i < len; i++) {
+	for (i = 0; i < len; i++) {
 		u32 k = key[i];
 
 		k *= c1;

@@ -1007,7 +1007,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 #endif /* See strip.py */
 	unit_log_clear();
 	dst = crpc->peer->dst;
-	old_refcount = atomic_read(&dst->__rcuref.refcnt);
+	old_refcount = atomic_read(&dst->__refcnt);
 
 	skb_get(crpc->msgout.packets);
 #ifndef __STRIP__ /* See strip.py */
@@ -1017,7 +1017,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 #endif /* See strip.py */
 	EXPECT_STREQ("xmit DATA 1000@0", unit_log_get());
 	EXPECT_EQ(dst, skb_dst(crpc->msgout.packets));
-	EXPECT_EQ(old_refcount+1, atomic_read(&dst->__rcuref.refcnt));
+	EXPECT_EQ(old_refcount+1, atomic_read(&dst->__refcnt));
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)

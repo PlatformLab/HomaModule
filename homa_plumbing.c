@@ -119,7 +119,6 @@ static struct proto homav6_prot = {
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
 	.obj_size	   = sizeof(struct homa_v6_sock),
-	.ipv6_pinfo_offset = offsetof(struct homa_v6_sock, inet6),
 	.no_autobind       = 1,
 };
 
@@ -145,6 +144,7 @@ static struct net_protocol homa_protocol = {
 	.handler =	homa_softirq,
 	.err_handler =	homa_err_handler_v4,
 	.no_policy =     1,
+	.netns_ok  =     1,
 };
 
 static struct inet6_protocol homav6_protocol = {
@@ -412,6 +412,7 @@ static struct ctl_table homa_ctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
+	{}
 };
 #endif /* See strip.py */
 
@@ -995,7 +996,7 @@ int homa_socket(struct sock *sk)
  *           on errors.
  */
 int homa_setsockopt(struct sock *sk, int level, int optname,
-		    sockptr_t optval, unsigned int optlen)
+		    char __user *optval, unsigned int optlen)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	int ret;
@@ -1011,12 +1012,12 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 		u64 start = homa_clock();
 #endif /* See strip.py */
 
-		if (optlen != sizeof(struct homa_rcvbuf_args)) {
+		if (optlen != sizeof(args)) {
 			hsk->error_msg = "invalid optlen argument: must be sizeof(struct homa_rcvbuf_args)";
 			return -EINVAL;
 		}
 
-		if (copy_from_sockptr(&args, optval, optlen)) {
+		if (unlikely(copy_from_user(&args, optval, optlen))) {
 			hsk->error_msg = "invalid address for homa_rcvbuf_args";
 			return -EFAULT;
 		}
@@ -1042,7 +1043,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 			return -EINVAL;
 		}
 
-		if (copy_from_sockptr(&arg, optval, optlen)) {
+		if (unlikely(copy_from_user(&arg, optval, optlen))) {
 			hsk->error_msg = "invalid address for SO_HOMA_SERVER value";
 			return -EFAULT;
 		}
@@ -1080,7 +1081,7 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 	void *result;
 	int len;
 
-	if (copy_from_sockptr(&len, USER_SOCKPTR(optlen), sizeof(int))) {
+	if (unlikely(copy_from_user(&len, optlen, sizeof(int)))) {
 		hsk->error_msg = "invalid address for optlen argument to getsockopt";
 		return -EFAULT;
 	}
@@ -1114,12 +1115,12 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 		return -ENOPROTOOPT;
 	}
 
-	if (copy_to_sockptr(USER_SOCKPTR(optlen), &len, sizeof(int))) {
+	if (copy_to_user(optlen, &len, sizeof(int))) {
 		hsk->error_msg = "couldn't update optlen argument to getsockopt: read-only?";
 		return -EFAULT;
 	}
 
-	if (copy_to_sockptr(USER_SOCKPTR(optval), result, len)) {
+	if (copy_to_user(optval, result, len)) {
 		hsk->error_msg = "couldn't update optval argument to getsockopt: read-only?";
 		return -EFAULT;
 	}
@@ -1159,12 +1160,6 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		goto error;
 	}
 
-	if (unlikely(!msg->msg_control_is_user)) {
-		tt_record("homa_sendmsg error: !msg->msg_control_is_user");
-		hsk->error_msg = "msg_control argument for sendmsg isn't in user space";
-		result = -EINVAL;
-		goto error;
-	}
 	if (unlikely(copy_from_user(&args, (void __user *)msg->msg_control,
 				    sizeof(args)))) {
 		hsk->error_msg = "invalid address for msg_control argument to sendmsg";
@@ -1222,8 +1217,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		args.id = rpc->id;
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_alloc_client. */
 
-		if (unlikely(copy_to_user((void __user *)msg->msg_control,
-					  &args, sizeof(args)))) {
+		if (unlikely(copy_to_user((void __user *)msg->msg_control, &args,
+					  sizeof(args)))) {
 			homa_rpc_lock(rpc);
 			hsk->error_msg = "couldn't update homa_sendmsg_args argument to sendmsg: read-only?";
 			result = -EFAULT;
@@ -1309,16 +1304,16 @@ error_dont_end_rpc:
  * @len:         Total bytes of space available in msg->msg_iov; not used.
  * @flags:       Flags from system call; only MSG_DONTWAIT is used.
  * @addr_len:    Store the length of the sender address here
+ * @noblock:     Non-zero means MSG_DONTWAIT was specified
  * Return:       The length of the message on success, otherwise a negative
  *               errno. Sets hsk->error_msg on errors.
  */
 int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
-		 int *addr_len)
+		 int noblock, int *addr_len)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_recvmsg_args control;
 	struct homa_rpc *rpc = NULL;
-	int nonblocking;
 	int result;
 
 	IF_NO_STRIP(u64 start = homa_clock());
@@ -1371,7 +1366,6 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		goto done;
 	}
 
-	nonblocking = flags & MSG_DONTWAIT;
 	if (control.id != 0) {
 		rpc = homa_rpc_find_client(hsk, control.id); /* Locks RPC. */
 		if (!rpc) {
@@ -1380,14 +1374,14 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 			goto done;
 		}
 		homa_rpc_hold(rpc);
-		result = homa_wait_private(rpc, nonblocking);
+		result = homa_wait_private(rpc, noblock);
 		if (result != 0) {
 			hsk->error_msg = "error while waiting for private RPC to complete";
 			control.id = 0;
 			goto done;
 		}
 	} else {
-		rpc = homa_wait_shared(hsk, nonblocking);
+		rpc = homa_wait_shared(hsk, noblock);
 		if (IS_ERR(rpc)) {
 			/* If we get here, it means there was an error that
 			 * prevented us from finding an RPC to return. Errors
@@ -1528,7 +1522,6 @@ int homa_softirq(struct sk_buff *skb)
 {
 	struct sk_buff *packets, *other_pkts, *next;
 	struct sk_buff **prev_link, **other_link;
-	enum skb_drop_reason reason;
 	struct homa_common_hdr *h;
 	int header_offset;
 
@@ -1566,7 +1559,6 @@ int homa_softirq(struct sk_buff *skb)
 				pr_notice("Homa can't handle fragmented packet (no space for header); discarding\n");
 #endif /* See strip.py */
 			UNIT_LOG("", "pskb discard");
-			reason = SKB_DROP_REASON_HDR_TRUNC;
 			goto discard;
 		}
 		header_offset = skb_transport_header(skb) - skb->data;
@@ -1588,7 +1580,6 @@ int homa_softirq(struct sk_buff *skb)
 					skb->len - header_offset);
 #endif /* See strip.py */
 			INC_METRIC(short_packets, 1);
-			reason = SKB_DROP_REASON_PKT_TOO_SMALL;
 			goto discard;
 		}
 
@@ -1607,7 +1598,6 @@ int homa_softirq(struct sk_buff *skb)
 					   homa_local_id(h->sender_id));
 				tt_freeze();
 			}
-			reason = SKB_CONSUMED;
 			goto discard;
 		}
 #endif /* See strip.py */
@@ -1629,7 +1619,7 @@ int homa_softirq(struct sk_buff *skb)
 
 discard:
 		*prev_link = skb->next;
-		kfree_skb_reason(skb, reason);
+		kfree_skb(skb);
 	}
 
 	/* Now process the longer packets. Each iteration of this loop
@@ -1690,10 +1680,8 @@ discard:
  *          the ICMP header (the first byte of the embedded packet IP header).
  * @skb:   The incoming packet.
  * @info:  Information about the error that occurred?
- *
- * Return: zero, or a negative errno if the error couldn't be handled here.
  */
-int homa_err_handler_v4(struct sk_buff *skb, u32 info)
+void homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
 	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
 	const struct icmphdr *icmp = icmp_hdr(skb);
@@ -1723,7 +1711,6 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 	}
 	if (error != 0)
 		homa_abort_rpcs(homa, &daddr, port, error);
-	return 0;
 }
 
 /**
@@ -1736,10 +1723,8 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
  * @code:   Additional information about the error.
  * @offset: Not used.
  * @info:   Information about the error that occurred?
- *
- * Return: zero, or a negative errno if the error couldn't be handled here.
  */
-int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
+void homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			u8 type,  u8 code,  int offset,  __be32 info)
 {
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
@@ -1760,7 +1745,6 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	}
 	if (error != 0)
 		homa_abort_rpcs(homa, &iph->daddr, port, error);
-	return 0;
 }
 
 /**
@@ -1781,7 +1765,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	__poll_t mask;
 
 	mask = 0;
-	sock_poll_wait(file, sock, wait);
+	sock_poll_wait(file, sk_sleep(sock->sk), wait);
 	tt_record2("homa_poll found sk_wmem_alloc %d, sk_sndbuf %d",
 		   refcount_read(&hsk->sock.sk_wmem_alloc),
 		   hsk->sock.sk_sndbuf);
@@ -1812,7 +1796,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
  *
  * Return: 0 for success, nonzero for error.
  */
-int homa_dointvec(const struct ctl_table *table, int write,
+int homa_dointvec(struct ctl_table *table, int write,
 		  void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct homa *homa = homa_net(current->nsproxy->net_ns)->homa;
@@ -1901,7 +1885,7 @@ int homa_dointvec(const struct ctl_table *table, int write,
  *
  * Return: 0 for success, nonzero for error.
  */
-int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
+int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
 			      void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct homa_offload_core *offload_core;
@@ -2011,7 +1995,7 @@ int homa_timer_main(void *transport)
 		homa_timer(homa);
 	}
 	hrtimer_cancel(&hrtimer);
-	kthread_complete_and_exit(&timer_thread_done, 0);
+	complete_and_exit(&timer_thread_done, 0);
 	return 0;
 }
 

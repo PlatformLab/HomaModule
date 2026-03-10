@@ -15,6 +15,7 @@
 #include "utils.h"
 
 #include <linux/rhashtable.h>
+#include <linux/swait.h>
 
 /* It isn't safe to include some header files, such as stdlib, because
  * they conflict with kernel header files. The explicit declarations
@@ -287,20 +288,17 @@ unsigned int nr_cpu_ids = 8;
 unsigned long page_offset_base;
 unsigned long phys_base;
 unsigned long vmemmap_base;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
-kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
-#endif
+struct kmem_cache *kmalloc_caches[KMALLOC_SHIFT_HIGH + 1];
 int __preempt_count;
+
+/* Value that will be returned by smp_processor_id. */
 int cpu_number = 1;
+
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
-struct net_hotdata net_hotdata = {
-	.rps_cpu_mask = 0x1f,
-	.rps_sock_flow_table = (struct rps_sock_flow_table *) sock_flow_table
-};
+struct rps_sock_flow_table *rps_sock_flow_table
+		= (struct rps_sock_flow_table *) sock_flow_table;
+__u32 rps_cpu_mask = 0x1f;
 int debug_locks;
-struct static_call_key __SCK__cond_resched;
-struct static_call_key __SCK__might_resched;
-struct static_call_key __SCK__preempt_schedule;
 struct paravirt_patch_template pv_ops;
 struct workqueue_struct *system_wq;
 struct static_key_true validate_usercopy_range;
@@ -314,6 +312,12 @@ struct lockdep_map rcu_lock_map;
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
+
+int alloc_bucket_spinlocks(spinlock_t **locks, unsigned int *locks_mask,
+			   size_t max_size, unsigned int cpu_mult, gfp_t gfp)
+{
+	return 0;
+}
 
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 		int node)
@@ -372,6 +376,11 @@ bool cancel_work_sync(struct work_struct *work)
 
 void __check_object_size(const void *ptr, unsigned long n, bool to_user) {}
 
+int _cond_resched(void)
+{
+	return 0;
+}
+
 void consume_skb(struct sk_buff *skb) {
 	kfree_skb(skb);
 }
@@ -388,7 +397,7 @@ size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 		return 0;
 	}
 	while (bytes_left > 0) {
-		struct iovec *iov = (struct iovec *) iter_iov(iter);
+		struct iovec *iov = (struct iovec *)iter->iov;
 		u64 int_base = (u64) iov->iov_base;
 		size_t chunk_bytes = iov->iov_len;
 
@@ -401,7 +410,7 @@ size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 		iov->iov_base = (void *) (int_base + chunk_bytes);
 		iov->iov_len -= chunk_bytes;
 		if (iov->iov_len == 0)
-			iter->__iov++;
+			iter->iov++;
 	}
 	return bytes;
 }
@@ -467,7 +476,7 @@ int debug_lockdep_rcu_enabled(void)
 }
 #endif
 
-int do_wait_intr_irq(wait_queue_head_t *, wait_queue_entry_t *)
+int do_wait_intr_irq(wait_queue_head_t *head, wait_queue_entry_t *entry)
 {
 	UNIT_HOOK("do_wait_intr_irq");
 	if (mock_check_error(&mock_wait_intr_irq_errors))
@@ -479,8 +488,8 @@ void dst_release(struct dst_entry *dst)
 {
 	if (!dst)
 		return;
-	atomic_dec(&dst->__rcuref.refcnt);
-	if (atomic_read(&dst->__rcuref.refcnt) > 0)
+	atomic_dec(&dst->__refcnt);
+	if (atomic_read(&dst->__refcnt) > 0)
 		return;
 	if (!routes_in_use || unit_hash_get(routes_in_use, dst) == NULL) {
 		FAIL(" %s on unknown route", __func__);
@@ -494,7 +503,7 @@ void finish_wait(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
 
-void get_random_bytes(void *buf, size_t nbytes)
+void get_random_bytes(void *buf, int nbytes)
 {
 	memset(buf, 0, nbytes);
 }
@@ -540,15 +549,12 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode)
 {}
 
-void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
-		const struct ip_options *opt)
+void icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info)
 {
 	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
 }
 
-void icmp6_send(struct sk_buff *skb, u8 type, u8 code, u32 info,
-		const struct in6_addr *force_saddr,
-		const struct inet6_skb_parm *parm)
+void icmpv6_send(struct sk_buff *skb, u8 type, u8 code, __u32 info)
 {
 	unit_log_printf("; ", "icmp6_send type %d, code %d", type, code);
 }
@@ -558,8 +564,8 @@ int idle_cpu(int cpu)
 	return mock_check_error(&mock_cpu_idle);
 }
 
-ssize_t import_iovec(int type, const struct iovec __user *uvector,
-		unsigned int nr_segs, unsigned int fast_segs,
+int import_iovec(int type, const struct iovec __user *uvector,
+		unsigned nr_segs, unsigned fast_segs,
 		struct iovec **iov, struct iov_iter *iter)
 {
 	ssize_t size;
@@ -575,14 +581,6 @@ ssize_t import_iovec(int type, const struct iovec __user *uvector,
 	}
 	iov_iter_init(iter, type, *iov, nr_segs, size);
 	return size;
-}
-
-int import_ubuf(int rw, void __user *buf, size_t len, struct iov_iter *i)
-{
-	if (mock_check_error(&mock_import_ubuf_errors))
-		return -EACCES;
-	iov_iter_ubuf(i, rw,  buf, len);
-	return 0;
 }
 
 int inet6_add_offload(const struct net_offload *prot, unsigned char protocol)
@@ -695,16 +693,15 @@ void init_wait_entry(struct wait_queue_entry *wq_entry, int flags)
 {}
 
 void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name,
-			   struct lock_class_key *)
+			   struct lock_class_key *key)
 {}
 
-void iov_iter_init(struct iov_iter *i, unsigned int direction,
-			const struct iovec *iov, unsigned long nr_segs,
-			size_t count)
+void iov_iter_init(struct iov_iter *i, int direction, const struct iovec *iov,
+		   unsigned long nr_segs, size_t count)
 {
 	direction &= READ | WRITE;
-	i->iter_type = ITER_IOVEC | direction;
-	i->__iov = iov;
+	i->type = ITER_IOVEC | direction;
+	i->iov = iov;
 	i->nr_segs = nr_segs;
 	i->iov_offset = 0;
 	i->count = count;
@@ -727,8 +724,8 @@ struct dst_entry *ip6_dst_check(struct dst_entry *dst, u32 cookie)
 	return dst;
 }
 
-struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
-		struct flowi6 *fl6, const struct in6_addr *final_dst)
+struct dst_entry *ip6_dst_lookup_flow(const struct sock *sk, struct flowi6 *fl6,
+				      const struct in6_addr *final_dst)
 {
 	struct rtable *route;
 
@@ -739,7 +736,7 @@ struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 		FAIL(" malloc failed");
 		return ERR_PTR(-ENOMEM);
 	}
-	atomic_set(&route->dst.__rcuref.refcnt, 1);
+	atomic_set(&route->dst.__refcnt, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_devices[0];
 	route->dst.obsolete = 0;
@@ -755,7 +752,7 @@ unsigned int ip6_mtu(const struct dst_entry *dst)
 }
 
 int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
-	     u32 mark, struct ipv6_txoptions *opt, int tclass, u32 priority)
+	     u32 mark, struct ipv6_txoptions *opt, int tclass)
 {
 	char buffer[200];
 	const char *prefix = " ";
@@ -830,7 +827,7 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 		FAIL(" malloc failed");
 		return ERR_PTR(-ENOMEM);
 	}
-	atomic_set(&route->dst.__rcuref.refcnt, 1);
+	atomic_set(&route->dst.__refcnt, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_devices[0];
 	route->dst.obsolete = 0;
@@ -849,20 +846,22 @@ int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
 void device_set_wakeup_capable(struct device *dev, bool capable)
 {}
 
-void device_wakeup_disable(struct device *dev)
-{}
+int device_wakeup_disable(struct device *dev)
+{
+	return 0;
+}
 
 int device_wakeup_enable(struct device *dev)
 {
 	return 0;
 }
 
-int filp_close(struct file *, fl_owner_t id)
+int filp_close(struct file *f, fl_owner_t id)
 {
 	return 0;
 }
 
-struct file *filp_open(const char *, int, umode_t)
+struct file *filp_open(const char *f, int dummy, umode_t mode)
 {
 	return NULL;
 }
@@ -873,6 +872,11 @@ void __fortify_panic(const u8 reason, const size_t avail, const size_t size)
 
 	/* API prohibits return. */
 	while (1) ;
+}
+
+void free_bucket_spinlocks(spinlock_t *locks)
+{
+	kvfree(locks);
 }
 
 ssize_t kernel_read(struct file *file, void *buf, size_t count, loff_t *pos)
@@ -899,11 +903,7 @@ void kfree(const void *block)
 	free((void *) block);
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-void kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
-#else
-void __kfree_skb(struct sk_buff *skb)
-#endif
+void kfree_skb(struct sk_buff *skb)
 {
 	int i;
 	struct skb_shared_info *shinfo = skb_shinfo(skb);
@@ -929,19 +929,9 @@ void __kfree_skb(struct sk_buff *skb)
 	free(skb);
 }
 
-void kfree_skb_list_reason(struct sk_buff *segs, enum skb_drop_reason reason)
-{
-	while (segs) {
-		struct sk_buff *next = segs->next;
-
-		__kfree_skb(segs);
-		segs = next;
-	}
-}
-
 void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 {
-	return mock_kmalloc(size, gfpflags);
+	return kmalloc(size, gfpflags);
 }
 
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
@@ -951,7 +941,7 @@ void __might_sleep(const char *file, int line)
 }
 #endif
 
-void *mock_kmalloc(size_t size, gfp_t flags)
+void *__kmalloc(size_t size, gfp_t flags)
 {
 	void *block;
 
@@ -977,17 +967,12 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 
 void *__kmalloc_noprof(size_t size, gfp_t flags)
 {
-	return mock_kmalloc(size, flags);
+	return kmalloc(size, flags);
 }
 
-void kvfree(const void *addr)
+void *kmem_cache_alloc_trace(struct kmem_cache *s, gfp_t flags, size_t size)
 {
-	kfree(addr);
-}
-
-void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), gfp_t flags, int node)
-{
-	return mock_kmalloc(size, flags);
+	return __kmalloc(size, flags);
 }
 
 struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
@@ -1009,6 +994,16 @@ int kthread_stop(struct task_struct *k)
 	unit_log_printf("; ", "kthread_stop");
 	mock_exit_thread = true;
 	return 0;
+}
+
+void kvfree(const void *addr)
+{
+	kfree(addr);
+}
+
+void *kvmalloc_node(size_t size, gfp_t flags, int node)
+{
+	return __kmalloc(size, flags);
 }
 
 #ifdef CONFIG_DEBUG_LIST
@@ -1064,9 +1059,8 @@ void lock_sock_nested(struct sock *sk, int subclass)
 	mock_active_locks++;
 	sk->sk_lock.owned = 1;
 }
-
-ssize_t __modver_version_show(const struct module_attribute *a,
-		struct module_kobject *b, char *c)
+ssize_t __modver_version_show(struct module_attribute *mattr,
+			      struct module_kobject *mk, char *buf)
 {
 	return 0;
 }
@@ -1108,22 +1102,6 @@ int netif_receive_skb(struct sk_buff *skb)
 void __netif_schedule(struct Qdisc *q)
 {}
 
-void preempt_count_add(int val)
-{
-	int i;
-
-	for (i = 0; i < val; i++)
-		preempt_disable();
-}
-
-void preempt_count_sub(int val)
-{
-	int i;
-
-	for (i = 0; i < val; i++)
-		preempt_enable();
-}
-
 long prepare_to_wait_event(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry, int state)
 {
@@ -1133,7 +1111,7 @@ long prepare_to_wait_event(struct wait_queue_head *wq_head,
 	return 0;
 }
 
-int _printk(const char *format, ...)
+int printk(const char *format, ...)
 {
 	int len = strlen(mock_printk_output);
 	int available;
@@ -1166,7 +1144,7 @@ int _printk(const char *format, ...)
 
 struct proc_dir_entry *proc_create(const char *name, umode_t mode,
 				   struct proc_dir_entry *parent,
-				   const struct proc_ops *proc_ops)
+				   const struct file_operations *proc_fops)
 {
 	struct proc_dir_entry *entry = malloc(40);
 
@@ -1264,20 +1242,9 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 	return 1;
 }
 
-void __lockfunc _raw_spin_unlock(raw_spinlock_t *lock)
-{
-	UNIT_HOOK("unlock");
-	mock_record_unlocked(lock);
-}
-
 void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
 {
 	UNIT_HOOK("unlock");
-	mock_record_unlocked(lock);
-}
-
-void __lockfunc _raw_spin_unlock_irq(raw_spinlock_t *lock)
-{
 	mock_record_unlocked(lock);
 }
 
@@ -1321,20 +1288,7 @@ int rcu_read_lock_bh_held(void)
 }
 #endif
 
-void __rcu_read_lock(void)
-{}
-
-void __rcu_read_unlock(void)
-{}
-
-bool rcuref_get_slowpath(rcuref_t *ref)
-{
-	return true;
-}
-
-void refcount_warn_saturate(refcount_t *r, enum refcount_saturation_type t) {}
-
-int register_pernet_subsys(struct pernet_operations *)
+int register_pernet_subsys(struct pernet_operations *ops)
 {
 	return 0;
 }
@@ -1370,7 +1324,7 @@ void rtnl_kfree_skbs(struct sk_buff *head, struct sk_buff *tail)
 	while (true) {
 		struct sk_buff *next = head->next;
 
-		__kfree_skb(head);
+		kfree_skb(head);
 		if (head == tail)
 			break;
 		head = next;
@@ -1403,8 +1357,7 @@ int __SCT__might_resched(void)
 void __SCT__preempt_schedule(void)
 {}
 
-void security_sk_classify_flow(const struct sock *sk,
-		struct flowi_common *flic)
+void security_sk_classify_flow(struct sock *sk, struct flowi *fl)
 {}
 
 void __show_free_areas(unsigned int filter, nodemask_t *nodemask,
@@ -1417,16 +1370,6 @@ void sk_common_release(struct sock *sk)
 int sk_set_peek_off(struct sock *sk, int val)
 {
 	return 0;
-}
-
-void sk_skb_reason_drop(struct sock *sk, struct sk_buff *skb,
-		enum skb_drop_reason reason)
-{
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-	kfree_skb(skb);
-#else
-	__kfree_skb(skb);
-#endif
 }
 
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
@@ -1442,7 +1385,7 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		return 0;
 	}
 	while (bytes_left > 0) {
-		struct iovec *iov = (struct iovec *) iter_iov(iter);
+		struct iovec *iov = (struct iovec *)iter->iov;
 		u64 int_base = (u64) iov->iov_base;
 		size_t chunk_bytes = iov->iov_len;
 
@@ -1458,7 +1401,7 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		iov->iov_base = (void *) (int_base + chunk_bytes);
 		iov->iov_len -= chunk_bytes;
 		if (iov->iov_len == 0)
-			iter->__iov++;
+			iter->iov++;
 	}
 	return 0;
 }
@@ -1497,13 +1440,6 @@ void *skb_put(struct sk_buff *skb, unsigned int len)
 	return result;
 }
 
-void skb_queue_purge_reason(struct sk_buff_head *list,
-			    enum skb_drop_reason reason)
-{
-	while (skb_queue_len(list) > 0)
-		kfree_skb(__skb_dequeue(list));
-}
-
 struct sk_buff *skb_segment(struct sk_buff *head_skb,
 		netdev_features_t features)
 {
@@ -1533,13 +1469,13 @@ int sock_common_getsockopt(struct socket *sock, int level, int optname,
 }
 
 int sock_common_setsockopt(struct socket *sock, int level, int optname,
-		sockptr_t optval, unsigned int optlen)
+		char __user *optval, unsigned int optlen)
 {
 	return 0;
 }
 
 int sock_no_accept(struct socket *sock, struct socket *newsock,
-		struct proto_accept_arg *arg)
+		   int dummy1, bool dummy2)
 {
 	return 0;
 }
@@ -1571,7 +1507,7 @@ int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 	return 0;
 }
 
-void synchronize_rcu(void)
+void synchronize_sched(void)
 {}
 
 void __tasklet_hi_schedule(struct tasklet_struct *t)
@@ -1592,13 +1528,14 @@ void unregister_net_sysctl_table(struct ctl_table_header *header)
 	UNIT_LOG("; ", "unregister_net_sysctl_table");
 }
 
-void unregister_pernet_subsys(struct pernet_operations *)
+void unregister_pernet_subsys(struct pernet_operations *ops)
 {}
 
-void unregister_qdisc(struct Qdisc_ops *qops)
+int unregister_qdisc(struct Qdisc_ops *qops)
 {
 	registered_qdiscs--;
 	qdisc_ops = NULL;
+	return 0;
 }
 
 void vfree(const void *block)
@@ -1624,16 +1561,14 @@ long wait_woken(struct wait_queue_entry *wq_entry, unsigned int mode,
 	return 0;
 }
 
-int __wake_up(struct wait_queue_head *wq_head, unsigned int mode,
-		int nr_exclusive, void *key)
+void __wake_up(wait_queue_head_t *q, unsigned int mode, int nr, void *key)
 {
 	if (!mock_log_wakeups)
-		return 0;
-	if (nr_exclusive == 1)
+		return;
+	if (nr == 1)
 		unit_log_printf("; ", "wake_up");
 	else
 		unit_log_printf("; ", "wake_up_all");
-	return 0;
 }
 
 void __wake_up_locked(struct wait_queue_head *wq_head, unsigned int mode,
@@ -2340,7 +2275,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	mock_socket.sk = sk;
 	sk->sk_net.net = mock_net_for_hnet(hnet);
 	refcount_set(&sk->sk_wmem_alloc, 1);
-	init_waitqueue_head(&mock_socket.wq.wait);
+	init_waitqueue_head(&mock_socket.wq->wait);
 	rcu_assign_pointer(sk->sk_wq, &mock_socket.wq);
 	sk->sk_sndtimeo = MAX_SCHEDULE_TIMEOUT;
 	if (port != 0 && port >= mock_min_default_port)

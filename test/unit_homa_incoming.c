@@ -894,23 +894,6 @@ TEST_F(homa_incoming, homa_copy_to_user__skb_data_extends_past_message_end)
 	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("", unit_log_get());
 }
-TEST_F(homa_incoming, homa_copy_to_user__error_in_import_ubuf)
-{
-	struct homa_rpc *crpc;
-
-	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->server_port, self->client_id,
-			1000, 4000);
-	ASSERT_NE(NULL, crpc);
-
-	unit_log_clear();
-	mock_import_ubuf_errors = 1;
-	homa_rpc_lock(crpc);
-	EXPECT_EQ(13, -homa_copy_to_user(crpc));
-	homa_rpc_unlock(crpc);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
-}
 TEST_F(homa_incoming, homa_copy_to_user__error_in_skb_copy_datagram_iter)
 {
 	struct homa_rpc *crpc;

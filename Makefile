@@ -33,8 +33,10 @@ ifneq ($(KERNEL_SRC),)
 KDIR ?= $(KERNEL_SRC)
 endif
 
-LINUX_VERSION ?= $(shell uname -r)
+# LINUX_VERSION ?= $(shell uname -r)
+LINUX_VERSION := 4.18.0+
 KDIR ?= /lib/modules/$(LINUX_VERSION)/build
+CC = gcc-8
 
 LINUX_SRC_DIR ?= ../net-next
 
@@ -104,3 +106,6 @@ printClean-%:
 	$(MAKE) -C $(KDIR) M=$(shell pwd) $@
 
 endif
+
+# Prevents warnings related to the __init annotation for homa_load.
+CFLAGS_homa_plumbing.o += -Wno-missing-attributes

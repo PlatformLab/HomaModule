@@ -10,10 +10,13 @@
 #undef alloc_pages
 #define alloc_pages mock_alloc_pages
 
+#undef atomic64_cmpxchg_relaxed
 #define atomic64_cmpxchg_relaxed mock_cmpxchg
 
 #undef alloc_percpu_gfp
-#define alloc_percpu_gfp(type, flags) mock_kmalloc(10 * sizeof(type), flags)
+#define alloc_percpu_gfp(type, flags) __kmalloc(10 * sizeof(type), flags)
+
+#define complete_and_exit(...)
 
 #define compound_order mock_compound_order
 
@@ -46,13 +49,8 @@
 
 #define homa_rpc_put mock_rpc_put
 
-#undef kmalloc
-#define kmalloc mock_kmalloc
-
 #undef kmalloc_array
-#define kmalloc_array(count, size, type) mock_kmalloc((count) * (size), type)
-
-#define kthread_complete_and_exit(...)
+#define kmalloc_array(count, size, type) __kmalloc((count) * (size), type)
 
 #undef local_irq_save
 #define local_irq_save(flags) (flags) = 0
@@ -92,6 +90,8 @@
 
 #undef register_net_sysctl
 #define register_net_sysctl mock_register_net_sysctl
+
+#define rt6_get_cookie(...) 999
 
 #define signal_pending(...) mock_signal_pending
 
@@ -205,7 +205,6 @@ unsigned int
 void        mock_get_page(struct page *page);
 struct homa_net
 	   *mock_hnet(int index, struct homa *homa);
-void       *mock_kmalloc(size_t size, gfp_t flags);
 struct net *mock_net_for_hnet(struct homa_net *hnet);
 void       *mock_net_generic(const struct net *net, unsigned int id);
 int         mock_page_refs(struct page *page);

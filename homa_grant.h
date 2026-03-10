@@ -236,7 +236,7 @@ void     homa_grant_cand_check(struct homa_grant_candidates *cand,
 			       struct homa_grant *grant);
 void     homa_grant_check_fifo(struct homa_grant *grant);
 void     homa_grant_check_rpc(struct homa_rpc *rpc);
-int      homa_grant_dointvec(const struct ctl_table *table, int write,
+int      homa_grant_dointvec(struct ctl_table *table, int write,
 			     void *buffer, size_t *lenp, loff_t *ppos);
 void     homa_grant_end_rpc(struct homa_rpc *rpc);
 void     homa_grant_find_oldest(struct homa_grant *grant);

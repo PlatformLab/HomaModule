@@ -167,13 +167,11 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	struct homa_gap *gap, *dummy, *gap2;
 	int start = ntohl(h->seg.offset);
 	int length = homa_data_len(skb);
-	enum skb_drop_reason reason;
 	int end = start + length;
 
 	if ((start + length) > rpc->msgin.length) {
 		tt_record3("Packet extended past message end; id %d, offset %d, length %d",
 			   rpc->id, start, length);
-		reason = SKB_DROP_REASON_PKT_TOO_BIG;
 		goto discard;
 	}
 
@@ -189,7 +187,6 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				    rpc->msgin.recv_end, start)) {
 			tt_record2("Couldn't allocate gap for id %d (start %d): no memory",
 				   rpc->id, start);
-			reason = SKB_DROP_REASON_NOMEM;
 			goto discard;
 		}
 		rpc->msgin.recv_end = end;
@@ -207,13 +204,11 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			if (start < gap->start) {
 				tt_record4("Packet overlaps gap start: id %d, start %d, end %d, gap_start %d",
 					   rpc->id, start, end, gap->start);
-				reason = SKB_DROP_REASON_DUP_FRAG;
 				goto discard;
 			}
 			if (end > gap->end) {
 				tt_record4("Packet overlaps gap end: id %d, start %d, end %d, gap_end %d",
 					   rpc->id, start, end, gap->start);
-				reason = SKB_DROP_REASON_DUP_FRAG;
 				goto discard;
 			}
 			gap->start = end;
@@ -233,7 +228,6 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			if (end > gap->end) {
 				tt_record4("Packet overlaps gap end: id %d, start %d, end %d, gap_end %d",
 					   rpc->id, start, end, gap->start);
-				reason = SKB_DROP_REASON_DUP_FRAG;
 				goto discard;
 			}
 			gap->end = start;
@@ -245,7 +239,6 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		if (!gap2) {
 			tt_record2("Couldn't allocate gap for split for id %d (start %d): no memory",
 				   rpc->id, end);
-			reason = SKB_DROP_REASON_NOMEM;
 			goto discard;
 		}
 		gap2->time = gap->time;
@@ -262,7 +255,7 @@ discard:
 #endif /* See strip.py */
 	tt_record4("homa_add_packet discarding packet for id %d, offset %d, length %d, retransmit %d",
 		   rpc->id, start, length, h->retransmit);
-	kfree_skb_reason(skb, reason);
+	kfree_skb(skb);
 	return;
 
 keep:
@@ -358,6 +351,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 			int offset = ntohl(h->seg.offset);
 			int buf_bytes, chunk_size;
 			struct iov_iter iter;
+			struct iovec iov;
 			int copied = 0;
 			char __user *dst;
 
@@ -377,13 +371,12 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 					}
 					chunk_size = buf_bytes;
 				}
-				error = import_ubuf(READ, dst, chunk_size,
-						    &iter);
-				if (error)
-					goto free_skbs;
+				iov.iov_base = dst;
+				iov.iov_len = chunk_size;
+				iov_iter_init(&iter, READ, &iov, 1, chunk_size);
 				error = skb_copy_datagram_iter(skbs[i],
 							       sizeof(*h) +
-							       copied,  &iter,
+							       copied, &iter,
 							       chunk_size);
 				if (error)
 					goto free_skbs;
@@ -457,8 +450,8 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 	hsk = homa_sock_find(hnet, dport);
 	if (!hsk || (!homa_is_client(id) && !hsk->is_server)) {
 		if (skb_is_ipv6(skb))
-			icmp6_send(skb, ICMPV6_DEST_UNREACH,
-				   ICMPV6_PORT_UNREACH, 0, NULL, IP6CB(skb));
+			icmpv6_send(skb, ICMPV6_DEST_UNREACH,
+				    ICMPV6_PORT_UNREACH, 0);
 		else
 			icmp_send(skb, ICMP_DEST_UNREACH,
 				  ICMP_PORT_UNREACH, 0);

@@ -237,7 +237,7 @@ TEST_F(homa_skb, homa_skb_extend_frags__cant_merge_allocate_new_page)
 	EXPECT_NE(NULL, p3);
 	EXPECT_EQ(1000, length);
 	EXPECT_EQ(2, skb_shinfo(self->skb)->nr_frags);
-	EXPECT_EQ(0, skb_shinfo(self->skb)->frags[1].offset);
+	EXPECT_EQ(0, skb_shinfo(self->skb)->frags[1].page_offset);
 	EXPECT_EQ(2000, self->skb->len);
 
 	EXPECT_EQ(1000, skb_core->page_inuse);
@@ -267,7 +267,7 @@ TEST_F(homa_skb, homa_skb_extend_frags__cant_merge_use_same_page_reduce_length)
 	EXPECT_EQ(p2 + 512, p3);
 	EXPECT_EQ(512, length);
 	EXPECT_EQ(2, skb_shinfo(self->skb)->nr_frags);
-	EXPECT_EQ(1536, skb_shinfo(self->skb)->frags[1].offset);
+	EXPECT_EQ(1536, skb_shinfo(self->skb)->frags[1].page_offset);
 
 	EXPECT_EQ(2048, skb_core->page_inuse);
 	kfree_skb(skb2);
@@ -397,13 +397,13 @@ TEST_F(homa_skb, homa_skb_append_to_frag__basics)
 	EXPECT_EQ(2, shinfo->nr_frags);
 	EXPECT_EQ(10, skb_frag_size(&shinfo->frags[0]));
 	p = ((char *) page_address(skb_frag_page(&shinfo->frags[0])))
-			+ shinfo->frags[0].offset;
+			+ shinfo->frags[0].page_offset;
 	p[skb_frag_size(&shinfo->frags[0])] = 0;
 	EXPECT_STREQ("abcd012345", p);
 
 	EXPECT_EQ(15, skb_frag_size(&shinfo->frags[1]));
 	p = ((char *) page_address(skb_frag_page(&shinfo->frags[1])))
-			+ shinfo->frags[1].offset;
+			+ shinfo->frags[1].page_offset;
 	EXPECT_STREQ("6789ABCDEFGHIJ", p);
 }
 TEST_F(homa_skb, homa_skb_append_to_frag__no_memory)

@@ -74,6 +74,7 @@ static struct ctl_table grant_ctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= homa_grant_dointvec
 	},
+	{}
 };
 #endif /* See strip.py */
 
@@ -1166,7 +1167,7 @@ void homa_grant_update_sysctl_deps(struct homa_grant *grant)
  *
  * Return: 0 for success, nonzero for error.
  */
-int homa_grant_dointvec(const struct ctl_table *table, int write,
+int homa_grant_dointvec(struct ctl_table *table, int write,
 			void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table table_copy;

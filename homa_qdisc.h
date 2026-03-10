@@ -317,7 +317,7 @@ void            homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev,
 void            homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb);
 void            homa_qdisc_destroy(struct Qdisc *sch);
 void            homa_qdisc_dev_callback(struct rcu_head *head);
-int             homa_qdisc_dointvec(const struct ctl_table *table, int write,
+int             homa_qdisc_dointvec(struct ctl_table *table, int write,
 				    void *buffer, size_t *lenp, loff_t *ppos);
 int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
@@ -436,7 +436,7 @@ static inline int homa_qdisc_bytes_pending(struct homa_qdisc *q)
 	/* Ideally this function would be provided by dynamic_queue_limits.h
 	 * so that we don't have to root around in its data structures.
 	 */
-	struct dql *dql = &qdisc_from_priv(q)->dev_queue->dql;
+	struct dql *dql = &q->qdisc->dev_queue->dql;
 
 	return READ_ONCE(dql->num_queued) - READ_ONCE(dql->num_completed);
 }

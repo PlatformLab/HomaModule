@@ -198,13 +198,16 @@ TEST_F(homa_sock, homa_sock_init__ip_header_length)
 TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 {
 	struct homa_sock hijack, no_hijack;
+	int protocol;
 
 	self->homa.hijack_tcp = 0;
 	mock_sock_init(&no_hijack, self->hnet, 0);
 	self->homa.hijack_tcp = 1;
 	mock_sock_init(&hijack, self->hnet, 0);
-	EXPECT_EQ(0, no_hijack.sock.sk_protocol);
-	EXPECT_EQ(IPPROTO_TCP, hijack.sock.sk_protocol);
+	protocol = no_hijack.sock.sk_protocol;
+	EXPECT_EQ(0, protocol);
+	protocol = hijack.sock.sk_protocol;
+	EXPECT_EQ(IPPROTO_TCP, protocol);
 	unit_sock_destroy(&hijack);
 	unit_sock_destroy(&no_hijack);
 }

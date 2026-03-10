@@ -37,11 +37,10 @@
 #include <linux/vmalloc.h>
 #include <net/icmp.h>
 #include <net/ip.h>
+#include <net/ip6_route.h>
 #include <net/netns/generic.h>
 #include <net/protocol.h>
 #include <net/inet_common.h>
-#include <net/gro.h>
-#include <net/rps.h>
 
 #ifndef __UPSTREAM__ /* See strip.py */
 #include "homa.h"
@@ -71,6 +70,11 @@ struct homa;
 struct homa_peer;
 struct homa_rpc;
 struct homa_sock;
+
+/* Features not present in all kernels: */
+#ifndef __cond_acquires
+#define __cond_acquires(x)
+#endif
 
 #ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"
@@ -711,8 +715,8 @@ int      homa_copy_to_user(struct homa_rpc *rpc);
 void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_destroy(struct homa *homa);
 void     homa_dispatch_pkts(struct sk_buff *skb);
-int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
-int      homa_err_handler_v6(struct sk_buff *skb,
+void     homa_err_handler_v4(struct sk_buff *skb, u32 info);
+void     homa_err_handler_v6(struct sk_buff *skb,
 			     struct inet6_skb_parm *opt, u8 type,  u8 code,
 			     int offset, __be32 info);
 int      homa_fill_data_interleaved(struct homa_rpc *rpc,
@@ -739,7 +743,7 @@ int      homa_net_start(struct net *net);
 __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait);
 int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
-		      int flags, int *addr_len);
+		      int flags, int noblock, int *addr_len);
 void     homa_request_retrans(struct homa_rpc *rpc);
 void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			 struct homa_sock *hsk);
@@ -747,7 +751,7 @@ void     homa_rpc_handoff(struct homa_rpc *rpc);
 int      homa_rpc_tx_end(struct homa_rpc *rpc);
 int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 int      homa_setsockopt(struct sock *sk, int level, int optname,
-			 sockptr_t optval, unsigned int optlen);
+			char __user *optval, unsigned int optlen);
 int      homa_shutdown(struct socket *sock, int how);
 int      homa_socket(struct sock *sk);
 int      homa_softirq(struct sk_buff *skb);
@@ -771,7 +775,7 @@ void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
 #ifndef __STRIP__ /* See strip.py */
 void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
-int      homa_dointvec(const struct ctl_table *table, int write,
+int      homa_dointvec(struct ctl_table *table, int write,
 		       void *buffer, size_t *lenp, loff_t *ppos);
 void     homa_incoming_sysctl_changed(struct homa *homa);
 int      homa_ioc_abort(struct socket *sock, unsigned long arg);
@@ -780,7 +784,7 @@ int      homa_message_in_init(struct homa_rpc *rpc, int length,
 void     homa_prios_changed(struct homa *homa);
 void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			  int priority);
-int      homa_sysctl_softirq_cores(const struct ctl_table *table,
+int      homa_sysctl_softirq_cores(struct ctl_table *table,
 				   int write, void *buffer, size_t *lenp,
 				   loff_t *ppos);
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,

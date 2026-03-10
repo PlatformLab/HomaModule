@@ -1,5 +1,11 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
+* Backporting to 4.18.0:
+  * Things to port forward:
+    * Change to tt_unfreeze
+    * Changes in tthoma.py
+    * Changes in homa_qdisc.c
+    * Changes in test/Makefile
 
 * (12/12/25) Something is wrong with the xl170 cluster: both Homa and TCP
   are showing considerably worse performance than previously. I tried multiple

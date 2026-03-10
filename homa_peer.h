@@ -288,7 +288,7 @@ struct homa_peer
 	*homa_peer_alloc(struct homa_sock *hsk, const struct in6_addr *addr);
 struct homa_peertab
 	*homa_peer_alloc_peertab(void);
-int      homa_peer_dointvec(const struct ctl_table *table, int write,
+int      homa_peer_dointvec(struct ctl_table *table, int write,
 			    void *buffer, size_t *lenp, loff_t *ppos);
 void     homa_peer_free(struct rcu_head *head);
 void     homa_peer_free_net(struct homa_net *hnet);

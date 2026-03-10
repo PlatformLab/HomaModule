@@ -152,10 +152,12 @@ struct homa_common_hdr {
 #endif /* See strip.py */
 
 	/**
-	 * @window: Corresponds to the window field in TCP headers. Not used
-	 * by HOMA.
+	 * @gro_count: Corresponds to the window field in TCP headers, which
+	 * isn't used by Homa. Value on the wire is undefined. Used only by
+	 * homa_offload.c (it counts the total number of packets aggregated
+	 * into this packet, including the top-level packet).
 	 */
-	__be16 window;
+	__u16 gro_count;
 
 	/**
 	 * @checksum: Not used by Homa, but must occupy the same bytes as

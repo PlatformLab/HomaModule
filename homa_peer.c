@@ -64,6 +64,7 @@ static struct ctl_table peer_ctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= homa_peer_dointvec
 	},
+	{}
 };
 #endif /* See strip.py */
 
@@ -516,7 +517,7 @@ struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
  */
 int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 {
-	struct dst_entry *dst;
+	struct dst_entry *dst, *old;
 	int result = 0;
 
 	homa_peer_lock(peer);
@@ -530,8 +531,7 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 				   ipv6_to_ipv4(peer->addr),
 				   hsk->inet.inet_saddr, 0, 0,
 				   hsk->sock.sk_uid);
-		security_sk_classify_flow(&hsk->sock,
-					  &peer->flow.u.__fl_common);
+		security_sk_classify_flow(&hsk->sock, &peer->flow);
 		rt = ip_route_output_flow(sock_net(&hsk->sock),
 					  &peer->flow.u.ip4, &hsk->sock);
 		if (IS_ERR(rt)) {
@@ -553,16 +553,15 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 		peer->flow.u.ip6.fl6_dport = 0;
 		peer->flow.u.ip6.fl6_sport = 0;
 		peer->flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
-		security_sk_classify_flow(&hsk->sock,
-					  &peer->flow.u.__fl_common);
-		dst = ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
-					  &peer->flow.u.ip6, NULL);
+		security_sk_classify_flow(&hsk->sock, &peer->flow);
+		dst = ip6_dst_lookup_flow(&hsk->sock, &peer->flow.u.ip6,
+					  &peer->addr);
 		if (IS_ERR(dst)) {
 			result = PTR_ERR(dst);
 			INC_METRIC(peer_route_errors, 1);
 			goto done;
 		}
-		peer->dst_cookie = rt6_get_cookie(dst_rt6_info(dst));
+		peer->dst_cookie = rt6_get_cookie((struct rt6_info *)dst);
 	}
 
 	/* From the standpoint of homa_get_dst, peer->dst is not updated
@@ -572,7 +571,9 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 	 * a lost packet) or a valid dst to be replaced (resulting in
 	 * unnecessary work).
 	 */
-	dst_release(rcu_replace_pointer(peer->dst, dst, true));
+	old = rcu_dereference_protected(peer->dst, lockdep_is_held(&peer->lock));
+	rcu_assign_pointer(peer->dst, dst);
+	dst_release(old);
 
 done:
 	homa_peer_unlock(peer);
@@ -729,7 +730,7 @@ void homa_peer_update_sysctl_deps(struct homa_peertab *peertab)
  *
  * Return: 0 for success, nonzero for error.
  */
-int homa_peer_dointvec(const struct ctl_table *table, int write,
+int homa_peer_dointvec(struct ctl_table *table, int write,
 		       void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct homa_peertab *peertab;

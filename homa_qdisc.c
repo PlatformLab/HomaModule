@@ -123,6 +123,7 @@ static struct ctl_table homa_qdisc_ctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= homa_qdisc_dointvec
 	},
+	{}
 };
 
 static struct Qdisc_ops homa_qdisc_ops __read_mostly = {
@@ -428,8 +429,7 @@ void homa_qdisc_destroy(struct Qdisc *qdisc)
 
 	spin_lock_bh(&q->qdev->defer_lock);
 	while (!skb_queue_empty(&q->deferred_tcp))
-		kfree_skb_reason(__skb_dequeue(&q->deferred_tcp),
-				 SKB_DROP_REASON_QDISC_DROP);
+		kfree_skb(__skb_dequeue(&q->deferred_tcp));
 	list_del_init(&q->defer_links);
 	if (q->qdev->congested_qdisc == q)
 		q->qdev->congested_qdisc = NULL;
@@ -761,7 +761,7 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 		tt_record_tcp("homa_qdisc_pacer requeued TCP packet from "
 			"0x%x to 0x%x, data bytes %d, seq/ack %u",
 			skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
-	homa_qdisc_schedule_skb(skb, qdisc_from_priv(q));
+	homa_qdisc_schedule_skb(skb, q->qdisc);
 	homa_qdisc_update_congested(q);
 	return pkt_len;
 }
@@ -897,7 +897,7 @@ int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 		homa_qdisc_schedule_skb(skb, qdisc);
 		homa_qdisc_update_congested(qdisc_priv(qdisc));
 	} else {
-		kfree_skb_reason(skb, SKB_DROP_REASON_QDISC_DROP);
+		kfree_skb(skb);
 	}
 	rcu_read_unlock_bh();
 	return pkt_len;
@@ -916,7 +916,7 @@ void homa_qdisc_free_homa(struct homa_qdisc_dev *qdev)
 		skb = homa_qdisc_get_deferred_homa(qdev);
 		if (!skb)
 			break;
-		kfree_skb_reason(skb, SKB_DROP_REASON_QUEUE_PURGE);
+		kfree_skb(skb);
 	}
 }
 
@@ -1153,7 +1153,7 @@ void homa_qdisc_pacer_check(struct homa *homa)
  *
  * Return: 0 for success, nonzero for error.
  */
-int homa_qdisc_dointvec(const struct ctl_table *table, int write,
+int homa_qdisc_dointvec(struct ctl_table *table, int write,
 			void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table table_copy;

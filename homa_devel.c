@@ -1266,6 +1266,8 @@ error:
 		tt_printk();
 		BUG_ON(1);
 	}
+#else
+	return;
 #endif /* __UNIT_TEST__ */
 }
 #endif /* See strip.py */
