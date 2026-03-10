@@ -913,12 +913,12 @@ def get_rpc_node(id):
     Given an RPC id, return the name of the node corresponding
     to that id, or an empty string if a node could not be determined.
     """
-    global rpcs, traces
+    global rpcs, traces, ip_to_node
     if id in rpcs:
         return rpcs[id]['node']
     if id^1 in rpcs:
         rpc = rpcs[id^1]
-        if 'peer' in rpc:
+        if 'peer' in rpc and rpc['peer'] in ip_to_node:
             return ip_to_node[rpc['peer']]
     return ''
 
@@ -1875,27 +1875,29 @@ class Dispatcher:
     })
 
     def __ip_xmit(self, trace, time, core, match, interests):
-        id = int(match.group(1))
-        offset = int(match.group(2))
+        peer = match.group(1)
+        id = int(match.group(2))
+        offset = int(match.group(3))
         for interest in interests:
-            interest.tt_ip_xmit(trace, time, core, id, offset)
+            interest.tt_ip_xmit(trace, time, core, peer, id, offset)
 
     patterns.append({
         'name': 'ip_xmit',
-        'regexp': 'calling ip.*_xmit: .* id ([0-9]+), offset ([0-9]+)'
+        'regexp': 'calling ip.*_xmit: .* peer ([^,]+), id ([0-9]+), offset ([0-9]+)'
     })
 
     def __send_data(self, trace, time, core, match, interests):
         id = int(match.group(1))
         offset = int(match.group(2))
         length = int(match.group(3))
+        qid = int(match.group(4))
         for interest in interests:
-            interest.tt_send_data(trace, time, core, id, offset, length)
+            interest.tt_send_data(trace, time, core, id, offset, length, qid)
 
     patterns.append({
         'name': 'send_data',
         'regexp': 'Finished queueing packet: rpc id ([0-9]+), offset '
-                  '([0-9]+), len ([0-9]+)'
+                  '([0-9]+), len ([0-9]+), qid ([0-9]+)'
     })
 
     def __send_grant(self, trace, time, core, match, interests):
@@ -2663,20 +2665,6 @@ class Dispatcher:
         'name': 'freeze_rx',
         'regexp': r'Freezing because of request on port .* from '
                 r'(0x[a-f0-9]+):([0-9]+),'
-    })
-
-    def __resend_tx(self, trace, time, core, match, interests):
-        id = int(match.group(1))
-        peer = match.group(2)
-        offset = int(match.group(3))
-        length = int(match.group(4))
-        for interest in interests:
-            interest.tt_resend_tx(trace, time, core, peer, id, offset, length)
-
-    patterns.append({
-        'name': 'resend_tx',
-        'regexp': r'Sending RESEND for id ([0-9]+), peer (0x[a-f0-9]+), '
-                r'offset ([0-9]+), length ([0-9]+),'
     })
 
     def __busy_tx(self, trace, time, core, match, interests):
@@ -4531,10 +4519,10 @@ class AnalyzeGrants:
         print('Checks:  Rate of calling homa_grant_check_rpc (k/sec)')
         print('CUsec:   Average execution time in homa_grant_check_rpc')
         print('CCores:  Average active cores in homa_grant_check_rpc')
-        print('LPer:    Average # of acquisitions of the grant lock per call to ')
+        print('LPer:    Average # of acquisitions of the grant lock per call to')
         print('         homa_grant_check_rpc')
         print('RUsec:   Average time spent acquiring/holding the grant '
-                'lock for priority ')
+                'lock for priority')
         print('         recalculations')
         print('RCores:  Average cores acquiring/hold the grant lock for '
                 'priority recalculation')
@@ -5482,10 +5470,10 @@ class AnalyzeIntervals:
                 tso_length = pkt['tso_length']
 
                 if tx_node:
-                    if nic_end < 1e20:
+                    if 'nic' in pkt or 'free_tx_skb' in pkt:
                         add_to_intervals(tx_node, nic_start, nic_end,
                                 'tx_in_nic', tso_length)
-                    if nic_end2 < 1e20:
+                    if 'nic' in pkt or nic_end2 < 1e20:
                         add_to_intervals(tx_node, nic_start, nic_end2,
                                 'tx_in_nic2', tso_length)
                         add_to_intervals(tx_node, nic_start, nic_end2,
@@ -5530,6 +5518,8 @@ class AnalyzeIntervals:
                 if interval != None:
                     interval['tx_gro_bytes'] += length
 
+            if not 'rx_node' in pkt:
+                pkt['rx_node'] = ''
             if not pkt['rx_node']:
                 continue
             rx_node = pkt['rx_node']
@@ -7633,7 +7623,7 @@ class AnalyzeNicsnapshot:
     Print information about the state of the NIC queues on a particular
     node at a particular point in time. Requires the --time and --node
     options. If --verbose is specified then all of the packets in the
-    position of the NIC at the reference time are printed.
+    possession of the NIC at the reference time are printed.
     """
 
     def __init__(self, dispatcher):
@@ -8653,7 +8643,7 @@ class AnalyzePackets:
         # that core (but not yet freed).
         self.copied = defaultdict(list)
 
-    def tt_ip_xmit(self, trace, t, core, id, offset):
+    def tt_ip_xmit(self, trace, t, core, peer, id, offset):
         global packets, rpcs
         p = packets[pkt_id(id, offset)]
         p['tx_node'] = trace['node']
@@ -8722,7 +8712,7 @@ class AnalyzePackets:
             p['free'] = t
         self.copied[core] = []
 
-    def tt_send_data(self, trace, t, core, id, offset, length):
+    def tt_send_data(self, trace, t, core, id, offset, length, qid):
         global packets
         p = packets[pkt_id(id, offset)]
         if not p['retransmits']:
@@ -8731,8 +8721,7 @@ class AnalyzePackets:
             p['tso_length'] = length
         else:
             p['retransmits'][-1]['tso_length'] = length
-        if id == 202753545:
-            print("tt_send_data got packet: %s" % (p))
+        p['tx_qid'] = qid
 
     def tt_pacer_xmit(self, trace, t, core, id, offset, port, bytes_left):
         global packets
@@ -8851,6 +8840,8 @@ class AnalyzePackets:
                 pkt['tx_node'] = get_rpc_node(id)
 
             if not 'rx_node' in pkt:
+                if not isinstance(id, int):
+                    raise Exception('Bad id %s for pkt: %s' % (id, pkt))
                 pkt['rx_node'] = get_rpc_node(id^1)
 
             if 'qdisc_xmit' in pkt:
@@ -9669,7 +9660,7 @@ class AnalyzeRpcs:
         rpcs[id]['handoff'] = t
         rpcs.pop('queued', None)
 
-    def tt_ip_xmit(self, trace, t, core, id, offset):
+    def tt_ip_xmit(self, trace, t, core, peer, id, offset):
         global rpcs
         rpcs[id]['ip_xmits'][offset] = t
 
@@ -9697,7 +9688,7 @@ class AnalyzeRpcs:
     def tt_softirq_grant(self, trace, t, core, id, offset, priority, increment):
         self.append(trace, id, t, 'softirq_grant', [t, offset])
 
-    def tt_send_data(self, trace, t, core, id, offset, length):
+    def tt_send_data(self, trace, t, core, id, offset, length, qid):
         # Combine the length and other info from this record with the time
         # from the ip_xmit call. No ip_xmit call? Skip this record too.
         global rpcs
@@ -10281,9 +10272,9 @@ class AnalyzeRx:
                     'the peer\n')
             f.write('# IP:         KB of data that have been passed to ip*xmit '
                     'on sender (or\n')
-            f.write('              requeued by homa_qdisc after being '
+            f.write('#             requeued by homa_qdisc after being '
                     'deferred) but not yet\n')
-            f.write('              transmitted by NIC; large numbers probably '
+            f.write('#             transmitted by NIC; large numbers probably '
                     'indicate qdisc backup\n')
             f.write('# Net:        KB of data that have been passed to the '
                     'NIC but not\n')
@@ -11106,7 +11097,7 @@ class AnalyzeSync:
         # Node name -> node id (position in get_sorted_nodes()).
         self.node_id = {}
 
-    def tt_ip_xmit(self, trace, t, core, id, offset):
+    def tt_ip_xmit(self, trace, t, core, peer, id, offset):
         node = trace['node']
         key = '%d:%d' % (id, offset)
         if not key in self.tx_pkts:
@@ -11153,7 +11144,7 @@ class AnalyzeSync:
         self.node_pkts[node]['ctl_tx'] += 1
         self.id_node[id] = node
 
-    def tt_resend_tx(self, trace, t, core, peer, id, offset, length):
+    def tt_resend_tx(self, trace, t, core, id, peer, offset, length):
         node = trace['node']
         self.ctl_tx[node][id].append(t)
         self.node_pkts[node]['ctl_tx'] += 1
@@ -11351,6 +11342,7 @@ class AnalyzeSync:
         # Each iteration of the following loop compares each node against
         # each other node to update min_offset and max_offset values. The
         # loop terminates when no more updates can be made.
+        iterations = 0
         while True:
             num_updates = 0
             for i in range(len(min_offsets)):
@@ -11361,24 +11353,34 @@ class AnalyzeSync:
                     delay_from = min_delays[i][j]
                     if min_offsets[i] != None and delay_from != None:
                         min = min_offsets[i] - delay_from
-                        # print('  Min from %d to %d: min[%d] %.1f, delay %.1f, min %.1f, min[%d] %s'
+                        # print('  Min from %d to %d: min_offsets[%d] %.1f, delay %.1f, min %.1f, min_offsets[%d] %s'
                         #         % (i, j, i, min_offsets[i], delay_from, min,
                         #         j, min_offsets[j]))
                         if min_offsets[j] == None or min_offsets[j] < min:
                             num_updates += 1
                             min_offsets[j] = min
+                            # print('  Updated min_offsets[%d] to %.1f' % (
+                            #         j, min))
 
                     delay_to = min_delays[j][i]
                     if max_offsets[i] != None and delay_to != None:
                         max = max_offsets[i] + delay_to
-                        # print('  Max from %d to %d: max[%d] %.1f, delay %.1f, max %.1f, max[%d] %s'
+                        # print('  Max from %d to %d: max_offsets[%d] %.1f, delay %.1f, max %.1f, max_offsets[%d] %s'
                         #         % (i, j, i, max_offsets[i], delay_to, max,
                         #         j, max_offsets[j]))
                         if max_offsets[j] == None or max_offsets[j] > max:
                             num_updates += 1
                             max_offsets[j] = max
+                            # print('  Updated max_offsets[%d] to %.1f' % (
+                            #         j, max))
             stats.append(num_updates)
             if num_updates == 0:
+                break
+            iterations += 1
+            # print('Ending iteration %d' % (iterations))
+            if iterations >= 100:
+                print('Offset calculation for clock sync didn\'t converge after %d iterations; aborting'
+                        % (iterations))
                 break
         return min_offsets, max_offsets, stats
 
@@ -11405,13 +11407,13 @@ class AnalyzeSync:
         print('FrRx:      Total number of Homa freeze packets received')
         print('TcpTx:     Total number of TCP packets sent')
         print('TcpRx:     Total number of TCP packets received')
-        print('\nFile          Span HomaTx HomaRx  GrTx  GrRx '
+        print('\nFile            Span HomaTx HomaRx  GrTx  GrRx '
                 'CtlTx CtlRx FrTx FrRx  TcpTx  TcpRx')
 
         nodes = get_sorted_nodes()
         for node in nodes:
             trace = traces[node]
-            print('%-12s %5.1f %6d %6d %5d %5d %5d %5d %4d %4d %6d %6d' % (
+            print('%-12s %7.1f %6d %6d %5d %5d %5d %5d %4d %4d %6d %6d' % (
                     trace['file'],
                     (trace['last_time'] - trace['first_time'])/1000,
                     self.node_pkts[node]['homa_tx'],
@@ -11427,6 +11429,24 @@ class AnalyzeSync:
 
         min_delays, min_times = self.find_min_delays()
         self.find_min_delays_alt(min_delays, min_times)
+        errors = 0
+        for i in range(len(min_delays)):
+            for j in range(i+1, len(min_delays)):
+                if min_delays[i][j] == None or min_delays[j][i] == None:
+                    continue
+                rtt = min_delays[i][j] + min_delays[j][i]
+                if rtt > 0:
+                    continue
+                errors += 1
+                print('Negative RTT %.1f: %s (%.3f) -> %s (%.3f), '
+                        '%s (%.3f) -> %s (%.3f)' % (rtt,
+                        nodes[i], min_times[i][j][0],
+                        nodes[j], min_times[i][j][1],
+                        nodes[j], min_times[j][i][0],
+                        nodes[i], min_times[j][i][1]), file=sys.stderr)
+        if errors:
+            raise Exception('Aborting because of negative RTTs')
+
         min_offsets, max_offsets, stats = self.get_offsets(min_delays)
 
         print('\nMin/max updates made in each round of the offset '
@@ -12192,33 +12212,30 @@ class AnalyzeTemp:
         dispatcher.interest('AnalyzeTcppackets')
 
     def output(self):
-        global packets, grants, tcp_packets
+        global packets
 
-        # node -> dict of addr -> core, where addr is a sender address and
-        # core is the GRO core for that address (for Homa)
-        node_cores = defaultdict(dict)
+        pending = []
+        time = 4500
+        num_bytes = 0
 
         for pkt in packets.values():
-            if 'gro_core' in pkt and pkt['tx_node'] and pkt['rx_node']:
-                node_cores[pkt['rx_node']][pkt['tx_node']] = pkt['gro_core']
-
-        print('\nNode  Conflict  Max')
-        total_conflicts = 0
-        for node in get_sorted_nodes():
-            cores = defaultdict(lambda: 0)
-            # print('Node %s: %s' % (node, node_cores[node]))
-            for addr, core in node_cores[node].items():
-                cores[core] += 1
-            conflicts = 0
-            max_conflict = 0
-            # print('Node %s core info: %s' % (node, cores))
-            for count in cores.values():
-                conflicts += count - 1
-                if count - 1 > max_conflict:
-                    max_conflict = count - 1
-            total_conflicts += conflicts
-            print('%-8s   %3d  %3d' % (node, conflicts, max_conflict))
-        print('Total conflicts: %d' % (total_conflicts))
+            if not 'tso_length' in pkt:
+                continue
+            if not 'tx_node' in pkt or pkt['tx_node'] != 'node6':
+                continue
+            if 'nic' in pkt:
+                if pkt['nic'] > time:
+                    continue
+                if 'free_tx_skb' in pkt and pkt['free_tx_skb'] <= 4500:
+                    continue
+            else:
+                if not 'free_tx_skb' in pkt or pkt['free_tx_skb'] <= 4500:
+                    continue
+            pending.append(pkt)
+            num_bytes += pkt['tso_length']
+        print('%d total bytes in %d packets:\n' % (num_bytes, len(pending)))
+        pending.sort(key = lambda pkt: pkt['nic'])
+        print(print_pkts(pending, header=True), end='')
 
     def output_slow_pkts(self):
         pkts = []
@@ -13390,7 +13407,7 @@ if options.help:
     print_analyzer_help()
     exit(0)
 if not tt_files:
-    print('No trace files specified')
+    print('No trace files specified', file=sys.stderr)
     exit(1)
 if options.data:
     os.makedirs(options.data, exist_ok=True)
