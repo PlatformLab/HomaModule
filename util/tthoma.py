@@ -15,6 +15,7 @@ import heapq
 import itertools
 from io import StringIO
 import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from optparse import OptionParser
 import math
@@ -1871,7 +1872,7 @@ class Dispatcher:
     patterns.append({
         'name': 'softirq_grant',
         'regexp': 'processing grant for id ([0-9]+), offset ([0-9]+), '
-                'priority ([0-9]+), increment ([0-9]+)'
+                'priority ([0-9]+), increment ([-0-9]+)'
     })
 
     def __ip_xmit(self, trace, time, core, match, interests):
@@ -5437,7 +5438,7 @@ class AnalyzeIntervals:
                 print('Packet with no length: %s' % (pkt), file=sys.stderr)
                 continue
             length = pkt['length']
-            txmit = pkt['xmit2'] if 'xmit2' in pkt else None
+            txmit = pkt['xmit'] if 'xmit' in pkt else None
             if 'nic' in pkt:
                 tnic = pkt['nic']
                 nic_start = tnic
@@ -11039,6 +11040,10 @@ class AnalyzeSync:
         # time is the latest receive time.
         self.rx_pkts = {}
 
+        # rpc_id:offset[g] -> 1 for each Homa data packet or grant that is
+        # known to have been sent or received multiple times.
+        self.retrans = {}
+
         # node -> rpc_id -> <times>. For each node number, contains a
         # dictionary mapping from RPC identifiers to a list of unadjusted
         # times when a busy or resend packet was transmitted for rpc_id.
@@ -11103,15 +11108,24 @@ class AnalyzeSync:
         if not key in self.tx_pkts:
             self.tx_pkts[key] = [t, node]
             self.node_pkts[node]['homa_tx'] += 1
+        else:
+            self.retrans[key] = 1
         self.id_node[id] = node
 
     def tt_gro_data(self, trace, t, core, peer, id, offset, prio):
         node = trace['node']
         key = '%d:%d' % (id ^ 1, offset)
-        self.rx_pkts[key] = [t, node]
-        self.node_pkts[node]['homa_rx'] += 1
+        if not key in self.rx_pkts:
+            self.rx_pkts[key] = [t, node]
+            self.node_pkts[node]['homa_rx'] += 1
+        else:
+            self.retrans[key] = 1
         self.id_node[id] = node
         self.id_addr[id ^ 1] = peer
+
+    def tt_retransmit(self, trace, t, core, id, offset, length):
+        key = '%d:%d' % (id, offset)
+        self.retrans[key] = 1
 
     def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
         node = trace['node']
@@ -11119,12 +11133,17 @@ class AnalyzeSync:
         if not key in self.tx_pkts:
             self.tx_pkts[key] = [t, node]
             self.node_pkts[node]['grant_tx'] += 1
+        else:
+            self.retrans[key] = 1
 
     def tt_gro_grant(self, trace, t, core, peer, id, offset, prio):
         node = trace['node']
         key = '%d:%dg' % (id ^ 1, offset)
-        self.rx_pkts[key] = [t, node]
-        self.node_pkts[node]['grant_rx'] += 1
+        if not key in self.rx_pkts:
+            self.rx_pkts[key] = [t, node]
+            self.node_pkts[node]['grant_rx'] += 1
+        else:
+            self.retrans[key] = 1
         self.id_addr[id ^ 1] = peer
 
     def tt_gro_ctl(self, trace, t, core, peer, id, type):
@@ -11209,6 +11228,8 @@ class AnalyzeSync:
 
         for key, tx_info in self.tx_pkts.items():
             if not key in self.rx_pkts:
+                continue
+            if key in self.retrans:
                 continue
             tx_time, tx_node = tx_info
             tx_id = self.node_id[tx_node]
@@ -12690,7 +12711,9 @@ class AnalyzeTxintervals:
             f.write('# Resps:      Response messages that have been started '
                     'but not fully\n')
             f.write('#             transmitted as of the end of the interval\n')
-            f.write('# Pkts:       Packets transmitted during the interval\n')
+            f.write('# Pkts:       Packets transmitted (forwarded by qdisc) '
+                    'during the\n')
+            f.write('              interval\n')
             f.write('# QDisc:      KB of data that have been passed to ip*xmit '
                     'but not yet\n')
             f.write('#             passed to the NIC, as of the end of the '
