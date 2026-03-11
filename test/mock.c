@@ -55,7 +55,6 @@ int mock_register_sysctl_errors;
 int mock_rht_init_errors;
 int mock_rht_insert_errors;
 int mock_route_errors;
-int mock_spin_lock_held;
 int mock_trylock_errors;
 int mock_vmalloc_errors;
 int mock_wait_intr_irq_errors;
@@ -1294,7 +1293,7 @@ void _raw_spin_unlock_irqrestore(raw_spinlock_t *lock,
 int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 {
 	UNIT_HOOK("spin_lock");
-	if (mock_check_error(&mock_spin_lock_held))
+	if (mock_check_error(&mock_trylock_errors))
 		return 0;
 	mock_record_locked(lock);
 	return 1;

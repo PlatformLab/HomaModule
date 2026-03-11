@@ -122,23 +122,6 @@ static void qdev_create_hook(char *id)
 		homa_qdisc_qdev_get(hook_dev);
 }
 
-static u64 xmit_clock;
-static void xmit_hook(char *id)
-{
-	if (strcmp(id, "pacer_xmit") != 0)
-		return;
-	if (xmit_clock == 0)
-		xmit_clock = mock_clock;
-}
-
-static struct Qdisc *hook_qdisc;
-static void complete_qdisc_hook(char *id)
-{
-	if (strcmp(id, "pacer spin") != 0)
-		return;
-	hook_qdisc->dev_queue->dql.num_completed += 1;
-}
-
 FIXTURE(homa_qdisc) {
 	struct homa homa;
 	struct homa_net *hnet;
@@ -1871,7 +1854,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_main)
 	homa_qdisc_qdev_put(qdev);
 }
 
-TEST_F(homa_qdisc, homa_qdisc_pacer__pacer_lock_unavailable)
+TEST_F(homa_qdisc, homa_qdisc_pacer__pacer_already_running)
 {
 	struct homa_qdisc_dev *qdev;
 	u64 link_idle;
@@ -1890,46 +1873,15 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__pacer_lock_unavailable)
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
 	unit_log_clear();
 
-	mock_spin_lock_held = 1;
-	homa_qdisc_pacer(qdev, false);
+	mock_trylock_errors = 1;
+	homa_qdisc_pacer(qdev);
 	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
 	EXPECT_EQ(link_idle, atomic64_read(&qdev->link_idle_time));
 
 	homa_qdisc_qdev_put(qdev);
 }
-TEST_F(homa_qdisc, homa_qdisc_pacer__spin_until_qdisc_no_longer_congested)
-{
-	struct homa_qdisc_dev *qdev;
-	struct homa_rpc *srpc;
-	struct homa_qdisc *q;
-
-	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
-	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
-	mock_queue_index = 3;
-	q = qdisc_priv(self->qdiscs[3]);
-	qdev = homa_qdisc_qdev_get(self->dev);
-	qdev->congested_qdisc = q;
-	self->qdiscs[3]->dev_queue->dql.num_queued = qdev->max_nic_queue_bytes +
-						     10;
-
-	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id, 10000, 10000);
-	ASSERT_NE(NULL, srpc);
-
-	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
-	hook_qdisc = self->qdiscs[3];
-	unit_hook_register(complete_qdisc_hook);
-
-	homa_qdisc_pacer(qdev, false);
-	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
-	EXPECT_EQ(NULL, qdev->congested_qdisc);
-	EXPECT_EQ(10, hook_qdisc->dev_queue->dql.num_completed);
-
-	homa_qdisc_qdev_put(qdev);
-}
-TEST_F(homa_qdisc, homa_qdisc_pacer__spin_until_link_idle)
+TEST_F(homa_qdisc, homa_qdisc_pacer__link_idle_time_too_large)
 {
 	struct homa_qdisc_dev *qdev;
 	struct homa_rpc *srpc;
@@ -1947,17 +1899,55 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__spin_until_link_idle)
 	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
 
 	mock_clock = 0;
-	mock_clock_tick = 1000;
-	atomic64_set(&qdev->link_idle_time, 10000);
+	atomic64_set(&qdev->link_idle_time, 3600);
 	self->homa.qshared->max_nic_est_backlog_cycles = 3500;
 	unit_log_clear();
-	unit_hook_register(xmit_hook);
-	xmit_clock = 0;
 
-	homa_qdisc_pacer(qdev, false);
+	/* First call fails because of link_idle_time. */
+	homa_qdisc_pacer(qdev);
+	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
+
+	/* Second call succeeds. */
+	atomic64_set(&qdev->link_idle_time, 3400);
+	homa_qdisc_pacer(qdev);
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
-	EXPECT_EQ(7000, xmit_clock);
+
+	homa_qdisc_qdev_put(qdev);
+}
+TEST_F(homa_qdisc, homa_qdisc_pacer__congested_qdisc)
+{
+	struct homa_qdisc_dev *qdev;
+	struct homa_rpc *srpc;
+	struct homa_qdisc *q;
+
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
+	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
+	mock_queue_index = 3;
+	qdev = homa_qdisc_qdev_get(self->dev);
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
+
+	q = qdisc_priv(self->qdiscs[3]);
+	qdev->congested_qdisc = q;
+	self->qdiscs[3]->dev_queue->dql.num_queued = qdev->max_nic_queue_bytes + 10;
+
+	/* First call fails because of congested_qdisc. */
+	homa_qdisc_pacer(qdev);
+	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
+
+	/* Second call succeeds and resets congested_qdisc. */
+	self->qdiscs[3]->dev_queue->dql.num_completed += 11;
+	homa_qdisc_pacer(qdev);
+	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
+	EXPECT_TRUE(qdev->congested_qdisc == NULL);
 
 	homa_qdisc_qdev_put(qdev);
 }
@@ -1994,7 +1984,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__return_after_one_packet)
 	self->homa.qshared->max_nic_est_backlog_cycles = 100;
 	unit_log_clear();
 
-	homa_qdisc_pacer(qdev, false);
+	homa_qdisc_pacer(qdev);
 	unit_log_clear();
 	log_deferred(qdev);
 	EXPECT_STREQ("[id 1237, offsets 4000]", unit_log_get());
@@ -2026,7 +2016,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__dont_spin)
 	self->homa.qshared->max_nic_est_backlog_cycles = 3500;
 	unit_log_clear();
 
-	homa_qdisc_pacer(qdev, true);
+	homa_qdisc_pacer(qdev);
 	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
 
@@ -2039,7 +2029,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__no_deferred_packets)
 	qdev = homa_qdisc_qdev_get(self->dev);
 	qdev->homa_credit = -1000;
 
-	homa_qdisc_pacer(qdev, false);
+	homa_qdisc_pacer(qdev);
 	EXPECT_EQ(0, atomic64_read(&qdev->link_idle_time));
 	EXPECT_EQ(-1000, qdev->homa_credit);
 
@@ -2064,7 +2054,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__xmit_homa_packet_no_tcp)
 	qdev->homa_credit = -100;
 	qdev->hnet->homa->qshared->homa_share = 40;
 
-	homa_qdisc_pacer(qdev, false);
+	EXPECT_EQ(1100, homa_qdisc_pacer(qdev));
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
 	EXPECT_EQ(-65999, qdev->homa_credit);
@@ -2091,7 +2081,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__xmit_tcp_no_homa)
 	qdev->homa_credit = 1000;
 	qdev->hnet->homa->qshared->homa_share = 40;
 
-	homa_qdisc_pacer(qdev, false);
+	EXPECT_EQ(2500, homa_qdisc_pacer(qdev));
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
 	EXPECT_EQ(2, self->qdiscs[2]->q.qlen);
 	EXPECT_EQ(52000, qdev->homa_credit);
@@ -2132,7 +2122,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__both_protocols_have_packets_choose_tcp)
 	qdev->hnet->homa->qshared->max_nic_est_backlog_cycles = 10000;
 	mock_clock = 1000000 - 10000 + 100;
 
-	homa_qdisc_pacer(qdev, false);
+	homa_qdisc_pacer(qdev);
 	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
 	EXPECT_EQ(1, self->qdiscs[2]->q.qlen);
 	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
@@ -2161,38 +2151,12 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__xmit_multiple_packets)
 	qdev->hnet->homa->qshared->homa_share = 40;
 	qdev->hnet->homa->qshared->max_nic_est_backlog_cycles = 100000;
 
-	homa_qdisc_pacer(qdev, false);
+	homa_qdisc_pacer(qdev);
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
 	EXPECT_EQ(3, self->qdiscs[2]->q.qlen);
 	EXPECT_EQ(3, homa_metrics_per_cpu()->pacer_tcp_packets);
 	EXPECT_EQ(3900, homa_metrics_per_cpu()->pacer_tcp_bytes);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->pacer_help_bytes);
-
-	homa_qdisc_qdev_put(qdev);
-}
-TEST_F(homa_qdisc, homa_qdisc_pacer__pacer_help_bytes_metric)
-{
-	struct homa_qdisc_dev *qdev;
-	struct homa_rpc *srpc;
-
-	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
-	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
-	mock_queue_index = 3;
-	qdev = homa_qdisc_qdev_get(self->dev);
-	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id, 10000, 10000);
-	ASSERT_NE(NULL, srpc);
-
-	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 800));
-	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
-	unit_log_clear();
-
-	homa_qdisc_pacer(qdev, true);
-	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
-	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_homa_packets);
-	EXPECT_EQ(900, homa_metrics_per_cpu()->pacer_homa_bytes);
-	EXPECT_EQ(900, homa_metrics_per_cpu()->pacer_help_bytes);
 
 	homa_qdisc_qdev_put(qdev);
 }
@@ -2225,6 +2189,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_check__enqueue_packet)
 	homa_qdisc_pacer_check(&self->homa);
 	EXPECT_EQ(1, self->qdiscs[3]->q.qlen);
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(1100, homa_metrics_per_cpu()->pacer_help_bytes);
 
 	homa_qdisc_qdev_put(qdev);
 	homa_qdisc_qdev_put(qdev2);

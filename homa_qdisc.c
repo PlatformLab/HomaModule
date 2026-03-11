@@ -211,7 +211,7 @@ struct homa_qdisc_shared *homa_qdisc_shared_alloc(void)
 	INIT_LIST_HEAD(&qshared->qdevs);
 	qshared->fifo_fraction = 50;
 	qshared->max_nic_est_backlog_usecs = 5;
-	qshared->max_nic_queue_usecs = 20;
+	qshared->max_nic_queue_usecs = 40;
 	qshared->defer_min_bytes = 1000;
 	qshared->homa_share = 50;
 	qshared->max_link_usage = 99;
@@ -452,8 +452,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	struct homa_qdisc_dev *qdev = q->qdev;
 	struct homa_qdisc_shared *qshared;
 	struct homa_data_hdr *h;
+	int offset = 0;
 	int pkt_len;
-	int offset;
 
 	homa_qdisc_update_congested(q);
 
@@ -526,8 +526,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 
 enqueue:
 	if (is_homa_pkt(skb)) {
+		h = (struct homa_data_hdr *)skb_transport_header(skb);
 		if (h->common.type == DATA) {
-			h = (struct homa_data_hdr *)skb_transport_header(skb);
 			tt_record3("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d on qid %d",
 				   be64_to_cpu(h->common.sender_id), offset,
 				   q->ix);
@@ -986,7 +986,7 @@ int homa_qdisc_pacer_main(void *device)
 		if (kthread_should_stop())
 			break;
 		start = homa_clock();
-		homa_qdisc_pacer(qdev, false);
+		homa_qdisc_pacer(qdev);
 		INC_METRIC(pacer_cycles, homa_clock() - start);
 
 		if (homa_qdisc_any_deferred(qdev)) {
@@ -1012,7 +1012,7 @@ int homa_qdisc_pacer_main(void *device)
 
 /**
  * homa_qdisc_pacer() - Transmit a few packets from the homa_deferred and
- * tcp_deferred lists while keeping NIC queue short. There may still be
+ * tcp_deferred lists if the NIC isn't congested. There may still be
  * deferred packets when this function returns.
  *
  * Note: this function may be invoked from places other than
@@ -1025,21 +1025,18 @@ int homa_qdisc_pacer_main(void *device)
  * invocations are not guaranteed to happen, so the pacer thread provides a
  * backstop.
  * @qdev:       The device on which to transmit.
- * @dont_spin:  If true, then return immediately if the NIC is congested,
- *              rather than spinning until congestion drops. If this value
- *              is false, then the caller must not be running at SoftIRQ
- *              level, and it must not have acquired a lock that disables
- *              BH processing (otherwise this function can self-deadlock).
+ * Return:      The number of bytes transmitted.
  */
-void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool dont_spin)
+int homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 {
 	int i, xmit_bytes, max_cycles;
+	int result = 0;
 
 	/* Make sure only one instance of this function executes at a
 	 * time.
 	 */
-	if (!spin_trylock(&qdev->pacer_mutex))
-		return;
+	if (!spin_trylock_bh(&qdev->pacer_mutex))
+		return 0;
 
 	/* Each iteration through the following loop sends one packet. We
 	 * limit the number of passes through this loop in order to cap the
@@ -1048,44 +1045,28 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool dont_spin)
 	 */
 	max_cycles = qdev->hnet->homa->qshared->max_nic_est_backlog_cycles;
 	for (i = 0; i < 5; i++) {
+		struct homa_qdisc *congested;
 		u64 idle_time, now;
 
-		/* If the NIC is congested, wait for the congestion to
-		 * subside.
+		/* Return if the NIC is congested using either of the two
+		 * approaches described in the PACING comment at the top
+		 * of this file.
 		 */
 		now = homa_clock();
 		idle_time = atomic64_read(&qdev->link_idle_time);
-		while (1) {
-			struct homa_qdisc *congested;
+		if (idle_time > now + max_cycles)
+			goto done;
 
-			congested = READ_ONCE(qdev->congested_qdisc);
-			if (congested &&
-			    homa_qdisc_bytes_pending(congested)
-			    <= qdev->max_nic_queue_bytes) {
-				WRITE_ONCE(qdev->congested_qdisc, NULL);
-				congested = NULL;
-			}
-			if (!congested && (now + max_cycles) >= idle_time)
-				break;
-
-			/* If we've xmitted at least one packet then
-			 * return (this helps with testing and also
-			 * allows homa_qdisc_pacer_main to yield the core).
-			 */
-			if (i != 0 || dont_spin)
-				goto done;
-			cpu_relax();
-			now = homa_clock();
-			UNIT_HOOK("pacer spin");
+		congested = READ_ONCE(qdev->congested_qdisc);
+		if (congested && homa_qdisc_bytes_pending(congested) <=
+				qdev->max_nic_queue_bytes) {
+			WRITE_ONCE(qdev->congested_qdisc, NULL);
+			tt_record1("homa_qdisc_pacer cleared congested_qdisc (was qid %d)",
+				congested->ix);
+			congested = NULL;
 		}
-
-		/* Note: when we get here, it's possible that the NIC queue is
-		 * still too long because other threads have queued packets,
-		 * but we transmit anyway. If we don't, we could end up in a
-		 * situation where the pacer thread is effectively starved by
-		 * other "helper" threads.
-		 */
-		UNIT_HOOK("pacer_xmit");
+		if (congested)
+			goto done;
 
 		/* Decide whether to transmit a Homa or TCP packet. If
 		 * only one protocol has packets, reset homa_credit to
@@ -1116,12 +1097,12 @@ void homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool dont_spin)
 					qdev->hnet->homa->qshared->homa_share;
 			}
 		}
-		if (dont_spin)
-			INC_METRIC(pacer_help_bytes, xmit_bytes);
+		result += xmit_bytes;
 		INC_METRIC(pacer_xmit_cycles, homa_clock() - now);
 	}
 done:
-	spin_unlock(&qdev->pacer_mutex);
+	spin_unlock_bh(&qdev->pacer_mutex);
+	return result;
 }
 
 /**
@@ -1137,6 +1118,7 @@ void homa_qdisc_pacer_check(struct homa *homa)
 	struct homa_qdisc_dev *qdev;
 	u64 now = homa_clock();
 	int max_cycles;
+	int xmit_bytes;
 
 	max_cycles = homa->qshared->max_nic_est_backlog_cycles;
 	rcu_read_lock();
@@ -1152,8 +1134,10 @@ void homa_qdisc_pacer_check(struct homa *homa)
 		if (now + (max_cycles >> 1) <
 		    atomic64_read(&qdev->link_idle_time))
 			continue;
-		tt_record("homa_qdisc_pacer_check calling homa_qdisc_pacer");
-		homa_qdisc_pacer(qdev, true);
+		xmit_bytes = homa_qdisc_pacer(qdev);
+		tt_record1("homa_qdisc_pacer_check transmitted %d bytes",
+			   xmit_bytes);
+		INC_METRIC(pacer_help_bytes, xmit_bytes);
 	}
 	rcu_read_unlock();
 }

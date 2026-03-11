@@ -190,9 +190,7 @@ struct homa_qdisc_dev {
 	/**
 	 * @pacer_mutex: Ensures that only one instance of
 	 * homa_qdisc_pacer runs at a time. Only used in "try" mode:
-	 * never block on this. Note: must not disable bh when acquiring
-	 * this lock, because the pacer may wait for bh activity to
-	 * complete.
+	 * never block on this.
 	 */
 	spinlock_t pacer_mutex ____cacheline_aligned_in_smp;
 
@@ -331,7 +329,7 @@ int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
 void            homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev,
 				     struct homa_rpc *rpc);
-void            homa_qdisc_pacer(struct homa_qdisc_dev *qdev, bool dont_spin);
+int             homa_qdisc_pacer(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_pacer_check(struct homa *homa);
 int             homa_qdisc_pacer_main(void *device);
 struct homa_qdisc_dev *
@@ -450,8 +448,12 @@ static inline int homa_qdisc_bytes_pending(struct homa_qdisc *q)
  */
 static inline void homa_qdisc_update_congested(struct homa_qdisc *q)
 {
-	if (homa_qdisc_bytes_pending(q) > q->qdev->max_nic_queue_bytes)
+	if (homa_qdisc_bytes_pending(q) > q->qdev->max_nic_queue_bytes) {
+		if (!READ_ONCE(q->qdev->congested_qdisc))
+			tt_record2("homa_qdisc_update_congested marked qid %d congested (%d bytes)",
+				   q->ix, homa_qdisc_bytes_pending(q));
 		WRITE_ONCE(q->qdev->congested_qdisc, q);
+	}
 }
 
 #endif /* _HOMA_QDISC_H */
