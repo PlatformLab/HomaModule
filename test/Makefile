@@ -121,12 +121,7 @@ dummyFile:
 # Note: Without -O2 there will be strange compiler errors such as
 # 'asm operand 2 probably does not match constraints'.
 rhashtable.o: rhashtable.c
-	gcc $(CINCLUDES) \
-	-D__KERNEL__ -D__UNIT_TEST__ -O2 -g -std=gnu11 \
-	-fno-strict-aliasing \
-	-DKBUILD_MODFILE='"lib/rhashtable"' -DKBUILD_BASENAME='"rhashtable"' \
-	-DKBUILD_MODNAME='"rhashtable"' -D__KBUILD_MODNAME=kmod_rhashtable \
-	-c $< -o $@
+	$(CC) -c $(CFLAGS) -O2 $< -o $@
 
 unit: $(OBJS)
 	$(CXX) $(CFLAGS) $^ -o $@ -lasan
