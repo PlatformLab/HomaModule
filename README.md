@@ -20,18 +20,18 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
     been implemented yet. If you would like to test Homa under large incasts,
     let me know and I will implement this feature.
 
- - Please contact me if you have any problems using this repo; I'm happy to
-   provide advice and support.
+- Please contact me if you have any problems using this repo; I'm happy to
+  provide advice and support.
 
 - The head is known to work under Linux 6.17.8. In the past, Homa has
   run under several earlier versions of Linux. There is a separate branch
   for each of these
-  older versions, with names such as linux_4.15.18. Older branches are
-  out of date feature-wise: recent commits have not been back-ported to them.
-  Other versions of Linux have not been tested and
-  may require code changes (these upgrades rarely long). If you get Homa
-  working on some other version, please submit a
-  pull request with the required code changes.
+  older versions, with names such as linux_4.15.18. Older branches
+  except for linux_4.18.0 are out of date feature-wise: recent commits have
+  not been back-ported to them. Other versions of Linux have not been tested and
+  may require code changes (typically this is easy to do). If you get Homa
+  working on some other version, please submit a pull request with the
+  required code changes.
 
 - Related work that you may find useful:
   - [Preliminary support for using Homa with gRPC](https://github.com/PlatformLab/grpc_homa)
@@ -51,6 +51,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   assumes that you have already run `make` both in the top-level directory and
   in `util`.
 
+- A collection of man pages is available in the "man" subdirectory. The API for
+  Homa is different from TCP sockets.
+
 - For best Homa performance, you should also make the following configuration
   changes:
   - Enable priority queues in your switches, selected by the 3
@@ -61,29 +64,27 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
     page `homa.7` for more info.
   - Enable jumbo frames on your switches and on the Linux nodes.
 
-- NIC support for TSO: Homa can use TCP Segmentation Offload (TSO) in order
-  to send large messages more efficiently. To do this, it uses a header format
-  that matches TCP's headers closely enough to take advantage of TSO support in NICs.
-  It is not clear that this approach will work with all NICs, but the following
-  NICs are known to work:
+- NIC support: Homa is known to work with the following NICs:
   - Mellanox ConnectX-4, ConnectX-5, and ConnectX-6
+  - Intel E810 series (ice)
+  Please let me know if you find other NICs that work (or don't work).
 
-  There have been reports of problems with the following NICs (these have not
-  yet been explored thoroughly enough to know whether the problems are
-  insurmountable):
-  - Intel E810 (ice), XXV710 (i40e), XL710
+- TSO support: in order to get best peformance Homa needs to take advantage
+  of TSO support provided by NICs for TCP. This can happen in either of two
+  ways. Some NICs, such as those from Mellanox/NVIDIA, will perform TSO
+  even on packets with IP protocols other than TCP. Homa uses a header format
+  that matches TCP's headers closely enough that TSO will work "out of the box".
+  For other NICs, such as the Intel E810 series, the NIC refuses to perform
+  TCP if the IP protocol is not TCP. For these NICs Homa has a "TCP hijacking"
+  mode where it encapsulates its packets as TCP frames, with an IP protocol
+  of TCP. Then, on the receiver side, Homa intercepts the incoming "TCP"
+  packets and steals them back before they can be processed by TCP. To
+  enable TCP hijacking, use `sysctl` to set the `hijack_tcp` parameter to 1
+  on all nodes.
 
-  Please let me know if you find other NICs that work (or NICs that don't work).
-  If the NIC doesn't support TSO for Homa, then you can request that Homa
-  perform segmentation in software by setting the `gso_force_software` parameter
-  to a nonzero value using `sysctl`. Unfortunately, software segmentation
-  is inefficient because it has to copy the packet data. Alternatively,
-  you can ensure that the `max_gso_size` parameter is the same as the maximum
-  packet size, which eliminates GSO in any form. This is also inefficient
-  because it requires more packets to traverse the Linux networking stack.
-
-- A collection of man pages is available in the "man" subdirectory. The API for
-  Homa is different from TCP sockets.
+- If you don't use TCP hijacking and your NICs don't support TSO for non-TCP
+  protocols, then you must make sure that the `max_gso_size` parameter is
+  no larger than the MTU (otherwise large outgoing packets will be dropped).
 
 - The subdirectory "test" contains unit tests, which you can run by typing
   "make" in that subdirectory.
@@ -123,6 +124,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant changes
+- March 2026: backported Homa to Linux version 4.18.0, using the
+  `linux_4.18.0` branch. Future changes made to the `main` branch are
+  likely to be reflected in this branch also.
 - January 2026: introduced new 'homa_qdisc' queuing discpline to improve
   performance when TCP and Homa run simultaneously. Results on c6620 CloudLab
   cluster (100 Gbps network):
