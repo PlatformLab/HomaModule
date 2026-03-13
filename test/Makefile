@@ -1,7 +1,6 @@
 # Makefile to run unit tests for Homa
 
-LINUX_VERSION := 4.18.0+
-# LINUX_VERSION ?= $(shell uname -r)
+LINUX_VERSION ?= $(shell uname -r)
 KDIR ?= /lib/modules/$(LINUX_VERSION)/build
 LINUX_SRC_DIR ?= /ouster/linux-stable
 CC ?= gcc

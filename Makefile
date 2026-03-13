@@ -33,8 +33,7 @@ ifneq ($(KERNEL_SRC),)
 KDIR ?= $(KERNEL_SRC)
 endif
 
-# LINUX_VERSION ?= $(shell uname -r)
-LINUX_VERSION := 4.18.0+
+LINUX_VERSION ?= $(shell uname -r)
 KDIR ?= /lib/modules/$(LINUX_VERSION)/build
 CC = gcc-8
 
