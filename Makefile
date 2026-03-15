@@ -35,7 +35,8 @@ endif
 
 LINUX_VERSION ?= $(shell uname -r)
 KDIR ?= /lib/modules/$(LINUX_VERSION)/build
-CC = gcc-8
+#CC = gcc-8
+CC = gcc
 
 LINUX_SRC_DIR ?= ../net-next
 

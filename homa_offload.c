@@ -137,7 +137,8 @@ void homa_gro_unhook_tcp(void)
  *              held for possible GRO merging.
  * @skb:        The newly arrived packet.
  */
-struct sk_buff **homa_tcp_gro_receive(struct sk_buff **gro_list,
+//struct sk_buff **homa_tcp_gro_receive(struct sk_buff **gro_list,
+struct sk_buff *homa_tcp_gro_receive(struct list_head *gro_list,
 				      struct sk_buff *skb)
 {
 	struct homa_common_hdr *h = (struct homa_common_hdr *)
@@ -275,162 +276,128 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
  * gro_list. The skb referred to by that link should be removed from the
  * list by the caller and passed up the stack immediately.
  */
-struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb)
+struct sk_buff *homa_gro_receive(struct list_head *gro_list, struct sk_buff *skb)
 {
-	/* This function will do one of the following things:
-	 * 1. Merge skb with a packet in gro_list by appending it to
-	 *    the frag_list of that packet.
-	 * 2. Set NAPI_GRO_CB(skb)->flush, indicating that skb is not a
-	 *    candidate for merging and should be passed up the networking
-	 *    stack immediately.
-	 * 3. Leave skb untouched, in which case it will be added to
-	 *    gro_list by the caller, so it will be considered for merges
-	 *    in the future.
-	 */
-	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
-	u64 saved_softirq_metric, softirq_cycles;
-	struct homa_offload_core *offload_core;
-	struct sk_buff **result = NULL;
-	struct homa_data_hdr *h_new;
-	u64 *softirq_cycles_metric;
-	struct sk_buff *held_skb;
-	u64 now = homa_clock();
-	struct sk_buff **pp;
-	int priority;
-	u32 saddr;
-	int busy;
+        struct homa *homa = homa_net(dev_net(skb->dev))->homa;
+        u64 saved_softirq_metric, softirq_cycles;
+        struct homa_offload_core *offload_core;
+        struct homa_data_hdr *h_new;
+        u64 *softirq_cycles_metric;
+        struct sk_buff *held_skb;
+        struct sk_buff *result;
+        struct sk_buff *p;               /* C90: declare before code */
+        u64 now = homa_clock();
+        int priority;
+        u32 saddr;
+        int busy;
 
-	if (!homa_make_header_avl(skb))
-		tt_record("homa_gro_receive couldn't pull enough data from packet");
+        result = NULL;
 
-	// if (homa_drop_packet(homa)) {
-	// 	kfree_skb(skb);
-	// 	return ERR_PTR(-EINPROGRESS);
-	// }
+        if (!homa_make_header_avl(skb))
+                tt_record("homa_gro_receive couldn't pull enough data from packet");
 
-	h_new = (struct homa_data_hdr *)skb_transport_header(skb);
-	offload_core = &per_cpu(homa_offload_core, smp_processor_id());
-	busy = (now - offload_core->last_gro) < homa->gro_busy_cycles;
-	offload_core->last_active = now;
-	if (skb_is_ipv6(skb)) {
-		priority = ipv6_hdr(skb)->priority;
-		saddr = ntohl(ipv6_hdr(skb)->saddr.in6_u.u6_addr32[3]);
-	} else {
-		priority = ((struct iphdr *)skb_network_header(skb))->tos >> 5;
-		saddr = ntohl(ip_hdr(skb)->saddr);
-	}
+        h_new = (struct homa_data_hdr *)skb_transport_header(skb);
+        offload_core = &per_cpu(homa_offload_core, smp_processor_id());
+        busy = (now - offload_core->last_gro) < homa->gro_busy_cycles;
+        offload_core->last_active = now;
 
-	if (h_new->common.type == DATA) {
-		if (h_new->seg.offset == (__force __be32)-1) {
-			tt_record2("homa_gro_receive replaced offset %d with %d",
-				   ntohl(h_new->seg.offset),
-				   ntohl(h_new->common.sequence));
-			h_new->seg.offset = h_new->common.sequence;
-		}
-		tt_record4("homa_gro_receive got packet from 0x%x id %llu, offset %d, priority %d",
-			   saddr, homa_local_id(h_new->common.sender_id),
-			   ntohl(h_new->seg.offset), priority);
-		if (homa_data_len(skb) == ntohl(h_new->message_length) &&
-		    (homa->gro_policy & HOMA_GRO_SHORT_BYPASS) &&
-		    !busy) {
-			INC_METRIC(gro_data_bypasses, 1);
-			goto bypass;
-		}
-	} else if (h_new->common.type == GRANT) {
-		tt_record4("homa_gro_receive got grant from 0x%x id %llu, offset %d, priority %d",
-			   saddr, homa_local_id(h_new->common.sender_id),
-			   ntohl(((struct homa_grant_hdr *)h_new)->offset),
-			   priority);
-		/* The following optimization handles grants here at NAPI
-		 * level, bypassing the SoftIRQ mechanism (and avoiding the
-		 * delay of handing off to a different core). This makes
-		 * a significant difference in throughput for large
-		 * messages, especially when the system is loaded.
-		 */
-		if ((homa->gro_policy & HOMA_GRO_FAST_GRANTS) && !busy) {
-			INC_METRIC(gro_grant_bypasses, 1);
-			goto bypass;
-		}
-#ifndef __STRIP__ /* See strip.py */
-	} else {
-		tt_record4("homa_gro_receive got packet from 0x%x id %llu, type 0x%x, priority %d",
-			   saddr, homa_local_id(h_new->common.sender_id),
-			   h_new->common.type, priority);
-#endif /* See strip.py */
-	}
+        if (skb_is_ipv6(skb)) {
+                priority = ipv6_hdr(skb)->priority;
+                saddr = ntohl(ipv6_hdr(skb)->saddr.in6_u.u6_addr32[3]);
+        } else {
+                priority = ((struct iphdr *)skb_network_header(skb))->tos >> 5;
+                saddr = ntohl(ip_hdr(skb)->saddr);
+        }
 
-	h_new->common.gro_count = 1;
-	for (pp = gro_list; (held_skb = *pp) != NULL; pp = &held_skb->next) {
-		struct homa_common_hdr *h_held;
-		int protocol;
+        if (h_new->common.type == DATA) {
+                if (h_new->seg.offset == (__force __be32)-1) {
+                        tt_record2("homa_gro_receive replaced offset %d with %d",
+                                   ntohl(h_new->seg.offset),
+                                   ntohl(h_new->common.sequence));
+                        h_new->seg.offset = h_new->common.sequence;
+                }
+                tt_record4("homa_gro_receive got packet from 0x%x id %llu, offset %d, priority %d",
+                           saddr, homa_local_id(h_new->common.sender_id),
+                           ntohl(h_new->seg.offset), priority);
+                if (homa_data_len(skb) == ntohl(h_new->message_length) &&
+                    (homa->gro_policy & HOMA_GRO_SHORT_BYPASS) &&
+                    !busy) {
+                        INC_METRIC(gro_data_bypasses, 1);
+                        goto bypass;
+                }
+        } else if (h_new->common.type == GRANT) {
+                tt_record4("homa_gro_receive got grant from 0x%x id %llu, offset %d, priority %d",
+                           saddr, homa_local_id(h_new->common.sender_id),
+                           ntohl(((struct homa_grant_hdr *)h_new)->offset), priority);
+                if ((homa->gro_policy & HOMA_GRO_FAST_GRANTS) && !busy) {
+                        INC_METRIC(gro_grant_bypasses, 1);
+                        goto bypass;
+                }
+#ifndef __STRIP__
+        } else {
+                tt_record4("homa_gro_receive got packet from 0x%x id %llu, type 0x%x, priority %d",
+                           saddr, homa_local_id(h_new->common.sender_id),
+                           h_new->common.type, priority);
+#endif
+        }
 
-		h_held = (struct homa_common_hdr *)skb_transport_header(
-				held_skb);
+        h_new->common.gro_count = 1;
 
-		/* Packets can be batched together as long as they are all
-		 * Homa packets, even if they are from different RPCs. Don't
-		 * use the same_flow mechanism that is normally used in
-		 * gro_receive, because it won't allow packets from different
-		 * sources to be aggregated.
-		 */
-		if (skb_is_ipv6(held_skb))
-			protocol = ipv6_hdr(held_skb)->nexthdr;
-		else
-			protocol = ip_hdr(held_skb)->protocol;
-		if (protocol != IPPROTO_HOMA)
-			continue;
+        /* list-head GRO API: iterate with list_for_each_entry */
+        list_for_each_entry(p, gro_list, list) {
+                struct homa_common_hdr *h_held;
+                int protocol;
 
-		/* Aggregate skb into held_skb. We don't update the length of
-		 * held_skb, because we'll eventually split it up and process
-		 * each skb independently.
-		 */
-		if (NAPI_GRO_CB(held_skb)->last == held_skb)
-			skb_shinfo(held_skb)->frag_list = skb;
-		else
-			NAPI_GRO_CB(held_skb)->last->next = skb;
-		NAPI_GRO_CB(held_skb)->last = skb;
-		skb->next = NULL;
-		NAPI_GRO_CB(skb)->same_flow = 1;
-		NAPI_GRO_CB(held_skb)->count++;
-		h_held->gro_count++;
-		if (h_held->gro_count >= homa->max_gro_skbs)
-			result = pp;
-	        goto done;
-	}
+                held_skb = p;
+                h_held = (struct homa_common_hdr *)skb_transport_header(held_skb);
 
-	/* There was no existing Homa packet that this packet could be
-	 * batched with, so this packet will now go on gro_list for future
-	 * packets to be batched with. If the packet is sent up the stack
-	 * before another packet arrives for batching, we want it to be
-	 * processed on this same core (it's faster that way, and if
-	 * batching doesn't occur it means we aren't heavily loaded; if
-	 * batching does occur, homa_gro_complete will pick a different
-	 * core).
-	 */
-	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
-		homa_set_softirq_cpu(skb, smp_processor_id());
+                if (skb_is_ipv6(held_skb))
+                        protocol = ipv6_hdr(held_skb)->nexthdr;
+                else
+                        protocol = ip_hdr(held_skb)->protocol;
+
+                if (protocol != IPPROTO_HOMA)
+                        continue;
+
+                if (NAPI_GRO_CB(held_skb)->last == held_skb)
+                        skb_shinfo(held_skb)->frag_list = skb;
+                else
+                        NAPI_GRO_CB(held_skb)->last->next = skb;
+
+                NAPI_GRO_CB(held_skb)->last = skb;
+                skb->next = NULL;
+
+                NAPI_GRO_CB(skb)->same_flow = 1;
+                NAPI_GRO_CB(held_skb)->count++;
+                h_held->gro_count++;
+
+                if (h_held->gro_count >= homa->max_gro_skbs)
+                        result = held_skb;
+
+                goto done;
+        }
+
+        if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
+                homa_set_softirq_cpu(skb, smp_processor_id());
 
 done:
-	homa_pacer_check(homa->pacer);
-	homa_qdisc_pacer_check(homa);
-	offload_core->last_gro = homa_clock();
-	return result;
+        homa_pacer_check(homa->pacer);
+        homa_qdisc_pacer_check(homa);
+        offload_core->last_gro = homa_clock();
+        return result;
 
 bypass:
-	/* Record SoftIRQ cycles in a different metric to reflect that
-	 * they happened during bypass.
-	 */
-	softirq_cycles_metric = &homa_metrics_per_cpu()->softirq_cycles;
-	saved_softirq_metric = *softirq_cycles_metric;
-	homa_softirq(skb);
-	softirq_cycles = *softirq_cycles_metric - saved_softirq_metric;
-	*softirq_cycles_metric = saved_softirq_metric;
-	INC_METRIC(bypass_softirq_cycles, softirq_cycles);
-	offload_core->last_gro = homa_clock();
+        softirq_cycles_metric = &homa_metrics_per_cpu()->softirq_cycles;
+        saved_softirq_metric = *softirq_cycles_metric;
+        homa_softirq(skb);
+        softirq_cycles = *softirq_cycles_metric - saved_softirq_metric;
+        *softirq_cycles_metric = saved_softirq_metric;
+        INC_METRIC(bypass_softirq_cycles, softirq_cycles);
+        offload_core->last_gro = homa_clock();
 
-	/* This return value indicates that we have freed skb. */
-	return ERR_PTR(-EINPROGRESS);
+        return ERR_PTR(-EINPROGRESS);
 }
+
 
 /**
  * homa_gro_gen2() - When the Gen2 load balancer is being used this function
