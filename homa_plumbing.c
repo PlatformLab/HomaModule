@@ -1769,7 +1769,6 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	__poll_t mask;
 
 	mask = 0;
-	//sock_poll_wait(file, sk_sleep(sock->sk), wait);
 	sock_poll_wait(file, sock, wait);
 	tt_record2("homa_poll found sk_wmem_alloc %d, sk_sndbuf %d",
 		   refcount_read(&hsk->sock.sk_wmem_alloc),
