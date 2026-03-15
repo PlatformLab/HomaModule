@@ -1681,7 +1681,6 @@ discard:
  * @skb:   The incoming packet.
  * @info:  Information about the error that occurred?
  */
-//void homa_err_handler_v4(struct sk_buff *skb, u32 info)
 int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
 	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
@@ -1727,7 +1726,6 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
  * @offset: Not used.
  * @info:   Information about the error that occurred?
  */
-//void homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			u8 type,  u8 code,  int offset,  __be32 info)
 {

@@ -137,7 +137,6 @@ void homa_gro_unhook_tcp(void)
  *              held for possible GRO merging.
  * @skb:        The newly arrived packet.
  */
-//struct sk_buff **homa_tcp_gro_receive(struct sk_buff **gro_list,
 struct sk_buff *homa_tcp_gro_receive(struct list_head *gro_list,
 				      struct sk_buff *skb)
 {
@@ -278,6 +277,16 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
  */
 struct sk_buff *homa_gro_receive(struct list_head *gro_list, struct sk_buff *skb)
 {
+	/* This function will do one of the following things:
+	 * 1. Merge skb with a packet in gro_list by appending it to
+	 *    the frag_list of that packet.
+	 * 2. Set NAPI_GRO_CB(skb)->flush, indicating that skb is not a
+	 *    candidate for merging and should be passed up the networking
+	 *    stack immediately.
+	 * 3. Leave skb untouched, in which case it will be added to
+	 *    gro_list by the caller, so it will be considered for merges
+	 *    in the future.
+	 */
         struct homa *homa = homa_net(dev_net(skb->dev))->homa;
         u64 saved_softirq_metric, softirq_cycles;
         struct homa_offload_core *offload_core;

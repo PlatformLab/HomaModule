@@ -715,8 +715,6 @@ int      homa_copy_to_user(struct homa_rpc *rpc);
 void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_destroy(struct homa *homa);
 void     homa_dispatch_pkts(struct sk_buff *skb);
-//void     homa_err_handler_v4(struct sk_buff *skb, u32 info);
-//void     homa_err_handler_v6(struct sk_buff *skb,
 int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
 int      homa_err_handler_v6(struct sk_buff *skb,
 			     struct inet6_skb_parm *opt, u8 type,  u8 code,
