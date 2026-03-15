@@ -697,11 +697,13 @@ void __exit homa_unload(void)
 
 #ifndef __STRIP__ /* See strip.py */
 	homa_gro_unhook_tcp();
+#endif /* See strip.py */
 	if (timer_kthread) {
 		timer_thread_exit = 1;
 		wake_up_process(timer_kthread);
 		wait_for_completion(&timer_thread_done);
 	}
+#ifndef __STRIP__ /* See strip.py */
 	homa_qdisc_unregister();
 	if (homa_offload_end() != 0)
 		pr_err("Homa couldn't stop offloads\n");
@@ -1680,8 +1682,10 @@ discard:
  *          the ICMP header (the first byte of the embedded packet IP header).
  * @skb:   The incoming packet.
  * @info:  Information about the error that occurred?
+ *
+ * Return: zero, or a negative errno if the error couldn't be handled here.
  */
-void homa_err_handler_v4(struct sk_buff *skb, u32 info)
+int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
 	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
 	const struct icmphdr *icmp = icmp_hdr(skb);
@@ -1711,6 +1715,8 @@ void homa_err_handler_v4(struct sk_buff *skb, u32 info)
 	}
 	if (error != 0)
 		homa_abort_rpcs(homa, &daddr, port, error);
+
+	return 0;
 }
 
 /**
@@ -1723,8 +1729,10 @@ void homa_err_handler_v4(struct sk_buff *skb, u32 info)
  * @code:   Additional information about the error.
  * @offset: Not used.
  * @info:   Information about the error that occurred?
+ *
+ * Return: zero, or a negative errno if the error couldn't be handled here.
  */
-void homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
+int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			u8 type,  u8 code,  int offset,  __be32 info)
 {
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
@@ -1745,6 +1753,8 @@ void homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	}
 	if (error != 0)
 		homa_abort_rpcs(homa, &iph->daddr, port, error);
+
+	return 0;
 }
 
 /**
@@ -1765,7 +1775,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	__poll_t mask;
 
 	mask = 0;
-	sock_poll_wait(file, sk_sleep(sock->sk), wait);
+	sock_poll_wait(file, sock, wait);
 	tt_record2("homa_poll found sk_wmem_alloc %d, sk_sndbuf %d",
 		   refcount_read(&hsk->sock.sk_wmem_alloc),
 		   hsk->sock.sk_sndbuf);
