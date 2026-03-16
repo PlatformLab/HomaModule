@@ -77,7 +77,9 @@ CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o homa_grant.o \
 CP_EXTRAS := Kconfig \
 	     Makefile
 CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS) $(CP_EXTRAS))
-net-next: $(CP_TARGETS) $(LINUX_SRC_DIR)/include/uapi/linux/homa.h
+net-next: $(HOMA_TARGET) $(CP_TARGETS) $(LINUX_SRC_DIR)/include/uapi/linux/homa.h
+$(HOMA_TARGET):
+	mkdir $(HOMA_TARGET)
 $(HOMA_TARGET)/%: % util/strip.py
 	util/strip.py $< > $@
 $(HOMA_TARGET)/%.txt: %.txt
