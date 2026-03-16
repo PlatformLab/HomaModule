@@ -20,7 +20,7 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa)
 	struct homa_pacer *pacer;
 	int err;
 
-	pacer = kzalloc(sizeof(*pacer), GFP_KERNEL);
+	pacer = kzalloc_obj(*pacer, GFP_KERNEL);
 	if (!pacer)
 		return ERR_PTR(-ENOMEM);
 	pacer->homa = homa;

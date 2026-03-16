@@ -438,7 +438,7 @@ static inline bool homa_qdisc_precedes(struct homa_rpc *rpc1,
  * homa_qdisc_bytes_pending() - Return the total number of bytes in skbs
  * that have been enqueued in the NIC for transmission via a given queue
  * but have not yet been returned after transmission.
- * @q:    Return the pending bytes for the devqueue asssociated with
+ * @q:    Return the pending bytes for the devqueue associated with
  *        this qdisc.
  * Return:   See above
  */

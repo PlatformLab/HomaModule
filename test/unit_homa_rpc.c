@@ -729,24 +729,6 @@ TEST_F(homa_rpc, homa_rpc_reap__release_buffers)
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
 	EXPECT_EQ(1, self->hsk.buffer_pool->check_waiting_invoked);
 }
-TEST_F(homa_rpc, homa_rpc_reap__free_gaps)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
-			4000, 98, 1000,	150000);
-
-	ASSERT_NE(NULL, crpc);
-	homa_gap_alloc(&crpc->msgin.gaps, 1000, 2000);
-	mock_clock = 1000;
-	homa_gap_alloc(&crpc->msgin.gaps, 5000, 6000);
-
-	EXPECT_STREQ("start 1000, end 2000; start 5000, end 6000, time 1000",
-			unit_print_gaps(crpc));
-	homa_rpc_end(crpc);
-	self->homa.reap_limit = 5;
-	homa_rpc_reap(&self->hsk, false);
-	// Test framework will complain if memory not freed.
-}
 TEST_F(homa_rpc, homa_rpc_reap__release_peer_ref)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

@@ -88,7 +88,7 @@ struct homa_grant *homa_grant_alloc(struct homa *homa)
 	struct homa_grant *grant;
 	int err;
 
-	grant = kzalloc(sizeof(*grant), GFP_KERNEL);
+	grant = kzalloc_obj(*grant, GFP_KERNEL);
 	if (!grant)
 		return ERR_PTR(-ENOMEM);
 	grant->homa = homa;

@@ -36,7 +36,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	struct homa_rpc *crpc;
 	int err;
 
-	crpc = kzalloc(sizeof(*crpc), GFP_KERNEL);
+	crpc = kzalloc_obj(*crpc, GFP_KERNEL);
 	if (unlikely(!crpc)) {
 		hsk->error_msg = "couldn't allocate memory for client RPC";
 		return ERR_PTR(-ENOMEM);
@@ -618,20 +618,6 @@ release:
 				homa_pool_release_buffers(rpc->hsk->buffer_pool,
 							  rpc->msgin.num_bpages,
 							  rpc->msgin.bpage_offsets);
-			if (rpc->msgin.length >= 0) {
-				while (1) {
-					struct homa_gap *gap;
-
-					gap = list_first_entry_or_null(
-							&rpc->msgin.gaps,
-							struct homa_gap,
-							links);
-					if (!gap)
-						break;
-					list_del(&gap->links);
-					kfree(gap);
-				}
-			}
 			if (rpc->peer) {
 				homa_peer_release(rpc->peer);
 				rpc->peer = NULL;

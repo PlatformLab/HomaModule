@@ -78,7 +78,7 @@ struct homa_peertab *homa_peer_alloc_peertab(void)
 	struct homa_peertab *peertab;
 	int err;
 
-	peertab = kzalloc(sizeof(*peertab), GFP_KERNEL);
+	peertab = kzalloc_obj(*peertab, GFP_KERNEL);
 	if (!peertab)
 		return ERR_PTR(-ENOMEM);
 
@@ -360,7 +360,7 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 	struct homa_peer *peer;
 	int status;
 
-	peer = kzalloc(sizeof(*peer), GFP_ATOMIC);
+	peer = kzalloc_obj(*peer, GFP_ATOMIC);
 	if (!peer) {
 		INC_METRIC(peer_kmalloc_errors, 1);
 		hsk->error_msg = "couldn't allocate memory for homa_peer";

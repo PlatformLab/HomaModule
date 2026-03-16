@@ -52,7 +52,7 @@ struct homa_pool *homa_pool_alloc(struct homa_sock *hsk)
 {
 	struct homa_pool *pool;
 
-	pool = kzalloc(sizeof(*pool), GFP_KERNEL);
+	pool = kzalloc_obj(*pool, GFP_KERNEL);
 	if (!pool)
 		return ERR_PTR(-ENOMEM);
 	pool->hsk = hsk;
