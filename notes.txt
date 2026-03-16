@@ -1,8 +1,6 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Remove trace/events/homa.h from linux-stable (and from timetrace.c)
-
 * (12/12/25) Something is wrong with the xl170 cluster: both Homa and TCP
   are showing considerably worse performance than previously. I tried multiple
   different clusters, and tried backing out to older versions of Homa and
