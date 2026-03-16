@@ -559,6 +559,7 @@ static inline void homa_set_hijack(struct homa_common_hdr *common)
 	common->urgent = htons(HOMA_TCP_URGENT);
 	common->doff = 0x50;
 }
+#endif /* See strip.py */
 
 /**
  * homa_get_offset() - Returns the offset within message of the first byte
@@ -569,9 +570,12 @@ static inline void homa_set_hijack(struct homa_common_hdr *common)
  */
 static inline int homa_get_offset(struct homa_data_hdr *h)
 {
+#ifndef __STRIP__ /* See strip.py */
 	return (h->seg.offset != -1) ? ntohl(h->seg.offset) :
 	       ntohl(h->common.sequence);
-}
+#else /* See strip.py */
+	return ntohl(h->seg.offset);
 #endif /* See strip.py */
+}
 
 #endif /* _HOMA_WIRE_H */
