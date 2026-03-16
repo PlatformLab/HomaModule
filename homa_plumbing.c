@@ -696,11 +696,13 @@ void __exit homa_unload(void)
 
 #ifndef __STRIP__ /* See strip.py */
 	homa_gro_unhook_tcp();
+#endif /* See strip.py */
 	if (timer_kthread) {
 		timer_thread_exit = 1;
 		wake_up_process(timer_kthread);
 		wait_for_completion(&timer_thread_done);
 	}
+#ifndef __STRIP__ /* See strip.py */
 	homa_qdisc_unregister();
 	if (homa_offload_end() != 0)
 		pr_err("Homa couldn't stop offloads\n");
