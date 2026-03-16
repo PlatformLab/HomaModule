@@ -510,7 +510,7 @@ static inline void homa_rpc_lock(struct homa_rpc *rpc)
  *             currently owned by someone else.
  */
 static inline int homa_rpc_try_lock(struct homa_rpc *rpc)
-	__cond_acquires(rpc->bucket->lock)
+	__cond_acquires(nonzero, rpc->bucket->lock)
 {
 	if (!spin_trylock_bh(&rpc->bucket->lock))
 		return 0;

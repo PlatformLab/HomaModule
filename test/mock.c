@@ -306,6 +306,8 @@ struct workqueue_struct *system_wq;
 struct static_key_true validate_usercopy_range;
 unsigned long __per_cpu_offset[NR_CPUS];
 struct tracepoint __tracepoint_sched_set_state_tp;
+struct workqueue_struct *system_percpu_wq;
+struct static_call_key __SCK__WARN_trap;
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 struct lockdep_map rcu_lock_map;
@@ -524,7 +526,6 @@ void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 		  enum hrtimer_mode mode)
 {
 	timer->base = &clock_base;
-	clock_base.get_time = &hrtimer_get_time;
 }
 
 void hrtimer_setup(struct hrtimer *timer,
@@ -532,7 +533,6 @@ void hrtimer_setup(struct hrtimer *timer,
 		   clockid_t clock_id, enum hrtimer_mode mode)
 {
 	timer->base = &clock_base;
-	clock_base.get_time = &hrtimer_get_time;
 	timer->function = function;
 }
 
@@ -540,8 +540,8 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode)
 {}
 
-void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
-		const struct ip_options *opt)
+void __icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info,
+		 const struct inet_skb_parm *parm)
 {
 	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
 }
@@ -649,7 +649,7 @@ int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
 	return 0;
 }
 
-int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
+int inet_dgram_connect(struct socket *sock, struct sockaddr_unsized *uaddr,
 		       int addr_len, int flags)
 {
 	return 0;
@@ -715,7 +715,8 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
-int ip6_datagram_connect(struct sock *sk, struct sockaddr *addr, int addr_len)
+int ip6_datagram_connect(struct sock *sk, struct sockaddr_unsized *addr,
+			 int addr_len)
 {
 	return 0;
 }
@@ -840,7 +841,7 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 	return route;
 }
 
-int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
+int ip4_datagram_connect(struct sock *sk, struct sockaddr_unsized *uaddr,
 		int addr_len)
 {
 	return 0;
@@ -985,7 +986,8 @@ void kvfree(const void *addr)
 	kfree(addr);
 }
 
-void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), gfp_t flags, int node)
+void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), unsigned long align,
+			     gfp_t flags, int node)
 {
 	return mock_kmalloc(size, flags);
 }
@@ -1071,8 +1073,7 @@ ssize_t __modver_version_show(const struct module_attribute *a,
 	return 0;
 }
 
-void __mutex_init(struct mutex *lock, const char *name,
-			 struct lock_class_key *key)
+void mutex_init_generic(struct mutex *lock)
 {}
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC

@@ -20,6 +20,12 @@
 
 #undef WARN_ON_ONCE
 #define WARN_ON_ONCE(condition) WARN_ON(condition)
+
+#undef WARN_ONCE
+/* This definition allows WARN_ONCE to be used both as a value and as
+ * a statement.
+ */
+#define WARN_ONCE(cond, ...) ({ bool __c = (cond); (void)__c; __c; })
 #endif /* __UNIT_TEST__ */
 
 #include <linux/audit.h>
@@ -704,7 +710,7 @@ extern unsigned int homa_net_id;
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);
 void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
-int      homa_bind(struct socket *sk, struct sockaddr *addr,
+int      homa_bind(struct socket *sk, struct sockaddr_unsized *addr,
 		   int addr_len);
 void     homa_close(struct sock *sock, long timeout);
 int      homa_copy_to_user(struct homa_rpc *rpc);

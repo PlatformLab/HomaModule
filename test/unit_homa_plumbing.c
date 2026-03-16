@@ -154,7 +154,8 @@ TEST_F(homa_plumbing, homa_bind__version_mismatch)
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	addr.sa_family = AF_INET6;
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr, sizeof(addr));
+	result = homa_bind(&sock, (struct sockaddr_unsized *)&addr,
+			   sizeof(addr));
 	EXPECT_EQ(EAFNOSUPPORT, -result);
 	EXPECT_STREQ("address family in bind address didn't match socket",
 		     self->hsk.error_msg);
@@ -172,7 +173,8 @@ TEST_F(homa_plumbing, homa_bind__ipv6_address_too_short)
 
 	addr.in6.sin6_family = AF_INET6;
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in6)-1);
+	result = homa_bind(&sock, (struct sockaddr_unsized *)&addr.sa,
+			   sizeof(addr.in6)-1);
 	EXPECT_EQ(EINVAL, -result);
 	EXPECT_STREQ("ipv6 address too short", self->hsk.error_msg);
 }
@@ -191,7 +193,8 @@ TEST_F(homa_plumbing, homa_bind__ipv6_ok)
 	addr.in6.sin6_family = AF_INET6;
 	addr.in6.sin6_port = htons(123);
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in6));
+	result = homa_bind(&sock, (struct sockaddr_unsized *)&addr.sa,
+			   sizeof(addr.in6));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(123, self->hsk.port);
 	EXPECT_EQ(1, self->hsk.is_server);
@@ -209,7 +212,8 @@ TEST_F(homa_plumbing, homa_bind__ipv4_address_too_short)
 
 	addr.in4.sin_family = AF_INET;
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in4)-1);
+	result = homa_bind(&sock, (struct sockaddr_unsized *)&addr.sa,
+			   sizeof(addr.in4)-1);
 	EXPECT_EQ(EINVAL, -result);
 	EXPECT_STREQ("ipv4 address too short", self->hsk.error_msg);
 }
@@ -228,7 +232,8 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 	addr.in4.sin_family = AF_INET;
 	addr.in4.sin_port = htons(345);
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in4));
+	result = homa_bind(&sock, (struct sockaddr_unsized *)&addr.sa,
+			   sizeof(addr.in4));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(345, self->hsk.port);
 	EXPECT_EQ(1, self->hsk.is_server);

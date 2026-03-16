@@ -37,7 +37,8 @@ endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS)
+CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -fms-extensions \
+		-std=gnu11 -g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
 
 TEST_SRCS :=  unit_homa_incoming.c \
