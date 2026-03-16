@@ -216,7 +216,7 @@ struct homa_qdisc_shared *homa_qdisc_shared_alloc(void)
 	qshared->homa_share = 50;
 	qshared->max_link_usage = 99;
 	qshared->sysctl_header = register_net_sysctl(&init_net, "net/homa",
-						   homa_qdisc_ctl_table);
+						     homa_qdisc_ctl_table);
 	if (!qshared->sysctl_header) {
 		pr_err("couldn't register sysctl parameters for Homa qdisc\n");
 		kfree(qshared);
@@ -544,7 +544,7 @@ enqueue:
 /**
  * homa_qdisc_can_bypass() - Determine whether it is OK to transmit a given
  * TCP packet before those already deferred for a qdisc.
- * @q:       New packet
+ * @skb:     New packet
  * @q:       Qdisc with deferred TCP packets
  * Return:   True if skb can be transmitted before the packets in @list
  *           without violating reordering rules.
@@ -568,9 +568,9 @@ bool homa_qdisc_can_bypass(struct sk_buff *skb, struct homa_qdisc *q)
 		if (ipv6_hdr(skb)->nexthdr != IPPROTO_TCP)
 			return false;
 		daddr = ipv6_hdr(skb)->daddr.in6_u.u6_addr32[0] ^
-		         ipv6_hdr(skb)->daddr.in6_u.u6_addr32[1] ^
-			 ipv6_hdr(skb)->daddr.in6_u.u6_addr32[2] ^
-			 ipv6_hdr(skb)->daddr.in6_u.u6_addr32[3];
+		        ipv6_hdr(skb)->daddr.in6_u.u6_addr32[1] ^
+			ipv6_hdr(skb)->daddr.in6_u.u6_addr32[2] ^
+			ipv6_hdr(skb)->daddr.in6_u.u6_addr32[3];
 	} else {
 		return false;
 	}
@@ -850,7 +850,7 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 		}
 		qdev->srpt_bytes += (qdisc_pkt_len(skb) *
 				     qdev->hnet->homa->qshared->fifo_weight) >>
-		                    HOMA_FIFO_WEIGHT_SHIFT;
+		                     HOMA_FIFO_WEIGHT_SHIFT;
 		INC_METRIC(pacer_fifo_bytes, qdisc_pkt_len(skb));
 	} else {
 		qdev->srpt_bytes -= qdisc_pkt_len(skb);
@@ -1156,8 +1156,8 @@ void homa_qdisc_pacer_check(struct homa *homa)
 int homa_qdisc_dointvec(const struct ctl_table *table, int write,
 			void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct ctl_table table_copy;
 	struct homa_qdisc_shared *qshared;
+	struct ctl_table table_copy;
 	int result;
 
 	qshared = homa_net(current->nsproxy->net_ns)->homa->qshared;

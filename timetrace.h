@@ -81,6 +81,7 @@ struct tt_buffer {
 /**
  * tt_get_buf_index() - Returns the current position in a tt_buffer
  * (masks off potentially garbage high-order bits)
+ * @buffer:   Buffer in question.
  */
 static inline int tt_get_buf_index(struct tt_buffer *buffer)
 {
