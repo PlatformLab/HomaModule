@@ -16,7 +16,7 @@ struct homa_rpc;
 
 /**
  * struct homa_peertab - Stores homa_peer objects, indexed by IPv6
- * address.
+ * address. There is one of these per struct homa.
  */
 struct homa_peertab {
 	/**

@@ -581,8 +581,8 @@ static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
  */
 static inline void homa_set_doff(struct homa_data_hdr *h, int size)
 {
-	/* Drop the 2 low-order bits from size and set the 4 high-order
-	 * bits of doff from what's left.
+	/* This fills in the high-order 4 bits of doff with the number of
+	 * words in the neader.
 	 */
 	h->common.doff = size << 2;
 }
