@@ -86,6 +86,7 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 int      homa_offload_end(void);
 int      homa_offload_init(void);
 void     homa_send_ipis(void);
+void     homa_set_softirq_cpu(struct sk_buff *skb, int cpu);
 #ifndef __STRIP__ /* See strip.py */
 struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 				     struct sk_buff *skb);
