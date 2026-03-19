@@ -199,7 +199,7 @@ int homa_peer_prefer_evict(struct homa_peertab *peertab,
 			   struct homa_peer *peer2)
 {
 	/* Prefer a peer whose homa-net is over its limit; if both are either
-	 * over or under, then prefer the peer with the shortest idle time.
+	 * over or under, then prefer the peer with the longest idle time.
 	 */
 	if (peer1->ht_key.hnet->num_peers > peertab->net_max) {
 		if (peer2->ht_key.hnet->num_peers <= peertab->net_max)
