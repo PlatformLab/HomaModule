@@ -521,7 +521,7 @@ TEST_F(homa_pool, homa_pool_get_buffer__bad_offset)
 	EXPECT_EQ(0, available);
 }
 
-TEST_F(homa_pool, homa_pool_release_buffers__basics)
+TEST_F(homa_pool, homa_pool_free_bufs__basics)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc1, *crpc2;
@@ -539,8 +539,8 @@ TEST_F(homa_pool, homa_pool_release_buffers__basics)
 	EXPECT_EQ(3, atomic_read(&pool->descriptors[2].refs));
 	EXPECT_EQ(97, atomic_read(&pool->free_bpages));
 
-	homa_pool_release_buffers(pool, crpc1->msgin.num_bpages,
-			crpc1->msgin.bpage_offsets);
+	homa_pool_free_bufs(pool, crpc1->msgin.num_bpages,
+			    crpc1->msgin.bpage_offsets);
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
 	EXPECT_EQ(2, atomic_read(&pool->descriptors[2].refs));
@@ -549,17 +549,17 @@ TEST_F(homa_pool, homa_pool_release_buffers__basics)
 	/* Ignore requests if pool not initialized. */
 	saved_region = pool->region;
 	pool->region = NULL;
-	homa_pool_release_buffers(pool, crpc1->msgin.num_bpages,
-			crpc1->msgin.bpage_offsets);
+	homa_pool_free_bufs(pool, crpc1->msgin.num_bpages,
+			    crpc1->msgin.bpage_offsets);
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
 	pool->region = saved_region;
 }
-TEST_F(homa_pool, homa_pool_release_buffers__bogus_offset)
+TEST_F(homa_pool, homa_pool_free_bufs__bogus_offset)
 {
 	u32 buffer = self->hsk.buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
 
-	EXPECT_EQ(EINVAL, -homa_pool_release_buffers(self->hsk.buffer_pool,
-						       1, &buffer));
+	EXPECT_EQ(EINVAL, -homa_pool_free_bufs(self->hsk.buffer_pool, 1,
+					       &buffer));
 }
 
 TEST_F(homa_pool, homa_pool_check_waiting__basics)
