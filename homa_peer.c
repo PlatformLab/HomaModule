@@ -127,9 +127,6 @@ void homa_peer_free_net(struct homa_net *hnet)
 	struct homa_peer *peer;
 
 	spin_lock_bh(&peertab->lock);
-	peertab->gc_stop_count++;
-	spin_unlock_bh(&peertab->lock);
-
 	rhashtable_walk_enter(&peertab->ht, &iter);
 	rhashtable_walk_start(&iter);
 	while (1) {
@@ -151,9 +148,6 @@ void homa_peer_free_net(struct homa_net *hnet)
 	rhashtable_walk_exit(&iter);
 	WARN(hnet->num_peers != 0, "%s ended up with hnet->num_peers %d",
 	     __func__, hnet->num_peers);
-
-	spin_lock_bh(&peertab->lock);
-	peertab->gc_stop_count--;
 	spin_unlock_bh(&peertab->lock);
 }
 
@@ -173,14 +167,11 @@ void homa_peer_release_fn(void *object, void *dummy)
 
 /**
  * homa_peer_free_peertab() - Destructor for homa_peertabs.
- * @peertab:  The table to destroy.
+ * @peertab:  The table to destroy. Caller must ensure that it will never
+ *            be accessed again.
  */
 void homa_peer_free_peertab(struct homa_peertab *peertab)
 {
-	spin_lock_bh(&peertab->lock);
-	peertab->gc_stop_count++;
-	spin_unlock_bh(&peertab->lock);
-
 	if (peertab->ht_valid) {
 		rhashtable_walk_exit(&peertab->ht_iter);
 		rhashtable_free_and_destroy(&peertab->ht, homa_peer_release_fn,
@@ -319,8 +310,6 @@ void homa_peer_gc(struct homa_peertab *peertab)
 	int i;
 
 	spin_lock_bh(&peertab->lock);
-	if (peertab->gc_stop_count != 0)
-		goto done;
 	if (peertab->num_peers < peertab->gc_threshold)
 		goto done;
 	num_victims = homa_peer_pick_victims(peertab, victims,

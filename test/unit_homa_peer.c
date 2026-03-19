@@ -73,14 +73,6 @@ static void peer_race_hook(char *id)
 	jiffies += 10;
 }
 
-static struct homa_peertab *hook_peertab;
-static void stop_gc_hook(char *id)
-{
-	if (strcmp(id, "kfree") != 0)
-		return;
-	unit_log_printf("; ", "gc_stop_count %d", hook_peertab->gc_stop_count);
-}
-
 TEST_F(homa_peer, homa_peer_alloc_peertab__success)
 {
 	struct homa_peertab *peertab;
@@ -146,23 +138,6 @@ TEST_F(homa_peer, homa_peer_free_net__basics)
 	homa_peer_free_net(self->hnet);
 	EXPECT_EQ(1, unit_count_peers(&self->homa));
 	EXPECT_EQ(1, self->homa.peertab->num_peers);
-}
-TEST_F(homa_peer, homa_peer_free_net__set_gc_stop_count)
-{
-	struct homa_peer *peer;
-
-	peer = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peer);
-
-	unit_hook_register(stop_gc_hook);
-	hook_peertab = self->homa.peertab;
-	unit_log_clear();
-	self->homa.peertab->gc_stop_count = 3;
-
-	homa_peer_free_net(self->hnet);
-	EXPECT_EQ(0, unit_count_peers(&self->homa));
-	EXPECT_SUBSTR("gc_stop_count 4", unit_log_get());
-	EXPECT_EQ(3, self->homa.peertab->gc_stop_count);
 }
 
 TEST_F(homa_peer, homa_peer_release_fn)
@@ -415,25 +390,6 @@ TEST_F(homa_peer, homa_peer_gc__basics)
 	EXPECT_STREQ("call_rcu invoked", unit_log_get());
 	EXPECT_EQ(0, self->hnet->num_peers);
 	EXPECT_EQ(peertab->gc_threshold - 1, peertab->num_peers);
-}
-TEST_F(homa_peer, homa_peer_gc__gc_stop_count)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peer;
-
-	jiffies = 300;
-	peer = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peer);
-	EXPECT_EQ(1, self->hnet->num_peers);
-
-	jiffies = peertab->idle_jiffies_max + 1000;
-	peertab->num_peers = peertab->gc_threshold;
-	peertab->gc_stop_count = 1;
-
-	unit_log_clear();
-	homa_peer_gc(peertab);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1, self->hnet->num_peers);
 }
 TEST_F(homa_peer, homa_peer_gc__peers_below_gc_threshold)
 {
