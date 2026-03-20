@@ -1401,7 +1401,6 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	} else {
 		result = rpc->msgin.length;
 	}
-	result = rpc->error ? rpc->error : rpc->msgin.length;
 
 #ifndef __STRIP__ /* See strip.py */
 	/* Generate time traces on both ends for long elapsed times (used
