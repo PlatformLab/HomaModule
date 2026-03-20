@@ -1964,7 +1964,7 @@ done:
  * wake up the timer thread. Runs at IRQ level.
  * @timer:   The timer that triggered; not used.
  *
- * Return:   Always HRTIMER_RESTART.
+ * Return:   Always HRTIMER_NORESTART.
  */
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 {
