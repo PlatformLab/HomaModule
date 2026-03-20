@@ -538,9 +538,10 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	IF_NO_STRIP(homa_set_hijack(&unknown.common));
 	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
 	peer = homa_peer_get(hsk, &saddr);
-	if (!IS_ERR(peer))
+	if (!IS_ERR(peer)) {
 		__homa_xmit_control(&unknown, sizeof(unknown), peer, hsk);
-	homa_peer_release(peer);
+		homa_peer_release(peer);
+	}
 }
 
 #ifndef __STRIP__ /* See strip.py */

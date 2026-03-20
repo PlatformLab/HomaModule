@@ -748,7 +748,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors);
 }
 
-TEST_F(homa_outgoing, homa_xmit_unknown)
+TEST_F(homa_outgoing, homa_xmit_unknown__basics)
 {
 	struct homa_grant_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
@@ -762,6 +762,21 @@ TEST_F(homa_outgoing, homa_xmit_unknown)
 	homa_xmit_unknown(skb, &self->hsk);
 	EXPECT_STREQ("xmit RPC_UNKNOWN from 0.0.0.0:99, dport 40000, id 99991",
 			unit_log_get());
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_xmit_unknown__cant_find_peer)
+{
+	struct homa_grant_hdr h = {{.sport = htons(self->client_port),
+			.dport = htons(self->server_port),
+			.sender_id = cpu_to_be64(99990),
+			.type = GRANT},
+			.offset = htonl(11200)};
+	struct sk_buff *skb;
+
+	mock_kmalloc_errors = 1;
+	skb = mock_skb_alloc(self->client_ip, &h.common, 0, 0);
+	homa_xmit_unknown(skb, &self->hsk);
+	EXPECT_STREQ("", unit_log_get());
 	kfree_skb(skb);
 }
 #endif /* See strip.py */
