@@ -633,7 +633,7 @@ TEST_F(homa_plumbing, homa_getsockopt__bad_level)
 
 	EXPECT_EQ(ENOPROTOOPT, -homa_getsockopt(&self->hsk.sock, 0, SO_HOMA_RCVBUF,
 		(char *)&val, &size));
-	EXPECT_STREQ("homa_setsockopt invoked with level not IPPROTO_HOMA",
+	EXPECT_STREQ("homa_getsockopt invoked with level not IPPROTO_HOMA",
 		     self->hsk.error_msg);
 }
 TEST_F(homa_plumbing, homa_getsockopt__recvbuf_bad_length)

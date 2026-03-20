@@ -1082,7 +1082,7 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 	}
 
 	if (level != IPPROTO_HOMA) {
-		hsk->error_msg = "homa_setsockopt invoked with level not IPPROTO_HOMA";
+		hsk->error_msg = "homa_getsockopt invoked with level not IPPROTO_HOMA";
 		return -ENOPROTOOPT;
 	}
 	if (optname == SO_HOMA_RCVBUF) {
