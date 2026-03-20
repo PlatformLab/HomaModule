@@ -420,6 +420,7 @@ void homa_freeze_peers(void)
 		goto done;
 	}
 
+	memset(&freeze, 0, sizeof(freeze));
 	freeze.common.type = FREEZE;
 	freeze.common.sport = htons(hsk->port);
 	freeze.common.dport = 0;

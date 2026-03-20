@@ -425,6 +425,7 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 {
 	struct homa_common_hdr *h = contents;
 
+	memset(h, 0, sizeof(*h));
 	h->type = type;
 	h->sport = htons(rpc->hsk->port);
 	h->dport = htons(rpc->dport);
@@ -530,6 +531,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	tt_record3("sending unknown to 0x%x:%d for id %llu",
 		   tt_addr(saddr), ntohs(h->sport),
 		   homa_local_id(h->sender_id));
+	memset(&unknown, 0, sizeof(unknown));
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
 	unknown.common.type = RPC_UNKNOWN;

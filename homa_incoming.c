@@ -851,7 +851,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end);
 #endif /* See strip.py */
 
-	if (offset >= tx_end)  {
+	if (offset >= tx_end) {
 		/* We have chosen not to transmit any of the requested data;
 		 * send BUSY so the receiver knows we are alive.
 		 */
@@ -991,6 +991,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	 * other acks available for the peer. Note: can't use rpc below,
 	 * since it may be NULL.
 	 */
+	memset(&ack, 0, sizeof(ack));
 	ack.common.type = ACK;
 	ack.common.sport = h->dport;
 	ack.common.dport = h->sport;
