@@ -1033,6 +1033,8 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	}
 
 	count = ntohs(h->num_acks);
+	if (count > HOMA_MAX_ACKS_PER_PKT)
+		count = HOMA_MAX_ACKS_PER_PKT;
 	if (count > 0) {
 		if (rpc) {
 			/* Must temporarily release rpc's lock because
