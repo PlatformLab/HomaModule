@@ -889,6 +889,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		hsk->error_msg = "socket has been shut down";
 		return -ESHUTDOWN;
 	}
+	rcu_read_lock();
 	hinfo.bpool_avail_bytes = homa_pool_avail_bytes(hsk->buffer_pool);
 	hinfo.port = hsk->port;
 	dst = (char *)hinfo.rpc_info;
@@ -905,6 +906,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		if (dst && bytes_avl >= sizeof(rinfo)) {
 			if (copy_to_user((void __user *)dst, &rinfo,
 					 sizeof(rinfo))) {
+				rcu_read_unlock();
 				homa_unprotect_rpcs(hsk);
 				hsk->error_msg = "couldn't copy homa_rpc_info to user space: invalid or read-only address?";
 				return -EFAULT;
@@ -914,6 +916,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		}
 		hinfo.num_rpcs++;
 	}
+	rcu_read_unlock();
 	homa_unprotect_rpcs(hsk);
 
 	if (hsk->error_msg)
