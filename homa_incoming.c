@@ -252,6 +252,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		gap->start = end;
 		goto keep;
 	}
+	/* Packet doesn't overlap any gap, so it is a duplicate. */
+	reason = SKB_DROP_REASON_DUP_FRAG;
 
 discard:
 #ifndef __STRIP__ /* See strip.py */
