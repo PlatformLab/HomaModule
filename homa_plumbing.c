@@ -976,15 +976,7 @@ int homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
  */
 int homa_socket(struct sock *sk)
 {
-	struct homa_sock *hsk = homa_sk(sk);
-	int result;
-
-	result = homa_sock_init(hsk);
-	if (result != 0) {
-		homa_sock_shutdown(hsk);
-		homa_sock_destroy(&hsk->sock);
-	}
-	return result;
+	return homa_sock_init(homa_sk(sk));
 }
 
 /**
