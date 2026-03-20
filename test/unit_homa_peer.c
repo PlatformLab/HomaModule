@@ -523,6 +523,50 @@ TEST_F(homa_peer, homa_peer_get__basics)
 	homa_peer_release(peer);
 	homa_peer_release(peer2);
 }
+
+struct homa_peer *hook_peer;
+struct homa_peertab *hook_peertab;
+static void gc_hook(char *id)
+{
+	if (strcmp(id, "spin_lock") != 0 || !hook_peer)
+		return;
+
+	/* Restore the peer's refererence count to 1. */
+	refcount_inc(&hook_peer->refs);
+
+	/* Make sure the peer will be garbage-collected. */
+	hook_peertab->gc_threshold = 0;
+	hook_peertab->idle_jiffies_min = 0;
+	hook_peertab->idle_jiffies_max = 0;
+	homa_peer_gc(hook_peertab);
+	hook_peer = NULL;
+}
+TEST_F(homa_peer, homa_peer_get__race_with_homa_peer_release)
+{
+	struct homa_peer *peer, *peer2;
+
+	/* Create peer, then release so refcount is 1. */
+	peer = homa_peer_get(&self->hsk, ip1111);
+	ASSERT_FALSE(IS_ERR(peer));
+	homa_peer_release(peer);
+	EXPECT_EQ(1, refcount_read(&peer->refs));
+
+	/* Artificially reduce reference count to 0 so refcount_inc_not_zero
+	 * will fail in homa_peer_get, and arrange for gc to remove the peer
+	 * when homa_peer_get acquires the spinlock.
+	 */
+	refcount_dec(&peer->refs);
+	unit_hook_register(gc_hook);
+	hook_peer = peer;
+	hook_peertab = self->homa.peertab;
+
+	/* Try to get the same peer; make sure that a different peer is
+	 * returned.
+	 */
+	peer2 = homa_peer_get(&self->hsk, ip1111);
+	EXPECT_NE(peer, peer2);
+	homa_peer_release(peer2);
+}
 TEST_F(homa_peer, homa_peer_get__error_in_homa_peer_alloc)
 {
 	struct homa_peer *peer;

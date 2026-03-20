@@ -390,7 +390,7 @@ void homa_peer_free(struct rcu_head *head)
 	struct homa_peer *peer;
 
 	peer = container_of(head, struct homa_peer, rcu_head);
-	dst_release(rcu_dereference(peer->dst));
+	dst_release(rcu_dereference_protected(peer->dst, 1));
 	kfree(peer);
 }
 
@@ -417,8 +417,7 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 	key.hnet = hsk->hnet;
 	rcu_read_lock();
 	peer = rhashtable_lookup(&peertab->ht, &key, ht_params);
-	if (peer) {
-		homa_peer_hold(peer);
+	if (peer && refcount_inc_not_zero(&peer->refs)) {
 		peer->access_jiffies = jiffies;
 		rcu_read_unlock();
 		return peer;
@@ -442,11 +441,11 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 		 * one instead of ours.
 		 */
 		homa_peer_release(peer);
-		homa_peer_hold(other);
+		refcount_inc(&other->refs);
 		peer = other;
 		peer->access_jiffies = jiffies;
 	} else {
-		homa_peer_hold(peer);
+		refcount_inc(&peer->refs);
 		peertab->num_peers++;
 		key.hnet->num_peers++;
 	}

@@ -132,8 +132,9 @@ struct homa_peer {
 	/**
 	 * @refs: Number of outstanding references to this peer. Includes
 	 * one reference for the entry in peertab->ht, plus one for each
-	 * unmatched call to homa_peer_hold; the peer gets freed when
-	 * this value becomes zero.
+	 * call to homa_peer_get that has not been canceled by a call to
+	 * homa_peer_release; the peer gets freed when this value becomes
+	 * zero.
 	 */
 	refcount_t refs;
 
@@ -344,16 +345,6 @@ static inline void homa_peer_unlock(struct homa_peer *peer)
 	__releases(peer->lock)
 {
 	spin_unlock_bh(&peer->lock);
-}
-
-/**
- * homa_peer_hold() - Increment the reference count on an RPC, which will
- * prevent it from being freed until homa_peer_release() is called.
- * @peer:      Object on which to take a reference.
- */
-static inline void homa_peer_hold(struct homa_peer *peer)
-{
-	refcount_inc(&peer->refs);
 }
 
 /**
