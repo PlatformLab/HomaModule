@@ -131,8 +131,8 @@ struct homa_common_hdr {
 	 * in a homa_data_hdr; used by TSO to determine where the replicated
 	 * header portion ends. For other packets the offset is always 5
 	 * (standard TCP header length); other values may cause some NICs
-	 * (such as Intel E810-C) to drop outgoing packets when TCP hijacking
-	 * is enabled. The low-order bits are always 0.
+	 * (such as Intel E810-C) to drop outgoing data packets when TCP
+	 * hijacking is enabled. The low-order bits are always 0.
 	 */
 	u8 doff;
 
