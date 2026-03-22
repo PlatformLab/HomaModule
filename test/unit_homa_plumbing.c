@@ -960,7 +960,7 @@ TEST_F(homa_plumbing, homa_recvmsg__wrong_args_length)
 {
 	self->recvmsg_hdr.msg_controllen -= 1;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_STREQ("invalid msg_controllen in recvmsg",
 		     self->hsk.error_msg);
 }
@@ -968,7 +968,7 @@ TEST_F(homa_plumbing, homa_recvmsg__cant_read_args)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_STREQ("invalid address for msg_control argument to recvmsg",
 		     self->hsk.error_msg);
 }
@@ -979,21 +979,21 @@ TEST_F(homa_plumbing, homa_recvmsg__clear_cookie)
 	self->recvmsg_args.completion_cookie = 12345;
 	self->recvmsg_args.num_bpages = 1000000;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_EQ(0, self->recvmsg_args.completion_cookie);
 }
 TEST_F(homa_plumbing, homa_recvmsg__num_bpages_too_large)
 {
 	self->recvmsg_args.num_bpages = HOMA_MAX_BPAGES + 1;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_STREQ("num_pages exceeds HOMA_MAX_BPAGES", self->hsk.error_msg);
 }
 TEST_F(homa_plumbing, homa_recvmsg__reserved_not_zero)
 {
 	self->recvmsg_args.reserved = 1;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_STREQ("reserved fields in homa_recvmsg_args must be zero",
 		     self->hsk.error_msg);
 }
@@ -1003,7 +1003,7 @@ TEST_F(homa_plumbing, homa_recvmsg__no_buffer_pool)
 
 	self->hsk.buffer_pool = NULL;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_STREQ("SO_HOMA_RECVBUF socket option has not been set",
 		     self->hsk.error_msg);
 	self->hsk.buffer_pool = saved_pool;
@@ -1019,7 +1019,7 @@ TEST_F(homa_plumbing, homa_recvmsg__release_buffers)
 	self->recvmsg_args.bpage_offsets[1] = HOMA_BPAGE_SIZE;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[1].refs));
 }
@@ -1030,7 +1030,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_in_release_buffers)
 			self->hsk.buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
 
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT));
 	EXPECT_STREQ("error while releasing buffer pages",
 		     self->hsk.error_msg);
 }
@@ -1039,7 +1039,7 @@ TEST_F(homa_plumbing, homa_recvmsg__private_rpc_doesnt_exist)
 	self->recvmsg_args.id = 99;
 
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_STREQ("invalid RPC id passed to recvmsg",
 		     self->hsk.error_msg);
 }
@@ -1055,7 +1055,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_private)
 	self->recvmsg_args.id = crpc->id;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT));
 	EXPECT_STREQ("error while waiting for private RPC to complete",
 		     self->hsk.error_msg);
 	EXPECT_EQ(0, self->recvmsg_args.id);
@@ -1074,7 +1074,7 @@ TEST_F(homa_plumbing, homa_recvmsg__private_rpc_has_error)
 	self->recvmsg_args.id = crpc->id;
 
 	EXPECT_EQ(ETIMEDOUT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT));
 	EXPECT_STREQ("RPC failed", self->hsk.error_msg);
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -1082,7 +1082,7 @@ TEST_F(homa_plumbing, homa_recvmsg__private_rpc_has_error)
 TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_shared)
 {
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT));
 	EXPECT_STREQ("error while waiting for shared RPC to complete",
 		     self->hsk.error_msg);
 }
@@ -1095,8 +1095,7 @@ TEST_F(homa_plumbing, homa_recvmsg__MSG_DONT_WAIT)
 	EXPECT_NE(NULL, crpc);
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk,
-			&self->recvmsg_hdr, 0, MSG_DONTWAIT,
-			&self->recvmsg_hdr.msg_namelen));
+			&self->recvmsg_hdr, 0, MSG_DONTWAIT));
 	EXPECT_STREQ("error while waiting for shared RPC to complete",
 		     self->hsk.error_msg);
 }
@@ -1119,7 +1118,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	crpc->completion_cookie = 44444;
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(44444, self->recvmsg_args.completion_cookie);
 	EXPECT_EQ(AF_INET, self->addr.in4.sin_family);
@@ -1150,7 +1149,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 	crpc->completion_cookie = 44444;
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(44444, self->recvmsg_args.completion_cookie);
 	EXPECT_EQ(AF_INET6, self->addr.in6.sin6_family);
@@ -1173,8 +1172,7 @@ TEST_F(homa_plumbing, homa_recvmsg__rpc_has_error)
 	homa_rpc_abort(crpc, -ETIMEDOUT);
 
 	EXPECT_EQ(ETIMEDOUT, -homa_recvmsg(&self->hsk.inet.sk,
-			&self->recvmsg_hdr, 0, 0,
-			&self->recvmsg_hdr.msg_namelen));
+			&self->recvmsg_hdr, 0, 0));
 	EXPECT_STREQ("RPC failed", self->hsk.error_msg);
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(44444, self->recvmsg_args.completion_cookie);
@@ -1197,7 +1195,7 @@ TEST_F(homa_plumbing, homa_recvmsg__add_ack)
 
 	peer = crpc->peer;
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_EQ(1, peer->num_acks);
 }
 TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
@@ -1208,7 +1206,7 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 
 	EXPECT_NE(NULL, srpc);
 	EXPECT_EQ(100, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
 	EXPECT_EQ(0, srpc->peer->num_acks);
@@ -1224,7 +1222,7 @@ TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
 	srpc->error = -ENOMEM;
 
 	EXPECT_EQ(ENOMEM, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -1244,7 +1242,7 @@ TEST_F(homa_plumbing, homa_recvmsg__reap_because_of_SOCK_NOSPACE)
 
 	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
 	EXPECT_EQ(0, self->hsk.dead_skbs);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls));
@@ -1260,7 +1258,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_args)
 	mock_copy_to_user_errors = 1;
 
 	EXPECT_EQ(EFAULT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0));
 	EXPECT_STREQ("couldn't update homa_recvmsg_args argument to recvmsg: read-only?",
 		     self->hsk.error_msg);
 	EXPECT_EQ(0, self->recvmsg_args.id);
@@ -1277,7 +1275,7 @@ TEST_F(homa_plumbing, homa_recvmsg__copy_back_args_even_after_error)
 	self->recvmsg_args.bpage_offsets[1] = HOMA_BPAGE_SIZE;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT));
 	EXPECT_EQ(0, self->recvmsg_args.num_bpages);
 }
 

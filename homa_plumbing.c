@@ -1139,9 +1139,9 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
  */
 int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 {
+	DECLARE_SOCKADDR(union sockaddr_in_union *, addr, msg->msg_name);
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_sendmsg_args args;
-	union sockaddr_in_union *addr;
 	struct homa_rpc *rpc = NULL;
 	int result = 0;
 
@@ -1153,7 +1153,6 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			start;
 #endif /* See strip.py */
 
-	addr = (union sockaddr_in_union *)msg->msg_name;
 	if (!addr) {
 		hsk->error_msg = "no msg_name passed to sendmsg";
 		result = -EINVAL;
@@ -1309,12 +1308,10 @@ error_dont_end_rpc:
  * @msg:         Controlling information for the receive.
  * @len:         Total bytes of space available in msg->msg_iov; not used.
  * @flags:       Flags from system call; only MSG_DONTWAIT is used.
- * @addr_len:    Store the length of the sender address here
  * Return:       The length of the message on success, otherwise a negative
  *               errno. Sets hsk->error_msg on errors.
  */
-int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
-		 int *addr_len)
+int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_recvmsg_args control;
@@ -1437,20 +1434,24 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		memcpy(control.bpage_offsets, rpc->msgin.bpage_offsets,
 		       sizeof(rpc->msgin.bpage_offsets));
 	}
-	if (sk->sk_family == AF_INET6) {
-		struct sockaddr_in6 *in6 = msg->msg_name;
+	if (msg->msg_name) {
+		if (sk->sk_family == AF_INET6) {
+			DECLARE_SOCKADDR(struct sockaddr_in6 *, in6,
+					 msg->msg_name);
 
-		in6->sin6_family = AF_INET6;
-		in6->sin6_port = htons(rpc->dport);
-		in6->sin6_addr = rpc->peer->addr;
-		*addr_len = sizeof(*in6);
-	} else {
-		struct sockaddr_in *in4 = msg->msg_name;
+			in6->sin6_family = AF_INET6;
+			in6->sin6_port = htons(rpc->dport);
+			in6->sin6_addr = rpc->peer->addr;
+			msg->msg_namelen = sizeof(*in6);
+		} else {
+			DECLARE_SOCKADDR(struct sockaddr_in *, in4,
+					 msg->msg_name);
 
-		in4->sin_family = AF_INET;
-		in4->sin_port = htons(rpc->dport);
-		in4->sin_addr.s_addr = ipv6_to_ipv4(rpc->peer->addr);
-		*addr_len = sizeof(*in4);
+			in4->sin_family = AF_INET;
+			in4->sin_port = htons(rpc->dport);
+			in4->sin_addr.s_addr = ipv6_to_ipv4(rpc->peer->addr);
+			msg->msg_namelen = sizeof(*in4);
+		}
 	}
 
 	/* This indicates that the application now owns the buffers, so
