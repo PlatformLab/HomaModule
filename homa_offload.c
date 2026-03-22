@@ -174,17 +174,39 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 static void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 {
 	struct rps_sock_flow_table *sock_flow_table;
-	int hash;
+	u32 table_index, hash, mask;
+	rps_tag_ptr tagptr;
 
 	rcu_read_lock();
-	sock_flow_table = rcu_dereference(net_hotdata.rps_sock_flow_table);
+	tagptr = READ_ONCE(net_hotdata.rps_sock_flow_table);
+	sock_flow_table = rps_tag_to_table(tagptr);
+
 	if (sock_flow_table) {
-		hash = cpu + net_hotdata.rps_cpu_mask + 1;
-		if (sock_flow_table->ents[hash] != hash) {
-			sock_flow_table = rcu_dereference(net_hotdata.rps_sock_flow_table);
-			sock_flow_table->ents[hash] = hash;
-		}
+		mask = rps_tag_to_mask(tagptr);
+
+		/* Directing a packet to a given CPU works as follows:
+		 * - One entry in the flow table is used for each target
+		 *   CPU (not each flow, as is the normal usage!). This
+		 *   minimizes consumption of flow table entries and
+		 *   maximizes cache hits.
+		 * - The first entries in the flow table are used for
+		 *   this purpose.
+		 * - The hash stored in the skb is the desired cpu (entry index)
+		 *   plus the size of the flow table. This ensures that the
+		 *   hash is never zero (which would mean "no hash").
+		 * - The contents of the flow table entry must be the same
+		 *   as the hash. The low-order bits will be used as cpu,
+		 *   and get_rps_cpu checks the high-order bits to make
+		 *   sure they match the hash.
+		 */
+		hash = cpu + mask + 1;
+		table_index = hash & mask;
+
+		if (READ_ONCE(sock_flow_table[table_index].ent) != hash)
+			WRITE_ONCE(sock_flow_table[table_index].ent, hash);
 		__skb_set_sw_hash(skb, hash, false);
+		tt_record3("homa_set_softirq_cpu set value 0x%x for flow table entry 0x%x, mask 0x%x",
+			   hash, table_index, mask);
 	}
 	rcu_read_unlock();
 }

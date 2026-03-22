@@ -292,10 +292,16 @@ kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
 #endif
 int __preempt_count;
 int cpu_number = 1;
-char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
+#define FLOW_TABLE_MASK_BITS 10
+struct rps_sock_flow_table sock_flow_table[1 << FLOW_TABLE_MASK_BITS]
+		__attribute__((aligned(32)));
 struct net_hotdata net_hotdata = {
-	.rps_cpu_mask = 0x1f,
-	.rps_sock_flow_table = (struct rps_sock_flow_table *) sock_flow_table
+	/* Note: this needs to have the mask ORed into the low bits, but
+	 * can't do that at compile time; it gets set properly in mock_teardown
+	 * (thus it won't be correct for the first unit test, but it will
+	 * be good after that).
+	 */
+	.rps_sock_flow_table = (rps_tag_ptr)sock_flow_table
 };
 int debug_locks;
 struct static_call_key __SCK__cond_resched;
@@ -2458,6 +2464,8 @@ void mock_teardown(void)
 	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
 			&tcp_v6_offload;
 	jiffies = 1100;
+	net_hotdata.rps_sock_flow_table = (rps_tag_ptr)sock_flow_table |
+					  FLOW_TABLE_MASK_BITS;
 
 	count = unit_hash_size(skbs_in_use);
 	if (count > 0)

@@ -534,21 +534,21 @@ TEST_F(homa_offload, homa_gro_gen2)
 
 	// Avoid busy cores.
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(1, self->skb->hash - 32);
+	EXPECT_EQ(1, 1023 - self->skb->hash);
 	EXPECT_EQ(1, atomic_read(&per_cpu(homa_offload_core, 1).softirq_backlog));
 
 	// All cores busy; must rotate.
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(6, self->skb->hash - 32);
+	EXPECT_EQ(6, 1023 - self->skb->hash);
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(7, self->skb->hash - 32);
+	EXPECT_EQ(7, 1023 - self->skb->hash);
 	EXPECT_EQ(2, per_cpu(homa_offload_core, 5).softirq_offset);
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(0, self->skb->hash - 32);
+	EXPECT_EQ(0, 1023 - self->skb->hash);
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(1, self->skb->hash - 32);
+	EXPECT_EQ(1, 1023 - self->skb->hash);
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(6, self->skb->hash - 32);
+	EXPECT_EQ(6, 1023 - self->skb->hash);
 	EXPECT_EQ(1, per_cpu(homa_offload_core, 5).softirq_offset);
 }
 
@@ -570,7 +570,7 @@ TEST_F(homa_offload, homa_gro_gen3__basics)
 	self->homa.busy_cycles = 1000;
 
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(7, self->skb->hash - 32);
+	EXPECT_EQ(7, 1023 - self->skb->hash);
 	EXPECT_EQ(0, offload3->last_active);
 	EXPECT_EQ(5000, offload7->last_active);
 }
@@ -588,7 +588,7 @@ TEST_F(homa_offload, homa_gro_gen3__stop_on_negative_core_id)
 	self->homa.busy_cycles = 1000;
 
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(3, self->skb->hash - 32);
+	EXPECT_EQ(3, 1023 - self->skb->hash);
 	EXPECT_EQ(5000, per_cpu(homa_offload_core, 3).last_active);
 }
 TEST_F(homa_offload, homa_gro_gen3__all_cores_busy_so_pick_first)
@@ -606,7 +606,7 @@ TEST_F(homa_offload, homa_gro_gen3__all_cores_busy_so_pick_first)
 	self->homa.busy_cycles = 1000;
 
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(3, self->skb->hash - 32);
+	EXPECT_EQ(3, 1023 - self->skb->hash);
 	EXPECT_EQ(5000, per_cpu(homa_offload_core, 3).last_active);
 }
 
@@ -631,14 +631,14 @@ TEST_F(homa_offload, homa_gro_complete__GRO_IDLE)
 
 	mock_set_core(5);
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(1, self->skb->hash - 32);
+	EXPECT_EQ(1, 1023 - self->skb->hash);
 
 	per_cpu(homa_offload_core, 6).last_active = 5;
 	mock_set_core(5);
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(6, self->skb->hash - 32);
+	EXPECT_EQ(6, 1023 - self->skb->hash);
 
 	mock_set_core(6);
 	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(2, self->skb->hash - 32);
+	EXPECT_EQ(2, 1023 - self->skb->hash);
 }
