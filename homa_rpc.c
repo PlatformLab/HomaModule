@@ -36,7 +36,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	struct homa_rpc *crpc;
 	int err;
 
-	crpc = kmem_cache_zalloc(hsk->homa->rpc_kmem_cache, GFP_KERNEL);
+	crpc = kzalloc(sizeof(*crpc), GFP_KERNEL);
 	if (unlikely(!crpc)) {
 		hsk->error_msg = "couldn't allocate memory for client RPC";
 		return ERR_PTR(-ENOMEM);
@@ -95,7 +95,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 error:
 	if (crpc->peer)
 		homa_peer_release(crpc->peer);
-	kmem_cache_free(hsk->homa->rpc_kmem_cache, crpc);
+	kfree(crpc);
 	return ERR_PTR(err);
 }
 
@@ -146,7 +146,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	}
 
 	/* Initialize fields that don't require the socket lock. */
-	srpc = kmem_cache_zalloc(hsk->homa->rpc_kmem_cache, GFP_ATOMIC);
+	srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC);
 	if (!srpc) {
 		err = -ENOMEM;
 		goto error;
@@ -209,11 +209,9 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 
 error:
 	homa_bucket_unlock(bucket, id);
-	if (srpc) {
-		if (srpc->peer)
-			homa_peer_release(srpc->peer);
-		kmem_cache_free(hsk->homa->rpc_kmem_cache, srpc);
-	}
+	if (srpc && srpc->peer)
+		homa_peer_release(srpc->peer);
+	kfree(srpc);
 	return ERR_PTR(err);
 }
 
@@ -654,7 +652,7 @@ release:
 #endif /* See strip.py */
 			rpc->state = 0;
 			rpc->magic = 0;
-			kmem_cache_free(hsk->homa->rpc_kmem_cache, rpc);
+			kfree(rpc);
 		}
 		homa_sock_wakeup_wmem(hsk);
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",

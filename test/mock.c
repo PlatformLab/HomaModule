@@ -28,11 +28,6 @@ extern void      *malloc(size_t size);
 #endif
 extern void      *memcpy(void *dest, const void *src, size_t n);
 
-struct kmem_cache {
-	unsigned int size;
-	int num;
-};
-
 /* The variables below can be set to non-zero values by unit tests in order
  * to simulate error returns from various functions. If bit 0 is set to 1,
  * the next call to the function will fail; bit 1 corresponds to the next
@@ -983,41 +978,6 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 void *__kmalloc_noprof(size_t size, gfp_t flags)
 {
 	return mock_kmalloc(size, flags);
-}
-
-void *kmem_cache_alloc_noprof(struct kmem_cache *cachep, gfp_t flags)
-{
-	void *result = mock_kmalloc(cachep->size, flags);
-
-	if (result)
-		cachep->num++;
-	return result;
-}
-
-struct kmem_cache *__kmem_cache_create_args(const char *name,
-					    unsigned int object_size,
-					    struct kmem_cache_args *args,
-					    slab_flags_t flags)
-{
-	struct kmem_cache *cache;
-
-	cache = mock_kmalloc(sizeof(*cache), GFP_KERNEL | __GFP_ZERO);
-	if (cache)
-		cache->size = object_size;
-	return cache;
-}
-
-void kmem_cache_destroy(struct kmem_cache *cache)
-{
-	if (cache->num != 0)
-		FAIL(" kmem_cache destroyed with %d live objects", cache->num);
-	kfree(cache);
-}
-
-void kmem_cache_free(struct kmem_cache *cache, void *objp)
-{
-	cache->num--;
-	kfree(objp);
 }
 
 void kvfree(const void *addr)

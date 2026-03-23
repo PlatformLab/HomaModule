@@ -106,21 +106,12 @@ TEST_F(homa_utils, homa_init__cant_allocate_port_map)
 	EXPECT_EQ(NULL, homa2.socktab);
 	homa_destroy(&homa2);
 }
-TEST_F(homa_utils, homa_init__cant_create_rpc_kmem_cache)
-{
-	struct homa homa2;
-
-	mock_kmalloc_errors = 0x40;
-	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_SUBSTR("Couldn't initialize rpc_kmem_cache", mock_printk_output);
-	homa_destroy(&homa2);
-}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_utils, homa_init__homa_skb_init_failure)
 {
 	struct homa homa2;
 
-	mock_kmalloc_errors = 0x80;
+	mock_kmalloc_errors = 0x40;
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_SUBSTR("Couldn't initialize skb management (errno 12)",
 		      mock_printk_output);

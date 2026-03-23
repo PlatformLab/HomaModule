@@ -138,11 +138,6 @@ struct homa {
 	 */
 	struct homa_socktab *socktab;
 
-	/**
-	 * @rpc_kmem_cache: Used to allocate homa_rpc structs efficiently.
-	 */
-	struct kmem_cache *rpc_kmem_cache;
-
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @page_pool_mutex: Synchronizes access to any/all of the page_pools
