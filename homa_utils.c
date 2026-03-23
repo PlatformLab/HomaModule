@@ -65,6 +65,13 @@ int homa_init(struct homa *homa)
 	if (!homa->socktab)
 		return -ENOMEM;
 	homa_socktab_init(homa->socktab);
+	homa->rpc_kmem_cache = kmem_cache_create("homa_rpc",
+						 sizeof(struct homa_rpc),
+						 0, SLAB_HWCACHE_ALIGN, NULL);
+	if (!homa->rpc_kmem_cache) {
+		pr_err("Couldn't initialize rpc_kmem_cache\n");
+		return -ENOMEM;
+	}
 #ifndef __STRIP__ /* See strip.py */
 	err = homa_skb_init(homa);
 	if (err) {
@@ -157,6 +164,10 @@ void homa_destroy(struct homa *homa)
 		homa->peertab = NULL;
 	}
 #ifndef __STRIP__ /* See strip.py */
+	if (homa->rpc_kmem_cache) {
+		kmem_cache_destroy(homa->rpc_kmem_cache);
+		homa->rpc_kmem_cache = NULL;
+	}
 
 	homa_skb_cleanup(homa);
 #endif /* See strip.py */
