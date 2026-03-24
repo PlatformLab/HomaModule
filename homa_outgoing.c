@@ -476,7 +476,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 #ifndef __STRIP__ /* See strip.py */
 	if (hsk->inet.sk.sk_family == AF_INET6) {
 		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
-				  NULL, hsk->homa->priority_map[priority] << 5);
+				  NULL, hsk->homa->priority_map[priority] << 5, 0);
 	} else {
 		/* This will find its way to the DSCP field in the IPv4 hdr. */
 		hsk->inet.tos = hsk->homa->priority_map[priority] << 5;
@@ -497,7 +497,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 #else /* See strip.py */
 	if (hsk->inet.sk.sk_family == AF_INET6)
 		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
-				  NULL, 0);
+				  NULL, 0, 0);
 	else
 		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
 #endif /* See strip.py */
@@ -687,10 +687,10 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 #ifndef __STRIP__ /* See strip.py */
 		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
 			       0, NULL,
-			       rpc->hsk->homa->priority_map[priority] << 5);
+			       rpc->hsk->homa->priority_map[priority] << 5, 0);
 #else /* See strip.py */
 		ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
-			 0, NULL, 0);
+			 0, NULL, 0, 0);
 #endif /* See strip.py */
 	} else {
 		tt_record4("calling ip_queue_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",

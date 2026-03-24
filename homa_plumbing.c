@@ -144,7 +144,6 @@ static struct net_protocol homa_protocol = {
 	.handler =	homa_softirq,
 	.err_handler =	homa_err_handler_v4,
 	.no_policy =     1,
-	.netns_ok  =     1,
 };
 
 static struct inet6_protocol homav6_protocol = {
@@ -998,7 +997,7 @@ int homa_socket(struct sock *sk)
  *           on errors.
  */
 int homa_setsockopt(struct sock *sk, int level, int optname,
-		    char __user *optval, unsigned int optlen)
+		    sockptr_t optval, unsigned int optlen)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	int ret;
@@ -1019,7 +1018,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 			return -EINVAL;
 		}
 
-		if (unlikely(copy_from_user(&args, optval, optlen))) {
+		if (unlikely(copy_from_sockptr(&args, optval, optlen))) {
 			hsk->error_msg = "invalid address for homa_rcvbuf_args";
 			return -EFAULT;
 		}
@@ -1045,7 +1044,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 			return -EINVAL;
 		}
 
-		if (unlikely(copy_from_user(&arg, optval, optlen))) {
+		if (unlikely(copy_from_sockptr(&arg, optval, optlen))) {
 			hsk->error_msg = "invalid address for SO_HOMA_SERVER value";
 			return -EFAULT;
 		}
@@ -2005,7 +2004,7 @@ int homa_timer_main(void *transport)
 		homa_timer(homa);
 	}
 	hrtimer_cancel(&hrtimer);
-	complete_and_exit(&timer_thread_done, 0);
+	kthread_complete_and_exit(&timer_thread_done, 0);
 	return 0;
 }
 

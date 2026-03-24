@@ -751,7 +751,7 @@ void     homa_rpc_handoff(struct homa_rpc *rpc);
 int      homa_rpc_tx_end(struct homa_rpc *rpc);
 int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 int      homa_setsockopt(struct sock *sk, int level, int optname,
-			char __user *optval, unsigned int optlen);
+			sockptr_t optval, unsigned int optlen);
 int      homa_shutdown(struct socket *sock, int how);
 int      homa_socket(struct sock *sk);
 int      homa_softirq(struct sk_buff *skb);
