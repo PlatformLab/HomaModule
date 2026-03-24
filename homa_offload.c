@@ -145,10 +145,10 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 	struct homa_common_hdr *h = (struct homa_common_hdr *)
 			skb_transport_header(skb);
 
-	tt_record2("Source address is 0x%x length %d", ntohl(ip_hdr(skb)->saddr), skb->len);
-	tt_record4("homa_tcp_gro_receive got type 0x%x, flags 0x%x, "
-			"urgent 0x%x, id %d", h->type, h->flags,
-			ntohs(h->urgent), homa_local_id(h->sender_id));
+	//tt_record2("Source address is 0x%x length %d", ntohl(ip_hdr(skb)->saddr), skb->len);
+	//tt_record4("homa_tcp_gro_receive got type 0x%x, flags 0x%x, "
+	//		"urgent 0x%x, id %d", h->type, h->flags,
+	//		ntohs(h->urgent), homa_local_id(h->sender_id));
 	if (h->flags != HOMA_TCP_FLAGS ||
 	    ntohs(h->urgent) != HOMA_TCP_URGENT)
 		return tcp_net_offload->callbacks.gro_receive(held_list, skb);
