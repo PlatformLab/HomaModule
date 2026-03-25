@@ -701,13 +701,13 @@ TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
 			unit_log_get());
 }
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
+TEST_F(homa_outgoing, __homa_xmit_control__ipv6_set_hijack)
 {
 	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
 
-	// Make sure the test uses IPv4.
-	mock_ipv6 = false;
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
 	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 
@@ -718,11 +718,10 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
-	mock_xmit_log_verbose = 1;
-	mock_ip_queue_xmit_errors = 1;
-	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors);
+	mock_xmit_log_hijack = 1;
+	EXPECT_EQ(0, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_STREQ("xmit GRANT 12345@4; hijack checksum 666, flags 0x6",
+		     unit_log_get());
 }
 TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 {
@@ -743,6 +742,51 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 	h.priority = 4;
 	mock_xmit_log_verbose = 1;
 	mock_ip6_xmit_errors = 1;
+	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors);
+}
+TEST_F(homa_outgoing, __homa_xmit_control__ipv4_set_hijack)
+{
+	struct homa_grant_hdr h;
+	struct homa_rpc *srpc;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+		self->server_ip, self->client_port, 1111, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
+
+	h.offset = htonl(12345);
+	h.priority = 4;
+	mock_xmit_log_hijack = 1;
+	EXPECT_EQ(0, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_STREQ("xmit GRANT 12345@4; hijack checksum 444, flags 0x6",
+		     unit_log_get());
+}
+TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
+{
+	struct homa_grant_hdr h;
+	struct homa_rpc *srpc;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+		self->server_ip, self->client_port, 1111, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
+
+	h.offset = htonl(12345);
+	h.priority = 4;
+	mock_xmit_log_verbose = 1;
+	mock_ip_queue_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors);
@@ -1035,23 +1079,27 @@ TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 	EXPECT_EQ(old_refcount+1, atomic_read(&dst->__rcuref.refcnt));
 }
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)
+TEST_F(homa_outgoing, __homa_xmit_data__ipv6_call_homa_set_hijack)
 {
+	struct homa_common_hdr *h;
 	struct homa_rpc *crpc;
+	struct sk_buff *skb;
 
-	// Make sure the test uses IPv4.
-	mock_ipv6 = false;
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
 	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
-			1000, 1000);
+			100, 1000);
 	unit_log_clear();
-	mock_ip_queue_xmit_errors = 1;
-	skb_get(crpc->msgout.packets);
-	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors);
+	skb = crpc->msgout.packets;
+	skb_get(skb);
+	__homa_xmit_data(skb, crpc, 5);
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
+	EXPECT_EQ(HOMA_TCP_FLAGS, h->flags);
+	EXPECT_EQ(666, h->checksum);
 }
 TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
 {
@@ -1067,6 +1115,46 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
 			100, 1000);
 	unit_log_clear();
 	mock_ip6_xmit_errors = 1;
+	skb_get(crpc->msgout.packets);
+	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors);
+}
+TEST_F(homa_outgoing, __homa_xmit_data__ipv4_call_homa_set_hijack)
+{
+	struct homa_common_hdr *h;
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			1000, 1000);
+	unit_log_clear();
+	skb = crpc->msgout.packets;
+	skb_get(skb);
+	__homa_xmit_data(skb, crpc, 5);
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
+	EXPECT_EQ(HOMA_TCP_FLAGS, h->flags);
+	EXPECT_EQ(444, h->checksum);
+}
+TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)
+{
+	struct homa_rpc *crpc;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			1000, 1000);
+	unit_log_clear();
+	mock_ip_queue_xmit_errors = 1;
 	skb_get(crpc->msgout.packets);
 	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors);

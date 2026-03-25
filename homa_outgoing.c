@@ -17,6 +17,39 @@
 #include "homa_stub.h"
 #endif /* See strip.py */
 
+#ifndef __STRIP__ /* See strip.py */
+/**
+ * homa_set_hijack() - Set fields in an outgoing Homa packet that are needed
+ * for TCP hijacking to work properly. This function doesn't actually cause
+ * the packet to be sent via TCP (that is determined by hsk->sock.sk_protocol,
+ * which is set elsewhere). The modifications made here are safe even if the
+ * packet isn't actually sent via TCP.
+ * @skb:    Packet buffer in which to set fields.
+ * @peer:   Peer that contains source and destination addresses for the packet.
+ * @ipv6:   True means the packet is going to be sent via IPv6; false means
+ *          IPv4.
+ */
+static inline void homa_set_hijack(struct sk_buff *skb, struct homa_peer *peer,
+				   bool ipv6)
+{
+	struct homa_common_hdr *h;
+
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
+	h->flags = HOMA_TCP_FLAGS;
+	h->urgent = htons(HOMA_TCP_URGENT);
+	/* Arrange for proper TCP checksumming. */
+	skb->ip_summed = CHECKSUM_PARTIAL;
+	skb->csum_start = skb_transport_header(skb) - skb->head;
+	skb->csum_offset = offsetof(struct homa_common_hdr, checksum);
+	if (ipv6)
+		h->checksum = ~tcp_v6_check(skb->len, &peer->flow.u.ip6.saddr,
+					    &peer->flow.u.ip6.daddr, 0);
+	else
+		h->checksum = ~tcp_v4_check(skb->len, peer->flow.u.ip4.saddr,
+					    peer->flow.u.ip4.daddr, 0);
+}
+#endif /* See strip.py */
+
 /**
  * homa_message_out_init() - Initialize rpc->msgout.
  * @rpc:       RPC whose output message should be initialized. Must be
@@ -160,8 +193,7 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	h->common.dport = htons(rpc->dport);
 	h->common.sequence = htonl(offset);
 	h->common.type = DATA;
-	IF_NO_STRIP(homa_set_hijack(&h->common));
-	homa_set_doff(h, sizeof(struct homa_data_hdr));
+	homa_set_doff(skb, sizeof(struct homa_data_hdr));
 	h->common.checksum = 0;
 	h->common.sender_id = cpu_to_be64(rpc->id);
 	h->message_length = htonl(rpc->msgout.length);
@@ -190,7 +222,7 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 #else /* See strip.py */
 	if (segs > 1) {
 #endif /* See strip.py */
-		homa_set_doff(h, sizeof(struct homa_data_hdr)  -
+		homa_set_doff(skb, sizeof(struct homa_data_hdr)  -
 				sizeof(struct homa_seg_hdr));
 #ifndef __STRIP__ /* See strip.py */
 		h->seg.offset = htonl(offset);
@@ -429,7 +461,6 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	h->type = type;
 	h->sport = htons(rpc->hsk->port);
 	h->dport = htons(rpc->dport);
-	IF_NO_STRIP(homa_set_hijack(h));
 	h->sender_id = cpu_to_be64(rpc->id);
 	return __homa_xmit_control(contents, length, rpc->peer, rpc->hsk);
 }
@@ -474,12 +505,16 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	priority = hsk->homa->num_priorities - 1;
 #endif /* See strip.py */
 	skb->ooo_okay = 1;
+	homa_set_doff(skb, length);
 #ifndef __STRIP__ /* See strip.py */
 	if (hsk->inet.sk.sk_family == AF_INET6) {
+		homa_set_hijack(skb, peer, true);
 		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
 				  NULL, hsk->homa->priority_map[priority] << 5,
 				  0);
 	} else {
+		homa_set_hijack(skb, peer, false);
+
 		/* This will find its way to the DSCP field in the IPv4 hdr. */
 		hsk->inet.tos = hsk->homa->priority_map[priority] << 5;
 		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
@@ -535,7 +570,6 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
 	unknown.common.type = RPC_UNKNOWN;
-	IF_NO_STRIP(homa_set_hijack(&unknown.common));
 	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
 	peer = homa_peer_get(hsk, &saddr);
 	if (!IS_ERR(peer)) {
@@ -680,15 +714,13 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 	skb_dst_set(skb, homa_get_dst(rpc->peer, rpc->hsk));
 
 	skb->ooo_okay = 1;
-	skb->ip_summed = CHECKSUM_PARTIAL;
-	skb->csum_start = skb_transport_header(skb) - skb->head;
-	skb->csum_offset = offsetof(struct homa_common_hdr, checksum);
 	if (rpc->hsk->inet.sk.sk_family == AF_INET6) {
 		tt_record4("calling ip6_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",
 			   homa_get_skb_info(skb)->wire_bytes,
 			   tt_addr(rpc->peer->addr), rpc->id,
 			   homa_get_skb_info(skb)->offset);
 #ifndef __STRIP__ /* See strip.py */
+		homa_set_hijack(skb, rpc->peer, true);
 		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
 			       0, NULL,
 			       rpc->hsk->homa->priority_map[priority] << 5, 0);
@@ -703,6 +735,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 			   homa_get_skb_info(skb)->offset);
 
 #ifndef __STRIP__ /* See strip.py */
+		homa_set_hijack(skb, rpc->peer, false);
 		rpc->hsk->inet.tos =
 				rpc->hsk->homa->priority_map[priority] << 5;
 		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);

@@ -134,6 +134,7 @@ int      homa_snprintf(char *buffer, int size, int used,
 		       const char *format, ...) __printf(4, 5);
 char    *homa_symbol_for_type(uint8_t type);
 char    *homa_symbol_for_state(struct homa_rpc *rpc);
+int      homa_tcp_checksum(struct sk_buff *skb);
 int      homa_validate_incoming(struct homa *homa, int verbose,
 				int *link_errors);
 

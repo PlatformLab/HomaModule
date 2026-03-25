@@ -997,7 +997,6 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	ack.common.type = ACK;
 	ack.common.sport = h->dport;
 	ack.common.dport = h->sport;
-	IF_NO_STRIP(homa_set_hijack(&ack.common));
 	ack.common.sender_id = cpu_to_be64(id);
 	ack.num_acks = htons(homa_peer_get_acks(peer,
 						HOMA_MAX_ACKS_PER_PKT,
