@@ -614,23 +614,9 @@ release:
 
 			UNIT_LOG("; ", "reaped %llu", rpc->id);
 			if (unlikely(rpc->msgin.num_bpages))
-				homa_pool_release_buffers(rpc->hsk->buffer_pool,
-							  rpc->msgin.num_bpages,
-							  rpc->msgin.bpage_offsets);
-			if (rpc->msgin.length >= 0) {
-				while (1) {
-					struct homa_gap *gap;
-
-					gap = list_first_entry_or_null(
-							&rpc->msgin.gaps,
-							struct homa_gap,
-							links);
-					if (!gap)
-						break;
-					list_del(&gap->links);
-					kfree(gap);
-				}
-			}
+				homa_pool_free_bufs(rpc->hsk->buffer_pool,
+						    rpc->msgin.num_bpages,
+						    rpc->msgin.bpage_offsets);
 			if (rpc->peer) {
 				homa_peer_release(rpc->peer);
 				rpc->peer = NULL;

@@ -71,10 +71,15 @@ int mock_signal_pending;
 /* Used as current task during tests. Also returned by kthread_run. */
 struct task_struct mock_task;
 
-/* If a test sets this variable to nonzero, ip_queue_xmit will log
+/* If a test sets this variable to nonzero, ip*xmit will log
  * outgoing packets using the long format rather than short.
  */
 int mock_xmit_log_verbose;
+
+/* If a test sets this variable to nonzero, ip*xmit will log hijacking
+ * information from outgoing packets.
+ */
+int mock_xmit_log_hijack;
 
 /* If a test sets this variable to nonzero, calls to wake_up and
  * wake_up_all will be logged.
@@ -469,6 +474,13 @@ void __copy_overflow(int size, unsigned long count)
 	abort();
 }
 
+__sum16 csum_ipv6_magic(const struct in6_addr *saddr,
+			const struct in6_addr *daddr,
+			__u32 len, __u8 proto, __wsum csum)
+{
+	return ~666;
+}
+
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 int debug_lockdep_rcu_enabled(void)
 {
@@ -772,6 +784,13 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 	else
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
 	unit_log_printf("; ", "xmit %s", buffer);
+	if (mock_xmit_log_hijack) {
+		struct homa_common_hdr *h;
+
+		h = (struct homa_common_hdr *)skb_transport_header(skb);
+		unit_log_printf("; ", "hijack checksum %d, flags 0x%x",
+			       h->checksum, h->flags);
+	}
 	kfree_skb(skb);
 	return 0;
 }
@@ -799,6 +818,13 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 	else
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
 	unit_log_printf("; ", "xmit %s", buffer);
+	if (mock_xmit_log_hijack) {
+		struct homa_common_hdr *h;
+
+		h = (struct homa_common_hdr *)skb_transport_header(skb);
+		unit_log_printf("; ", "hijack checksum %d, flags 0x%x",
+			       h->checksum, h->flags);
+	}
 	kfree_skb(skb);
 	return 0;
 }
@@ -1368,6 +1394,11 @@ void sk_common_release(struct sock *sk)
 {}
 
 int sk_set_peek_off(struct sock *sk, int val)
+{
+	return 0;
+}
+
+__wsum skb_checksum(const struct sk_buff *skb, int offset, int len, __wsum csum)
 {
 	return 0;
 }
@@ -2363,6 +2394,7 @@ void mock_teardown(void)
 	mock_prepare_to_wait_status = -ERESTARTSYS;
 	mock_signal_pending = 0;
 	mock_xmit_log_verbose = 0;
+	mock_xmit_log_hijack = 0;
 	mock_log_wakeups = 0;
 	mock_mtu = 0;
 	mock_max_skb_frags = MAX_SKB_FRAGS;

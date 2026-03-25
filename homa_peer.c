@@ -128,9 +128,6 @@ void homa_peer_free_net(struct homa_net *hnet)
 	struct homa_peer *peer;
 
 	spin_lock_bh(&peertab->lock);
-	peertab->gc_stop_count++;
-	spin_unlock_bh(&peertab->lock);
-
 	rhashtable_walk_enter(&peertab->ht, &iter);
 	rhashtable_walk_start(&iter);
 	while (1) {
@@ -152,9 +149,6 @@ void homa_peer_free_net(struct homa_net *hnet)
 	rhashtable_walk_exit(&iter);
 	WARN(hnet->num_peers != 0, "%s ended up with hnet->num_peers %d",
 	     __func__, hnet->num_peers);
-
-	spin_lock_bh(&peertab->lock);
-	peertab->gc_stop_count--;
 	spin_unlock_bh(&peertab->lock);
 }
 
@@ -174,14 +168,11 @@ void homa_peer_release_fn(void *object, void *dummy)
 
 /**
  * homa_peer_free_peertab() - Destructor for homa_peertabs.
- * @peertab:  The table to destroy.
+ * @peertab:  The table to destroy. Caller must ensure that it will never
+ *            be accessed again.
  */
 void homa_peer_free_peertab(struct homa_peertab *peertab)
 {
-	spin_lock_bh(&peertab->lock);
-	peertab->gc_stop_count++;
-	spin_unlock_bh(&peertab->lock);
-
 	if (peertab->ht_valid) {
 		rhashtable_walk_exit(&peertab->ht_iter);
 		rhashtable_free_and_destroy(&peertab->ht, homa_peer_release_fn,
@@ -209,7 +200,7 @@ int homa_peer_prefer_evict(struct homa_peertab *peertab,
 			   struct homa_peer *peer2)
 {
 	/* Prefer a peer whose homa-net is over its limit; if both are either
-	 * over or under, then prefer the peer with the shortest idle time.
+	 * over or under, then prefer the peer with the longest idle time.
 	 */
 	if (peer1->ht_key.hnet->num_peers > peertab->net_max) {
 		if (peer2->ht_key.hnet->num_peers <= peertab->net_max)
@@ -320,8 +311,6 @@ void homa_peer_gc(struct homa_peertab *peertab)
 	int i;
 
 	spin_lock_bh(&peertab->lock);
-	if (peertab->gc_stop_count != 0)
-		goto done;
 	if (peertab->num_peers < peertab->gc_threshold)
 		goto done;
 	num_victims = homa_peer_pick_victims(peertab, victims,
@@ -402,7 +391,7 @@ void homa_peer_free(struct rcu_head *head)
 	struct homa_peer *peer;
 
 	peer = container_of(head, struct homa_peer, rcu_head);
-	dst_release(rcu_dereference(peer->dst));
+	dst_release(rcu_dereference_protected(peer->dst, 1));
 	kfree(peer);
 }
 
@@ -429,8 +418,7 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 	key.hnet = hsk->hnet;
 	rcu_read_lock();
 	peer = rhashtable_lookup(&peertab->ht, &key, ht_params);
-	if (peer) {
-		homa_peer_hold(peer);
+	if (peer && refcount_inc_not_zero(&peer->refs)) {
 		peer->access_jiffies = jiffies;
 		rcu_read_unlock();
 		return peer;
@@ -454,11 +442,11 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 		 * one instead of ours.
 		 */
 		homa_peer_release(peer);
-		homa_peer_hold(other);
+		refcount_inc(&other->refs);
 		peer = other;
 		peer->access_jiffies = jiffies;
 	} else {
-		homa_peer_hold(peer);
+		refcount_inc(&peer->refs);
 		peertab->num_peers++;
 		key.hnet->num_peers++;
 	}

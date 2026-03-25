@@ -104,6 +104,12 @@
 
 #define spin_unlock mock_spin_unlock
 
+#undef tcp_v4_check
+#define tcp_v4_check(...) (~(__force __sum16)444U)
+
+#undef tcp_v6_check
+#define tcp_v6_check(...) (~(__force __sum16)666U)
+
 #undef this_cpu_ptr
 #define this_cpu_ptr(name) (&name[cpu_number])
 
@@ -180,6 +186,7 @@ extern int         mock_trylock_errors;
 extern u64         mock_tt_cycles;
 extern int         mock_vmalloc_errors;
 extern int         mock_xmit_log_verbose;
+extern int         mock_xmit_log_hijack;
 
 extern struct task_struct *current_task;
 

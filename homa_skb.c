@@ -637,8 +637,6 @@ void homa_skb_release_pages(struct homa *homa)
 			max_low_mark = pool->low_mark;
 			max_pool = pool;
 		}
-		tt_record3("NUMA node %d has %d pages in skb page pool, low mark %d",
-			   i, pool->avail, pool->low_mark);
 		pool->low_mark = pool->avail;
 	}
 

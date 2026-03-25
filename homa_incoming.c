@@ -245,6 +245,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		gap->start = end;
 		goto keep;
 	}
+	/* Packet doesn't overlap any gap, so it is a duplicate. */
 
 discard:
 #ifndef __STRIP__ /* See strip.py */
@@ -844,7 +845,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end);
 #endif /* See strip.py */
 
-	if (offset >= tx_end)  {
+	if (offset >= tx_end) {
 		/* We have chosen not to transmit any of the requested data;
 		 * send BUSY so the receiver knows we are alive.
 		 */
@@ -984,10 +985,10 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	 * other acks available for the peer. Note: can't use rpc below,
 	 * since it may be NULL.
 	 */
+	memset(&ack, 0, sizeof(ack));
 	ack.common.type = ACK;
 	ack.common.sport = h->dport;
 	ack.common.dport = h->sport;
-	IF_NO_STRIP(homa_set_hijack(&ack.common));
 	ack.common.sender_id = cpu_to_be64(id);
 	ack.num_acks = htons(homa_peer_get_acks(peer,
 						HOMA_MAX_ACKS_PER_PKT,
@@ -1023,6 +1024,8 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	}
 
 	count = ntohs(h->num_acks);
+	if (count > HOMA_MAX_ACKS_PER_PKT)
+		count = HOMA_MAX_ACKS_PER_PKT;
 	if (count > 0) {
 		if (rpc) {
 			/* Must temporarily release rpc's lock because

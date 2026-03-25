@@ -420,10 +420,10 @@ void homa_freeze_peers(void)
 		goto done;
 	}
 
+	memset(&freeze, 0, sizeof(freeze));
 	freeze.common.type = FREEZE;
 	freeze.common.sport = htons(hsk->port);
 	freeze.common.dport = 0;
-	IF_NO_STRIP(homa_set_hijack(&freeze.common));
 	freeze.common.sender_id = 0;
 
 	rhashtable_walk_enter(&hnet->homa->peertab->ht, &iter);
@@ -1271,3 +1271,31 @@ error:
 #endif /* __UNIT_TEST__ */
 }
 #endif /* See strip.py */
+
+/**
+ * homa_tcp_checksum() - Compute the TCP checksum for a packet. This is
+ * done "from scratch", i.e. not using any existing information such
+ * as skb->csum.
+ * @skb:     Contains the packet to checksum
+ * Return:   Checksum for the packet: 0 is the "correct" value.
+ */
+int homa_tcp_checksum(struct sk_buff *skb)
+{
+    int tcp_len = skb->len - skb_transport_offset(skb);
+    __wsum data_csum;
+
+    // Calculate the sum of the TCP header + data manually
+    data_csum = skb_checksum(skb, skb_transport_offset(skb), tcp_len, 0);
+
+    if (skb_is_ipv6(skb)) {
+        // Fold the manual sum with the IPv6 pseudo-header
+        return csum_ipv6_magic(&ipv6_hdr(skb)->saddr, &ipv6_hdr(skb)->daddr,
+			       tcp_len, IPPROTO_TCP, data_csum);
+    } else {
+        const struct iphdr *iph = ip_hdr(skb);
+
+        // Fold the manual sum with the IPv4 pseudo-header
+        return csum_tcpudp_magic(iph->saddr, iph->daddr, tcp_len,
+                                 IPPROTO_TCP, data_csum);
+    }
+}

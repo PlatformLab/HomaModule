@@ -110,7 +110,7 @@ int homa_interest_wait(struct homa_interest *interest)
 	interest->blocked = 1;
 	IF_NO_STRIP(block_start = now);
 	wait_err = wait_event_interruptible_exclusive(interest->wait_queue,
-			atomic_read_acquire(&interest->ready) != 0);
+						      atomic_read_acquire(&interest->ready) != 0);
 	IF_NO_STRIP(blocked_time = homa_clock() - block_start);
 	if (wait_err == -ERESTARTSYS)
 		result = -EINTR;

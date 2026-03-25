@@ -294,7 +294,9 @@ def scan(file):
                         # Label or method start; no need to continue further
                         break
                     if leading_space(prev) < indent:
-                        if not prev.lstrip().startswith('case'):
+                        stripped = prev.lstrip()
+                        if not (stripped.startswith('case') or
+                                stripped.startswith('default')):
                             slines = slines[:i]
                         break
 

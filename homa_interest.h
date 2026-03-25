@@ -71,7 +71,7 @@ struct homa_interest {
  *               homa_interest_init_shared.
  */
 static inline void homa_interest_unlink_shared(struct homa_interest *interest)
-	__must_hold(hsk->lock)
+	__must_hold(interest->hsk->lock)
 {
 	list_del_init(&interest->links);
 }
