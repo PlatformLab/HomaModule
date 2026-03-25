@@ -519,7 +519,8 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 				   ipv6_to_ipv4(peer->addr),
 				   hsk->inet.inet_saddr, 0, 0,
 				   hsk->sock.sk_uid);
-		security_sk_classify_flow(&hsk->sock, &peer->flow);
+		security_sk_classify_flow(&hsk->sock,
+					 &peer->flow.u.__fl_common);
 		rt = ip_route_output_flow(sock_net(&hsk->sock),
 					  &peer->flow.u.ip4, &hsk->sock);
 		if (IS_ERR(rt)) {
@@ -541,7 +542,8 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 		peer->flow.u.ip6.fl6_dport = 0;
 		peer->flow.u.ip6.fl6_sport = 0;
 		peer->flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
-		security_sk_classify_flow(&hsk->sock, &peer->flow);
+		security_sk_classify_flow(&hsk->sock,
+					 &peer->flow.u.__fl_common);
 		dst = ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
 						   &peer->flow.u.ip6,
 						   &peer->addr);

@@ -204,7 +204,7 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 		frag = &shinfo->frags[shinfo->nr_frags - 1];
 		if (skb_frag_page(frag) == skb_core->skb_page &&
 		    skb_core->page_inuse < skb_core->page_size &&
-		    (frag->page_offset + skb_frag_size(frag)) ==
+		    (frag->bv_offset + skb_frag_size(frag)) ==
 			    skb_core->page_inuse) {
 			if ((skb_core->page_size - skb_core->page_inuse) <
 			    actual_size)
@@ -234,7 +234,7 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 	shinfo->nr_frags++;
 	frag_page_set(frag, skb_core->skb_page);
 	get_page(skb_core->skb_page);
-	frag->page_offset = skb_core->page_inuse;
+	frag->bv_offset = skb_core->page_inuse;
 	*length = actual_size;
 	skb_frag_size_set(frag, actual_size);
 	result = page_address(skb_frag_page(frag)) + skb_core->page_inuse;
@@ -432,7 +432,7 @@ int homa_skb_append_from_skb(struct homa *homa, struct sk_buff *dst_skb,
 		dst_shinfo->nr_frags++;
 		frag_page_set(dst_frag, skb_frag_page(src_frag));
 		get_page(skb_frag_page(src_frag));
-		dst_frag->page_offset = src_frag->page_offset
+		dst_frag->bv_offset = src_frag->bv_offset
 				+ (offset - src_frag_offset);
 		skb_frag_size_set(dst_frag, chunk_size);
 		offset += chunk_size;
@@ -582,7 +582,7 @@ void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
 		if (chunk_size > length)
 			chunk_size = length;
 		memcpy(dst, page_address(skb_frag_page(frag)) +
-			    frag->page_offset + (offset - frag_offset),
+			    frag->bv_offset + (offset - frag_offset),
 		       chunk_size);
 		offset += chunk_size;
 		length -= chunk_size;

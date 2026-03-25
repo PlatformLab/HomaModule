@@ -9,11 +9,11 @@
 DEFINE_PER_CPU(struct homa_metrics, homa_metrics);
 
 /* Describes file operations implemented for /proc/net/homa_metrics. */
-static const struct file_operations homa_metrics_ops = {
-	.open		= homa_metrics_open,
-	.read		= homa_metrics_read,
-	.llseek         = homa_metrics_lseek,
-	.release	= homa_metrics_release,
+static const struct proc_ops homa_metrics_ops = {
+	.proc_open      = homa_metrics_open,
+	.proc_read      = homa_metrics_read,
+	.proc_lseek     = homa_metrics_lseek,
+	.proc_release   = homa_metrics_release,
 };
 
 /* Global information used to export metrics information through a file in
