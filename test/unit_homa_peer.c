@@ -555,7 +555,7 @@ TEST_F(homa_peer, homa_peer_get__race_with_homa_peer_release)
 	 * will fail in homa_peer_get, and arrange for gc to remove the peer
 	 * when homa_peer_get acquires the spinlock.
 	 */
-	refcount_dec(&peer->refs);
+	atomic_dec(&peer->refs.refs);
 	unit_hook_register(gc_hook);
 	hook_peer = peer;
 	hook_peertab = self->homa.peertab;
