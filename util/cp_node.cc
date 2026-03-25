@@ -2723,7 +2723,7 @@ void log_homa_info(int fd) {
 	int status;
 
 	rpcs = new homa_rpc_info[MAX_RPCS];
-	hinfo.rpc_info = rpcs;
+	hinfo.rpc_info = (__u64)(uintptr_t)rpcs;
 	hinfo.rpc_info_length = MAX_RPCS * sizeof(*rpcs);
 	status = ioctl(fd, HOMAIOCINFO, &hinfo);
 	if (status != 0) {

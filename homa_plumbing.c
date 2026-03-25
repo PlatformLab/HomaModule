@@ -523,10 +523,9 @@ int __init homa_load(void)
 
 #ifndef __UPSTREAM__ /* See strip.py */
 	pr_err("Homa module loading\n");
-	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, homa_grant_hdr %lu, ack %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu skb_shared_info %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
+	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu skb_shared_info %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
 		  sizeof(struct homa_data_hdr),
 		  sizeof(struct homa_seg_hdr),
-		  sizeof(struct homa_grant_hdr),
 		  sizeof(struct homa_ack),
 		  sizeof(struct homa_peer),
 		  sizeof(struct iphdr),
@@ -891,6 +890,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		hsk->error_msg = "socket has been shut down";
 		return -ESHUTDOWN;
 	}
+	rcu_read_lock();
 	hinfo.bpool_avail_bytes = homa_pool_avail_bytes(hsk->buffer_pool);
 	hinfo.port = hsk->port;
 	dst = (char *)hinfo.rpc_info;
@@ -907,6 +907,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		if (dst && bytes_avl >= sizeof(rinfo)) {
 			if (copy_to_user((void __user *)dst, &rinfo,
 					 sizeof(rinfo))) {
+				rcu_read_unlock();
 				homa_unprotect_rpcs(hsk);
 				hsk->error_msg = "couldn't copy homa_rpc_info to user space: invalid or read-only address?";
 				return -EFAULT;
@@ -916,6 +917,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		}
 		hinfo.num_rpcs++;
 	}
+	rcu_read_unlock();
 	homa_unprotect_rpcs(hsk);
 
 	if (hsk->error_msg)
@@ -975,15 +977,7 @@ int homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
  */
 int homa_socket(struct sock *sk)
 {
-	struct homa_sock *hsk = homa_sk(sk);
-	int result;
-
-	result = homa_sock_init(hsk);
-	if (result != 0) {
-		homa_sock_shutdown(hsk);
-		homa_sock_destroy(&hsk->sock);
-	}
-	return result;
+	return homa_sock_init(homa_sk(sk));
 }
 
 /**
@@ -1089,7 +1083,7 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 	}
 
 	if (level != IPPROTO_HOMA) {
-		hsk->error_msg = "homa_setsockopt invoked with level not IPPROTO_HOMA";
+		hsk->error_msg = "homa_getsockopt invoked with level not IPPROTO_HOMA";
 		return -ENOPROTOOPT;
 	}
 	if (optname == SO_HOMA_RCVBUF) {
@@ -1360,8 +1354,8 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		result = -EINVAL;
 		goto done;
 	}
-	result = homa_pool_release_buffers(hsk->buffer_pool, control.num_bpages,
-					   control.bpage_offsets);
+	result = homa_pool_free_bufs(hsk->buffer_pool, control.num_bpages,
+				     control.bpage_offsets);
 	control.num_bpages = 0;
 	if (result != 0) {
 		hsk->error_msg = "error while releasing buffer pages";
@@ -1401,7 +1395,6 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	} else {
 		result = rpc->msgin.length;
 	}
-	result = rpc->error ? rpc->error : rpc->msgin.length;
 
 #ifndef __STRIP__ /* See strip.py */
 	/* Generate time traces on both ends for long elapsed times (used
@@ -1963,7 +1956,7 @@ done:
  * wake up the timer thread. Runs at IRQ level.
  * @timer:   The timer that triggered; not used.
  *
- * Return:   Always HRTIMER_RESTART.
+ * Return:   Always HRTIMER_NORESTART.
  */
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 {

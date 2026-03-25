@@ -26,5 +26,7 @@ for t in $targets; do
     rsync -rtv ~/.ssh/cloudlab_rsa.pub ~/.ssh/cloudlab_rsa $t:.ssh/
     ssh $t 'if [ ! -e .ssh/id_rsa ]; then
         cp .ssh/cloudlab_rsa .ssh/id_rsa
-        fi'
+        fi
+        git config --global user.name "John Ousterhout"
+        git config --global user.email "ouster@cs.stanford.edu"'
 done

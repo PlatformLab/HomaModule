@@ -138,8 +138,8 @@ int homa_pacer_main(void *arg)
 
 		tt_record("pacer sleeping");
 		status = wait_event_interruptible(pacer->wait_queue,
-				kthread_should_stop() ||
-				!list_empty(&pacer->throttled_rpcs));
+						  kthread_should_stop() ||
+						  !list_empty(&pacer->throttled_rpcs));
 		tt_record1("pacer woke up with status %d", status);
 		if (status != 0 && status != -ERESTARTSYS)
 			break;

@@ -82,6 +82,7 @@ symbols = [
         'int      homa_getsockopt(',
         'int      homa_hash(',
         'enum hrtimer_restart homa_hrtimer(',
+        'int      homa_ioc_info(',
         'int      homa_ioctl(',
         'int      homa_load(',
         'void     homa_net_exit(',
