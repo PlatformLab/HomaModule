@@ -649,6 +649,18 @@ TEST_F(homa_peer, homa_get_dst__multiple_refresh_failures)
 	dst_release(dst);
 	homa_peer_release(peer);
 }
+TEST_F(homa_peer, homa_get_dst__update_flowi_proto)
+{
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
+	struct dst_entry *dst;
+
+	self->hsk.sock.sk_protocol = IPPROTO_TCP;
+	peer->flow.flowi_proto = IPPROTO_HOMA;
+	dst = homa_get_dst(peer, &self->hsk);
+	EXPECT_EQ(IPPROTO_TCP, peer->flow.flowi_proto);
+	dst_release(dst);
+	homa_peer_release(peer);
+}
 
 TEST_F(homa_peer, homa_peer_reset_dst__ipv4)
 {
