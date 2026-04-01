@@ -149,7 +149,7 @@ void homa_request_retrans(struct homa_rpc *rpc)
 	resend.offset = htonl(offset);
 	resend.length = htonl(length);
 	tt_record4("Sending RESEND for id %d, peer 0x%x, offset %d, length %d",
-		   rpc->id, tt_addr(rpc->peer->addr), offset, offset + length);
+		   rpc->id, tt_addr(rpc->peer->addr), offset, length);
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 }
 
@@ -192,6 +192,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			reason = SKB_DROP_REASON_NOMEM;
 			goto discard;
 		}
+		tt_record3("Created new gap for id %d: start %d, end %d",
+			   rpc->id, rpc->msgin.recv_end, start);
 		rpc->msgin.recv_end = end;
 		goto keep;
 	}
@@ -216,6 +218,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				reason = SKB_DROP_REASON_DUP_FRAG;
 				goto discard;
 			}
+			tt_record4("Increasing start for gap for id %d, old start %d, new %d, end %d",
+				   rpc->id, gap->start, end, gap->end);
 			gap->start = end;
 			if (gap->start >= gap->end) {
 				list_del(&gap->links);
@@ -236,6 +240,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				reason = SKB_DROP_REASON_DUP_FRAG;
 				goto discard;
 			}
+			tt_record4("Decreasing end for gap for id %d, old end %d, new %d, start %d",
+				   rpc->id, gap->end, start, gap->start);
 			gap->end = start;
 			goto keep;
 		}
@@ -248,6 +254,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			reason = SKB_DROP_REASON_NOMEM;
 			goto discard;
 		}
+		tt_record4("Splitting gap for id %d; old gap start %d, end %d, pkt_start %d",
+			   rpc->id, gap->start, gap->end, start);
 		gap2->time = gap->time;
 		gap->start = end;
 		goto keep;
