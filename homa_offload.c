@@ -133,11 +133,11 @@ void homa_gro_unhook_tcp(void)
  * homa_tcp_gro_receive() - Invoked instead of TCP's normal gro_receive function
  * when hooking is enabled. Identifies Homa-over-TCP packets and passes them
  * to Homa; sends real TCP packets to TCP's gro_receive function.
- * @held_list:  Pointer to header for list of packets that are being
+ * @gro_list:   Pointer to header for list of packets that are being
  *              held for possible GRO merging.
  * @skb:        The newly arrived packet.
  */
-struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
+struct sk_buff *homa_tcp_gro_receive(struct list_head *gro_list,
 				      struct sk_buff *skb)
 {
 	struct homa_common_hdr *h = (struct homa_common_hdr *)
@@ -148,7 +148,7 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 	//		ntohs(h->urgent), homa_local_id(h->sender_id));
 	if (h->flags != HOMA_TCP_FLAGS ||
 	    ntohs(h->urgent) != HOMA_TCP_URGENT)
-		return tcp_net_offload->callbacks.gro_receive(held_list, skb);
+		return tcp_net_offload->callbacks.gro_receive(gro_list, skb);
 
 	/* Change the packet's IP protocol to Homa so that it will get
 	 * dispatched directly to Homa in the future.
@@ -161,7 +161,7 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 						 htons(IPPROTO_HOMA));
 		ip_hdr(skb)->protocol = IPPROTO_HOMA;
 	}
-	return homa_gro_receive(held_list, skb);
+	return homa_gro_receive(gro_list, skb);
 }
 
 /**
@@ -267,16 +267,15 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
  * unusual way: it simply aggregates all packets targeted to a particular
  * destination port, so that the entire bundle can get through the networking
  * stack in a single traversal.
- * @held_list:  Pointer to header for list of packets that are being
- *              held for possible GRO merging. Note: this list contains
- *              only packets matching a given hash.
+ * @gro_list:   Pointer to header for list of packets that are being
+ *              held for possible GRO merging.
  * @skb:        The newly arrived packet.
  *
  * Return: If the return value is non-NULL, it refers to an skb in
  * gro_list. The skb will be removed from the list by the caller and
  * passed up the stack immediately.
  */
-struct sk_buff *homa_gro_receive(struct list_head *held_list,
+struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 				 struct sk_buff *skb)
 {
 	/* This function will do one of the following things:
@@ -296,10 +295,10 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	struct homa_data_hdr *h_new;
 	u64 *softirq_cycles_metric;
 	struct sk_buff *held_skb;
+	struct sk_buff *p;
 	u64 now = homa_clock();
 	int priority;
 	u32 saddr;
-	u32 hash;
 	int busy;
 
 	if (!homa_make_header_avl(skb))
@@ -361,97 +360,53 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 #endif /* See strip.py */
 	}
 
-	/* The GRO mechanism tries to separate packets onto different
-	 * gro_lists by hash. This is bad for us, because we want to batch
-	 * packets together regardless of their RPCs. So, instead of
-	 * checking the list they gave us, check the last list where this
-	 * core added a Homa packet (if there is such a list).
+	h_new->common.gro_count = 1;
+
+	/* On newer kernels (5.0+), the GRO mechanism separates packets
+	 * into per-hash buckets (GRO_HASH_BUCKETS / struct gro_list /
+	 * napi->gro_hash[]). On EL8 (kernel 4.18), none of that exists;
+	 * napi_struct has a single gro_list. So instead of reverse-
+	 * engineering napi via container_of on hash buckets, we simply
+	 * iterate the provided gro_list to find an existing Homa packet
+	 * to batch with.
 	 */
-	hash = skb_get_hash_raw(skb) & (GRO_HASH_BUCKETS - 1);
-	if (offload_core->held_skb) {
-		/* Reverse-engineer the location of the gro_node, so we
-		 * can verify that held_skb is still valid.
+	list_for_each_entry(p, gro_list, list) {
+		struct homa_common_hdr *h_held;
+		int protocol;
+
+		held_skb = p;
+		h_held = (struct homa_common_hdr *)
+			 skb_transport_header(held_skb);
+
+		if (skb_is_ipv6(held_skb))
+			protocol = ipv6_hdr(held_skb)->nexthdr;
+		else
+			protocol = ip_hdr(held_skb)->protocol;
+		if (protocol != IPPROTO_HOMA)
+			continue;
+
+		/* Aggregate skb into held_skb. We don't update the
+		 * length of held_skb because we'll eventually split
+		 * it up and process each skb independently.
 		 */
-		struct gro_list *gro_list = container_of(held_list,
-				struct gro_list, list);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
-		struct napi_struct *napi = container_of(gro_list,
-				struct napi_struct, gro_hash[hash]);
-#else
-		struct gro_node *gro_node = container_of(gro_list,
-				struct gro_node, hash[hash]);
-#endif
+		if (NAPI_GRO_CB(held_skb)->last == held_skb)
+			skb_shinfo(held_skb)->frag_list = skb;
+		else
+			NAPI_GRO_CB(held_skb)->last->next = skb;
+		NAPI_GRO_CB(held_skb)->last = skb;
+		skb->next = NULL;
+		NAPI_GRO_CB(skb)->same_flow = 1;
+		NAPI_GRO_CB(held_skb)->count++;
+		h_held->gro_count++;
 
-		/* Must verify that offload_core->held_skb points to a packet on
-		 * the list, and that the packet is a Homa packet.
-		 * homa_gro_complete isn't always invoked before removing
-		 * packets from the list, so offload_core->held_skb could be a
-		 * dangling pointer (or the skb could have been reused for
-		 * some other protocol).
+		/* When the batch is full, return the held_skb to the
+		 * caller; the GRO framework will remove it from the
+		 * gro_list and pass it up through the SoftIRQ layer.
 		 */
-		list_for_each_entry(held_skb,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
-				    &napi->gro_hash[offload_core->held_bucket].list,
-#else
-				    &gro_node->hash[offload_core->held_bucket].list,
-#endif
-				    list) {
-			int protocol;
+		if (h_held->gro_count >= homa->max_gro_skbs)
+			result = held_skb;
 
-			if (held_skb != offload_core->held_skb)
-				continue;
-			if (skb_is_ipv6(held_skb))
-				protocol = ipv6_hdr(held_skb)->nexthdr;
-			else
-				protocol = ip_hdr(held_skb)->protocol;
-			if (protocol != IPPROTO_HOMA) {
-				tt_record3("homa_gro_receive held_skb 0x%0x%0x isn't Homa: protocol %d",
-					   tt_hi(held_skb), tt_lo(held_skb),
-					   protocol);
-				continue;
-			}
-
-			/* Aggregate skb into held_skb. We don't update the
-			 * length of held_skb because we'll eventually split
-			 * it up and process each skb independently.
-			 */
-			if (NAPI_GRO_CB(held_skb)->last == held_skb)
-				skb_shinfo(held_skb)->frag_list = skb;
-			else
-				NAPI_GRO_CB(held_skb)->last->next = skb;
-			NAPI_GRO_CB(held_skb)->last = skb;
-			skb->next = NULL;
-			NAPI_GRO_CB(skb)->same_flow = 1;
-			NAPI_GRO_CB(held_skb)->count++;
-			if (NAPI_GRO_CB(held_skb)->count >= homa->max_gro_skbs) {
-				/* Push this batch up through the SoftIRQ
-				 * layer. This code is a hack, needed because
-				 * returning skb as result is no longer
-				 * sufficient (as of 5.4.80) to push it up
-				 * the stack; the packet just gets queued on
-				 * gro_node->rx_list. This code basically steals
-				 * the packet from dev_gro_receive and
-				 * pushes it upward.
-				 */
-				skb_list_del_init(held_skb);
-				homa_gro_complete(held_skb, 0);
-				netif_receive_skb(held_skb);
-				homa_send_ipis();
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
-				napi->gro_hash[offload_core->held_bucket].count--;
-				if (napi->gro_hash[offload_core->held_bucket].count == 0)
-					__clear_bit(offload_core->held_bucket,
-						    &napi->gro_bitmask);
-#else
-				gro_node->hash[offload_core->held_bucket].count--;
-				if (gro_node->hash[offload_core->held_bucket].count == 0)
-					__clear_bit(offload_core->held_bucket,
-						    &gro_node->bitmask);
-#endif
-				result = ERR_PTR(-EINPROGRESS);
-			}
-			goto done;
-		}
+		goto done;
 	}
 
 	/* There was no existing Homa packet that this packet could be
@@ -462,8 +417,6 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 * means we aren't heavily loaded; if batching does occur,
 	 * homa_gro_complete will pick a different core).
 	 */
-	offload_core->held_skb = skb;
-	offload_core->held_bucket = hash;
 	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
 		homa_set_softirq_cpu(skb, smp_processor_id());
 
