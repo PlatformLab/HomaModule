@@ -1454,6 +1454,16 @@ void sk_skb_reason_drop(struct sock *sk, struct sk_buff *skb,
 	__kfree_skb(skb);
 #endif
 }
+
+void skb_attempt_defer_free(struct sk_buff *skb)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
+	kfree_skb(skb);
+#else
+	__kfree_skb(skb);
+#endif
+}
+
 __wsum skb_checksum(const struct sk_buff *skb, int offset, int len, __wsum csum)
 {
 	return 0;

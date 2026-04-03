@@ -294,6 +294,19 @@ keep:
 }
 
 /**
+ * homa_consume_rx_skb() - Invoked to free an incoming skb that has been
+ * processed normally. Contains optimizations to minimize overhead during
+ * the execution of this function.
+ * @skb:    Buffer to free. Should be for an incoming skb, which was
+ *          processed normally.
+ */
+void homa_consume_rx_skb(struct sk_buff *skb)
+{
+	skb_orphan(skb);
+	skb_attempt_defer_free(skb);
+}
+
+/**
  * homa_copy_to_user() - Copy as much data as possible from incoming
  * packet buffers to buffers in user space.
  * @rpc:     RPC for which data should be copied. Must be locked by caller.
@@ -423,7 +436,7 @@ free_skbs:
 		start = homa_clock();
 #endif /* See strip.py */
 		for (i = 0; i < n; i++)
-			consume_skb(skbs[i]);
+			homa_consume_rx_skb(skbs[i]);
 		INC_METRIC(skb_free_cycles, homa_clock() - start);
 		INC_METRIC(skb_frees, n);
 		tt_record2("finished freeing %d skbs for id %d",
@@ -788,7 +801,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(rpc, false);
 	}
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 #endif /* See strip.py */
 
@@ -872,7 +885,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	}
 
 done:
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 
 /**
@@ -932,7 +945,7 @@ void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 #endif /* See strip.py */
 	}
 done:
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -957,7 +970,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 		peer->cutoff_version = h->cutoff_version;
 		homa_peer_release(peer);
 	}
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 #endif /* See strip.py */
 
@@ -1015,7 +1028,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	homa_peer_release(peer);
 
 done:
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 
 /**
@@ -1058,7 +1071,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	}
 	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
 		   homa_local_id(h->common.sender_id), tt_addr(saddr), count);
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 
 /**
