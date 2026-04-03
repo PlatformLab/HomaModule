@@ -2,7 +2,21 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
-68. (January 2025) Performance snapshot with and without pacer, using
+69. (March 2026) Use a kmem_cache for homa_rpcs? Tried this, but took it out
+because it made performance slightly worse. Here are measurements of
+cycles/allocation for a 6-node cp_vs_tcp experiment on xl170s:
+
+kmem_cache   no kmem_cache
+416             395
+432             412
+401             381
+357             335
+405             376
+391             368
+-------------------
+400             378    (avg. of avgs)
+
+68. (January 2026) Performance snapshot with and without pacer, using
 c6620 CloudLab nodes, "-w w4 -b 80 -s 20 -n 6". cp_vs_tcp is used unless
 cp_both is indicated.
 

@@ -2116,6 +2116,47 @@ TEST_F(homa_incoming, homa_ack_pkt__target_rpc_exists_plus_extras)
 	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc2));
 	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc2));
 }
+TEST_F(homa_incoming, homa_ack_pkt__reduce_oversize_count)
+{
+	struct homa_rpc *srpc1, *srpc2;
+	struct homa_ack_hdr h;
+	struct sk_buff *skb;
+	struct homa_ack ack;
+	int i;
+
+
+	srpc1 = unit_server_rpc(&self->hsk2, UNIT_OUTGOING, self->client_ip,
+				self->server_ip, self->client_port,
+				self->server_id, 100, 5000);
+	srpc2 = unit_server_rpc(&self->hsk2, UNIT_OUTGOING, self->client_ip,
+				self->server_ip, self->client_port,
+				self->server_id+2, 100, 5000);
+	ASSERT_NE(NULL, srpc1);
+	ASSERT_NE(NULL, srpc2);
+	EXPECT_EQ(2, unit_list_length(&self->hsk2.active_rpcs));
+
+	/* Create a packet that has one ack too many. The last is for
+	 * srpc2, all the others are for srpc1.  */
+	h.common.sport = htons(self->client_port);
+	h.common.dport = htons(self->hsk2.port);
+	h.common.sender_id = cpu_to_be64(self->client_id);
+	h.common.type = ACK;
+	h.num_acks = htons(HOMA_MAX_ACKS_PER_PKT + 1);
+	ack.server_port = htons(self->server_port);
+	ack.client_id = cpu_to_be64(self->client_id);
+	for (i = 0; i < HOMA_MAX_ACKS_PER_PKT; i++)
+		h.acks[0] = ack;
+	ack.client_id = cpu_to_be64(self->client_id + 2);
+	skb = mock_skb_alloc(self->client_ip, &h.common, sizeof(ack), 0);
+	memcpy(skb_tail_pointer(skb) - sizeof(ack), &ack, sizeof(ack));
+
+	unit_log_clear();
+	mock_xmit_log_verbose = 1;
+	homa_dispatch_pkts(skb);
+	EXPECT_EQ(1, unit_list_length(&self->hsk2.active_rpcs));
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc1));
+	EXPECT_STREQ("OUTGOING", homa_symbol_for_state(srpc2));
+}
 TEST_F(homa_incoming, homa_ack_pkt__target_rpc_doesnt_exist)
 {
 	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,

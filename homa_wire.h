@@ -131,8 +131,8 @@ struct homa_common_hdr {
 	 * in a homa_data_hdr; used by TSO to determine where the replicated
 	 * header portion ends. For other packets the offset is always 5
 	 * (standard TCP header length); other values may cause some NICs
-	 * (such as Intel E810-C) to drop outgoing packets when TCP hijacking
-	 * is enabled. The low-order bits are always 0.
+	 * (such as Intel E810-C) to drop outgoing data packets when TCP
+	 * hijacking is enabled. The low-order bits are always 0.
 	 */
 	u8 doff;
 
@@ -546,20 +546,6 @@ static inline u64 homa_local_id(__be64 sender_id)
 	 */
 	return be64_to_cpu(sender_id) ^ 1;
 }
-
-#ifndef __STRIP__ /* See strip.py */
-/**
- * homa_set_hijack() - Set fields in a Homa header that are needed for
- * TCP hijacking to work properly.
- * @common:   Header in which to set fields.
- */
-static inline void homa_set_hijack(struct homa_common_hdr *common)
-{
-	common->flags = HOMA_TCP_FLAGS;
-	common->urgent = htons(HOMA_TCP_URGENT);
-	common->doff = 0x50;
-}
-#endif /* See strip.py */
 
 /**
  * homa_get_offset() - Returns the offset within message of the first byte

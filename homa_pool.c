@@ -364,8 +364,8 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	/* Can't use the current page; get another one. */
 new_page:
 	if (homa_pool_get_pages(pool, 1, pages, 1) != 0) {
-		homa_pool_release_buffers(pool, rpc->msgin.num_bpages,
-					  rpc->msgin.bpage_offsets);
+		homa_pool_free_bufs(pool, rpc->msgin.num_bpages,
+				    rpc->msgin.bpage_offsets);
 		rpc->msgin.num_bpages = 0;
 		goto out_of_space;
 	}
@@ -442,7 +442,7 @@ void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
 }
 
 /**
- * homa_pool_release_buffers() - Release buffer space so that it can be
+ * homa_pool_free_bufs() - Release buffer space so that it can be
  * reused.
  * @pool:         Pool that the buffer space belongs to. Doesn't need to
  *                be locked.
@@ -451,8 +451,7 @@ void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
  *                from the start of the pool to the buffer to be released.
  * Return:        0 for success, otherwise a negative errno.
  */
-int homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
-			      u32 *buffers)
+int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 {
 	int result = 0;
 	int i;
@@ -479,8 +478,8 @@ int homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 /**
  * homa_pool_check_waiting() - Checks to see if there are enough free
  * bpages to wake up any RPCs that were blocked. Whenever
- * homa_pool_release_buffers is invoked, this function must be invoked later,
- * at a point when the caller holds no locks (homa_pool_release_buffers may
+ * homa_pool_free_bufs is invoked, this function must be invoked later,
+ * at a point when the caller holds no locks (homa_pool_free_bufs may
  * be invoked with locks held, so it can't safely invoke this function).
  * This is regrettably tricky, but I can't think of a better solution.
  * @pool:         Information about the buffer pool.

@@ -345,7 +345,7 @@ TEST_F(homa_plumbing, homa_ioc_info__rpc_info)
 	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
 			self->server_ip, self->client_port, self->server_id + 2,
 			5000, 2000);
-	hinfo.rpc_info = info;
+	hinfo.rpc_info = (__u64)(uintptr_t)info;
 	hinfo.rpc_info_length = sizeof(info);
 
 	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
@@ -368,7 +368,7 @@ TEST_F(homa_plumbing, homa_ioc_info__ignore_dead_rpc)
 	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
 			self->server_ip, self->client_port, self->server_id + 2,
 			5000, 2000);
-	hinfo.rpc_info = info;
+	hinfo.rpc_info = (__u64)(uintptr_t)info;
 	hinfo.rpc_info_length = sizeof(info);
 
 	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
@@ -387,7 +387,7 @@ TEST_F(homa_plumbing, homa_ioc_info__no_memory_for_rpc_info)
 	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
 			self->server_ip, self->client_port, self->server_id + 2,
 			5000, 2000);
-	hinfo.rpc_info = NULL;
+	hinfo.rpc_info = (__u64)(uintptr_t)NULL;
 	hinfo.rpc_info_length = 1000;
 
 	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
@@ -406,7 +406,7 @@ TEST_F(homa_plumbing, homa_ioc_info__not_enough_space_for_all_rpcs)
 			self->server_ip, self->client_port, self->server_id + 2,
 			5000, 2000);
 	memset(info, 0, sizeof(info));
-	hinfo.rpc_info = info;
+	hinfo.rpc_info = (__u64)(uintptr_t)info;
 	hinfo.rpc_info_length = sizeof(*info);
 
 	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
@@ -427,7 +427,7 @@ TEST_F(homa_plumbing, homa_ioc_info__cant_copy_rpc_info_to_user)
 			self->server_ip, self->client_port, self->server_id + 2,
 			5000, 2000);
 	memset(info, 0, sizeof(info));
-	hinfo.rpc_info = info;
+	hinfo.rpc_info = (__u64)(uintptr_t)info;
 	hinfo.rpc_info_length = sizeof(info);
 
 	mock_copy_to_user_errors = 2;
@@ -478,7 +478,7 @@ TEST_F(homa_plumbing, homa_ioctl__HOMAIOCINFO)
 {
 	struct homa_info hinfo;
 
-	hinfo.rpc_info = NULL;
+	hinfo.rpc_info = (__u64)(uintptr_t)NULL;
 	self->hsk.error_msg = "Sample error message";
 	EXPECT_EQ(0, -homa_ioctl(self->hsk.sock.sk_socket, HOMAIOCINFO,
 		  (unsigned long) &hinfo));
@@ -638,7 +638,7 @@ TEST_F(homa_plumbing, homa_getsockopt__bad_level)
 
 	EXPECT_EQ(ENOPROTOOPT, -homa_getsockopt(&self->hsk.sock, 0, SO_HOMA_RCVBUF,
 		(char *)&val, &size));
-	EXPECT_STREQ("homa_setsockopt invoked with level not IPPROTO_HOMA",
+	EXPECT_STREQ("homa_getsockopt invoked with level not IPPROTO_HOMA",
 		     self->hsk.error_msg);
 }
 TEST_F(homa_plumbing, homa_getsockopt__recvbuf_bad_length)

@@ -1002,7 +1002,8 @@ int homa_qdisc_pacer_main(void *device)
 
 		tt_record("homa_qdisc pacer sleeping");
 		status = wait_event_interruptible(qdev->pacer_sleep,
-			kthread_should_stop() || homa_qdisc_any_deferred(qdev));
+						  kthread_should_stop() ||
+						  homa_qdisc_any_deferred(qdev));
 		tt_record1("homa_qdisc pacer woke up with status %d", status);
 		if (status != 0 && status != -ERESTARTSYS)
 			break;

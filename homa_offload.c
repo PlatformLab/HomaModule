@@ -43,7 +43,7 @@ static struct net_offload hook_tcp6_net_offload;
  */
 int homa_offload_init(void)
 {
-	int i;
+	int i, res1, res2;
 
 	for (i = 0; i < nr_cpu_ids; i++) {
 		struct homa_offload_core *offload_core;
@@ -62,8 +62,8 @@ int homa_offload_init(void)
 		offload_core->held_bucket = 0;
 	}
 
-	int res1 = inet_add_offload(&homa_offload, IPPROTO_HOMA);
-	int res2 = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
+	res1 = inet_add_offload(&homa_offload, IPPROTO_HOMA);
+	res2 = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
 
 	return res1 ? res1 : res2;
 }
@@ -171,7 +171,7 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
  * @cpu:  Index of core to which the packet should be directed for
  *        SoftIRQ processing.
  */
-static void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
+void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 {
 	struct rps_sock_flow_table *sock_flow_table;
 	u32 table_index, hash, mask;

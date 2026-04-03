@@ -615,9 +615,9 @@ release:
 
 			UNIT_LOG("; ", "reaped %llu", rpc->id);
 			if (unlikely(rpc->msgin.num_bpages))
-				homa_pool_release_buffers(rpc->hsk->buffer_pool,
-							  rpc->msgin.num_bpages,
-							  rpc->msgin.bpage_offsets);
+				homa_pool_free_bufs(rpc->hsk->buffer_pool,
+						    rpc->msgin.num_bpages,
+						    rpc->msgin.bpage_offsets);
 			if (rpc->peer) {
 				homa_peer_release(rpc->peer);
 				rpc->peer = NULL;

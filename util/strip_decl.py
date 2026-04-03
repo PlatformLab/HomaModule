@@ -58,6 +58,7 @@ symbols = [
     ['incoming',
         'void     homa_ack_pkt(',
         'void     homa_add_packet(',
+        'void     homa_consume_rx_skb(',
         'int      homa_copy_to_user(',
         'void     homa_data_pkt(',
         'void     homa_dispatch_pkts(',

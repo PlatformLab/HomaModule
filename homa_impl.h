@@ -578,19 +578,16 @@ static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
 }
 
 /**
- * homa_set_doff() - Fills in the doff TCP header field for a Homa packet.
- * @h:     Packet header whose doff field is to be set.
+ * homa_set_doff() - Fills in the doff TCP header field for a packet.
+ * @skb:   Packet whose doff field is to be set.
  * @size:  Size of the "header", bytes (must be a multiple of 4). This
  *         information is used only for TSO; it's the number of bytes
  *         that should be replicated in each segment. The bytes after
  *         this will be distributed among segments.
  */
-static inline void homa_set_doff(struct homa_data_hdr *h, int size)
+static inline void homa_set_doff(struct sk_buff *skb, int size)
 {
-	/* Drop the 2 low-order bits from size and set the 4 high-order
-	 * bits of doff from what's left.
-	 */
-	h->common.doff = size << 2;
+	tcp_hdr(skb)->doff = size >> 2;
 }
 
 /** skb_is_ipv6() - Return true if the packet is encapsulated with IPv6,
@@ -713,6 +710,7 @@ void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 int      homa_bind(struct socket *sk, struct sockaddr_unsized *addr,
 		   int addr_len);
 void     homa_close(struct sock *sock, long timeout);
+void     homa_consume_rx_skb(struct sk_buff *skb);
 int      homa_copy_to_user(struct homa_rpc *rpc);
 void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_destroy(struct homa *homa);

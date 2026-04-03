@@ -543,7 +543,7 @@ static inline void homa_rpc_unlock(struct homa_rpc *rpc)
 
 /**
  * homa_protect_rpcs() - Ensures that no RPCs will be reaped for a given
- * socket until homa_sock_unprotect is called. Typically used by functions
+ * socket until homa_unprotect_rpcs is called. Typically used by functions
  * that want to scan the active RPCs for a socket without holding the socket
  * lock.  Multiple calls to this function may be in effect at once. See
  * "Homa Locking Strategy" in homa_impl.h for more info on why this function
@@ -568,7 +568,7 @@ static inline int homa_protect_rpcs(struct homa_sock *hsk)
 
 /**
  * homa_unprotect_rpcs() - Cancel the effect of a previous call to
- * homa_sock_protect(), so that RPCs can once again be reaped.
+ * homa_protect_rpcs(), so that RPCs can once again be reaped.
  * @hsk:    Socket whose RPCs should be unprotected.
  */
 static inline void homa_unprotect_rpcs(struct homa_sock *hsk)
@@ -598,7 +598,7 @@ static inline void homa_rpc_hold(struct homa_rpc *rpc)
 
 /**
  * homa_rpc_put() - Release a reference on an RPC (cancels the effect of
- * a previous call to homa_rpc_put).
+ * a previous call to homa_rpc_hold).
  * @rpc:      RPC to release.
  */
 static inline void homa_rpc_put(struct homa_rpc *rpc)

@@ -520,8 +520,8 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 	tt_record2("homa_sock_wait_wmem waiting on port %d, wmem %d",
 		   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
 	result = wait_event_interruptible_timeout(*sk_sleep(&hsk->sock),
-				homa_sock_wmem_avl(hsk) || hsk->shutdown,
-				timeo);
+						  homa_sock_wmem_avl(hsk) ||
+						  hsk->shutdown, timeo);
 	tt_record4("homa_sock_wait_wmem woke up on port %d with result %d, wmem %d, signal pending %d",
 		   hsk->port, result, refcount_read(&hsk->sock.sk_wmem_alloc),
 		   signal_pending(current));

@@ -7,11 +7,10 @@
 #ifndef _UAPI_LINUX_HOMA_H
 #define _UAPI_LINUX_HOMA_H
 
+#include <linux/in.h>
+#include <linux/in6.h>
+#include <linux/socket.h>
 #include <linux/types.h>
-#ifndef __KERNEL__
-#include <netinet/in.h>
-#include <sys/socket.h>
-#endif
 
 /* IANA-assigned Internet Protocol number for Homa. */
 #define IPPROTO_HOMA 146
@@ -159,7 +158,7 @@ struct homa_rcvbuf_args {
 	__u64 start;
 
 	/** @length: Total number of bytes available at @start. */
-	size_t length;
+	__u64 length;
 };
 
 /* Meanings of the bits in Homa's flag word, which can be set using
@@ -186,7 +185,7 @@ struct homa_rpc_info {
 
 	/** @peer: Address of the peer socket for this RPC. */
 	union {
-		struct sockaddr_storage storage;
+		struct __kernel_sockaddr_storage storage;
 		struct sockaddr_in in4;
 		struct sockaddr_in6 in6;
 	} peer;
@@ -289,15 +288,16 @@ struct homa_rpc_info {
 struct homa_info {
 	/**
 	 * @rpc_info: (in) Address of memory region in which to store
-	 * information about individual RPCs.
+	 * information about individual RPCs. Actual type is
+	 * "struct homa_rpc_info *".
 	 */
-	struct homa_rpc_info *rpc_info;
+	__u64 rpc_info;
 
 	/**
 	 * @rpc_info_length: (in) Number of bytes of storage available at
 	 * rpc_info.
 	 */
-	size_t rpc_info_length;
+	__u64 rpc_info_length;
 
 	/**
 	 * @bpool_avail_bytes: Number of bytes in the buffer pool for incoming

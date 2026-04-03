@@ -129,8 +129,8 @@ int      homa_pool_get_pages(struct homa_pool *pool, int num_pages,
 			     u32 *pages, int leave_locked);
 void     homa_pool_get_rcvbuf(struct homa_pool *pool,
 			      struct homa_rcvbuf_args *args);
-int      homa_pool_release_buffers(struct homa_pool *pool,
-				   int num_buffers, u32 *buffers);
+int      homa_pool_free_bufs(struct homa_pool *pool, int num_buffers,
+			     u32 *buffers);
 int      homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 			      u64 region_size);
 

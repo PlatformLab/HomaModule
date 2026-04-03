@@ -73,14 +73,6 @@ static void peer_race_hook(char *id)
 	jiffies += 10;
 }
 
-static struct homa_peertab *hook_peertab;
-static void stop_gc_hook(char *id)
-{
-	if (strcmp(id, "kfree") != 0)
-		return;
-	unit_log_printf("; ", "gc_stop_count %d", hook_peertab->gc_stop_count);
-}
-
 TEST_F(homa_peer, homa_peer_alloc_peertab__success)
 {
 	struct homa_peertab *peertab;
@@ -146,23 +138,6 @@ TEST_F(homa_peer, homa_peer_free_net__basics)
 	homa_peer_free_net(self->hnet);
 	EXPECT_EQ(1, unit_count_peers(&self->homa));
 	EXPECT_EQ(1, self->homa.peertab->num_peers);
-}
-TEST_F(homa_peer, homa_peer_free_net__set_gc_stop_count)
-{
-	struct homa_peer *peer;
-
-	peer = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peer);
-
-	unit_hook_register(stop_gc_hook);
-	hook_peertab = self->homa.peertab;
-	unit_log_clear();
-	self->homa.peertab->gc_stop_count = 3;
-
-	homa_peer_free_net(self->hnet);
-	EXPECT_EQ(0, unit_count_peers(&self->homa));
-	EXPECT_SUBSTR("gc_stop_count 4", unit_log_get());
-	EXPECT_EQ(3, self->homa.peertab->gc_stop_count);
 }
 
 TEST_F(homa_peer, homa_peer_release_fn)
@@ -416,25 +391,6 @@ TEST_F(homa_peer, homa_peer_gc__basics)
 	EXPECT_EQ(0, self->hnet->num_peers);
 	EXPECT_EQ(peertab->gc_threshold - 1, peertab->num_peers);
 }
-TEST_F(homa_peer, homa_peer_gc__gc_stop_count)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peer;
-
-	jiffies = 300;
-	peer = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peer);
-	EXPECT_EQ(1, self->hnet->num_peers);
-
-	jiffies = peertab->idle_jiffies_max + 1000;
-	peertab->num_peers = peertab->gc_threshold;
-	peertab->gc_stop_count = 1;
-
-	unit_log_clear();
-	homa_peer_gc(peertab);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1, self->hnet->num_peers);
-}
 TEST_F(homa_peer, homa_peer_gc__peers_below_gc_threshold)
 {
 	struct homa_peertab *peertab = self->homa.peertab;
@@ -567,6 +523,50 @@ TEST_F(homa_peer, homa_peer_get__basics)
 	homa_peer_release(peer);
 	homa_peer_release(peer2);
 }
+
+struct homa_peer *hook_peer;
+struct homa_peertab *hook_peertab;
+static void gc_hook(char *id)
+{
+	if (strcmp(id, "spin_lock") != 0 || !hook_peer)
+		return;
+
+	/* Restore the peer's refererence count to 1. */
+	refcount_inc(&hook_peer->refs);
+
+	/* Make sure the peer will be garbage-collected. */
+	hook_peertab->gc_threshold = 0;
+	hook_peertab->idle_jiffies_min = 0;
+	hook_peertab->idle_jiffies_max = 0;
+	homa_peer_gc(hook_peertab);
+	hook_peer = NULL;
+}
+TEST_F(homa_peer, homa_peer_get__race_with_homa_peer_release)
+{
+	struct homa_peer *peer, *peer2;
+
+	/* Create peer, then release so refcount is 1. */
+	peer = homa_peer_get(&self->hsk, ip1111);
+	ASSERT_FALSE(IS_ERR(peer));
+	homa_peer_release(peer);
+	EXPECT_EQ(1, refcount_read(&peer->refs));
+
+	/* Artificially reduce reference count to 0 so refcount_inc_not_zero
+	 * will fail in homa_peer_get, and arrange for gc to remove the peer
+	 * when homa_peer_get acquires the spinlock.
+	 */
+	atomic_dec(&peer->refs.refs);
+	unit_hook_register(gc_hook);
+	hook_peer = peer;
+	hook_peertab = self->homa.peertab;
+
+	/* Try to get the same peer; make sure that a different peer is
+	 * returned.
+	 */
+	peer2 = homa_peer_get(&self->hsk, ip1111);
+	EXPECT_NE(peer, peer2);
+	homa_peer_release(peer2);
+}
 TEST_F(homa_peer, homa_peer_get__error_in_homa_peer_alloc)
 {
 	struct homa_peer *peer;
@@ -646,6 +646,18 @@ TEST_F(homa_peer, homa_get_dst__multiple_refresh_failures)
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes));
 	EXPECT_EQ(old, dst);
 	EXPECT_EQ(3, mock_dst_check_errors);
+	dst_release(dst);
+	homa_peer_release(peer);
+}
+TEST_F(homa_peer, homa_get_dst__update_flowi_proto)
+{
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
+	struct dst_entry *dst;
+
+	self->hsk.sock.sk_protocol = IPPROTO_TCP;
+	peer->flow.flowi_proto = IPPROTO_HOMA;
+	dst = homa_get_dst(peer, &self->hsk);
+	EXPECT_EQ(IPPROTO_TCP, peer->flow.flowi_proto);
 	dst_release(dst);
 	homa_peer_release(peer);
 }

@@ -406,6 +406,7 @@ void homa_freeze_peers(void)
 	struct homa_peer *peer;
 	struct homa_sock *hsk;
 	struct homa_net *hnet;
+	int wrong_family;
 	int err;
 
 	/* Find a socket to use (any socket for the namespace will do). */
@@ -420,14 +421,15 @@ void homa_freeze_peers(void)
 		goto done;
 	}
 
+	memset(&freeze, 0, sizeof(freeze));
 	freeze.common.type = FREEZE;
 	freeze.common.sport = htons(hsk->port);
 	freeze.common.dport = 0;
-	IF_NO_STRIP(homa_set_hijack(&freeze.common));
 	freeze.common.sender_id = 0;
 
 	rhashtable_walk_enter(&hnet->homa->peertab->ht, &iter);
 	rhashtable_walk_start(&iter);
+	wrong_family = 0;
 	while (true) {
 		peer = rhashtable_walk_next(&iter);
 		if (!peer)
@@ -440,6 +442,13 @@ void homa_freeze_peers(void)
 			continue;
 		if (peer->ht_key.hnet != hnet)
 			continue;
+
+		/* Can't use IPv4 peers with IPv4 sockets or vice vers. a*/
+		if (ipv6_addr_v4mapped(&peer->ht_key.addr) ^
+		    (hsk->sock.sk_family == AF_INET)) {
+			wrong_family += 1;
+			continue;
+		}
 		tt_record1("Sending freeze to 0x%x", tt_addr(peer->addr));
 		err = __homa_xmit_control(&freeze, sizeof(freeze), peer, hsk);
 		if (err != 0)
@@ -448,6 +457,14 @@ void homa_freeze_peers(void)
 	}
 	rhashtable_walk_stop(&iter);
 	rhashtable_walk_exit(&iter);
+	if (wrong_family > 0) {
+		if (hsk->sock.sk_family == AF_INET)
+			tt_record1("homa_freeze_peers skipped %d peers because they use IPv6",
+				   wrong_family);
+		else
+			tt_record1("homa_freeze_peers skipped %d peers because they use IPv4",
+				   wrong_family);
+	}
 
 done:
 	rcu_read_unlock();
@@ -1269,3 +1286,33 @@ error:
 #endif /* __UNIT_TEST__ */
 }
 #endif /* See strip.py */
+
+/**
+ * homa_tcp_checksum() - Compute the TCP checksum for a packet. This is
+ * done "from scratch", i.e. not using any existing information such
+ * as skb->csum.
+ * @skb:     Contains the packet to checksum
+ * Return:   Checksum for the packet: 0 is the "correct" value.
+ */
+int homa_tcp_checksum(struct sk_buff *skb)
+{
+    int tcp_len = skb->len - skb_transport_offset(skb);
+    __wsum data_csum;
+
+    // Calculate the sum of the TCP header + data manually
+    data_csum = skb_checksum(skb, skb_transport_offset(skb), tcp_len, 0);
+
+    if (skb_is_ipv6(skb)) {
+        const struct ipv6hdr *ip6h = ipv6_hdr(skb);
+
+        // Fold the manual sum with the IPv6 pseudo-header
+        return csum_ipv6_magic(&ip6h->saddr, &ip6h->daddr, tcp_len,
+                               IPPROTO_TCP, data_csum);
+    } else {
+        const struct iphdr *iph = ip_hdr(skb);
+
+        // Fold the manual sum with the IPv4 pseudo-header
+        return csum_tcpudp_magic(iph->saddr, iph->daddr, tcp_len,
+                                 IPPROTO_TCP, data_csum);
+    }
+}

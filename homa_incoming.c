@@ -149,7 +149,7 @@ void homa_request_retrans(struct homa_rpc *rpc)
 	resend.offset = htonl(offset);
 	resend.length = htonl(length);
 	tt_record4("Sending RESEND for id %d, peer 0x%x, offset %d, length %d",
-		   rpc->id, tt_addr(rpc->peer->addr), offset, offset + length);
+		   rpc->id, tt_addr(rpc->peer->addr), offset, length);
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 }
 
@@ -192,6 +192,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			reason = SKB_DROP_REASON_NOMEM;
 			goto discard;
 		}
+		tt_record3("Created new gap for id %d: start %d, end %d",
+			   rpc->id, rpc->msgin.recv_end, start);
 		rpc->msgin.recv_end = end;
 		goto keep;
 	}
@@ -216,6 +218,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				reason = SKB_DROP_REASON_DUP_FRAG;
 				goto discard;
 			}
+			tt_record4("Increasing start for gap for id %d, old start %d, new %d, end %d",
+				   rpc->id, gap->start, end, gap->end);
 			gap->start = end;
 			if (gap->start >= gap->end) {
 				list_del(&gap->links);
@@ -236,6 +240,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				reason = SKB_DROP_REASON_DUP_FRAG;
 				goto discard;
 			}
+			tt_record4("Decreasing end for gap for id %d, old end %d, new %d, start %d",
+				   rpc->id, gap->end, start, gap->start);
 			gap->end = start;
 			goto keep;
 		}
@@ -248,10 +254,14 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			reason = SKB_DROP_REASON_NOMEM;
 			goto discard;
 		}
+		tt_record4("Splitting gap for id %d; old gap start %d, end %d, pkt_start %d",
+			   rpc->id, gap->start, gap->end, start);
 		gap2->time = gap->time;
 		gap->start = end;
 		goto keep;
 	}
+	/* Packet doesn't overlap any gap, so it is a duplicate. */
+	reason = SKB_DROP_REASON_DUP_FRAG;
 
 discard:
 #ifndef __STRIP__ /* See strip.py */
@@ -281,6 +291,19 @@ keep:
 			   rpc->msgin.bytes_remaining == 0);
 	}
 #endif /* See strip.py */
+}
+
+/**
+ * homa_consume_rx_skb() - Invoked to free an incoming skb that has been
+ * processed normally. Contains optimizations to minimize overhead during
+ * the execution of this function.
+ * @skb:    Buffer to free. Should be for an incoming skb, which was
+ *          processed normally.
+ */
+void homa_consume_rx_skb(struct sk_buff *skb)
+{
+	skb_orphan(skb);
+	skb_attempt_defer_free(skb);
 }
 
 /**
@@ -413,7 +436,7 @@ free_skbs:
 		start = homa_clock();
 #endif /* See strip.py */
 		for (i = 0; i < n; i++)
-			consume_skb(skbs[i]);
+			homa_consume_rx_skb(skbs[i]);
 		INC_METRIC(skb_free_cycles, homa_clock() - start);
 		INC_METRIC(skb_frees, n);
 		tt_record2("finished freeing %d skbs for id %d",
@@ -778,7 +801,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(rpc, false);
 	}
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 #endif /* See strip.py */
 
@@ -851,7 +874,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end);
 #endif /* See strip.py */
 
-	if (offset >= tx_end)  {
+	if (offset >= tx_end) {
 		/* We have chosen not to transmit any of the requested data;
 		 * send BUSY so the receiver knows we are alive.
 		 */
@@ -862,7 +885,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	}
 
 done:
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 
 /**
@@ -922,7 +945,7 @@ void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 #endif /* See strip.py */
 	}
 done:
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -947,7 +970,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 		peer->cutoff_version = h->cutoff_version;
 		homa_peer_release(peer);
 	}
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 #endif /* See strip.py */
 
@@ -991,10 +1014,10 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	 * other acks available for the peer. Note: can't use rpc below,
 	 * since it may be NULL.
 	 */
+	memset(&ack, 0, sizeof(ack));
 	ack.common.type = ACK;
 	ack.common.sport = h->dport;
 	ack.common.dport = h->sport;
-	IF_NO_STRIP(homa_set_hijack(&ack.common));
 	ack.common.sender_id = cpu_to_be64(id);
 	ack.num_acks = htons(homa_peer_get_acks(peer,
 						HOMA_MAX_ACKS_PER_PKT,
@@ -1005,7 +1028,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	homa_peer_release(peer);
 
 done:
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 
 /**
@@ -1030,6 +1053,8 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	}
 
 	count = ntohs(h->num_acks);
+	if (count > HOMA_MAX_ACKS_PER_PKT)
+		count = HOMA_MAX_ACKS_PER_PKT;
 	if (count > 0) {
 		if (rpc) {
 			/* Must temporarily release rpc's lock because
@@ -1046,7 +1071,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	}
 	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
 		   homa_local_id(h->common.sender_id), tt_addr(saddr), count);
-	consume_skb(skb);
+	homa_consume_rx_skb(skb);
 }
 
 /**
