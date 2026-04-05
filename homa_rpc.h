@@ -483,7 +483,7 @@ struct homa_rpc
 struct homa_rpc
 	*homa_rpc_alloc_server(struct homa_sock *hsk,
 			       const struct in6_addr *source,
-			       struct homa_data_hdr *h, int *created);
+			       struct homa_data_hdr *h);
 void     homa_rpc_end(struct homa_rpc *rpc);
 struct homa_rpc
 	*homa_rpc_find_client(struct homa_sock *hsk, u64 id);
