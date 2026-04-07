@@ -574,10 +574,12 @@ static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
 /**
  * homa_set_doff() - Fills in the doff TCP header field for a packet.
  * @skb:   Packet whose doff field is to be set.
- * @size:  Size of the "header", bytes (must be a multiple of 4). This
- *         information is used only for TSO; it's the number of bytes
- *         that should be replicated in each segment. The bytes after
- *         this will be distributed among segments.
+ * @size:  Size of the "header" in bytes (must be a multiple of 4). This is
+ *         needed for two reasons. First, for TSO to work it must indicate
+ *         the number of bytes that should be replicated in each segment.
+ *         The bytes after this will be distributed among segments. Second,
+ *         for TCP hijacking to work it must have a valid value (20 is a
+ *         good choice if the packet isn't a TSO frame).
  */
 static inline void homa_set_doff(struct sk_buff *skb, int size)
 {

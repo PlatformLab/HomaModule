@@ -19,11 +19,12 @@
 
 #ifndef __STRIP__ /* See strip.py */
 /**
- * homa_set_hijack() - Set fields in an outgoing Homa packet that are needed
- * for TCP hijacking to work properly. This function doesn't actually cause
- * the packet to be sent via TCP (that is determined by hsk->sock.sk_protocol,
- * which is set elsewhere). The modifications made here are safe even if the
- * packet isn't actually sent via TCP.
+ * homa_set_hijack() - Set all of the fields in an outgoing Homa packet that
+ * are needed for TCP hijacking to work properly except doff (use
+ * homa_set_doff for that). This function doesn't actually cause the packet
+ * to be sent via TCP (that is determined by hsk->sock.sk_protocol, which is
+ * set elsewhere). The modifications made here are safe even if the packet
+ * isn't actually sent via TCP.
  * @skb:    Packet buffer in which to set fields.
  * @peer:   Peer that contains source and destination addresses for the packet.
  * @ipv6:   True means the packet is going to be sent via IPv6; false means
@@ -505,7 +506,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	priority = hsk->homa->num_priorities - 1;
 #endif /* See strip.py */
 	skb->ooo_okay = 1;
-	homa_set_doff(skb, length);
+	homa_set_doff(skb, 20);
 #ifndef __STRIP__ /* See strip.py */
 	if (hsk->inet.sk.sk_family == AF_INET6) {
 		homa_set_hijack(skb, peer, true);
