@@ -52,6 +52,9 @@
 #ifndef __UPSTREAM__ /* See strip.py */
 #include "homa.h"
 #include <linux/version.h>
+#ifdef CONFIG_ARM64
+#include <clocksource/arm_arch_timer.h>
+#endif
 #include "homa_devel.h"
 #else /* See strip.py */
 #include <linux/homa.h>
@@ -826,7 +829,13 @@ static inline u64 homa_clock_khz(void)
 	return 1000000;
 #else /* __UNIT_TEST__ */
 #ifndef __UPSTREAM__ /* See strip.py */
-	return cpu_khz;
+#ifdef CONFIG_X86
+	return tsc_khz;
+#elif defined(CONFIG_ARM64)
+	return arch_timer_get_cntfrq() / 1000;
+#else
+	return 1000000;
+#endif
 #else /* See strip.py */
 	return 1000000;
 #endif /* See strip.py */
