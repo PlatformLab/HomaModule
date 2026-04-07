@@ -1010,7 +1010,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 						HOMA_MAX_ACKS_PER_PKT,
 						ack.acks));
 	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
-	tt_record3("Responded to NEED_ACK for id %d, peer %0x%x with %d other acks",
+	tt_record3("Responded to NEED_ACK for id %d, peer 0x%x with %d other acks",
 		   id, tt_addr(saddr), ntohs(ack.num_acks));
 	homa_peer_release(peer);
 
