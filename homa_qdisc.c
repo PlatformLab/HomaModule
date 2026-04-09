@@ -568,7 +568,6 @@ bool homa_qdisc_can_bypass(struct sk_buff *skb, struct homa_qdisc *q)
 		if (ipv6_hdr(skb)->nexthdr != IPPROTO_TCP)
 			return false;
 		daddr = ipv6_hdr(skb)->daddr.in6_u.u6_addr32[0] ^
-		        ipv6_hdr(skb)->daddr.in6_u.u6_addr32[1] ^
 			ipv6_hdr(skb)->daddr.in6_u.u6_addr32[2] ^
 			ipv6_hdr(skb)->daddr.in6_u.u6_addr32[3];
 	} else {
@@ -850,7 +849,7 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 		}
 		qdev->srpt_bytes += (qdisc_pkt_len(skb) *
 				     qdev->hnet->homa->qshared->fifo_weight) >>
-		                     HOMA_FIFO_WEIGHT_SHIFT;
+				     HOMA_FIFO_WEIGHT_SHIFT;
 		INC_METRIC(pacer_fifo_bytes, qdisc_pkt_len(skb));
 	} else {
 		qdev->srpt_bytes -= qdisc_pkt_len(skb);
