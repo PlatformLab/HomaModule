@@ -2373,6 +2373,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	init_waitqueue_head(&mock_socket.wq.wait);
 	rcu_assign_pointer(sk->sk_wq, &mock_socket.wq);
 	sk->sk_sndtimeo = MAX_SCHEDULE_TIMEOUT;
+	sk->sk_protocol = IPPROTO_HOMA;
 	if (port != 0 && port >= mock_min_default_port)
 		hnet->prev_default_port = port - 1;
 	err = homa_sock_init(hsk);

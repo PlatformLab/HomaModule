@@ -17,6 +17,7 @@ ifneq ($(__STRIP__),)
 MY_CFLAGS += -D__STRIP__
 else
 HOMA_OBJS += homa_grant.o \
+	homa_hijack.o \
 	homa_metrics.o \
 	homa_offload.o \
 	homa_pacer.o \

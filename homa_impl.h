@@ -644,30 +644,6 @@ static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 	return mapped;
 }
 
-#ifndef __STRIP__ /* See strip.py */
-/**
- * is_homa_pkt() - Return true if @skb is a Homa packet, false otherwise.
- * @skb:    Packet buffer to check.
- * Return:  see above.
- */
-static inline bool is_homa_pkt(struct sk_buff *skb)
-{
-	int protocol;
-
-	/* If the network header hasn't been created yet, assume it's a
-	 * Homa packet (Homa never generates any non-Homa packets).
-	 */
-	if (skb->network_header == 0)
-		return true;
-	protocol = (skb_is_ipv6(skb)) ? ipv6_hdr(skb)->nexthdr :
-					ip_hdr(skb)->protocol;
-	return (protocol == IPPROTO_HOMA ||
-		(protocol == IPPROTO_TCP &&
-		 tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT)));
-	return protocol == IPPROTO_HOMA;
-}
-#endif /* See strip.py */
-
 /**
  * homa_make_header_avl() - Invokes pskb_may_pull to make sure that all the
  * Homa header information for a packet is in the linear part of the skb
