@@ -661,6 +661,14 @@ def config_qdisc():
     config = get_qdisc_config()
     root = config['root_handle']
 
+    # If the option 'homa_share' isn't available, then Homa was compiled
+    # without homa_qdisc (e.g. for a stripped version).
+    result = exec_cmd(['sysctl', '.net.homa.homa_share'], check=False)
+    if result.returncode != 0:
+        print("Can't install Homa qdisc: it isn't available "
+                "(maybe Homa is stripped?)")
+        return
+
     print('Installing Homa qdisc')
     if root == '0:':
         # Must reset the root qdisc (it isn't possible to modify the
