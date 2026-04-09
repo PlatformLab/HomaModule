@@ -58,7 +58,10 @@ kdoc:
 	$(LINUX_SRC_DIR)/scripts/kernel-doc -none $(CHECK_SRCS)
 
 checkpatch:
-	$(LINUX_SRC_DIR)/scripts/checkpatch.pl --file --strict  --codespell $(CHECK_SRCS)
+	$(LINUX_SRC_DIR)/scripts/checkpatch.pl --file --strict --codespell $(CHECK_SRCS)
+
+checkpatch-net-next:
+	$(LINUX_SRC_DIR)/scripts/checkpatch.pl --file --strict --codespell $(HOMA_TARGET)/*.[ch]
 
 # Copy stripped source files to a Linux source tree
 HOMA_TARGET ?= $(LINUX_SRC_DIR)/net/homa
