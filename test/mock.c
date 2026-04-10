@@ -473,13 +473,6 @@ void __copy_overflow(int size, unsigned long count)
 	abort();
 }
 
-__sum16 csum_ipv6_magic(const struct in6_addr *saddr,
-			const struct in6_addr *daddr,
-			__u32 len, __u8 proto, __wsum csum)
-{
-	return 0;
-}
-
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 int debug_lockdep_rcu_enabled(void)
 {
