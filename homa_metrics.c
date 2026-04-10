@@ -240,13 +240,9 @@ char *homa_metrics_print(void)
 		  "Time spent in homa_softirq during SoftIRQ\n");
 		M("bypass_softirq_cycles", m->bypass_softirq_cycles,
 		  "Time spent in homa_softirq during bypass from GRO\n");
-
-		/* Adjust stats gathered in Linux that use rdtsc. */
-		M("linux_softirq_cycles", m->linux_softirq_cycles *
-		  (homa_clock_khz() / 1000) / (tsc_khz / 1000),
+		M("linux_softirq_cycles", m->linux_softirq_cycles,
 		  "Time spent in all Linux SoftIRQ\n");
-		M("napi_cycles", m->napi_cycles * (homa_clock_khz() / 1000) /
-		  (tsc_khz / 1000),
+		M("napi_cycles", m->napi_cycles,
 		  "Time spent in NAPI-level packet handling\n");
 		M("linux_softirqd_actions", m->linux_softirqd_actions,
 		  "SoftIRQ actions taken in the background softirqd thread\n");
