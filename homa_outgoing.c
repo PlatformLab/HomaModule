@@ -10,45 +10,12 @@
 #include "homa_wire.h"
 
 #ifndef __STRIP__ /* See strip.py */
+#include "homa_hijack.h"
 #include "homa_pacer.h"
 #include "homa_qdisc.h"
 #include "homa_skb.h"
 #else /* See strip.py */
 #include "homa_stub.h"
-#endif /* See strip.py */
-
-#ifndef __STRIP__ /* See strip.py */
-/**
- * homa_set_hijack() - Set fields in an outgoing Homa packet that are needed
- * for TCP hijacking to work properly. This function doesn't actually cause
- * the packet to be sent via TCP (that is determined by hsk->sock.sk_protocol,
- * which is set elsewhere). The modifications made here are safe even if the
- * packet isn't actually sent via TCP.
- * @skb:    Packet buffer in which to set fields.
- * @peer:   Peer that contains source and destination addresses for the packet.
- * @ipv6:   True means the packet is going to be sent via IPv6; false means
- *          IPv4.
- */
-static inline void homa_set_hijack(struct sk_buff *skb, struct homa_peer *peer,
-				   bool ipv6)
-{
-	struct homa_common_hdr *h;
-
-	h = (struct homa_common_hdr *)skb_transport_header(skb);
-	h->flags = HOMA_TCP_FLAGS;
-	h->urgent = htons(HOMA_TCP_URGENT);
-	/* Arrange for proper TCP checksumming. */
-	skb->ip_summed = CHECKSUM_PARTIAL;
-	skb->csum_start = skb_transport_header(skb) - skb->head;
-	skb->csum_offset = offsetof(struct homa_common_hdr, checksum);
-	if (ipv6)
-		h->checksum = ~csum_ipv6_magic(&peer->flow.u.ip6.saddr,
-					       &peer->flow.u.ip6.daddr,
-                        		       skb->len, IPPROTO_TCP, 0);
-	else
-		h->checksum = ~tcp_v4_check(skb->len, peer->flow.u.ip4.saddr,
-					    peer->flow.u.ip4.daddr, 0);
-}
 #endif /* See strip.py */
 
 /**
@@ -219,7 +186,7 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	homa_info->rpc = rpc;
 
 #ifndef __STRIP__ /* See strip.py */
-	if (segs > 1 && hsk->sock.sk_protocol != IPPROTO_TCP) {
+	if (segs > 1 && !homa_sock_hijacked(hsk)) {
 #else /* See strip.py */
 	if (segs > 1) {
 #endif /* See strip.py */
@@ -321,13 +288,11 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	 * on whether we're doing TCP hijacking (need more space in TSO packet
 	 * if no hijacking).
 	 */
-	if (rpc->hsk->sock.sk_protocol == IPPROTO_TCP) {
-		/* Hijacking */
+	if (homa_sock_hijacked(rpc->hsk)) {
 		segs_per_gso = gso_size - rpc->hsk->ip_header_length
 				- sizeof(struct homa_data_hdr);
 		do_div(segs_per_gso, max_seg_data);
 	} else {
-		/* No hijacking */
 		segs_per_gso = gso_size - rpc->hsk->ip_header_length -
 				sizeof(struct homa_data_hdr) +
 				sizeof(struct homa_seg_hdr);
@@ -506,14 +471,14 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	priority = hsk->homa->num_priorities - 1;
 #endif /* See strip.py */
 	skb->ooo_okay = 1;
-	homa_set_doff(skb, length);
+	homa_set_doff(skb, 20);
 #ifndef __STRIP__ /* See strip.py */
 	if (hsk->inet.sk.sk_family == AF_INET6) {
-		homa_set_hijack(skb, peer, true);
+		homa_hijack_set_hdr(skb, peer, true);
 		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
 				  NULL, hsk->homa->priority_map[priority] << 5);
 	} else {
-		homa_set_hijack(skb, peer, false);
+		homa_hijack_set_hdr(skb, peer, false);
 
 		/* This will find its way to the DSCP field in the IPv4 hdr. */
 		hsk->inet.tos = hsk->homa->priority_map[priority] << 5;
@@ -720,7 +685,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 			   tt_addr(rpc->peer->addr), rpc->id,
 			   homa_get_skb_info(skb)->offset);
 #ifndef __STRIP__ /* See strip.py */
-		homa_set_hijack(skb, rpc->peer, true);
+		homa_hijack_set_hdr(skb, rpc->peer, true);
 		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
 			       0, NULL,
 			       rpc->hsk->homa->priority_map[priority] << 5);
@@ -735,7 +700,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 			   homa_get_skb_info(skb)->offset);
 
 #ifndef __STRIP__ /* See strip.py */
-		homa_set_hijack(skb, rpc->peer, false);
+		homa_hijack_set_hdr(skb, rpc->peer, false);
 		rpc->hsk->inet.tos =
 				rpc->hsk->homa->priority_map[priority] << 5;
 		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);

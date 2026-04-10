@@ -382,7 +382,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		struct in6_addr *server_ip, int client_port, int id,
 		int req_length, int resp_length)
 {
-	int bytes_received, created;
+	int bytes_received;
 	struct homa_data_hdr h;
 	int status;
 
@@ -397,8 +397,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 #ifndef __STRIP__ /* See strip.py */
 	h.incoming = htonl(10000);
 #endif /* See strip.py */
-	struct homa_rpc *srpc = homa_rpc_alloc_server(hsk, client_ip, &h,
-			&created);
+	struct homa_rpc *srpc = homa_rpc_alloc_server(hsk, client_ip, &h);
 
 	if (IS_ERR(srpc))
 		return NULL;

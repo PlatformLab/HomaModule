@@ -108,8 +108,6 @@ error:
  * @source:   IP address (network byte order) of the RPC's client.
  * @h:        Header for the first data packet received for this RPC; used
  *            to initialize the RPC.
- * @created:  Will be set to 1 if a new RPC was created and 0 if an
- *            existing RPC was found.
  *
  * Return:  A pointer to a new RPC, which is locked, or a negative errno
  *          if an error occurred. If there is already an RPC corresponding
@@ -117,7 +115,7 @@ error:
  */
 struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 				       const struct in6_addr *source,
-				       struct homa_data_hdr *h, int *created)
+				       struct homa_data_hdr *h)
 	__cond_acquires(srpc->bucket->lock)
 {
 	u64 id = homa_local_id(h->common.sender_id);
@@ -140,7 +138,6 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 			/* RPC already exists; just return it instead
 			 * of creating a new RPC.
 			 */
-			*created = 0;
 			return srpc;
 		}
 	}
@@ -204,7 +201,6 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 		homa_rpc_handoff(srpc);
 	}
 	INC_METRIC(requests_received, 1);
-	*created = 1;
 	return srpc;
 
 error:

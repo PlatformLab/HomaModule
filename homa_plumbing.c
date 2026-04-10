@@ -10,6 +10,7 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
+#include "homa_hijack.h"
 #include "homa_offload.h"
 #include "homa_pacer.h"
 #include "homa_qdisc.h"
@@ -642,7 +643,7 @@ int __init homa_load(void)
 	}
 
 #ifndef __STRIP__ /* See strip.py */
-	homa_gro_hook_tcp();
+	homa_hijack_init();
 #endif /* See strip.py */
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_set_temp(homa->temp);
@@ -695,7 +696,7 @@ void __exit homa_unload(void)
 	pr_notice("Homa module unloading\n");
 
 #ifndef __STRIP__ /* See strip.py */
-	homa_gro_unhook_tcp();
+	homa_hijack_end();
 #endif /* See strip.py */
 	if (timer_kthread) {
 		timer_thread_exit = 1;
