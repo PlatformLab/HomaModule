@@ -20,6 +20,12 @@
 
 #undef WARN_ON_ONCE
 #define WARN_ON_ONCE(condition) WARN_ON(condition)
+
+#undef WARN_ONCE
+/* This definition allows WARN_ONCE to be used both as a value and as
+ * a statement.
+ */
+#define WARN_ONCE(cond, ...) ({ bool __c = (cond); (void)__c; __c; })
 #endif /* __UNIT_TEST__ */
 
 #include <linux/audit.h>
