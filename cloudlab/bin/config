@@ -661,11 +661,12 @@ def config_qdisc():
     config = get_qdisc_config()
     root = config['root_handle']
 
-    # Check to see if homa_qdisc is present in Homa.
-    result = subprocess.run(["sudo", "sysctl", ".net.homa.max_nic_queue_usecs"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # If the option 'homa_share' isn't available, then Homa was compiled
+    # without homa_qdisc (e.g. for a stripped version).
+    result = exec_cmd(['sysctl', '.net.homa.homa_share'], check=False)
     if result.returncode != 0:
-        print('Skipping installation of Homa qdisc: homa_qdisc.c not compiled')
+        print("Can't install Homa qdisc: it isn't available "
+                "(maybe Homa is stripped?)")
         return
 
     print('Installing Homa qdisc')

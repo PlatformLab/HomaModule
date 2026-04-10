@@ -68,6 +68,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_hijack.h"
 #include "homa_qdisc.h"
 #include "homa_rpc.h"
 #include "timetrace.h"
@@ -136,6 +137,26 @@ static struct Qdisc_ops homa_qdisc_ops __read_mostly = {
 	.destroy = homa_qdisc_destroy,
 	.owner = THIS_MODULE,
 };
+
+/**
+ * is_homa_pkt() - Return true if @skb is a Homa packet, false otherwise.
+ * @skb:    Packet buffer to check.
+ * Return:  see above.
+ */
+static inline bool is_homa_pkt(struct sk_buff *skb)
+{
+	int protocol;
+
+	/* If the network header hasn't been created yet, assume it's a
+	 * Homa packet (Homa never generates any non-Homa packets).
+	 */
+	if (skb->network_header == 0)
+		return true;
+	protocol = (skb_is_ipv6(skb)) ? ipv6_hdr(skb)->nexthdr :
+					ip_hdr(skb)->protocol;
+	return protocol == IPPROTO_HOMA ||
+		(protocol == IPPROTO_TCP && homa_skb_hijacked(skb));
+}
 
 /**
  * homa_qdisc_register() - Invoked when the Homa module is loaded; makes

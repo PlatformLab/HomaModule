@@ -11,6 +11,7 @@
 #include "utils.h"
 
 #ifndef __STRIP__ /* See strip.py */
+#include "homa_hijack.h"
 #include "homa_pacer.h"
 #include "homa_qdisc.h"
 #include "homa_skb.h"
@@ -1079,7 +1080,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 	EXPECT_EQ(old_refcount+1, atomic_read(&dst->__rcuref.refcnt));
 }
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, __homa_xmit_data__ipv6_call_homa_set_hijack)
+TEST_F(homa_outgoing, __homa_xmit_data__ipv6_call_homa_hijack_set_hdr)
 {
 	struct homa_common_hdr *h;
 	struct homa_rpc *crpc;
@@ -1098,7 +1099,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv6_call_homa_set_hijack)
 	skb_get(skb);
 	__homa_xmit_data(skb, crpc, 5);
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
-	EXPECT_EQ(HOMA_TCP_FLAGS, h->flags);
+	EXPECT_EQ(1, homa_skb_hijacked(skb));
 	EXPECT_EQ(666, h->checksum);
 }
 TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
@@ -1119,7 +1120,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
 	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors);
 }
-TEST_F(homa_outgoing, __homa_xmit_data__ipv4_call_homa_set_hijack)
+TEST_F(homa_outgoing, __homa_xmit_data__ipv4_call_homa_hijack_set_hdr)
 {
 	struct homa_common_hdr *h;
 	struct homa_rpc *crpc;
@@ -1138,7 +1139,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv4_call_homa_set_hijack)
 	skb_get(skb);
 	__homa_xmit_data(skb, crpc, 5);
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
-	EXPECT_EQ(HOMA_TCP_FLAGS, h->flags);
+	EXPECT_EQ(1, homa_skb_hijacked(skb));
 	EXPECT_EQ(444, h->checksum);
 }
 TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)

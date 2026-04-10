@@ -794,6 +794,7 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 	else
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
 	unit_log_printf("; ", "xmit %s", buffer);
+#ifndef __STRIP__ /* See strip.py */
 	if (mock_xmit_log_hijack) {
 		struct homa_common_hdr *h;
 
@@ -801,6 +802,7 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 		unit_log_printf("; ", "hijack checksum %d, flags 0x%x",
 			       h->checksum, h->flags);
 	}
+#endif /* See strip.py */
 	kfree_skb(skb);
 	return 0;
 }
@@ -828,6 +830,7 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 	else
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
 	unit_log_printf("; ", "xmit %s", buffer);
+#ifndef __STRIP__ /* See strip.py */
 	if (mock_xmit_log_hijack) {
 		struct homa_common_hdr *h;
 
@@ -835,6 +838,7 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 		unit_log_printf("; ", "hijack checksum %d, flags 0x%x",
 			       h->checksum, h->flags);
 	}
+#endif /* See strip.py */
 	kfree_skb(skb);
 	return 0;
 }
@@ -2390,6 +2394,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	init_waitqueue_head(&mock_socket.wq.wait);
 	rcu_assign_pointer(sk->sk_wq, &mock_socket.wq);
 	sk->sk_sndtimeo = MAX_SCHEDULE_TIMEOUT;
+	sk->sk_protocol = IPPROTO_HOMA;
 	if (port != 0 && port >= mock_min_default_port)
 		hnet->prev_default_port = port - 1;
 	err = homa_sock_init(hsk);
