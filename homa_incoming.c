@@ -520,14 +520,11 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 			if (!homa_is_client(id)) {
 				/* We are the server for this RPC. */
 				if (h->common.type == DATA) {
-					int created;
-
 					/* Create a new RPC if one doesn't
 					 * already exist.
 					 */
 					rpc = homa_rpc_alloc_server(hsk, &saddr,
-								    h,
-								    &created);
+								    h);
 					if (IS_ERR(rpc)) {
 						INC_METRIC(server_cant_create_rpcs, 1);
 						rpc = NULL;
