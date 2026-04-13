@@ -20,6 +20,7 @@ done
 for t in $targets; do
     echo $t
     rsync -rtv cloudlab/bin/ ouster@$t:bin/
+    rsync -rtv cloudlab/docker/ ouster@$t:docker/
     rsync -rtv cloudlab/bash_profile ouster@$t:.bash_profile
     rsync -rtv cloudlab/bashrc ouster@$t:.bashrc
     rsync -rtv cloudlab/gdbinit ouster@$t:.gdbinit
