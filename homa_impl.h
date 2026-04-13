@@ -20,6 +20,12 @@
 
 #undef WARN_ON_ONCE
 #define WARN_ON_ONCE(condition) WARN_ON(condition)
+
+#undef WARN_ONCE
+/* This definition allows WARN_ONCE to be used both as a value and as
+ * a statement.
+ */
+#define WARN_ONCE(cond, ...) ({ bool __c = (cond); (void)__c; __c; })
 #endif /* __UNIT_TEST__ */
 
 #include <linux/audit.h>
@@ -45,6 +51,9 @@
 #ifndef __UPSTREAM__ /* See strip.py */
 #include "homa.h"
 #include <linux/version.h>
+#ifdef CONFIG_ARM64
+#include <clocksource/arm_arch_timer.h>
+#endif
 #include "homa_devel.h"
 #else /* See strip.py */
 #include <linux/homa.h>
@@ -578,10 +587,12 @@ static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
 /**
  * homa_set_doff() - Fills in the doff TCP header field for a packet.
  * @skb:   Packet whose doff field is to be set.
- * @size:  Size of the "header", bytes (must be a multiple of 4). This
- *         information is used only for TSO; it's the number of bytes
- *         that should be replicated in each segment. The bytes after
- *         this will be distributed among segments.
+ * @size:  Size of the "header" in bytes (must be a multiple of 4). This is
+ *         needed for two reasons. First, for TSO to work it must indicate
+ *         the number of bytes that should be replicated in each segment.
+ *         The bytes after this will be distributed among segments. Second,
+ *         for TCP hijacking to work it must have a valid value (20 is a
+ *         good choice if the packet isn't a TSO frame).
  */
 static inline void homa_set_doff(struct sk_buff *skb, int size)
 {
@@ -645,30 +656,6 @@ static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 	ipv6_addr_set_v4mapped(ip_hdr(skb)->saddr, &mapped);
 	return mapped;
 }
-
-#ifndef __STRIP__ /* See strip.py */
-/**
- * is_homa_pkt() - Return true if @skb is a Homa packet, false otherwise.
- * @skb:    Packet buffer to check.
- * Return:  see above.
- */
-static inline bool is_homa_pkt(struct sk_buff *skb)
-{
-	int protocol;
-
-	/* If the network header hasn't been created yet, assume it's a
-	 * Homa packet (Homa never generates any non-Homa packets).
-	 */
-	if (skb->network_header == 0)
-		return true;
-	protocol = (skb_is_ipv6(skb)) ? ipv6_hdr(skb)->nexthdr :
-					ip_hdr(skb)->protocol;
-	return (protocol == IPPROTO_HOMA ||
-		(protocol == IPPROTO_TCP &&
-		 tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT)));
-	return protocol == IPPROTO_HOMA;
-}
-#endif /* See strip.py */
 
 /**
  * homa_make_header_avl() - Invokes pskb_may_pull to make sure that all the
@@ -846,7 +833,13 @@ static inline u64 homa_clock_khz(void)
 	return 1000000;
 #else /* __UNIT_TEST__ */
 #ifndef __UPSTREAM__ /* See strip.py */
-	return cpu_khz;
+#ifdef CONFIG_X86
+	return tsc_khz;
+#elif defined(CONFIG_ARM64)
+	return arch_timer_get_cntfrq() / 1000;
+#else
+	return 1000000;
+#endif
 #else /* See strip.py */
 	return 1000000;
 #endif /* See strip.py */

@@ -2,6 +2,20 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+70. (April 2026) Impact of using skb_attempt_defer_free to move skb
+freeing off the critical path copying data out to user space. On
+c6620's running 'cp_vs_tcp -w w4 -b 80' this improves copy-out throughput
+from 43-47 Gbps to 56-50 Gbps, and speeds up skb allocation (better cache
+behavior?). But, it doesn't save time overall. "Before" means without
+skb_attempt_defer_free, "After" means with:
+
+                                             Before    After
+Free skb in homa_copy_to_user                220 ns    130 ns
+Deferred free                                  0 ns    205 ns
+Allocate/initialize skb                      198 ns    110 ns
+-------------------------------------------------------------
+Total alloc/free cost                        418 ns    445 ns
+
 69. (March 2026) Use a kmem_cache for homa_rpcs? Tried this, but took it out
 because it made performance slightly worse. Here are measurements of
 cycles/allocation for a 6-node cp_vs_tcp experiment on xl170s:

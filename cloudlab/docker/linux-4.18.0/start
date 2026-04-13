@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Copyright (c) 2026 Homa Developers
+# SPDX-License-Identifier: BSD-1-Clause\
+
+# This script will create a Docker container from the Dockerfile in the current
+# directory and then start it running.
+
+sudo docker build -t linux-4.18 .
+sudo docker run -it  --hostname docker_4_18 \
+    -v /etc/passwd:/etc/passwd:ro \
+    -v /etc/group:/etc/group:ro \
+    -u $(id -u):$(id -g) \
+    -e HOME=/users/ouster \
+    -v /ouster:/ouster \
+    -v /users/ouster:/users/ouster linux-4.18 \
+    /bin/bash --login

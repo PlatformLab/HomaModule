@@ -205,7 +205,7 @@ TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 	self->homa.hijack_tcp = 1;
 	mock_sock_init(&hijack, self->hnet, 0);
 	protocol = no_hijack.sock.sk_protocol;
-	EXPECT_EQ(0, protocol);
+	EXPECT_EQ(IPPROTO_HOMA, protocol);
 	protocol = hijack.sock.sk_protocol;
 	EXPECT_EQ(IPPROTO_TCP, protocol);
 	unit_sock_destroy(&hijack);
