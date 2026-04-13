@@ -276,13 +276,8 @@ int homa_peer_pick_victims(struct homa_peertab *peertab,
 				peer = NULL;
 				break;
 			}
-			if (homa_peer_prefer_evict(peertab, peer, victims[i])) {
-				struct homa_peer *tmp;
-
-				tmp = victims[i];
-				victims[i] = peer;
-				peer = tmp;
-			}
+			if (homa_peer_prefer_evict(peertab, peer, victims[i]))
+				swap(peer, victims[i]);
 		}
 
 		if (num_victims < max_victims && peer) {
