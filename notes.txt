@@ -11,13 +11,8 @@ Notes for Homa implementation in Linux:
   homa_skb_info is not replicated in the segments, which causes crashes
   (e.g., homq_qdisc_defer_homa ends up with a NULL value for rpc).
 
-* (12/12/25) Something is wrong with the xl170 cluster: both Homa and TCP
-  are showing considerably worse performance than previously. I tried multiple
-  different clusters, and tried backing out to older versions of Homa and
-  Linux, but the problems don't go away.
-
 * Performance problems to track down:
-  * On c6620 cluster, "cp_node client --workload 500000" gets 20 GBps each
+  * On c6620 cluster, "cp_node client --workload 500000" gets 20 Gbps each
     way with TCP but only 15 Gbps with Homa.
 
 * Significant new functionality:

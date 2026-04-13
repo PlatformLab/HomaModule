@@ -151,11 +151,9 @@ TEST_F(homa_incoming, homa_message_in_init__basics)
 TEST_F(homa_incoming, homa_message_in_init__message_too_long)
 {
 	struct homa_rpc *srpc;
-	int created;
 
 	self->data.message_length = htonl(HOMA_MAX_MESSAGE_LENGTH+1);
-	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip, &self->data,
-			&created);
+	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip, &self->data);
 	ASSERT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(EINVAL, -PTR_ERR(srpc));
 }

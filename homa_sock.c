@@ -9,6 +9,7 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
+#include "homa_hijack.h"
 #endif /* See strip.py */
 
 /**
@@ -158,14 +159,6 @@ int homa_sock_init(struct homa_sock *hsk)
 	homa = hnet->homa;
 	socktab = homa->socktab;
 
-	/* Initialize fields outside the Homa part. */
-	hsk->sock.sk_sndbuf = homa->wmem_max;
-	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
-#ifndef __STRIP__ /* See strip.py */
-	if (homa->hijack_tcp)
-		hsk->sock.sk_protocol = IPPROTO_TCP;
-#endif /* See strip.py */
-
 	/* Do things requiring memory allocation before locking the socket,
 	 * so that GFP_ATOMIC is not needed.
 	 */
@@ -209,6 +202,11 @@ int homa_sock_init(struct homa_sock *hsk)
 		bucket->id = i + 1000000;
 		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
+
+	/* Initialize fields outside the Homa part. */
+	hsk->sock.sk_sndbuf = homa->wmem_max;
+	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
+	IF_NO_STRIP(homa_hijack_sock_init(hsk));
 
 	/* Pick a default port. Must keep the socktab locked from now
 	 * until the new socket is added to the socktab, to ensure that

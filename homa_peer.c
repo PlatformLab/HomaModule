@@ -489,6 +489,16 @@ struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
 		homa_peer_reset_dst(peer, hsk);
 	}
 	rcu_read_unlock();
+
+	/* This code is needed to handle situations where the same peer
+	 * is used by multiple sockets, some of which use TCP hijacking
+	 * and some of which don't (e.g. the peer is created for a socket
+	 * without hijacking, then hijacking is enabled and a new socket
+	 * uses the same peer). flowi_proto determines the IP protocol
+	 * that will be stored in IP headers for IPv6; sk_protocol is
+	 * IPPROTO_TCP if hijacking is being used, IPPROTO_HOMA if not.
+	 */
+	peer->flow.flowi_proto = hsk->sock.sk_protocol;
 	return dst;
 }
 

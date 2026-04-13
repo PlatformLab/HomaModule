@@ -390,7 +390,8 @@ int tt_proc_open(struct inode *inode, struct file *file)
 
 	if (!tt_test_no_khz) {
 		pf->bytes_available = snprintf(pf->msg_storage, TT_PF_BUF_SIZE,
-					       "cpu_khz: %u\n", tsc_khz);
+					       "cpu_khz: %llu\n",
+					       homa_clock_khz());
 	}
 
 done:
@@ -631,7 +632,7 @@ void tt_print_file(char *path)
 
 	bytes_used += snprintf(buffer + bytes_used,
 			sizeof(buffer) - bytes_used,
-			"cpu_khz: %u\n", tsc_khz);
+			"cpu_khz: %llu\n", homa_clock_khz());
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
@@ -758,7 +759,7 @@ void tt_printk(void)
 	}
 #endif
 
-	pr_err("cpu_khz: %u, start: %llu\n", tsc_khz, start_time);
+	pr_err("cpu_khz: %llu, start: %llu\n", homa_clock_khz(), start_time);
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {

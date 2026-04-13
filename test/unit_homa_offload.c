@@ -48,8 +48,6 @@ FIXTURE_SETUP(homa_offload)
 	self->header.common = (struct homa_common_hdr){
 		.sport = htons(40000), .dport = htons(99),
 		.type = DATA,
-		.flags = HOMA_TCP_FLAGS,
-		.urgent = HOMA_TCP_URGENT,
 		.sender_id = cpu_to_be64(1000)
 	};
 	self->header.message_length = htonl(10000);
@@ -94,109 +92,6 @@ FIXTURE_TEARDOWN(homa_offload)
 	}
 	homa_destroy(&self->homa);
 	unit_teardown();
-}
-
-TEST_F(homa_offload, homa_gro_hook_tcp)
-{
-	homa_gro_hook_tcp();
-	EXPECT_EQ(&homa_tcp_gro_receive,
-		  inet_offloads[IPPROTO_TCP]->callbacks.gro_receive);
-	EXPECT_EQ(&homa_tcp_gro_receive,
-		  inet6_offloads[IPPROTO_TCP]->callbacks.gro_receive);
-
-	/* Second hook call should do nothing. */
-	homa_gro_hook_tcp();
-
-	homa_gro_unhook_tcp();
-	EXPECT_EQ(&test_tcp_gro_receive,
-		  inet_offloads[IPPROTO_TCP]->callbacks.gro_receive);
-	EXPECT_EQ(&unit_tcp6_gro_receive,
-		  inet6_offloads[IPPROTO_TCP]->callbacks.gro_receive);
-
-	/* Second unhook call should do nothing. */
-	homa_gro_unhook_tcp();
-	EXPECT_EQ(&test_tcp_gro_receive,
-		  inet_offloads[IPPROTO_TCP]->callbacks.gro_receive);
-	EXPECT_EQ(&unit_tcp6_gro_receive,
-		  inet6_offloads[IPPROTO_TCP]->callbacks.gro_receive);
-}
-
-TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_tcp)
-{
-	struct homa_common_hdr *h;
-	struct sk_buff *skb;
-
-	homa_gro_hook_tcp();
-	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
-	h = (struct homa_common_hdr *) skb_transport_header(skb);
-	h->flags = 0;
-	EXPECT_EQ(NULL, homa_tcp_gro_receive(&self->gro_list, skb));
-	EXPECT_STREQ("test_tcp_gro_receive", unit_log_get());
-	kfree_skb(skb);
-	unit_log_clear();
-
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
-	h = (struct homa_common_hdr *)skb_transport_header(skb);
-	h->urgent -= 1;
-	EXPECT_EQ(NULL, homa_tcp_gro_receive(&self->gro_list, skb));
-	EXPECT_STREQ("test_tcp_gro_receive", unit_log_get());
-	kfree_skb(skb);
-	homa_gro_unhook_tcp();
-}
-TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv6)
-{
-	struct homa_common_hdr *h;
-	struct sk_buff *skb;
-
-	mock_ipv6 = true;
-	homa_gro_hook_tcp();
-	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
-	ip_hdr(skb)->protocol = IPPROTO_TCP;
-	h = (struct homa_common_hdr *)skb_transport_header(skb);
-	h->flags = HOMA_TCP_FLAGS;
-	h->urgent = htons(HOMA_TCP_URGENT);
-	NAPI_GRO_CB(skb)->same_flow = 0;
-	EXPECT_EQ(NULL, homa_tcp_gro_receive(&self->gro_list, skb));
-	EXPECT_EQ(IPPROTO_HOMA, ipv6_hdr(skb)->nexthdr);
-	EXPECT_STREQ("", unit_log_get());
-	unit_log_frag_list(self->gro_list, 0);
-	EXPECT_STREQ("DATA 1400@6000", unit_log_get());
-	homa_gro_unhook_tcp();
-}
-TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv4)
-{
-	struct homa_common_hdr *h;
-	struct sk_buff *skb;
-
-	mock_ipv6 = false;
-	homa_gro_hook_tcp();
-	self->header.seg.offset = htonl(7000);
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
-	ip_hdr(skb)->protocol = IPPROTO_TCP;
-	h = (struct homa_common_hdr *)skb_transport_header(skb);
-	h->flags = HOMA_TCP_FLAGS;
-	h->urgent = htons(HOMA_TCP_URGENT);
-	NAPI_GRO_CB(skb)->same_flow = 0;
-	EXPECT_EQ(NULL, homa_tcp_gro_receive(&self->gro_list, skb));
-	EXPECT_EQ(IPPROTO_HOMA, ip_hdr(skb)->protocol);
-	EXPECT_STREQ("", unit_log_get());
-	unit_log_frag_list(self->gro_list, 0);
-	EXPECT_STREQ("DATA 1400@7000", unit_log_get());
-	EXPECT_EQ(29695, ip_hdr(skb)->check);
-	homa_gro_unhook_tcp();
-}
-
-TEST_F(homa_offload, homa_set_softirq_cpu)
-{
-	struct sk_buff *skb;
-
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
-	homa_set_softirq_cpu(skb, 3);
-	EXPECT_EQ(rps_cpu_mask + 4, skb->hash);
-
-	kfree_skb(skb);
 }
 
 TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
