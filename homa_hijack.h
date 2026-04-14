@@ -65,8 +65,9 @@ static inline void homa_hijack_set_hdr(struct sk_buff *skb,
 	skb->csum_start = skb_transport_header(skb) - skb->head;
 	skb->csum_offset = offsetof(struct homa_common_hdr, checksum);
 	if (ipv6)
-		h->checksum = ~tcp_v6_check(skb->len, &peer->flow.u.ip6.saddr,
-					    &peer->flow.u.ip6.daddr, 0);
+		h->checksum = ~csum_ipv6_magic(&peer->flow.u.ip6.saddr,
+					       &peer->flow.u.ip6.daddr,
+					       skb->len, IPPROTO_TCP, 0);
 	else
 		h->checksum = ~tcp_v4_check(skb->len, peer->flow.u.ip4.saddr,
 					    peer->flow.u.ip4.daddr, 0);
