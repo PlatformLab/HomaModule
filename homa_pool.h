@@ -94,9 +94,9 @@ struct homa_pool {
 
 	/**
 	 * @free_bpages: the number of pages still available for allocation
-	 * by homa_pool_get pages. This equals the number of pages with zero
+	 * by homa_pool_get_pages. This equals the number of pages with zero
 	 * reference counts, minus the number of pages that have been claimed
-	 * by homa_get_pool_pages but not yet allocated.
+	 * by homa_pool_get_pages but not yet allocated.
 	 */
 	atomic_t free_bpages;
 
