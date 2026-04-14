@@ -504,29 +504,29 @@ struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
  * @peer:   The peer whose dst field should be reset.
  * @hsk:    Socket that will be used for sending packets.
  * Return:  Zero for success, or a negative errno if there was an error
- *          (in which case the existing value for the dst field is left
- *          in place).
+ *          (in which case peer is unmodified).
  */
 int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 {
 	struct dst_entry *dst;
+	struct flowi flow;
 	int result = 0;
 
 	homa_peer_lock(peer);
-	memset(&peer->flow, 0, sizeof(peer->flow));
+	memset(&flow, 0, sizeof(flow));
 	if (hsk->sock.sk_family == AF_INET) {
 		struct rtable *rt;
 
-		flowi4_init_output(&peer->flow.u.ip4, hsk->sock.sk_bound_dev_if,
+		flowi4_init_output(&flow.u.ip4, hsk->sock.sk_bound_dev_if,
 				   hsk->sock.sk_mark, hsk->inet.tos,
 				   RT_SCOPE_UNIVERSE, hsk->sock.sk_protocol, 0,
 				   ipv6_to_ipv4(peer->addr),
 				   hsk->inet.inet_saddr, 0, 0,
 				   hsk->sock.sk_uid);
 		security_sk_classify_flow(&hsk->sock,
-					  &peer->flow.u.__fl_common);
+					  &flow.u.__fl_common);
 		rt = ip_route_output_flow(sock_net(&hsk->sock),
-					  &peer->flow.u.ip4, &hsk->sock);
+					  &flow.u.ip4, &hsk->sock);
 		if (IS_ERR(rt)) {
 			result = PTR_ERR(rt);
 			INC_METRIC(peer_route_errors, 1);
@@ -536,20 +536,20 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 		peer->dst_cookie = 0;
 	} else {
 		/* This code is derived from code in tcp_v6_connect. */
-		peer->flow.u.ip6.flowi6_proto = hsk->sock.sk_protocol;
-		peer->flow.u.ip6.daddr = peer->addr;
-		peer->flow.u.ip6.saddr = hsk->inet.pinet6->saddr;
-		peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos,
+		flow.u.ip6.flowi6_proto = hsk->sock.sk_protocol;
+		flow.u.ip6.daddr = peer->addr;
+		flow.u.ip6.saddr = hsk->inet.pinet6->saddr;
+		flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos,
 							       0);
-		peer->flow.u.ip6.flowi6_oif = hsk->sock.sk_bound_dev_if;
-		peer->flow.u.ip6.flowi6_mark = hsk->sock.sk_mark;
-		peer->flow.u.ip6.fl6_dport = 0;
-		peer->flow.u.ip6.fl6_sport = 0;
-		peer->flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
+		flow.u.ip6.flowi6_oif = hsk->sock.sk_bound_dev_if;
+		flow.u.ip6.flowi6_mark = hsk->sock.sk_mark;
+		flow.u.ip6.fl6_dport = 0;
+		flow.u.ip6.fl6_sport = 0;
+		flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
 		security_sk_classify_flow(&hsk->sock,
-					  &peer->flow.u.__fl_common);
+					  &flow.u.__fl_common);
 		dst = ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
-					  &peer->flow.u.ip6, NULL);
+					  &flow.u.ip6, NULL);
 		if (IS_ERR(dst)) {
 			result = PTR_ERR(dst);
 			INC_METRIC(peer_route_errors, 1);
@@ -557,6 +557,7 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 		}
 		peer->dst_cookie = rt6_get_cookie(dst_rt6_info(dst));
 	}
+	memcpy(&peer->flow, &flow, sizeof(flow));
 
 	/* From the standpoint of homa_get_dst, peer->dst is not updated
 	 * atomically with peer->dst_cookie, which means homa_get_dst could
