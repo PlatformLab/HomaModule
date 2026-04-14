@@ -25,6 +25,7 @@
 #include "homa_peer.h"
 #include "homa_sock.h"
 #include "homa_wire.h"
+#include <net/ip6_checksum.h>
 
 /* Special value stored in the flags field of TCP headers to indicate that
  * the packet is actually a Homa packet. It includes the SYN and RST flags
