@@ -137,7 +137,7 @@ void homa_socktab_end_scan(struct homa_socktab_scan *scan)
 
 /**
  * homa_sock_init() - Constructor for homa_sock objects. This function
- * initializes only the parts of the socket that are owned by Homa.
+ * handles Homa-specific initialization.
  * @hsk:    Object to initialize. The Homa-specific parts must have been
  *          initialized to zeroes by the caller.
  *
@@ -166,15 +166,13 @@ int homa_sock_init(struct homa_sock *hsk)
 	if (IS_ERR(buffer_pool))
 		return PTR_ERR(buffer_pool);
 
-	/* Initialize Homa-specific fields. We can initialize everything
-	 * except the port and hash table links without acquiring the
-	 * socket lock.
+	/* Initialize the fields private to Homa. We can initialize
+	 * everything except the port and hash table links without acquiring
+	 * the socket table lock.
 	 */
 	hsk->homa = homa;
 	hsk->hnet = hnet;
 	hsk->buffer_pool = buffer_pool;
-	hsk->inet.inet_num = hsk->port;
-	hsk->inet.inet_sport = htons(hsk->port);
 
 	hsk->is_server = false;
 	hsk->shutdown = false;
@@ -234,6 +232,8 @@ int homa_sock_init(struct homa_sock *hsk)
 		spin_lock_bh(&socktab->write_lock);
 	}
 	hsk->port = hnet->prev_default_port;
+	hsk->inet.inet_num = hsk->port;
+	hsk->inet.inet_sport = htons(hsk->port);
 	hlist_add_head_rcu(&hsk->socktab_links,
 			   &socktab->buckets[homa_socktab_bucket(hnet,
 								 hsk->port)]);
