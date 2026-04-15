@@ -1258,7 +1258,7 @@ TEST_F(homa_plumbing, homa_recvmsg__reap_because_of_SOCK_NOSPACE)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_TRUE(refcount_read(&self->hsk.sock.sk_wmem_alloc) > 20000);
 
-	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
@@ -1590,7 +1590,7 @@ TEST_F(homa_plumbing, homa_poll__no_tx_buffer_space)
 
 	self->hsk.sock.sk_sndbuf = 0;
 	EXPECT_EQ(0, homa_poll(NULL, &sock, NULL));
-	EXPECT_EQ(1, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 }
 TEST_F(homa_plumbing, homa_poll__not_readable)
 {

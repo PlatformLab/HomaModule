@@ -1473,7 +1473,7 @@ done:
 		homa_rpc_unlock(rpc);
 	}
 
-	if (test_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags)) {
+	if (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags)) {
 		/* There are tasks waiting for tx memory, so reap
 		 * immediately.
 		 */
@@ -1783,7 +1783,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	if (homa_sock_wmem_avl(hsk))
 		mask |= EPOLLOUT | EPOLLWRNORM;
 	else
-		set_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags);
+		set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
 
 	if (hsk->shutdown)
 		mask |= EPOLLIN;

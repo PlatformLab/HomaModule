@@ -514,7 +514,7 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 
 	if (nonblocking)
 		timeo = 0;
-	set_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags);
+	set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
 	tt_record2("homa_sock_wait_wmem waiting on port %d, wmem %d",
 		   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
 	result = wait_event_interruptible_timeout(*sk_sleep(&hsk->sock),

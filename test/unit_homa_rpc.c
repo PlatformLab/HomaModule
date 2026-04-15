@@ -807,9 +807,9 @@ TEST_F(homa_rpc, homa_rpc_reap__call_homa_sock_wakeup_wmem)
 
 	ASSERT_NE(NULL, crpc);
 	homa_rpc_end(crpc);
-	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
 	homa_rpc_reap(&self->hsk, false);
-	EXPECT_EQ(0, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 }
 
 TEST_F(homa_rpc, homa_rpc_find_client)

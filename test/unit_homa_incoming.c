@@ -1375,8 +1375,8 @@ TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 	EXPECT_NE(0, homa_metrics_per_cpu()->data_pkt_reap_cycles);
 #endif /* See strip.py */
 
-	/* Third packet: must reap all dead skbs (SOCK_NO_SPACE). */
-	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
+	/* Third packet: must reap all dead skbs (HOMA_SOCK_NOSPACE). */
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &self->data.common,
 			1400, 0));
 	EXPECT_EQ(0, self->hsk.dead_skbs);
