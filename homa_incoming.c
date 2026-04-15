@@ -165,12 +165,13 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 {
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
 	struct homa_gap *gap, *dummy, *gap2;
-	int start = ntohl(h->seg.offset);
-	int length = homa_data_len(skb);
+	u32 start = ntohl(h->seg.offset);
+	u32 length = homa_data_len(skb);
 	enum skb_drop_reason reason;
-	int end = start + length;
+	u32 end = start + length;
 
-	if ((start + length) > rpc->msgin.length) {
+	if (start >= rpc->msgin.length ||
+	    length > (rpc->msgin.length - start)) {
 		tt_record3("Packet extended past message end; id %d, offset %d, length %d",
 			   rpc->id, start, length);
 		reason = SKB_DROP_REASON_PKT_TOO_BIG;

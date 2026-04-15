@@ -362,7 +362,7 @@ struct homa_data_hdr {
  * @skb:   Incoming data packet
  * Return: see above
  */
-static inline int homa_data_len(struct sk_buff *skb)
+static inline u32 homa_data_len(struct sk_buff *skb)
 {
 	return skb->len - skb_transport_offset(skb) -
 			sizeof(struct homa_data_hdr);
