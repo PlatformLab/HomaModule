@@ -1322,6 +1322,8 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	IF_NO_STRIP(u64 finish);
 
 	INC_METRIC(recv_calls, 1);
+	tt_record2("homa_recvmsg starting, port %d, pid %d",
+		   hsk->port, current->pid);
 #ifndef __STRIP__ /* See strip.py */
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active = start;
 #endif /* See strip.py */
@@ -1342,8 +1344,6 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		return -EFAULT;
 	}
 	control.completion_cookie = 0;
-	tt_record2("homa_recvmsg starting, port %d, pid %d",
-		   hsk->port, current->pid);
 
 	if (control.num_bpages > HOMA_MAX_BPAGES) {
 		hsk->error_msg = "num_pages exceeds HOMA_MAX_BPAGES";
@@ -1427,7 +1427,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	/* Collect result information. */
 	control.id = rpc->id;
 	control.completion_cookie = rpc->completion_cookie;
-	if (likely(rpc->msgin.length >= 0)) {
+	if (likely(result > 0)) {
 		control.num_bpages = rpc->msgin.num_bpages;
 		memcpy(control.bpage_offsets, rpc->msgin.bpage_offsets,
 		       sizeof(rpc->msgin.bpage_offsets));
@@ -1448,18 +1448,17 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		*addr_len = sizeof(*in4);
 	}
 
-	/* This indicates that the application now owns the buffers, so
-	 * we won't free them in homa_rpc_end.
-	 */
-	rpc->msgin.num_bpages = 0;
-
-	if (homa_is_client(rpc->id)) {
-		homa_peer_add_ack(rpc);
+	if (result < 0)
 		homa_rpc_end(rpc);
-	} else {
-		if (result < 0)
+	else {
+		/* This indicates that the application now owns the buffers, so
+		* they won't be freed in homa_rpc_end.
+		*/
+		rpc->msgin.num_bpages = 0;
+		if (homa_is_client(rpc->id)) {
+			homa_peer_add_ack(rpc);
 			homa_rpc_end(rpc);
-		else
+		} else
 			rpc->state = RPC_IN_SERVICE;
 	}
 

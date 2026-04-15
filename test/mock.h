@@ -39,6 +39,15 @@
 
 #define get_page mock_get_page
 
+#undef HOMA_BPAGE_SIZE
+#define HOMA_BPAGE_SIZE mock_bpage_size
+
+#undef HOMA_BPAGE_SHIFT
+#define HOMA_BPAGE_SHIFT mock_bpage_shift
+
+#undef HOMA_MAX_BPAGES
+#define HOMA_MAX_BPAGES 16
+
 #undef HOMA_MIN_DEFAULT_PORT
 #define HOMA_MIN_DEFAULT_PORT mock_min_default_port
 
@@ -121,6 +130,7 @@
 
 /* Forward references: */
 struct homa;
+struct homa_pool;
 struct homa_rpc;
 struct homa_sock;
 struct homa_socktab;
@@ -132,6 +142,7 @@ extern int         mock_bpage_size;
 extern int         mock_bpage_shift;
 extern u64         mock_clock;
 extern u64         mock_clock_tick;
+extern bool        mock_check_bpool_leaks;
 extern int         mock_cmpxchg_errors;
 extern int         mock_compound_order_mask;
 extern int         mock_copy_data_errors;
@@ -204,6 +215,7 @@ struct net_device
 	   *mock_dev(int index, struct homa *homa);
 struct dst_entry
 	   *mock_dst_check(struct dst_entry *, __u32 cookie);
+void        mock_free_pool(struct homa_pool *pool);
 cycles_t    mock_get_cycles(void);
 int         mock_get_link_ksettings(struct net_device *dev,
 				    struct ethtool_link_ksettings *settings);

@@ -194,17 +194,6 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__addr_error)
 	EXPECT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(srpc));
 }
-TEST_F(homa_rpc, homa_rpc_alloc_server__socket_shutdown)
-{
-	struct homa_rpc *srpc;
-
-	self->hsk.shutdown = 1;
-	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip, &self->data);
-	EXPECT_TRUE(IS_ERR(srpc));
-	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(srpc));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	self->hsk.shutdown = 0;
-}
 TEST_F(homa_rpc, homa_rpc_alloc_server__allocate_buffers)
 {
 	struct homa_rpc *srpc;
@@ -227,6 +216,17 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__cant_allocate_buffers)
 	ASSERT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(srpc));
 }
+TEST_F(homa_rpc, homa_rpc_alloc_server__socket_shutdown)
+{
+	struct homa_rpc *srpc;
+
+	self->hsk.shutdown = 1;
+	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip, &self->data);
+	EXPECT_TRUE(IS_ERR(srpc));
+	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(srpc));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	self->hsk.shutdown = 0;
+}
 TEST_F(homa_rpc, homa_rpc_alloc_server__handoff_rpc)
 {
 	struct homa_rpc *srpc;
@@ -244,6 +244,7 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__dont_handoff_no_buffers)
 {
 	struct homa_rpc *srpc;
 
+	mock_check_bpool_leaks = false;
 	self->data.message_length = N(1400);
 	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
 	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip, &self->data);
@@ -987,6 +988,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__HOMA_RPC_BUF_STALL)
 	struct homa_rpc_info info;
 	struct homa_rpc *crpc;
 
+	mock_check_bpool_leaks = false;
 	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			       self->server_ip, self->server_port,

@@ -76,6 +76,7 @@ TEST_F(homa_pool, set_bpages_needed)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 
+	mock_check_bpool_leaks = false;
 	atomic_set(&pool->free_bpages, 0);
 	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 2*HOMA_BPAGE_SIZE+1);
@@ -173,6 +174,7 @@ TEST_F(homa_pool, homa_pool_get_pages__basics)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	u32 pages[10];
 
+	mock_check_bpool_leaks = false;
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(0, pages[0]);
 	EXPECT_EQ(1, pages[1]);
@@ -186,6 +188,7 @@ TEST_F(homa_pool, homa_pool_get_pages__not_enough_space)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	u32 pages[10];
 
+	mock_check_bpool_leaks = false;
 	atomic_set(&pool->free_bpages, 1);
 	EXPECT_EQ(-1, homa_pool_get_pages(pool, 2, pages, 0));
 	atomic_set(&pool->free_bpages, 2);
@@ -196,6 +199,7 @@ TEST_F(homa_pool, homa_pool_get_pages__set_limit)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	u32 pages[10];
 
+	mock_check_bpool_leaks = false;
 	atomic_set(&pool->free_bpages, 62);
 	pool->cores[smp_processor_id()].next_candidate = 49;
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
@@ -207,6 +211,7 @@ TEST_F(homa_pool, homa_pool_get_pages__set_limit_with_MIN_EXTRA)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	u32 pages[10];
 
+	mock_check_bpool_leaks = false;
 	atomic_set(&pool->free_bpages, 92);
 	pool->cores[smp_processor_id()].next_candidate = 13;
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
@@ -218,6 +223,7 @@ TEST_F(homa_pool, homa_pool_get_pages__skip_unusable_bpages)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	u32 pages[10];
 
+	mock_check_bpool_leaks = false;
 	mock_clock = 1000;
 	atomic_set(&pool->descriptors[0].refs, 2);
 	atomic_set(&pool->descriptors[1].refs, 1);
@@ -236,6 +242,7 @@ TEST_F(homa_pool, homa_pool_get_pages__cant_lock_pages)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	u32 pages[10];
 
+	mock_check_bpool_leaks = false;
 	mock_clock = 1000;
 	mock_trylock_errors = 3;
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
@@ -247,6 +254,7 @@ TEST_F(homa_pool, homa_pool_get_pages__state_changes_while_locking)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	u32 pages[10];
 
+	mock_check_bpool_leaks = false;
 	mock_clock = 1000;
 	unit_hook_register(steal_bpages_hook);
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
@@ -258,6 +266,7 @@ TEST_F(homa_pool, homa_pool_get_pages__steal_expired_page)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	u32 pages[10];
 
+	mock_check_bpool_leaks = false;
 	pool->descriptors[0].owner = 5;
 	mock_clock = 5000;
 	pool->descriptors[0].expiration = mock_clock - 1;
@@ -273,6 +282,7 @@ TEST_F(homa_pool, homa_pool_get_pages__set_owner)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	u32 pages[10];
 
+	mock_check_bpool_leaks = false;
 	self->homa.bpage_lease_cycles = 1000;
 	mock_clock = 5000;
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 1));
@@ -305,6 +315,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__no_buffer_pool)
 			4000, 98, 1000,	150000);
 
 	ASSERT_NE(NULL, crpc);
+	mock_check_bpool_leaks = false;
 
 	homa_pool_free(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
@@ -316,6 +327,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__cant_allocate_full_bpages)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
+	mock_check_bpool_leaks = false;
 	atomic_set(&pool->free_bpages, 1);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 150000);
@@ -330,6 +342,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__no_partial_page)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
+	mock_check_bpool_leaks = false;
 	atomic_set(&pool->free_bpages, 2);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000,
@@ -347,6 +360,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__owned_page_locked_and_page_stolen)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
+	mock_check_bpool_leaks = false;
 	pool->cores[smp_processor_id()].next_candidate = 2;
 	atomic_set(&pool->free_bpages, 40);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
@@ -376,6 +390,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__page_wrap_around)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
+	mock_check_bpool_leaks = false;
 	pool->cores[smp_processor_id()].page_hint = 2;
 	pool->cores[smp_processor_id()].allocated = HOMA_BPAGE_SIZE-1900;
 	atomic_set(&pool->descriptors[2].refs, 1);
@@ -398,6 +413,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__owned_page_overflow)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
+	mock_check_bpool_leaks = false;
 	pool->cores[smp_processor_id()].next_candidate = 2;
 	atomic_set(&pool->free_bpages, 50);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
@@ -443,6 +459,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__cant_allocate_partial_bpage)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
+	mock_check_bpool_leaks = false;
 	atomic_set(&pool->free_bpages, 5);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000,
@@ -459,6 +476,8 @@ TEST_F(homa_pool, homa_pool_alloc_msg__out_of_space)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *rpc;
+
+	mock_check_bpool_leaks = false;
 
 	/* Queue up several RPCs to make sure they are properly sorted. */
 	atomic_set(&pool->free_bpages, 0);
@@ -527,6 +546,7 @@ TEST_F(homa_pool, homa_pool_free_bufs__basics)
 	struct homa_rpc *crpc1, *crpc2;
 	char *saved_region;
 
+	mock_check_bpool_leaks = false;
 	crpc1 = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 150000);
 	ASSERT_NE(NULL, crpc1);
@@ -566,6 +586,8 @@ TEST_F(homa_pool, homa_pool_check_waiting__basics)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc2, *crpc3;
+
+	mock_check_bpool_leaks = false;
 
 	/* Queue up 2 RPCs that together need a total of 5 bpages. */
 	atomic_set(&pool->free_bpages, 0);
@@ -618,6 +640,8 @@ TEST_F(homa_pool, homa_pool_check_waiting__rpc_initially_locked)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
+	mock_check_bpool_leaks = false;
+
 	atomic_set(&pool->free_bpages, 0);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 2000);
@@ -642,6 +666,8 @@ TEST_F(homa_pool, homa_pool_check_waiting__reset_bpages_needed)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc1, *crpc2;
+
+	mock_check_bpool_leaks = false;
 
 	atomic_set(&pool->free_bpages, 0);
 	crpc1 = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
@@ -668,6 +694,8 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
+	mock_check_bpool_leaks = false;
+
 	/* Queue up an RPC that needs 2 bpages. */
 	atomic_set(&pool->free_bpages, 0);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
@@ -689,6 +717,8 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_only_one_priority
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
+
+	mock_check_bpool_leaks = false;
 
 	/* Queue up an RPC that needs 2 bpages. */
 	atomic_set(&pool->free_bpages, 0);
@@ -712,6 +742,8 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_no_need_for_grant
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
+	mock_check_bpool_leaks = false;
+
 	atomic_set(&pool->free_bpages, 0);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 5000);
@@ -733,6 +765,8 @@ TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
+
+	mock_check_bpool_leaks = false;
 
 	/* Queue up an RPC that needs 4 bpages. */
 	atomic_set(&pool->free_bpages, 0);
@@ -762,6 +796,7 @@ TEST_F(homa_pool, homa_pool_avail_bytes__a_few_pages_allocated)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	u32 pages[10];
 
+	mock_check_bpool_leaks = false;
 	EXPECT_EQ(100 * HOMA_BPAGE_SIZE, homa_pool_avail_bytes(pool));
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 5, pages, 0));
 	EXPECT_EQ(95 * HOMA_BPAGE_SIZE, homa_pool_avail_bytes(pool));
@@ -780,4 +815,19 @@ TEST_F(homa_pool, homa_pool_avail_bytes__include_free_space_in_core_private_page
 	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 50000);
 	EXPECT_EQ(100 * HOMA_BPAGE_SIZE - 52000, homa_pool_avail_bytes(pool));
+}
+TEST_F(homa_pool, homa_pool_avail_bytes__private_page_completely_free)
+{
+	struct homa_rpc *crpc;
+	struct homa_pool *pool = self->hsk.buffer_pool;
+
+	mock_set_core(3);
+	EXPECT_EQ(100 * HOMA_BPAGE_SIZE, homa_pool_avail_bytes(pool));
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			       &self->server_ip, 4000, 98, 1000, 2000);
+	EXPECT_EQ(100 * HOMA_BPAGE_SIZE - 2000, homa_pool_avail_bytes(pool));
+	homa_pool_free_bufs(crpc->hsk->buffer_pool, crpc->msgin.num_bpages,
+			    crpc->msgin.bpage_offsets);
+	crpc->msgin.num_bpages = 0;
+	EXPECT_EQ(100 * HOMA_BPAGE_SIZE, homa_pool_avail_bytes(pool));
 }

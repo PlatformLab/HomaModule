@@ -81,7 +81,7 @@ FIXTURE_SETUP(homa_plumbing)
 		.incoming = htonl(10000),
 #endif /* See strip.py */
 	};
-	self->recvmsg_args.id = 0;
+	memset(&self->recvmsg_args, 0, sizeof(self->recvmsg_args));
 	self->recvmsg_hdr.msg_name = &self->addr;
 	self->recvmsg_hdr.msg_namelen = 0;
 	self->recvmsg_hdr.msg_control = &self->recvmsg_args;
@@ -109,6 +109,10 @@ FIXTURE_SETUP(homa_plumbing)
 }
 FIXTURE_TEARDOWN(homa_plumbing)
 {
+	if (self->recvmsg_args.num_bpages > 0)
+		homa_pool_free_bufs(self->hsk.buffer_pool,
+				self->recvmsg_args.num_bpages,
+				self->recvmsg_args.bpage_offsets);
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
@@ -976,6 +980,7 @@ TEST_F(homa_plumbing, homa_recvmsg__clear_cookie)
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, self->recvmsg_args.completion_cookie);
+	self->recvmsg_args.num_bpages = 0;
 }
 TEST_F(homa_plumbing, homa_recvmsg__num_bpages_too_large)
 {
@@ -983,25 +988,33 @@ TEST_F(homa_plumbing, homa_recvmsg__num_bpages_too_large)
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("num_pages exceeds HOMA_MAX_BPAGES", self->hsk.error_msg);
+	EXPECT_EQ(HOMA_MAX_BPAGES + 1, self->recvmsg_args.num_bpages);
+	self->recvmsg_args.num_bpages = 0;
 }
 TEST_F(homa_plumbing, homa_recvmsg__reserved_not_zero)
 {
 	self->recvmsg_args.reserved = 1;
+	self->recvmsg_args.num_bpages = 10;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("reserved fields in homa_recvmsg_args must be zero",
 		     self->hsk.error_msg);
+	EXPECT_EQ(10, self->recvmsg_args.num_bpages);
+	self->recvmsg_args.num_bpages = 0;
 }
 TEST_F(homa_plumbing, homa_recvmsg__no_buffer_pool)
 {
 	struct homa_pool *saved_pool = self->hsk.buffer_pool;
 
 	self->hsk.buffer_pool = NULL;
+	self->recvmsg_args.num_bpages = 10;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("SO_HOMA_RECVBUF socket option has not been set",
 		     self->hsk.error_msg);
 	self->hsk.buffer_pool = saved_pool;
+	EXPECT_EQ(10, self->recvmsg_args.num_bpages);
+	self->recvmsg_args.num_bpages = 0;
 }
 TEST_F(homa_plumbing, homa_recvmsg__release_buffers)
 {
@@ -1017,6 +1030,7 @@ TEST_F(homa_plumbing, homa_recvmsg__release_buffers)
 			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[1].refs));
+	EXPECT_EQ(0, self->recvmsg_args.num_bpages);
 }
 TEST_F(homa_plumbing, homa_recvmsg__error_in_release_buffers)
 {
@@ -1028,6 +1042,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_in_release_buffers)
 			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("error while releasing buffer pages",
 		     self->hsk.error_msg);
+	EXPECT_EQ(0, self->recvmsg_args.num_bpages);
 }
 TEST_F(homa_plumbing, homa_recvmsg__private_rpc_doesnt_exist)
 {
@@ -1125,6 +1140,10 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, self->recvmsg_args.num_bpages);
 	EXPECT_EQ(2*HOMA_BPAGE_SIZE, self->recvmsg_args.bpage_offsets[0]);
+
+	pages[0] *= HOMA_BPAGE_SIZE;
+	pages[1] *= HOMA_BPAGE_SIZE;
+	homa_pool_free_bufs(self->hsk.buffer_pool, 2, pages);
 }
 TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 {
@@ -1226,12 +1245,14 @@ TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
 }
 TEST_F(homa_plumbing, homa_recvmsg__reap_because_of_SOCK_NOSPACE)
 {
+	struct homa_rpc *crpc;
+
 	/* Make the tx message long enough that it takes multiple reap
 	 * passes (to ensure homa_rpc_reap was called with reap_all==true).
 	 */
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
-			self->client_ip, self->server_ip, self->server_port,
-			self->client_id, 20000, 2000);
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 20000, 2000);
 
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
@@ -1251,6 +1272,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_args)
 			self->client_id, 100, 2000);
 
 	EXPECT_NE(NULL, crpc);
+	mock_check_bpool_leaks = false;
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	mock_copy_to_user_errors = 1;
 

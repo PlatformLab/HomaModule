@@ -230,6 +230,25 @@ the message is a request, the application must eventually send a response
 (Homa retains state for each request until its response has been sent; if
 no responses are sent, kernel state will accumulate and the socket may
 eventually block).
+.PP
+In an error return
+.B num_bpages
+is normally 0 (no RPC is being returned, so there are no bpages to worry
+about). However, if
+.B num_pages
+is nonzero when
+.B recvmsg
+is invoked (i.e., the application is returning buffer space to Homa)
+and an error prevents Homa from freeing those bpages, then on return
+.B num_pages
+and
+.B bpage_offsets
+will have the same values that were passed into
+.BR recvmsg .
+This indicates that the bpages still belong to the application. If they
+are not passed back to Homa in a future
+.B recvmsg
+call, Homa will not be able to reuse their memory space.
 .SH ERRORS
 .PP
 When

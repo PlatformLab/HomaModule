@@ -205,9 +205,15 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 
 error:
 	homa_bucket_unlock(bucket, id);
-	if (srpc && srpc->peer)
-		homa_peer_release(srpc->peer);
-	kfree(srpc);
+	if (srpc) {
+		if (srpc->msgin.num_bpages > 0)
+			homa_pool_free_bufs(hsk->buffer_pool,
+					    srpc->msgin.num_bpages,
+					    srpc->msgin.bpage_offsets);
+		if (srpc->peer)
+			homa_peer_release(srpc->peer);
+		kfree(srpc);
+	}
 	return ERR_PTR(err);
 }
 

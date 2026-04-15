@@ -278,6 +278,11 @@ int mock_queue_index = 0;
 /* Number of invocations of netif_schedule_queue. */
 int mock_netif_schedule_calls;
 
+/* True means that failures should be logged if a test ends with buffer
+ * space still allocated in a homa_pool.
+ */
+bool mock_check_bpool_leaks = true;
+
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
 struct net_offload tcp_offload;
@@ -990,7 +995,7 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 		return NULL;
 	if (unit_hash_size(spinlocks_held)  > 0 &&
 	    (flags & ~__GFP_ZERO) != GFP_ATOMIC)
-		FAIL(" Incorrect flags 0x%x passed to mock_kmalloc; expected GFP_ATOMIC (0x%x)",
+		FAIL(" incorrect flags 0x%x passed to mock_kmalloc; expected GFP_ATOMIC (0x%x)",
 		     flags, GFP_ATOMIC);
 	block = malloc(size);
 	if (!block) {
@@ -1315,7 +1320,7 @@ void _raw_spin_unlock_irqrestore(raw_spinlock_t *lock,
 					    unsigned long flags)
 {
 	if (flags != 1234)
-		FAIL("incorrect flags %ld returned to %sa (expected 1234)",
+		FAIL(" incorrect flags %ld returned to %sa (expected 1234)",
 		     flags, __func__);
 	mock_record_unlocked(lock);
 }
@@ -1821,7 +1826,7 @@ struct net_device *mock_dev(int index, struct homa *homa)
 	struct net_device *dev;
 
 	if (index >= MOCK_MAX_NETS) {
-		FAIL("Index %d exceeds maximum number of network namespaces (%d)",
+		FAIL(" index %d exceeds maximum number of network namespaces (%d)",
 		     index, MOCK_MAX_NETS);
 		index = 0;
 	}
@@ -1856,6 +1861,21 @@ u64 mock_get_clock(void)
 	}
 	mock_clock += mock_clock_tick;
 	return mock_clock;
+}
+
+/**
+ * mock_free_pool() - Invoked by homa_pool_free during unit tests;
+ * checks for leaks of pool memory.
+ * @pool:       Structure to check.
+ */
+void mock_free_pool(struct homa_pool *pool)
+{
+	int avail = homa_pool_avail_bytes(pool);
+	int size = pool->num_bpages * HOMA_BPAGE_SIZE;
+
+	if (mock_check_bpool_leaks && avail != size)
+		FAIL(" homa_pool freed with %d bytes still in use",
+		     size - avail);
 }
 
 /**
@@ -1902,7 +1922,7 @@ struct homa_net *mock_hnet(int index, struct homa *homa)
 	struct homa_net *hnet;
 
 	if (index >= MOCK_MAX_NETS) {
-		FAIL("Index %d exceeds maximum number of network namespaces (%d)",
+		FAIL(" index %d exceeds maximum number of network namespaces (%d)",
 		     index, MOCK_MAX_NETS);
 		index = 0;
 	}
@@ -2164,7 +2184,7 @@ void mock_rpc_hold(struct homa_rpc *rpc)
 void mock_rpc_put(struct homa_rpc *rpc)
 {
 	if (refcount_read(&rpc->refs) < 2)
-		FAIL("homa_rpc_put invoked when RPC has no active holds");
+		FAIL(" homa_rpc_put invoked when RPC has no active holds");
 	mock_rpc_holds--;
 	refcount_dec(&rpc->refs);
 }
@@ -2345,7 +2365,7 @@ void mock_sock_hold(struct sock *sk)
 void mock_sock_put(struct sock *sk)
 {
 	if (mock_sock_holds == 0)
-		FAIL("sock_put invoked when there were no active sock_holds");
+		FAIL(" sock_put invoked when there were no active sock_holds");
 	mock_sock_holds--;
 }
 
@@ -2487,6 +2507,7 @@ void mock_teardown(void)
 	memset(&mock_net_queue, 0, sizeof(mock_net_queue));
 	mock_queue_index = 0;
 	mock_netif_schedule_calls = 0;
+	mock_check_bpool_leaks = true;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));

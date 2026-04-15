@@ -58,6 +58,14 @@ static void handoff_hook(char *id)
 	}
 }
 
+static void reset_msgin(struct homa_rpc *rpc)
+{
+	if (rpc->msgin.num_bpages > 0)
+		homa_pool_free_bufs(rpc->hsk->buffer_pool,
+				    rpc->msgin.num_bpages,
+				    rpc->msgin.bpage_offsets);
+	memset(&rpc->msgin, 0, sizeof(rpc->msgin));
+}
 
 #ifdef __STRIP__ /* See strip.py */
 int mock_message_in_init(struct homa_rpc *rpc, int length, int unsched)
@@ -143,6 +151,7 @@ TEST_F(homa_incoming, homa_message_in_init__basics)
 	EXPECT_EQ(0, homa_message_in_init(crpc, 127, 100));
 	EXPECT_EQ(100, crpc->msgin.granted);
 	EXPECT_EQ(200, crpc->msgin.birth);
+	reset_msgin(crpc);
 	EXPECT_EQ(0, homa_message_in_init(crpc, 128, 500));
 	EXPECT_EQ(128, crpc->msgin.granted);
 	EXPECT_EQ(1, crpc->msgin.num_bpages);
@@ -171,27 +180,40 @@ TEST_F(homa_incoming, homa_message_in_init__no_buffer_region)
 }
 TEST_F(homa_incoming, homa_message_in_init__no_buffers_available)
 {
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, 99, 1000, 1000);
+	struct homa_rpc *crpc;
+	int saved_free;
 
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 1000, 1000);
+
+	saved_free = atomic_read(&self->hsk.buffer_pool->free_bpages);
 	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
 	EXPECT_EQ(0, homa_message_in_init(crpc, HOMA_BPAGE_SIZE*2, 10000));
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
+	atomic_set(&self->hsk.buffer_pool->free_bpages, saved_free);
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_message_in_init__update_message_length_metrics)
 {
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, 99, 1000, 1000);
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 1000, 1000);
 
 	EXPECT_EQ(0, homa_message_in_init(crpc, 140, 140));
+	reset_msgin(crpc);
 	EXPECT_EQ(0, homa_message_in_init(crpc, 130, 130));
+	reset_msgin(crpc);
 	EXPECT_EQ(0, homa_message_in_init(crpc, 0xfff, 0xfff));
+	reset_msgin(crpc);
 	EXPECT_EQ(0, homa_message_in_init(crpc, 0xfff0, 0xfff0));
+	reset_msgin(crpc);
 	EXPECT_EQ(0, homa_message_in_init(crpc, 0x3000, 0x3000));
+	reset_msgin(crpc);
 	EXPECT_EQ(0, homa_message_in_init(crpc, 1000000, 1000000));
+	reset_msgin(crpc);
 	EXPECT_EQ(0, homa_message_in_init(crpc, 900000, 900000));
 	EXPECT_EQ(270, homa_metrics_per_cpu()->small_msg_bytes[2]);
 	EXPECT_EQ(0xfff, homa_metrics_per_cpu()->small_msg_bytes[63]);
@@ -742,8 +764,8 @@ TEST_F(homa_incoming, homa_copy_to_user__basics)
 	mock_bpage_size = 2048;
 	mock_bpage_shift = 11;
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->server_port, self->client_id,
-			1000, 4000);
+			       self->server_ip, self->server_port,
+			       self->client_id, 1000, 4000);
 	ASSERT_NE(NULL, crpc);
 	self->data.message_length = htonl(4000);
 	self->data.seg.offset = htonl(1400);
@@ -1483,13 +1505,17 @@ TEST_F(homa_incoming, homa_data_pkt__wrong_server_rpc_state)
 }
 TEST_F(homa_incoming, homa_data_pkt__no_buffers)
 {
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 1000, 5000);
+	struct homa_rpc *crpc;
+	int saved_free;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 1000, 5000);
 
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
 
+	saved_free = atomic_read(&self->hsk.buffer_pool->free_bpages);
 	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
 	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
 			1400, 0), crpc);
@@ -1497,6 +1523,7 @@ TEST_F(homa_incoming, homa_data_pkt__no_buffers)
 	EXPECT_EQ(1400, homa_metrics_per_cpu()->dropped_data_no_bufs);
 #endif /* See strip.py */
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
+	atomic_set(&self->hsk.buffer_pool->free_bpages, saved_free);
 }
 TEST_F(homa_incoming, homa_data_pkt__update_delta)
 {

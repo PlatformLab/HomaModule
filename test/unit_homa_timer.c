@@ -3,6 +3,7 @@
 #include "homa_impl.h"
 #include "homa_grant.h"
 #include "homa_peer.h"
+#include "homa_pool.h"
 #include "homa_rpc.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
@@ -113,12 +114,15 @@ TEST_F(homa_timer, homa_timer_check_rpc__all_granted_bytes_received)
 #endif /* See strip.py */
 TEST_F(homa_timer, homa_timer_check_rpc__no_buffer_space)
 {
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 100, 5000);
+	struct homa_rpc *crpc;
 
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 100, 5000);
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
+	homa_pool_free_bufs(crpc->hsk->buffer_pool, crpc->msgin.num_bpages,
+			    crpc->msgin.bpage_offsets);
 	crpc->msgin.num_bpages = 0;
 	crpc->silent_ticks = 10;
 	homa_rpc_lock(crpc);
