@@ -1030,7 +1030,7 @@ int homa_socket(struct sock *sk)
 }
 
 /**
- * homa_setsockopt() - Implements the getsockopt system call for Homa sockets.
+ * homa_setsockopt() - Implements the setsockopt system call for Homa sockets.
  * @sk:      Socket on which the system call was invoked.
  * @level:   Level at which the operation should be handled; will always
  *           be IPPROTO_HOMA.
