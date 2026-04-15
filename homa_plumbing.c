@@ -874,11 +874,15 @@ int homa_ioc_abort(struct socket *sock, unsigned long arg)
 int homa_ioc_info(struct socket *sock, unsigned long arg)
 {
 	struct homa_sock *hsk = homa_sk(sock->sk);
+	struct homa_rpc **rpcs = NULL;
 	struct homa_rpc_info rinfo;
 	struct homa_info hinfo;
 	struct homa_rpc *rpc;
+	int result = 0;
 	int bytes_avl;
+	int num_rpcs;
 	char *dst;
+	int i;
 
 	if (unlikely(copy_from_user(&hinfo, (void __user *)arg,
 				    sizeof(hinfo)))) {
@@ -890,35 +894,80 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		hsk->error_msg = "socket has been shut down";
 		return -ESHUTDOWN;
 	}
-	rcu_read_lock();
 	hinfo.bpool_avail_bytes = homa_pool_avail_bytes(hsk->buffer_pool);
 	hinfo.port = hsk->port;
 	dst = (char *)hinfo.rpc_info;
 	bytes_avl = hinfo.rpc_info_length;
 	hinfo.num_rpcs = 0;
-	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+
+	/* This function is tricky because we need to hold an RCU lock
+	 * while scanning the RPCs of the socket, but we can't hold the
+	 * RCU lock while copying status information out to user space.
+	 * Thus, we first collect pointers to all the RPCs in a separate
+	 * array (while holding an RCU lock), acquire a reference on each
+	 * RPC, then release the RCU lock and copy out to user space.
+	 */
+	num_rpcs = 0;
+	rcu_read_lock();
+	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links)
+		num_rpcs++;
+
+	if (num_rpcs > 0) {
+		/* Allocate an array and populate it with homa_rpc pointers.
+		 * Must release the RCU lock temporarily while allocating.
+		 */
+		rcu_read_unlock();
+		rpcs = kmalloc(num_rpcs * sizeof(*rpcs), GFP_KERNEL);
+		if (!rpcs) {
+			homa_unprotect_rpcs(hsk);
+			return -ENOMEM;
+		}
+		rcu_read_lock();
+		i = 0;
+		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			homa_rpc_lock(rpc);
+			if (rpc->state != RPC_DEAD) {
+				rpcs[i] = rpc;
+				homa_rpc_hold(rpc);
+				i++;
+			}
+			homa_rpc_unlock(rpc);
+			if (i == num_rpcs)
+				break;
+		}
+		/* The number of RPCs could have changed between the first
+		 * pass and the second pass.
+		 */
+		num_rpcs = i;
+	}
+	rcu_read_unlock();
+	homa_unprotect_rpcs(hsk);
+
+	/* Now scan the array and copy information out to user space.  Note
+	 * that RPCs could have ended since we added them to the array.
+	 */
+	for (i = 0; i < num_rpcs; i++) {
+		rpc = rpcs[i];
 		homa_rpc_lock(rpc);
+		homa_rpc_put(rpc);
 		if (rpc->state == RPC_DEAD) {
 			homa_rpc_unlock(rpc);
 			continue;
 		}
 		homa_rpc_get_info(rpc, &rinfo);
-		homa_rpc_unlock(rpc);
-		if (dst && bytes_avl >= sizeof(rinfo)) {
+		if (dst && bytes_avl >= sizeof(rinfo) && result == 0) {
 			if (copy_to_user((void __user *)dst, &rinfo,
 					 sizeof(rinfo))) {
-				rcu_read_unlock();
-				homa_unprotect_rpcs(hsk);
 				hsk->error_msg = "couldn't copy homa_rpc_info to user space: invalid or read-only address?";
-				return -EFAULT;
+				result = -EFAULT;
 			}
 			dst += sizeof(rinfo);
 			bytes_avl -= sizeof(rinfo);
 		}
+		homa_rpc_unlock(rpc);
 		hinfo.num_rpcs++;
 	}
-	rcu_read_unlock();
-	homa_unprotect_rpcs(hsk);
+	kfree(rpcs);
 
 	if (hsk->error_msg)
 		snprintf(hinfo.error_msg, HOMA_ERROR_MSG_SIZE, "%s",
@@ -930,7 +979,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		hsk->error_msg = "couldn't copy homa_info to user space: read-only address?";
 		return -EFAULT;
 	}
-	return 0;
+	return result;
 }
 
 /**

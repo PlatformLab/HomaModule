@@ -9,18 +9,6 @@
 #include "mock.h"
 #include "utils.h"
 
-/* The following hook function frees hook_rpc. */
-static struct homa_rpc *hook_rpc;
-static void unlock_hook(char *id)
-{
-	if (strcmp(id, "unlock") != 0)
-		return;
-	if (hook_rpc) {
-		homa_rpc_end(hook_rpc);
-		hook_rpc = 0;
-	}
-}
-
 FIXTURE(homa_plumbing) {
 	struct in6_addr client_ip[1];
 	int client_port;
@@ -115,6 +103,35 @@ FIXTURE_TEARDOWN(homa_plumbing)
 				self->recvmsg_args.bpage_offsets);
 	homa_destroy(&self->homa);
 	unit_teardown();
+}
+
+/* The following hook function frees hook_rpc. */
+static struct homa_rpc *hook_rpc;
+static void unlock_hook(char *id)
+{
+	if (strcmp(id, "unlock") != 0)
+		return;
+	if (hook_rpc) {
+		homa_rpc_end(hook_rpc);
+		hook_rpc = 0;
+	}
+}
+
+/* The following hook function creates new server RPCs. */
+struct _test_data_homa_plumbing *saved_self;
+static void create_rpcs_hook(char *id)
+{
+	if (strcmp(id, "kmalloc") != 0 || !saved_self)
+		return;
+	unit_server_rpc(&saved_self->hsk, UNIT_IN_SERVICE,
+			saved_self->client_ip, saved_self->server_ip,
+			saved_self->client_port, saved_self->server_id + 2,
+			5000, 2000);
+	unit_server_rpc(&saved_self->hsk, UNIT_IN_SERVICE,
+			saved_self->client_ip, saved_self->server_ip,
+			saved_self->client_port, saved_self->server_id + 4,
+			5000, 2000);
+	saved_self = NULL;
 }
 
 TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
@@ -353,6 +370,31 @@ TEST_F(homa_plumbing, homa_ioc_info__rpc_info)
 	EXPECT_EQ(self->server_id, info[0].id);
 	EXPECT_EQ(self->server_id + 2, info[1].id);
 }
+TEST_F(homa_plumbing, homa_ioc_info__no_rpcs)
+{
+	struct homa_info hinfo;
+
+	memset(&hinfo, 0, sizeof(hinfo));
+	hinfo.num_rpcs = 44;
+	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
+	EXPECT_EQ(0, hinfo.num_rpcs);
+}
+TEST_F(homa_plumbing, homa_ioc_info__kmalloc_failure)
+{
+	struct homa_rpc_info info[10];
+	struct homa_info hinfo;
+
+	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
+			self->server_ip, self->client_port, self->server_id,
+			2000, 100);
+	hinfo.rpc_info = (__u64)(uintptr_t)info;
+	hinfo.rpc_info_length = sizeof(info);
+
+	mock_kmalloc_errors = 1;
+	EXPECT_EQ(ENOMEM, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
+}
 TEST_F(homa_plumbing, homa_ioc_info__ignore_dead_rpc)
 {
 	struct homa_rpc_info info[10];
@@ -375,6 +417,24 @@ TEST_F(homa_plumbing, homa_ioc_info__ignore_dead_rpc)
 	EXPECT_EQ(1, hinfo.num_rpcs);
 	EXPECT_EQ(self->server_id + 2, info[0].id);
 	srpc->state = RPC_IN_SERVICE;
+}
+TEST_F(homa_plumbing, homa_ioc_info__new_rpcs_created_concurrently)
+{
+	struct homa_rpc_info info[10];
+	struct homa_info hinfo;
+
+	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
+			self->server_ip, self->client_port, self->server_id,
+			2000, 100);
+	hinfo.rpc_info = (__u64)(uintptr_t)info;
+	hinfo.rpc_info_length = sizeof(info);
+	unit_hook_register(create_rpcs_hook);
+	saved_self = self;
+
+	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
+				    (unsigned long) &hinfo));
+	EXPECT_EQ(1, hinfo.num_rpcs);
+	EXPECT_EQ(self->server_id, info[0].id);
 }
 TEST_F(homa_plumbing, homa_ioc_info__no_memory_for_rpc_info)
 {
@@ -425,6 +485,9 @@ TEST_F(homa_plumbing, homa_ioc_info__cant_copy_rpc_info_to_user)
 	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
 			self->server_ip, self->client_port, self->server_id + 2,
 			5000, 2000);
+	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
+			self->server_ip, self->client_port, self->server_id + 4,
+			5000, 2000);
 	memset(info, 0, sizeof(info));
 	hinfo.rpc_info = (__u64)(uintptr_t)info;
 	hinfo.rpc_info_length = sizeof(info);
@@ -436,6 +499,7 @@ TEST_F(homa_plumbing, homa_ioc_info__cant_copy_rpc_info_to_user)
 		     self->hsk.error_msg);
 	EXPECT_EQ(self->server_id, info[0].id);
 	EXPECT_EQ(0, info[1].id);
+	EXPECT_EQ(3, hinfo.num_rpcs);
 }
 TEST_F(homa_plumbing, homa_ioc_info__error_msg)
 {
