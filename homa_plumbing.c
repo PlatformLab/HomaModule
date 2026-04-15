@@ -1778,7 +1778,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
  * @opt:    Not used.
  * @type:   Type of ICMP packet.
  * @code:   Additional information about the error.
- * @offset: Not used.
+ * @offset: Total length of IPv6 header, including any extension headers.
  * @info:   Information about the error that occurred?
  *
  * Return: zero, or a negative errno if the error couldn't be handled here.
@@ -1794,7 +1794,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_PORT_UNREACH) {
 		const struct homa_common_hdr *h;
 
-		h = (struct homa_common_hdr *)(skb->data + sizeof(*iph));
+		h = (struct homa_common_hdr *)(skb->data + offset);
 		port = ntohs(h->dport);
 		error = -ENOTCONN;
 	} else if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_ADDR_UNREACH) {

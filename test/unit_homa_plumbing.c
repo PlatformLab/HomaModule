@@ -1617,7 +1617,7 @@ TEST_F(homa_plumbing, homa_err_handler_v6__port_unreachable)
 	       failed->len);
 
 	EXPECT_EQ(0, homa_err_handler_v6(icmp, NULL, ICMPV6_DEST_UNREACH,
-					 ICMPV6_PORT_UNREACH, 0, 111));
+					 ICMPV6_PORT_UNREACH, 40, 111));
 	EXPECT_EQ(ENOTCONN, -crpc->error);
 
 	kfree_skb(icmp);
@@ -1641,7 +1641,7 @@ TEST_F(homa_plumbing, homa_err_handler_v6__protocol_not_supported)
 	       failed->len);
 
 	EXPECT_EQ(0, homa_err_handler_v6(icmp, NULL, ICMPV6_PARAMPROB,
-					 ICMPV6_UNK_NEXTHDR, 0, 111));
+					 ICMPV6_UNK_NEXTHDR, 40, 111));
 	EXPECT_EQ(EPROTONOSUPPORT, -crpc->error);
 
 	kfree_skb(icmp);
