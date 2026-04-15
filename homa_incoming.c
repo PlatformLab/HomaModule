@@ -449,11 +449,6 @@ free_skbs:
  */
 void homa_dispatch_pkts(struct sk_buff *skb)
 {
-#ifdef __UNIT_TEST__
-#define MAX_ACKS 2
-#else /* __UNIT_TEST__ */
-#define MAX_ACKS 10
-#endif /* __UNIT_TEST__ */
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
 	u64 id = homa_local_id(h->common.sender_id);
