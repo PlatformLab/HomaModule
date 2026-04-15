@@ -417,6 +417,20 @@ TEST_F(homa_rpc, homa_rpc_end__remove_from_ready_rpcs)
 	homa_rpc_end(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 }
+TEST_F(homa_rpc, homa_rpc_end__cleanup_bpool)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	struct homa_rpc *crpc;
+	int pool_size = pool->num_bpages * HOMA_BPAGE_SIZE;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, 4000, 98, 1000,	150000);
+	ASSERT_NE(NULL, crpc);
+
+	EXPECT_EQ(150000, pool_size - homa_pool_avail_bytes(pool));
+	homa_rpc_end(crpc);
+	EXPECT_EQ(0, pool_size - homa_pool_avail_bytes(pool));
+}
 TEST_F(homa_rpc, homa_rpc_end__state_ready)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -683,23 +697,6 @@ TEST_F(homa_rpc, homa_rpc_reap__skb_memory_accounting)
 	EXPECT_STREQ("1236", dead_rpcs(&self->hsk));
 	EXPECT_EQ(1, self->hsk.dead_skbs);
 	EXPECT_EQ(3001, refcount_read(&self->hsk.sock.sk_wmem_alloc));
-}
-TEST_F(homa_rpc, homa_rpc_reap__release_buffers)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
-			4000, 98, 1000,	150000);
-	struct homa_pool *pool = self->hsk.buffer_pool;
-
-	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
-	homa_rpc_end(crpc);
-	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
-	self->hsk.buffer_pool->check_waiting_invoked = 0;
-	self->homa.reap_limit = 5;
-	homa_rpc_reap(&self->hsk, false);
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
-	EXPECT_EQ(1, self->hsk.buffer_pool->check_waiting_invoked);
 }
 TEST_F(homa_rpc, homa_rpc_reap__release_peer_ref)
 {

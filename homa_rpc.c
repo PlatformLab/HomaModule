@@ -148,6 +148,10 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 		err = -ENOMEM;
 		goto error;
 	}
+
+	/* Must be initialized before any errors can occur in this function. */
+	INIT_LIST_HEAD(&srpc->buf_links);
+
 	srpc->hsk = hsk;
 	srpc->bucket = bucket;
 	srpc->state = RPC_INCOMING;
@@ -164,7 +168,6 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->msgout.length = -1;
 	IF_NO_STRIP(homa_qdisc_rpc_init(&srpc->qrpc));
 	INIT_LIST_HEAD(&srpc->ready_links);
-	INIT_LIST_HEAD(&srpc->buf_links);
 	INIT_LIST_HEAD(&srpc->dead_links);
 #ifndef __STRIP__ /* See strip.py */
 	INIT_LIST_HEAD(&srpc->grantable_links);
@@ -204,16 +207,13 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	return srpc;
 
 error:
-	homa_bucket_unlock(bucket, id);
 	if (srpc) {
-		if (srpc->msgin.num_bpages > 0)
-			homa_pool_free_bufs(hsk->buffer_pool,
-					    srpc->msgin.num_bpages,
-					    srpc->msgin.bpage_offsets);
+		homa_pool_cleanup(srpc);
 		if (srpc->peer)
 			homa_peer_release(srpc->peer);
-		kfree(srpc);
 	}
+	homa_bucket_unlock(bucket, id);
+	kfree(srpc);
 	return ERR_PTR(err);
 }
 
@@ -302,7 +302,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	list_del_rcu(&rpc->active_links);
 	list_add_tail(&rpc->dead_links, &rpc->hsk->dead_rpcs);
 	__list_del_entry(&rpc->ready_links);
-	__list_del_entry(&rpc->buf_links);
+	homa_pool_cleanup(rpc);
 	homa_interest_notify_private(rpc);
 //	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
 //			rpc->hsk->client_port,
@@ -616,10 +616,6 @@ release:
 			rpc = rpcs[i];
 
 			UNIT_LOG("; ", "reaped %llu", rpc->id);
-			if (unlikely(rpc->msgin.num_bpages))
-				homa_pool_free_bufs(rpc->hsk->buffer_pool,
-						    rpc->msgin.num_bpages,
-						    rpc->msgin.bpage_offsets);
 			if (rpc->peer) {
 				homa_peer_release(rpc->peer);
 				rpc->peer = NULL;

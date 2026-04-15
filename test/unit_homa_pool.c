@@ -582,6 +582,36 @@ TEST_F(homa_pool, homa_pool_free_bufs__bogus_offset)
 					       &buffer));
 }
 
+TEST_F(homa_pool, homa_pool_cleanup__free_pool_space)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	struct homa_rpc *crpc;
+	int pool_size = pool->num_bpages * HOMA_BPAGE_SIZE;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			       &self->server_ip, 4000, 98, 1000, 50000);
+	ASSERT_NE(NULL, crpc);
+
+	EXPECT_EQ(50000, pool_size - homa_pool_avail_bytes(pool));
+	homa_pool_cleanup(crpc);
+	EXPECT_EQ(0, pool_size - homa_pool_avail_bytes(pool));
+}
+TEST_F(homa_pool, homa_pool_cleanup__unlink_from_waiting_for_bufs)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	struct homa_rpc *crpc;
+
+	mock_check_bpool_leaks = false;
+	atomic_set(&pool->free_bpages, 0);
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			       &self->server_ip, 4000, 98, 1000, 50000);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_FALSE(list_empty(&crpc->buf_links));
+
+	homa_pool_cleanup(crpc);
+	EXPECT_TRUE(list_empty(&crpc->buf_links));
+}
+
 TEST_F(homa_pool, homa_pool_check_waiting__basics)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;

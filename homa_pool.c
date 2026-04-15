@@ -290,6 +290,8 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 
 	if (!pool->region)
 		return -ENOMEM;
+	if (rpc->state == RPC_DEAD)
+		return 0;
 
 	/* First allocate any full bpages that are needed. */
 	full_pages = rpc->msgin.length >> HOMA_BPAGE_SHIFT;
@@ -465,6 +467,22 @@ int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 		   num_buffers, pool->hsk->port,
 		   atomic_read(&pool->free_bpages));
 	return result;
+}
+
+/**
+ * homa_pool_cleanup() - Invoked when RPCs are being deleted: releases
+ * pool space owned by the RPC, unlinks it from pool-related lists, etc.
+ * @rpc:        RPC to clean up.
+ */
+void homa_pool_cleanup(struct homa_rpc *rpc)
+{
+	if (rpc->msgin.num_bpages > 0) {
+		homa_pool_free_bufs(rpc->hsk->buffer_pool,
+				    rpc->msgin.num_bpages,
+				    rpc->msgin.bpage_offsets);
+		rpc->msgin.num_bpages = 0;
+	}
+	list_del_init(&rpc->buf_links);
 }
 
 /**
