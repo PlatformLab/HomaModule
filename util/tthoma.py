@@ -12561,7 +12561,7 @@ class AnalyzeTimeline:
         server_extra = [
             ['started copying to user space', 'copy_out_start', lambda x : x],
             ['finished copying to user space','copy_out_done',  lambda x : x],
-            ['finished copying req into pkts','copy_in_done',   lambda x : x]
+            ['finished copying resp into pkts','copy_in_done',   lambda x : x]
         ]
 
         # One entry in each of these lists for each phase of the RPC,

@@ -483,7 +483,7 @@ void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
 	tt_record2("beginning wait for rpc lock, id %d, (bucket %d)",
 		   id, bucket->id);
 	spin_lock_bh(&bucket->lock);
-	tt_record2("ending wait for bucket lock, id %d, (bucket %d)",
+	tt_record2("ending wait for rpc lock, id %d, (bucket %d)",
 		   id, bucket->id);
 	if (homa_is_client(id)) {
 		INC_METRIC(client_lock_misses, 1);
