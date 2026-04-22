@@ -469,6 +469,12 @@ def add_to_intervals(node, start, end, key, delta):
             break
         interval[key] += delta
 
+def avg(data):
+    """
+    Return the average of all the items in data, or 0 if data is empty.
+    """
+    return sum(data) / len(data) if data else 0
+
 def bytes_to_usec(bytes):
     """
     Compute how long many microseconds it takes to transmit a given number of
@@ -1473,22 +1479,26 @@ def set_tcp_ip_node(tcp_endpoint, node):
     key = tcp_endpoint[:-4]
     ip_to_node[key] = node
 
-def sort_pkts(pkts, key):
+def sort_pkts(pkts, keys):
     """
     Sort a list of packets using a given key and return the sorted list.
-    pkts:       Packets to sort
-    key:        Determines sort order (typically the value of the --sort
-                option); must be 'Xmit', 'Nic', 'Gro', 'SoftIRQ', or 'Free'
+    pkts:       Packets to sort; this list is sorted in place.
+    keys:       Determines sort order; one or more keys, each of which must be
+                one of 'Qid', 'Xmit', 'Nic', 'Gro', 'SoftIRQ', or 'Free'.
+                First key in the list has highest sort priority.
     """
 
-    sort_keys = {'Xmit': 'xmit', 'Qdisc': 'qdisc_xmit', 'Nic': 'nic',
-            'Gro': 'gro', 'SoftIRQ': 'softirq', 'Free': 'free_tx_skb'}
-    if not key in sort_keys:
-        raise Exception('Invalid sort option %s: must be one of %s' % (
-                key, sort_keys.keys()))
-    sort_key = sort_keys[key]
-    return sorted(pkts, key = lambda pkt :
-            pkt[sort_key] if sort_key in pkt else 1e20)
+    sort_keys = {'Qid': 'tx_qid', 'Xmit': 'xmit', 'Qdisc': 'qdisc_xmit',
+            'Nic': 'nic', 'Gro': 'gro', 'SoftIRQ': 'softirq',
+            'Free': 'free_tx_skb'}
+
+    for key in reversed(keys.split()):
+        if not key in sort_keys:
+            raise Exception('Invalid sort option %s: must be one of %s' % (
+                    key, sort_keys.keys()))
+        sort_key = sort_keys[key]
+        pkts.sort(key = lambda pkt: pkt[sort_key] if sort_key in pkt else 1e20)
+    return pkts
 
 def sum_fields(list, field):
     """
@@ -5231,7 +5241,7 @@ class AnalyzeIncoming:
         if skipped > 0:
             print('Incoming analyzer skipped %d packets out of %d (%.2f%%): '
                     'couldn\'t compute length' % (skipped, total_pkts,
-                    100.0*(skipped//total_pkts)), file=sys.stderr)
+                    100.0*(skipped/total_pkts)), file=sys.stderr)
 
         for grant in grants.values():
             if not 'gro' in grant:
@@ -7623,8 +7633,10 @@ class AnalyzeNicsnapshot:
     """
     Print information about the state of the NIC queues on a particular
     node at a particular point in time. Requires the --time and --node
-    options. If --verbose is specified then all of the packets in the
-    possession of the NIC at the reference time are printed.
+    options. Also prints all of the packets in the possession of the NIC
+    at the reference time are printed. The packets will be sorted using
+    the --sort option, which is a list of any of 'Qid', 'Xmit', 'Nic',
+    'Gro', 'SoftIRQ', or 'Free' (default: 'Qid Xmit').
     """
 
     def __init__(self, dispatcher):
@@ -7793,11 +7805,13 @@ class AnalyzeNicsnapshot:
                     end='')
         print()
 
-        if options.verbose:
-            print('\nDetails for all of the packets owned by the NIC at time %.1f:'
-                    % (options.time))
-            all_active.sort(key=lambda pkt: [pkt['tx_qid'], pkt['nic']])
-            print(print_pkts(all_active, header=True), end='')
+        keys = options.sort
+        if not keys:
+            keys = 'Qid Xmit'
+        print('\nDetails for all of the packets owned by the NIC at time %.1f:'
+                % (options.time))
+        sort_pkts(all_active, keys)
+        print(print_pkts(all_active, header=True), end='')
 
 #------------------------------------------------
 # Analyzer: nictx
@@ -9882,7 +9896,7 @@ class AnalyzeRpcs:
             else:
                 first_resp_pkt = []
                 last_resp_pkt = []
-            if 'nic' in first_req_pkt:
+            if 'nic' in first_req_pkt and 'sendmsg' in rpc:
                 xmit.append(first_req_pkt['nic'] - rpc['sendmsg'])
             if 'nic' in first_resp_pkt and 'sendmsg' in srpc:
                 xmit.append(first_resp_pkt['nic'] - srpc['sendmsg'])
@@ -9902,7 +9916,7 @@ class AnalyzeRpcs:
                 srvc.append(srpc['sendmsg'] - srpc['recvmsg_done'])
             if 'sendmsg' in rpc and 'recvmsg_done' in rpc:
                 rtt.append(rpc['recvmsg_done'] - rpc['sendmsg'])
-        for l in [xmit, net, free, recv, srvc, rtt]:
+        for l in [xmit, net, free, recv, softirq, srvc, rtt]:
             l.sort()
 
         print('\nOverall statistics about the selected RPCs. Most of these '
@@ -9924,22 +9938,22 @@ class AnalyzeRpcs:
         print('Rtt:      Total time from request sendmsg until recvmsg '
                 'completes for response\n')
 
-        print('               Min      P10      P50      P90      P99      Max')
+        print('               Min      P10      P50      P90      P99      Max      Avg')
         pctls = [0, 100, 500, 900, 990, 1000]
-        print('Xmit      %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(xmit, p, '%.1f') for p in pctls))
-        print('Net       %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(net, p, '%.1f') for p in pctls))
-        print('Free      %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(free, p, '%.1f') for p in pctls))
-        print('SoftIrq   %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(softirq, p, '%.1f') for p in pctls))
-        print('Recv      %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(recv, p, '%.1f') for p in pctls))
-        print('Srvc      %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(srvc, p, '%.1f') for p in pctls))
-        print('Rtt       %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(rtt, p, '%.1f') for p in pctls))
+        print('Xmit      %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(xmit, p, '%.1f') for p in pctls] + [avg(xmit)]))
+        print('Net       %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(net, p, '%.1f') for p in pctls] + [avg(net)]))
+        print('Free      %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(free, p, '%.1f') for p in pctls] + [avg(free)]))
+        print('SoftIrq   %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(softirq, p, '%.1f') for p in pctls] + [avg(softirq)]))
+        print('Recv      %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(recv, p, '%.1f') for p in pctls] + [avg(recv)]))
+        print('Srvc      %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(srvc, p, '%.1f') for p in pctls] + [avg(srvc)]))
+        print('Rtt       %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(rtt, p, '%.1f') for p in pctls] + [avg(rtt)]))
 
         # Print a summary line for each RPC.
         print('\nSummary information for each selected RPC:')
@@ -11824,22 +11838,22 @@ class AnalyzeTcp_rpcs:
         print('Rtt:      Total time from request sendmsg until recvmsg '
                 'completes for response\n')
 
-        print('               Min      P10      P50      P90      P99      Max')
+        print('               Min      P10      P50      P90      P99      Max      Avg')
         pctls = [0, 100, 500, 900, 990, 1000]
-        print('Xmit      %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(xmit, p, '%.1f') for p in pctls))
-        print('Net       %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(net, p, '%.1f') for p in pctls))
-        print('Free      %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(free, p, '%.1f') for p in pctls))
-        print('SoftIrq   %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(softirq, p, '%.1f') for p in pctls))
-        print('Recv      %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(recv, p, '%.1f') for p in pctls))
-        print('Srvc      %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(srvc, p, '%.1f') for p in pctls))
-        print('Rtt       %8s %8s %8s %8s %8s %8s' % tuple(
-                print_pctl(rtt, p, '%.1f') for p in pctls))
+        print('Xmit      %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(xmit, p, '%.1f') for p in pctls] + [avg(xmit)]))
+        print('Net       %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(net, p, '%.1f') for p in pctls] + [avg(net)]))
+        print('Free      %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(free, p, '%.1f') for p in pctls] + [avg(free)]))
+        print('SoftIrq   %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(softirq, p, '%.1f') for p in pctls] + [avg(softirq)]))
+        print('Recv      %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(recv, p, '%.1f') for p in pctls] + [avg(recv)]))
+        print('Srvc      %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(srvc, p, '%.1f') for p in pctls] + [avg(srvc)]))
+        print('Rtt       %8s %8s %8s %8s %8s %8s %8.1f' % tuple(
+                [print_pctl(rtt, p, '%.1f') for p in pctls] + [avg(rtt)]))
 
         # Print a summary line for each RPC.
         print('\nSummary information for each selected RPC:')
@@ -12227,36 +12241,31 @@ class AnalyzeTemp:
     debugging. Consult the code to see what it does right now.
     """
     def __init__(self, dispatcher):
-        # dispatcher.interest('AnalyzeTcp_rpcs')
-        # dispatcher.interest('AnalyzeRpcs')
-        dispatcher.interest('AnalyzePackets')
-        dispatcher.interest('AnalyzeTcppackets')
+        dispatcher.interest('AnalyzeIntervals')
 
     def output(self):
         global packets
 
-        pending = []
-        time = 4500
-        num_bytes = 0
+        tx_in_nic = []
+        print('\nMaximum NIC queue occupancy (KB):')
+        for node in get_sorted_nodes():
+            max = 0
+            max_time = 0.0
+            for interval in intervals[node]:
+                sample = interval['tx_in_nic']
+                tx_in_nic.append(sample)
+                if sample > max:
+                    max = sample
+                    max_time = interval['time']
+            print('%-10s  %.1f (%9.3f)' % (node, max * 1e-3, max_time))
 
-        for pkt in packets.values():
-            if not 'tso_length' in pkt:
-                continue
-            if not 'tx_node' in pkt or pkt['tx_node'] != 'node6':
-                continue
-            if 'nic' in pkt:
-                if pkt['nic'] > time:
-                    continue
-                if 'free_tx_skb' in pkt and pkt['free_tx_skb'] <= 4500:
-                    continue
-            else:
-                if not 'free_tx_skb' in pkt or pkt['free_tx_skb'] <= 4500:
-                    continue
-            pending.append(pkt)
-            num_bytes += pkt['tso_length']
-        print('%d total bytes in %d packets:\n' % (num_bytes, len(pending)))
-        pending.sort(key = lambda pkt: pkt['nic'])
-        print(print_pkts(pending, header=True), end='')
+        tx_in_nic.sort()
+        print('\nTx Kbytes in possession of NIC:')
+        print('Avg:   %6.1f' % (1e-3 * sum(tx_in_nic) / len(tx_in_nic)))
+        print('P50:   %6.1f' % (1e-3 * tx_in_nic[50 * len(tx_in_nic) // 100]))
+        print('P90:   %6.1f' % (1e-3 * tx_in_nic[90 * len(tx_in_nic) // 100]))
+        print('P99:   %6.1f' % (1e-3 * tx_in_nic[99 * len(tx_in_nic) // 100]))
+        print('Max:   %6.1f' % (1e-3 * tx_in_nic[-1]))
 
     def output_slow_pkts(self):
         pkts = []
@@ -12993,7 +13002,7 @@ class AnalyzeTxpkts:
             key = options.sort
             if key == None:
                 key = 'Xmit'
-            pkts = sort_pkts(pkts, key)
+            sort_pkts(pkts, key)
 
             f = open('%s/txpkts_%s.dat' % (options.data, node), 'w')
             f.write('# Node: %s\n' % (node))
