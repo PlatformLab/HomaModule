@@ -1837,6 +1837,8 @@ struct net_device *mock_dev(int index, struct homa *homa)
 		dev->_tx = &mock_net_queue;
 		dev->nd_net.net = &mock_nets[0];
 		dev->ethtool_ops = &mock_ethtool_ops;
+		dev->num_tx_queues = 1;
+		dev->real_num_tx_queues = 1;
 		mock_hnet(index, homa);
 	}
 	return dev;

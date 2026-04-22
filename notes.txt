@@ -7,6 +7,8 @@ Notes for Homa implementation in Linux:
   life of the RPC, but don't save skb's once packets have been
   transmitted.
 
+* Eliminate homa_skb_get, use skb_copy_bits instead.
+
 * Bug with homa_qdisc: if a TSO packet gets segmented in software, the
   homa_skb_info is not replicated in the segments, which causes crashes
   (e.g., homq_qdisc_defer_homa ends up with a NULL value for rpc).

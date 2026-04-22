@@ -672,7 +672,9 @@ than 100, since most NICs cannot transmit at full link speed under all
 conditions.
 .TP
 .IR max_nic_est_backlog_usecs
-This value is used to prevent the buildup of large queues of packets
+This value and
+.I max_nic_queue_usecs
+are used to prevent the buildup of large queues of packets
 waiting to be transmitted in the NIC. Homa keeps a running
 estimate of how many bytes are currently queued in the NIC, assuming
 the NIC transmits at full link speed. If the queue gets long enough
@@ -689,6 +691,20 @@ Lower values for this parameter reduce preemption lag and result in
 a better approximation of SRPT, but the value must be high enough to
 allow time to queue the next packet before
 the NIC becomes idle; otherwise, output bandwidth will be lost.
+.TP
+.IR max_nic_queue_usecs
+This value is used along with
+.I max_nic_est_backlog_usecs
+to limit packet queuing in the NIC  (see comments at the beginning of
+homa_qdisc.c for a discussion of how these two parameters work together).
+This parameter places a limit on the
+number of packets that have been passed to the NIC for transmission but not
+yet returned to Linux after transmission. If the data in such packets
+would take more than
+.I max_nic_queue_usecs
+to transmit (assuming full uplink bandwidth), then Homa will not queue
+additional packets in the NIC until the queued data gets back below
+.I max_nic_queue_usecs.
 .TP
 .IR max_overcommit
 An integer value setting an upper limit on the number of incoming
