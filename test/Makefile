@@ -37,8 +37,10 @@ endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS)
-CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
+CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS) \
+		-fsanitize=address -fno-omit-frame-pointer
+CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) \
+		-fsanitize=address -fno-omit-frame-pointer
 
 TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_interest.c \
@@ -123,10 +125,10 @@ dummyFile:
 # Note: Without -O2 there will be strange compiler errors such as
 # 'asm operand 2 probably does not match constraints'.
 rhashtable.o: rhashtable.c
-	$(CC) -c $(CFLAGS) -O2 $< -o $@
+	$(CC) -c $(CFLAGS) -O2 -fno-sanitize=address $< -o $@
 
 unit: $(OBJS)
-	$(CXX) $(CFLAGS) $^ -o $@ -lasan
+	$(CXX) $(CFLAGS) $^ -o $@
 
 test: unit
 	./unit

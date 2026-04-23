@@ -468,7 +468,6 @@ TEST_F(homa_qdisc, homa_qdisc_destroy)
 
 	homa_qdisc_destroy(qdisc2);
 	EXPECT_EQ(0, unit_list_length(&self->homa.qshared->qdevs));
-	EXPECT_EQ(NULL, qdev->congested_qdisc);
 	kfree(qdisc);
 	kfree(qdisc2);
 }
