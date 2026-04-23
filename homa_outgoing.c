@@ -10,6 +10,7 @@
 #include "homa_wire.h"
 
 #ifndef __STRIP__ /* See strip.py */
+#include <net/udp.h>
 #include "homa_pacer.h"
 #include "homa_qdisc.h"
 #include "homa_skb.h"
@@ -47,6 +48,45 @@ static inline void homa_set_hijack(struct sk_buff *skb, struct homa_peer *peer,
                         		       skb->len, IPPROTO_TCP, 0);
 	else
 		h->checksum = ~tcp_v4_check(skb->len, peer->flow.u.ip4.saddr,
+					    peer->flow.u.ip4.daddr, 0);
+}
+
+/**
+ * homa_set_udp_hijack() - Set fields in an outgoing Homa packet that are
+ * needed for UDP hijacking to work properly. Similar to homa_set_hijack()
+ * but uses IPPROTO_UDP for checksumming and writes a UDP length/checksum
+ * overlay at bytes 4-7 of the transport header.
+ * @skb:    Packet buffer in which to set fields.
+ * @peer:   Peer that contains source and destination addresses for the packet.
+ * @ipv6:   True means the packet is going to be sent via IPv6; false means
+ *          IPv4.
+ */
+static inline void homa_set_udp_hijack(struct sk_buff *skb,
+					struct homa_peer *peer, bool ipv6)
+{
+	struct homa_common_hdr *h;
+	__be16 *udp_len_csum;
+
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
+	h->flags = HOMA_UDP_FLAGS;
+	h->urgent = htons(HOMA_UDP_URGENT);
+
+	/* Write UDP length and checksum at bytes 4-7 of transport header. */
+	udp_len_csum = (__be16 *)(skb_transport_header(skb) + 4);
+	udp_len_csum[0] = htons(skb->len);    /* UDP length */
+	udp_len_csum[1] = 0;                  /* UDP checksum (0 = none) */
+
+	/* Arrange for proper UDP checksumming. */
+	skb->ip_summed = CHECKSUM_PARTIAL;
+	skb->csum_start = skb_transport_header(skb) - skb->head;
+	skb->csum_offset = offsetof(struct homa_common_hdr, checksum);
+	if (ipv6)
+		h->checksum = ~csum_ipv6_magic(&peer->flow.u.ip6.saddr,
+					       &peer->flow.u.ip6.daddr,
+					       skb->len, IPPROTO_UDP, 0);
+	else
+		h->checksum = ~udp_v4_check(skb->len,
+					    peer->flow.u.ip4.saddr,
 					    peer->flow.u.ip4.daddr, 0);
 }
 #endif /* See strip.py */
@@ -204,7 +244,10 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	IF_NO_STRIP(h->cutoff_version = rpc->peer->cutoff_version);
 	h->retransmit = 0;
 #ifndef __STRIP__ /* See strip.py */
-	h->seg.offset = htonl(-1);
+	if (hsk->sock.sk_protocol == IPPROTO_UDP)
+		h->seg.offset = htonl(offset);
+	else
+		h->seg.offset = htonl(-1);
 #else /* See strip.py */
 	h->seg.offset = htonl(offset);
 #endif /* See strip.py */
@@ -219,7 +262,8 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	homa_info->rpc = rpc;
 
 #ifndef __STRIP__ /* See strip.py */
-	if (segs > 1 && hsk->sock.sk_protocol != IPPROTO_TCP) {
+	if (segs > 1 && hsk->sock.sk_protocol != IPPROTO_TCP
+		    && hsk->sock.sk_protocol != IPPROTO_UDP) {
 #else /* See strip.py */
 	if (segs > 1) {
 #endif /* See strip.py */
@@ -322,10 +366,13 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	 * if no hijacking).
 	 */
 	if (rpc->hsk->sock.sk_protocol == IPPROTO_TCP) {
-		/* Hijacking */
+		/* TCP Hijacking */
 		segs_per_gso = gso_size - rpc->hsk->ip_header_length
 				- sizeof(struct homa_data_hdr);
 		do_div(segs_per_gso, max_seg_data);
+	} else if (rpc->hsk->sock.sk_protocol == IPPROTO_UDP) {
+		/* UDP Hijacking: one segment per GSO */
+		segs_per_gso = 1;
 	} else {
 		/* No hijacking */
 		segs_per_gso = gso_size - rpc->hsk->ip_header_length -
@@ -509,12 +556,18 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	homa_set_doff(skb, length);
 #ifndef __STRIP__ /* See strip.py */
 	if (hsk->inet.sk.sk_family == AF_INET6) {
-		homa_set_hijack(skb, peer, true);
+		if (hsk->sock.sk_protocol == IPPROTO_UDP)
+			homa_set_udp_hijack(skb, peer, true);
+		else
+			homa_set_hijack(skb, peer, true);
 		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
 				  NULL, hsk->homa->priority_map[priority] << 5,
 				  0);
 	} else {
-		homa_set_hijack(skb, peer, false);
+		if (hsk->sock.sk_protocol == IPPROTO_UDP)
+			homa_set_udp_hijack(skb, peer, false);
+		else
+			homa_set_hijack(skb, peer, false);
 
 		/* This will find its way to the DSCP field in the IPv4 hdr. */
 		hsk->inet.tos = hsk->homa->priority_map[priority] << 5;
@@ -721,7 +774,10 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 			   tt_addr(rpc->peer->addr), rpc->id,
 			   homa_get_skb_info(skb)->offset);
 #ifndef __STRIP__ /* See strip.py */
-		homa_set_hijack(skb, rpc->peer, true);
+		if (rpc->hsk->sock.sk_protocol == IPPROTO_UDP)
+			homa_set_udp_hijack(skb, rpc->peer, true);
+		else
+			homa_set_hijack(skb, rpc->peer, true);
 		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
 			       0, NULL,
 			       rpc->hsk->homa->priority_map[priority] << 5, 0);
@@ -736,7 +792,10 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 			   homa_get_skb_info(skb)->offset);
 
 #ifndef __STRIP__ /* See strip.py */
-		homa_set_hijack(skb, rpc->peer, false);
+		if (rpc->hsk->sock.sk_protocol == IPPROTO_UDP)
+			homa_set_udp_hijack(skb, rpc->peer, false);
+		else
+			homa_set_hijack(skb, rpc->peer, false);
 		rpc->hsk->inet.tos =
 				rpc->hsk->homa->priority_map[priority] << 5;
 		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);

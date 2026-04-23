@@ -359,6 +359,13 @@ struct homa {
 	int hijack_tcp;
 
 	/**
+	 * @hijack_udp: Non-zero means encapsulate outgoing Homa packets
+	 * as UDP packets (i.e. use UDP as the IP protocol). Set externally
+	 * via sysctl.
+	 */
+	int hijack_udp;
+
+	/**
 	 * @max_gro_skbs: Maximum number of socket buffers that can be
 	 * aggregated by the GRO mechanism.  Set externally via sysctl.
 	 */
@@ -665,7 +672,9 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
 					ip_hdr(skb)->protocol;
 	return (protocol == IPPROTO_HOMA ||
 		(protocol == IPPROTO_TCP &&
-		 tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT)));
+		 tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT)) ||
+		(protocol == IPPROTO_UDP &&
+		 tcp_hdr(skb)->urg_ptr == htons(HOMA_UDP_URGENT)));
 	return protocol == IPPROTO_HOMA;
 }
 #endif /* See strip.py */

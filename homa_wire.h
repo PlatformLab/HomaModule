@@ -139,13 +139,15 @@ struct homa_common_hdr {
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @flags: Holds TCP flags such as URG, ACK, etc. The special value
-	 * HOMA_TCP_FLAGS is stored here to distinguish Homa-over-TCP packets
-	 * from real TCP packets. It includes the SYN and RST flags,
-	 * which TCP would never use together; must not include URG or FIN
-	 * (TSO will turn off FIN for all but the last segment).
+	 * HOMA_TCP_FLAGS is stored here to distinguish Homa-over-TCP and
+	 * Homa-over-UDP packets from real TCP/UDP packets. It includes the
+	 * SYN and RST flags, which TCP would never use together; must not
+	 * include URG or FIN (TSO will turn off FIN for all but the last
+	 * segment).
 	 */
 	u8 flags;
 #define HOMA_TCP_FLAGS 6
+#define HOMA_UDP_FLAGS 5
 #else /* See strip.py */
 	/** @reserved1: Not used (corresponds to TCP flags). */
 	u8 reserved1;
@@ -168,12 +170,14 @@ struct homa_common_hdr {
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @urgent: occupies the same bytes as the urgent pointer in a TCP
-	 * header. When Homa packets are transmitted over TCP, this has the
-	 * special value HOMA_TCP_URGENT (which is set even though URG is
-	 * not set) to indicate that the packet is actually a Homa packet.
+	 * header. When Homa packets are transmitted over TCP or UDP, this
+	 * has the special value HOMA_TCP_URGENT or HOMA_UDP_URGENT (set
+	 * even though URG is not set) to indicate that the packet is
+	 * actually a Homa packet.
 	 */
 	__be16 urgent;
 #define HOMA_TCP_URGENT 0xb97d
+#define HOMA_UDP_URGENT 0xb97e
 #else /* See strip.py */
 	/** @reserved2: Not used (corresponds to TCP urgent field). */
 	__be16 reserved2;

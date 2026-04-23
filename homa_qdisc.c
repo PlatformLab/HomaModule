@@ -557,15 +557,17 @@ bool homa_qdisc_can_bypass(struct sk_buff *skb, struct homa_qdisc *q)
 	bool result;
 	int element;
 
-	/* Collect information from skb. If it isn't a TCP packet then
+	/* Collect information from skb. If it isn't a TCP or UDP packet then
 	 * reordering constraints are unknown so deny reordering.
 	 */
 	if (skb->protocol == htons(ETH_P_IP)) {
-		if (ip_hdr(skb)->protocol != IPPROTO_TCP)
+		if (ip_hdr(skb)->protocol != IPPROTO_TCP
+				&& ip_hdr(skb)->protocol != IPPROTO_UDP)
 			return false;
 		daddr = ip_hdr(skb)->daddr;
 	} else if (skb->protocol == htons(ETH_P_IPV6)) {
-		if (ipv6_hdr(skb)->nexthdr != IPPROTO_TCP)
+		if (ipv6_hdr(skb)->nexthdr != IPPROTO_TCP
+				&& ipv6_hdr(skb)->nexthdr != IPPROTO_UDP)
 			return false;
 		daddr = ipv6_hdr(skb)->daddr.in6_u.u6_addr32[0] ^
 		        ipv6_hdr(skb)->daddr.in6_u.u6_addr32[1] ^
@@ -591,11 +593,13 @@ bool homa_qdisc_can_bypass(struct sk_buff *skb, struct homa_qdisc *q)
 	skb_queue_walk(&q->deferred_tcp, skb2) {
 		element++;
 		if (skb2->protocol == htons(ETH_P_IP)) {
-			if (ip_hdr(skb2)->protocol != IPPROTO_TCP)
+			if (ip_hdr(skb2)->protocol != IPPROTO_TCP
+					&& ip_hdr(skb2)->protocol != IPPROTO_UDP)
 				continue;
 			daddr2 = ip_hdr(skb2)->daddr;
 		} else if (skb2->protocol == htons(ETH_P_IPV6)) {
-			if (ipv6_hdr(skb2)->nexthdr != IPPROTO_TCP)
+			if (ipv6_hdr(skb2)->nexthdr != IPPROTO_TCP
+					&& ipv6_hdr(skb2)->nexthdr != IPPROTO_UDP)
 				continue;
 			daddr2 = ipv6_hdr(skb2)->daddr.in6_u.u6_addr32[0] ^
 				 ipv6_hdr(skb2)->daddr.in6_u.u6_addr32[1] ^
@@ -757,8 +761,9 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 
 	pkt_len = qdisc_pkt_len(skb);
 	homa_qdisc_update_link_idle(qdev, pkt_len, -1);
-	if (ip_hdr(skb)->protocol == IPPROTO_TCP)
-		tt_record_tcp("homa_qdisc_pacer requeued TCP packet from "
+	if (ip_hdr(skb)->protocol == IPPROTO_TCP
+			|| ip_hdr(skb)->protocol == IPPROTO_UDP)
+		tt_record_tcp("homa_qdisc_pacer requeued TCP/UDP packet from "
 			"0x%x to 0x%x, data bytes %d, seq/ack %u",
 			skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
 	homa_qdisc_schedule_skb(skb, q->qdisc);

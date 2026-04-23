@@ -78,6 +78,8 @@ void     homa_gro_gen3(struct homa *homa, struct sk_buff *skb);
 #ifndef __STRIP__ /* See strip.py */
 void     homa_gro_hook_tcp(void);
 void     homa_gro_unhook_tcp(void);
+void     homa_gro_hook_udp(void);
+void     homa_gro_unhook_udp(void);
 #endif /* See strip.py */
 struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 				 struct sk_buff *skb);
@@ -89,6 +91,8 @@ void     homa_send_ipis(void);
 void     homa_set_softirq_cpu(struct sk_buff *skb, int cpu);
 #ifndef __STRIP__ /* See strip.py */
 struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
+				      struct sk_buff *skb);
+struct sk_buff *homa_udp_gro_receive(struct list_head *held_list,
 				      struct sk_buff *skb);
 #endif /* See strip.py */
 

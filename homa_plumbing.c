@@ -258,6 +258,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
+		.procname	= "hijack_udp",
+		.data		= OFFSET(hijack_udp),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "link_mbps",
 		.data		= OFFSET(link_mbps),
 		.maxlen		= sizeof(int),
@@ -642,6 +649,7 @@ int __init homa_load(void)
 
 #ifndef __STRIP__ /* See strip.py */
 	homa_gro_hook_tcp();
+	homa_gro_hook_udp();
 #endif /* See strip.py */
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_set_temp(homa->temp);
@@ -695,6 +703,7 @@ void __exit homa_unload(void)
 
 #ifndef __STRIP__ /* See strip.py */
 	homa_gro_unhook_tcp();
+	homa_gro_unhook_udp();
 #endif /* See strip.py */
 	if (timer_kthread) {
 		timer_thread_exit = 1;

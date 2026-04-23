@@ -37,6 +37,19 @@ static const struct net_offload *tcp6_net_offload;
  */
 static struct net_offload hook_tcp_net_offload;
 static struct net_offload hook_tcp6_net_offload;
+
+/* Pointers to UDP's net_offload structures. NULL means homa_gro_hook_udp
+ * hasn't been called yet.
+ */
+static const struct net_offload *udp_net_offload;
+static const struct net_offload *udp6_net_offload;
+
+/*
+ * Identical to *udp_net_offload except that the gro_receive function
+ * has been replaced.
+ */
+static struct net_offload hook_udp_net_offload;
+static struct net_offload hook_udp6_net_offload;
 #endif /* See strip.py */
 
 /**
@@ -152,6 +165,82 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 	if (h->flags != HOMA_TCP_FLAGS ||
 	    ntohs(h->urgent) != HOMA_TCP_URGENT)
 		return tcp_net_offload->callbacks.gro_receive(held_list, skb);
+
+	/* Change the packet's IP protocol to Homa so that it will get
+	 * dispatched directly to Homa in the future.
+	 */
+	if (skb_is_ipv6(skb)) {
+		ipv6_hdr(skb)->nexthdr = IPPROTO_HOMA;
+	} else {
+		ip_hdr(skb)->check = ~csum16_add(csum16_sub(~ip_hdr(skb)->check,
+							    htons(ip_hdr(skb)->protocol)),
+						 htons(IPPROTO_HOMA));
+		ip_hdr(skb)->protocol = IPPROTO_HOMA;
+	}
+	return homa_gro_receive(held_list, skb);
+}
+
+/**
+ * homa_gro_hook_udp() - Arranges for UDP gro_receive calls to be
+ * mediated by this file, so that Homa-over-UDP packets can be retrieved
+ * and funneled through Homa.
+ */
+void homa_gro_hook_udp(void)
+{
+	if (udp_net_offload)
+		return;
+
+	pr_notice("Homa setting up UDP hijacking\n");
+	rcu_read_lock();
+	udp_net_offload = rcu_dereference(inet_offloads[IPPROTO_UDP]);
+	hook_udp_net_offload = *udp_net_offload;
+	hook_udp_net_offload.callbacks.gro_receive = homa_udp_gro_receive;
+	inet_offloads[IPPROTO_UDP] = (struct net_offload __rcu *)
+			&hook_udp_net_offload;
+
+	udp6_net_offload = rcu_dereference(inet6_offloads[IPPROTO_UDP]);
+	hook_udp6_net_offload = *udp6_net_offload;
+	hook_udp6_net_offload.callbacks.gro_receive = homa_udp_gro_receive;
+	inet6_offloads[IPPROTO_UDP] = (struct net_offload __rcu *)
+			&hook_udp6_net_offload;
+	rcu_read_unlock();
+}
+
+/**
+ * homa_gro_unhook_udp() - Reverses the effects of a previous call to
+ * homa_gro_hook_udp, so that UDP packets are now passed directly to
+ * UDP's gro_receive function without mediation.
+ */
+void homa_gro_unhook_udp(void)
+{
+	if (!udp_net_offload)
+		return;
+	pr_notice("Homa cancelling UDP hijacking\n");
+	inet_offloads[IPPROTO_UDP] = (struct net_offload __rcu *)
+			udp_net_offload;
+	udp_net_offload = NULL;
+	inet6_offloads[IPPROTO_UDP] = (struct net_offload __rcu *)
+			udp6_net_offload;
+	udp6_net_offload = NULL;
+}
+
+/**
+ * homa_udp_gro_receive() - Invoked instead of UDP's normal gro_receive
+ * function when hooking is enabled. Identifies Homa-over-UDP packets and
+ * passes them to Homa; sends real UDP packets to UDP's gro_receive function.
+ * @held_list:  Pointer to header for list of packets that are being
+ *              held for possible GRO merging.
+ * @skb:        The newly arrived packet.
+ */
+struct sk_buff *homa_udp_gro_receive(struct list_head *held_list,
+				     struct sk_buff *skb)
+{
+	struct homa_common_hdr *h = (struct homa_common_hdr *)
+			skb_transport_header(skb);
+
+	if (h->flags != HOMA_UDP_FLAGS ||
+	    ntohs(h->urgent) != HOMA_UDP_URGENT)
+		return udp_net_offload->callbacks.gro_receive(held_list, skb);
 
 	/* Change the packet's IP protocol to Homa so that it will get
 	 * dispatched directly to Homa in the future.

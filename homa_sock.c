@@ -164,6 +164,8 @@ int homa_sock_init(struct homa_sock *hsk)
 #ifndef __STRIP__ /* See strip.py */
 	if (homa->hijack_tcp)
 		hsk->sock.sk_protocol = IPPROTO_TCP;
+	else if (homa->hijack_udp)
+		hsk->sock.sk_protocol = IPPROTO_UDP;
 #endif /* See strip.py */
 
 	/* Do things requiring memory allocation before locking the socket,
