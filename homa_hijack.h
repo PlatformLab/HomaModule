@@ -25,6 +25,7 @@
 #include "homa_peer.h"
 #include "homa_sock.h"
 #include "homa_wire.h"
+#include <net/ip6_checksum.h>
 
 /* Special value stored in the flags field of TCP headers to indicate that
  * the packet is actually a Homa packet. It includes the SYN and RST flags
@@ -32,6 +33,11 @@
  * off FIN for all but the last segment).
  */
 #define HOMA_HIJACK_FLAGS 6
+
+/* Special value stored in the flags field for UDP hijacking, distinct from
+ * the TCP hijack value.
+ */
+#define HOMA_UDP_FLAGS 5
 
 /* Special value stored in the urgent pointer of a TCP header to indicate
  * that the packet is actually a Homa packet (note that urgent pointer is
@@ -74,14 +80,16 @@ static inline void homa_hijack_set_hdr(struct sk_buff *skb,
 
 /**
  * homa_hijack_sock_init() - Perform socket initialization related to
- * TCP hijacking (arrange for outgoing packets on the socket to use TCP,
- * if the hijack_tcp option is set.)
+ * TCP/UDP hijacking (arrange for outgoing packets on the socket to use
+ * TCP or UDP, if the corresponding hijack option is set.)
  * @hsk:    New socket to initialize.
  */
 static inline void homa_hijack_sock_init(struct homa_sock *hsk)
 {
 	if (hsk->homa->hijack_tcp)
 		hsk->sock.sk_protocol = IPPROTO_TCP;
+	else if (hsk->homa->hijack_udp)
+		hsk->sock.sk_protocol = IPPROTO_UDP;
 }
 
 /* homa_sock_hijacked() - Returns true if outgoing packets on a socket
@@ -91,6 +99,14 @@ static inline void homa_hijack_sock_init(struct homa_sock *hsk)
 static inline bool homa_sock_hijacked(struct homa_sock *hsk)
 {
 	return hsk->sock.sk_protocol == IPPROTO_TCP;
+}
+
+/* homa_sock_udp_hijacked() - Returns true if outgoing packets on a socket
+ * should use UDP hijacking.
+ */
+static inline bool homa_sock_udp_hijacked(struct homa_sock *hsk)
+{
+	return hsk->sock.sk_protocol == IPPROTO_UDP;
 }
 
 /**
@@ -108,10 +124,74 @@ static inline bool homa_skb_hijacked(struct sk_buff *skb)
 	       h->urgent == ntohs(HOMA_HIJACK_URGENT);
 }
 
+/**
+ * homa_udp_hijack_set_hdr() - Set all header fields needed for UDP hijacking
+ * in an outgoing Homa packet. Overwrites the sequence field (bytes 4-7) with
+ * UDP length and checksum, so the packet offset must be stored in seg.offset.
+ * @skb:    Packet buffer in which to set fields.
+ * @peer:   Peer that contains source and destination addresses for the packet.
+ * @ipv6:   True means the packet is going to be sent via IPv6.
+ */
+static inline void homa_udp_hijack_set_hdr(struct sk_buff *skb,
+					    struct homa_peer *peer,
+					    bool ipv6)
+{
+	struct homa_common_hdr *h;
+	int transport_len;
+
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
+	h->flags = HOMA_UDP_FLAGS;
+	h->urgent = htons(HOMA_UDP_URGENT);
+
+	transport_len = skb->len - skb_transport_offset(skb);
+
+	/* Set UDP length at bytes 4-5 (overlaps high 16 bits of sequence). */
+	*((__be16 *)((u8 *)h + 4)) = htons(transport_len);
+
+	/* Arrange for proper UDP checksumming at bytes 6-7. */
+	skb->ip_summed = CHECKSUM_PARTIAL;
+	skb->csum_start = skb_transport_header(skb) - skb->head;
+	skb->csum_offset = 6;
+	if (ipv6)
+		*((__be16 *)((u8 *)h + 6)) = ~csum_ipv6_magic(
+				&peer->flow.u.ip6.saddr,
+				&peer->flow.u.ip6.daddr,
+				transport_len, IPPROTO_UDP, 0);
+	else
+		*((__be16 *)((u8 *)h + 6)) = ~csum_tcpudp_magic(
+				peer->flow.u.ip4.saddr,
+				peer->flow.u.ip4.daddr,
+				transport_len, IPPROTO_UDP, 0);
+}
+
+/**
+ * homa_skb_udp_hijacked() - Return true if the header fields in a UDP
+ * packet indicate that the packet is actually a Homa packet, false otherwise.
+ * @skb:    Packet to check: must have an IP protocol of IPPROTO_UDP.
+ */
+static inline bool homa_skb_udp_hijacked(struct sk_buff *skb)
+{
+	struct homa_common_hdr *h;
+
+	/* Need at least 20 bytes of transport data to safely check the
+	 * flags (offset 13) and urgent (offset 18-19) fields.
+	 */
+	if (skb_headlen(skb) < skb_transport_offset(skb) + 20)
+		return false;
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
+	return h->flags == HOMA_UDP_FLAGS &&
+	       h->urgent == ntohs(HOMA_UDP_URGENT);
+}
+
 void     homa_hijack_end(void);
 struct sk_buff *
 	 homa_hijack_gro_receive(struct list_head *held_list,
 				 struct sk_buff *skb);
 void     homa_hijack_init(void);
+void     homa_udp_hijack_end(void);
+struct sk_buff *
+	 homa_udp_hijack_gro_receive(struct list_head *held_list,
+				     struct sk_buff *skb);
+void     homa_udp_hijack_init(void);
 
 #endif /* _HOMA_HIJACK_H */

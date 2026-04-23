@@ -338,7 +338,7 @@ void print_help(const char *name)
 	printf("    --ipv6            Use IPv6 instead of IPv4\n");
 	printf("    --pin             All server threads will be restricted to run only\n"
 	        "                      on the givevn core\n");
-	printf("    --protocol        Transport protocol to use: homa or tcp (default: %s)\n",
+	printf("    --protocol        Transport protocol to use: homa, tcp, or udp (default: %s)\n",
 			protocol);
 	printf("    --port-threads    Number of server threads to service each port\n"
 		"                      (default: %d)\n",
@@ -2708,6 +2708,347 @@ void tcp_client::read(tcp_connection *connection, int pid)
 	}
 }
 
+/* ===================== UDP client and server ===================== */
+
+/**
+ * class udp_server - Holds information about a single UDP server,
+ * which consists of a thread that handles requests on a given port.
+ */
+class udp_server {
+public:
+	udp_server(int port, int id, int num_threads,
+			std::string& experiment);
+	~udp_server();
+	void server(int thread_id);
+
+	/** @port: Port on which we listen. */
+	int port;
+
+	/** @id: Unique identifier for this server. */
+	int id;
+
+	/** @experiment: name of the experiment this server is running. */
+	string experiment;
+
+	/** @fd: File descriptor for the UDP socket. */
+	int fd;
+
+	/** @metrics: Performance statistics. Not owned by this class. */
+	server_metrics *metrics;
+
+	/** @threads: Background threads servicing this socket. */
+	std::vector<std::thread> threads;
+
+	/** @stop: True means background threads should exit. */
+	bool stop;
+};
+
+/** @udp_servers: keeps track of all existing UDP servers. */
+std::vector<udp_server *> udp_servers;
+
+/**
+ * udp_server::udp_server() - Constructor for udp_server objects.
+ * @port:         Port number on which this server should listen.
+ * @id:           Unique identifier for this server.
+ * @num_threads:  Number of threads to service this socket.
+ * @experiment:   Name of the experiment.
+ */
+udp_server::udp_server(int port, int id, int num_threads,
+		std::string& experiment)
+	: port(port)
+	, id(id)
+	, fd(-1)
+	, metrics()
+	, threads()
+	, stop(false)
+{
+	if (std::find(experiments.begin(), experiments.end(), experiment)
+			== experiments.end())
+		experiments.emplace_back(experiment);
+
+	fd = socket(inet_family, SOCK_DGRAM, 0);
+	if (fd == -1) {
+		log(NORMAL, "FATAL: couldn't open UDP server socket: %s\n",
+				strerror(errno));
+		fatal();
+	}
+	sockaddr_in_union addr;
+	if (inet_family == AF_INET) {
+		addr.in4.sin_family = AF_INET;
+		addr.in4.sin_port = htons(port);
+		addr.in4.sin_addr.s_addr = INADDR_ANY;
+	} else {
+		addr.in6.sin6_family = AF_INET6;
+		addr.in6.sin6_port = htons(port);
+		addr.in6.sin6_addr = in6addr_any;
+	}
+	if (bind(fd, &addr.sa, sizeof(addr)) == -1) {
+		log(NORMAL, "FATAL: couldn't bind UDP socket to port %d: %s\n",
+				port, strerror(errno));
+		fatal();
+	}
+
+	metrics = new server_metrics(experiment);
+	::metrics.push_back(metrics);
+
+	for (int i = 0; i < num_threads; i++)
+		threads.emplace_back(&udp_server::server, this, i);
+	kfreeze_count = 0;
+}
+
+/**
+ * udp_server::~udp_server() - Destructor for UDP servers.
+ */
+udp_server::~udp_server()
+{
+	stop = true;
+	shutdown(fd, SHUT_RDWR);
+	for (size_t i = 0; i < threads.size(); i++)
+		threads[i].join();
+	close(fd);
+}
+
+/**
+ * udp_server::server() - Handles incoming UDP requests. Invoked as top-level
+ * method in a thread.
+ * @thread_id:  Unique id for this thread.
+ */
+void udp_server::server(int thread_id)
+{
+	char thread_name[50];
+	char buffer[1000000];
+
+	snprintf(thread_name, sizeof(thread_name), "US%d.%d", id, thread_id);
+	time_trace::thread_buffer thread_buffer(thread_name);
+	int pid = syscall(__NR_gettid);
+	if (server_core >= 0)
+		pin_thread(server_core);
+
+	while (!stop) {
+		sockaddr_in_union source;
+		socklen_t source_len = sizeof(source);
+		ssize_t length = recvfrom(fd, buffer, sizeof(buffer), 0,
+				&source.sa, &source_len);
+		if (length < 0) {
+			if (stop)
+				return;
+			if ((errno == EAGAIN) || (errno == EINTR))
+				continue;
+			log(NORMAL, "FATAL: UDP recvfrom failed: %s\n",
+					strerror(errno));
+			fatal();
+		}
+		if (length < (ssize_t)sizeof(message_header))
+			continue;
+
+		message_header *header =
+				reinterpret_cast<message_header *>(buffer);
+		metrics->requests++;
+		metrics->bytes_in += header->length;
+		tt("Received UDP request, cid 0x%08x, id %u, length %d, "
+				"pid %d", header->cid, header->msg_id,
+				header->length, pid);
+
+		if ((header->freeze) && !time_trace::frozen) {
+			tt("Freezing timetrace");
+			time_trace::freeze();
+			kfreeze();
+		}
+
+		/* Prepare and send response. */
+		int resp_length = header->short_response ? 100 : header->length;
+		if (resp_length < (int)sizeof(message_header))
+			resp_length = sizeof(message_header);
+		header->response = 1;
+		header->length = resp_length;
+		metrics->bytes_out += resp_length;
+
+		ssize_t sent = sendto(fd, buffer, resp_length, 0,
+				&source.sa, source_len);
+		if (sent < 0)
+			log(NORMAL, "ERROR: UDP sendto failed: %s\n",
+					strerror(errno));
+		tt("Sent UDP response, cid 0x%08x, id %u, length %d",
+				header->cid, header->msg_id, resp_length);
+	}
+}
+
+/**
+ * class udp_client - Holds information about a single UDP client,
+ * which consists of one thread issuing requests and one thread receiving
+ * responses.
+ */
+class udp_client : public client {
+public:
+	udp_client(int id, std::string& experiment);
+	virtual ~udp_client();
+	void receiver(int id);
+	void sender(void);
+
+	/** @fd: UDP socket file descriptor. */
+	int fd;
+
+	/** @stop: True means background threads should exit. */
+	bool stop;
+
+	/** @receiver_threads: threads that receive responses. */
+	std::vector<std::thread> receiving_threads;
+
+	/**
+	 * @sending_thread: thread that sends requests.
+	 */
+	std::optional<std::thread> sending_thread;
+};
+
+/**
+ * udp_client::udp_client() - Constructor for udp_client objects.
+ * @id:         Unique identifier for this client.
+ * @experiment: Name of experiment.
+ */
+udp_client::udp_client(int id, std::string& experiment)
+	: client(id, experiment)
+	, fd(-1)
+	, stop(false)
+	, receiving_threads()
+	, sending_thread()
+{
+	fd = socket(inet_family, SOCK_DGRAM, 0);
+	if (fd < 0) {
+		log(NORMAL, "FATAL: couldn't open UDP client socket: %s\n",
+				strerror(errno));
+		fatal();
+	}
+
+	for (int i = 0; i < port_receivers; i++)
+		receiving_threads.emplace_back(&udp_client::receiver, this, i);
+	while (receivers_running < receiving_threads.size()) {
+		/* Wait for receivers to begin execution before starting
+		 * the sender.
+		 */
+	}
+	sending_thread.emplace(&udp_client::sender, this);
+}
+
+/**
+ * udp_client::~udp_client() - Destructor for udp_client objects.
+ */
+udp_client::~udp_client()
+{
+	stop = true;
+	shutdown(fd, SHUT_RDWR);
+	if (sending_thread)
+		sending_thread->join();
+	for (std::thread& thread: receiving_threads)
+		thread.join();
+	close(fd);
+	check_completion("udp");
+}
+
+/**
+ * udp_client::sender() - Invoked as the top-level method in a thread;
+ * invokes a pseudo-random stream of RPCs continuously.
+ */
+void udp_client::sender()
+{
+	char thread_name[50];
+	char buffer[HOMA_MAX_MESSAGE_LENGTH];
+	int pid = syscall(__NR_gettid);
+
+	snprintf(thread_name, sizeof(thread_name), "C%d", id);
+	time_trace::thread_buffer thread_buffer(thread_name);
+
+	uint64_t next_start = rdtsc();
+	message_header *header = reinterpret_cast<message_header *>(buffer);
+
+	while (1) {
+		uint64_t now;
+		int server;
+		int slot = get_rinfo();
+
+		while (1) {
+			if (stop) {
+				rinfos[slot].active = false;
+				return;
+			}
+			now = rdtsc();
+			if ((now >= next_start) &&
+			    ((total_requests - total_responses)
+			     < client_port_max))
+				break;
+		}
+
+		rinfos[slot].start_time = now;
+		server = server_dist(rand_gen);
+		header->length = length_dist(rand_gen);
+		if (header->length > HOMA_MAX_MESSAGE_LENGTH)
+			header->length = HOMA_MAX_MESSAGE_LENGTH;
+		if (header->length < (int)sizeof(message_header))
+			header->length = sizeof(message_header);
+		rinfos[slot].request_length = header->length;
+		header->cid = server_conns[server];
+		header->cid.client_port = id;
+		header->msg_id = slot;
+		header->freeze = freeze[header->cid.server];
+		header->short_response = one_way;
+		header->response = 0;
+		tt("Sending UDP request, cid 0x%08x, id %u, length %d, "
+				"pid %d", header->cid, header->msg_id,
+				header->length, pid);
+
+		ssize_t sent = sendto(fd, buffer, header->length, 0,
+				&server_addrs[server].sa,
+				sockaddr_size(&server_addrs[server].sa));
+		if (sent < 0) {
+			log(NORMAL, "FATAL: error in UDP sendto: %s (request "
+					"length %d)\n", strerror(errno),
+					header->length);
+			fatal();
+		}
+		requests[server]++;
+		total_requests++;
+		lag = now - next_start;
+		next_start += interval_dist(rand_gen) * cycles_per_second;
+	}
+}
+
+/**
+ * udp_client::receiver() - Invoked as the top-level method in a thread
+ * that waits for UDP responses and logs statistics.
+ * @receiver_id:  Id of this receiver.
+ */
+void udp_client::receiver(int receiver_id)
+{
+	char thread_name[50];
+	char buffer[1000000];
+
+	snprintf(thread_name, sizeof(thread_name), "R%d.%d", id, receiver_id);
+	time_trace::thread_buffer thread_buffer(thread_name);
+	receivers_running++;
+	int pid = syscall(__NR_gettid);
+
+	while (!stop) {
+		ssize_t length = recvfrom(fd, buffer, sizeof(buffer),
+				0, NULL, NULL);
+		if (length < 0) {
+			if (stop)
+				return;
+			if ((errno == EAGAIN) || (errno == EINTR))
+				continue;
+			log(NORMAL, "FATAL: UDP recvfrom failed in client: "
+					"%s\n", strerror(errno));
+			fatal();
+		}
+		if (length < (ssize_t)sizeof(message_header))
+			continue;
+		uint64_t end_time = rdtsc();
+		message_header *header =
+				reinterpret_cast<message_header *>(buffer);
+		record(end_time, header);
+		tt("Response for cid 0x%08x received by pid %d",
+				header->cid, pid);
+	}
+}
+
 /**
  * homa_info() - Use the HOMAIOCINFO ioctl to extract the status of a
  * Homa socket and print the information to the log.
@@ -3173,6 +3514,10 @@ int client_cmd(std::vector<string> &words)
 			if (first_port == -1)
 				first_port = 4000;
 			clients.push_back(new homa_client(i, experiment));
+		} else if (strcmp(protocol, "udp") == 0) {
+			if (first_port == -1)
+				first_port = 6000;
+			clients.push_back(new udp_client(i, experiment));
 		} else {
 			if (first_port == -1)
 				first_port = 5000;
@@ -3454,6 +3799,14 @@ int server_cmd(std::vector<string> &words)
 					experiment);
 			homa_servers.push_back(server);
 		}
+	} else if (strcmp(protocol, "udp") == 0) {
+		if (first_port == -1)
+			first_port = 6000;
+		for (int i = 0; i < server_ports; i++) {
+			udp_server *server = new udp_server(first_port + i,
+					i, port_threads, experiment);
+			udp_servers.push_back(server);
+		}
 	} else {
 		if (first_port == -1)
 			first_port = 5000;
@@ -3492,6 +3845,9 @@ int stop_cmd(std::vector<string> &words)
 			for (tcp_server *server: tcp_servers)
 				delete server;
 			tcp_servers.clear();
+			for (udp_server *server: udp_servers)
+				delete server;
+			udp_servers.clear();
 			last_per_server_rpcs.clear();
 			for (server_metrics *m: metrics)
 				delete m;
