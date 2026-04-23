@@ -138,6 +138,7 @@ TEST_F(homa_peer, homa_peer_free_net__basics)
 	homa_peer_free_net(self->hnet);
 	EXPECT_EQ(1, unit_count_peers(&self->homa));
 	EXPECT_EQ(1, self->homa.peertab->num_peers);
+	unit_sock_destroy(&hsk2);
 }
 
 TEST_F(homa_peer, homa_peer_release_fn)
@@ -312,6 +313,7 @@ TEST_F(homa_peer, homa_peer_pick_victims__filter_idle_jiffies_max)
 	EXPECT_EQ(2, homa_peer_pick_victims(peertab, victims, 5));
 	EXPECT_EQ(peers[1], victims[0]);
 	EXPECT_EQ(peers[2], victims[1]);
+	unit_sock_destroy(&hsk2);
 }
 TEST_F(homa_peer, homa_peer_pick_victims__duplicate_peer)
 {

@@ -323,11 +323,11 @@ void homa_peer_gc(struct homa_peertab *peertab)
 
 		if (rhashtable_remove_fast(&peertab->ht, &peer->ht_linkage,
 					   ht_params) == 0) {
-			homa_peer_release(peer);
 			peertab->num_peers--;
 			peer->ht_key.hnet->num_peers--;
 			tt_record1("homa_peer_gc removed homa_peer 0x%x",
 				   tt_addr(peer->addr));
+			homa_peer_release(peer);
 		}
 	}
 done:

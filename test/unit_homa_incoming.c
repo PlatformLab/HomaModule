@@ -1166,6 +1166,11 @@ TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = GRANT},
 			.offset = htonl(12600), .priority = 3};
+	struct homa_cutoffs_hdr cutoffs = {
+			.common = {.sport = htons(self->server_port),
+			.dport = htons(self->hsk.port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.type = CUTOFFS}};
 
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(10000, crpc->msgout.granted);
@@ -1177,10 +1182,10 @@ TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
 	EXPECT_EQ(0, crpc->peer->outstanding_resends);
 
 	/* Don't reset silent_ticks for some packet types. */
-	h.common.type = CUTOFFS;
 	crpc->silent_ticks = 5;
 	crpc->peer->outstanding_resends = 2;
-	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &h.common, 0, 0));
+	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &cutoffs.common,
+					  0, 0));
 	EXPECT_EQ(5, crpc->silent_ticks);
 	EXPECT_EQ(0, crpc->peer->outstanding_resends);
 }

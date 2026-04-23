@@ -472,6 +472,9 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 #endif /* See strip.py */
 	skb->ooo_okay = 1;
 	homa_set_doff(skb, 20);
+	INC_METRIC(packets_sent[h->type - DATA], 1);
+	INC_METRIC(priority_bytes[priority], skb->len);
+	INC_METRIC(priority_packets[priority], 1);
 #ifndef __STRIP__ /* See strip.py */
 	if (hsk->inet.sk.sk_family == AF_INET6) {
 		homa_hijack_set_hdr(skb, peer, true);
@@ -486,16 +489,6 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	}
 	if (unlikely(result != 0))
 		INC_METRIC(control_xmit_errors, 1);
-	if (skb->dev) {
-		struct netdev_queue *txq;
-
-		txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
-		if (netif_tx_queue_stopped(txq))
-			tt_record4("__homa_xmit_control found stopped txq for id %d, qid %u, num_queued %u, limit %d",
-				   be64_to_cpu(h->sender_id),
-				   skb->queue_mapping,
-				   txq->dql.num_queued, txq->dql.adj_limit);
-	}
 #else /* See strip.py */
 	if (hsk->inet.sk.sk_family == AF_INET6)
 		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
@@ -503,9 +496,6 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	else
 		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
 #endif /* See strip.py */
-	INC_METRIC(packets_sent[h->type - DATA], 1);
-	INC_METRIC(priority_bytes[priority], skb->len);
-	INC_METRIC(priority_packets[priority], 1);
 	return result;
 }
 

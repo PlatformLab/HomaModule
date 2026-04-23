@@ -151,7 +151,7 @@ TEST_F(homa_sock, homa_sock_init__cant_allocate_buffer_pool)
 	struct homa_sock sock;
 
 	mock_kmalloc_errors = 1;
-	EXPECT_EQ(ENOMEM, -homa_sock_init(&sock));
+	EXPECT_EQ(ENOMEM, -mock_sock_init(&sock, self->hnet, 0));
 	unit_sock_destroy(&sock);
 }
 TEST_F(homa_sock, homa_sock_init__skip_port_in_use)

@@ -714,7 +714,6 @@ TEST_F(homa_rpc, homa_rpc_reap__release_peer_ref)
 	homa_rpc_end(crpc);
 	homa_rpc_reap(&self->hsk, false);
 	EXPECT_EQ(1, refcount_read(&peer->refs));
-	EXPECT_EQ(NULL, crpc->peer);
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_reap__metrics_for_client_response)

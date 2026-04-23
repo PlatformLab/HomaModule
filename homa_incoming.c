@@ -712,14 +712,6 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		goto discard;
 	}
 
-	homa_add_packet(rpc, skb);
-
-	if (skb_queue_len(&rpc->msgin.packets) != 0 &&
-	    !test_bit(RPC_PKTS_READY, &rpc->flags)) {
-		set_bit(RPC_PKTS_READY, &rpc->flags);
-		homa_rpc_handoff(rpc);
-	}
-
 #ifndef __STRIP__ /* See strip.py */
 	if (ntohs(h->cutoff_version) != homa->cutoff_version) {
 		/* The sender has out-of-date cutoffs. Note: we may need
@@ -744,6 +736,14 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		}
 	}
 #endif /* See strip.py */
+
+	homa_add_packet(rpc, skb);
+
+	if (skb_queue_len(&rpc->msgin.packets) != 0 &&
+	    !test_bit(RPC_PKTS_READY, &rpc->flags)) {
+		set_bit(RPC_PKTS_READY, &rpc->flags);
+		homa_rpc_handoff(rpc);
+	}
 	return;
 
 discard:
