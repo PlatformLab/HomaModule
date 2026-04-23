@@ -139,7 +139,7 @@ struct homa_common_hdr {
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @flags: Holds TCP flags such as URG, ACK, etc. Not used by Homa
-	 * except for TCP hijacking.
+	 * except for TCP/UDP hijacking.
 	 */
 	u8 flags;
 #else /* See strip.py */
@@ -162,10 +162,11 @@ struct homa_common_hdr {
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @urgent: occupies the same bytes as the urgent pointer in a TCP
-	 * header. Not used by Homa except during TCP hijacking.
+	 * header. Not used by Homa except during TCP/UDP hijacking.
 	 */
 	__be16 urgent;
 #define HOMA_HIJACK_URGENT 0xb97d
+#define HOMA_UDP_URGENT 0xb97e
 #else /* See strip.py */
 	/** @reserved2: Not used (corresponds to TCP urgent field). */
 	__be16 reserved2;

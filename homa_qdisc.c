@@ -155,7 +155,8 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
 	protocol = (skb_is_ipv6(skb)) ? ipv6_hdr(skb)->nexthdr :
 					ip_hdr(skb)->protocol;
 	return protocol == IPPROTO_HOMA ||
-		(protocol == IPPROTO_TCP && homa_skb_hijacked(skb));
+		(protocol == IPPROTO_TCP && homa_skb_hijacked(skb)) ||
+		(protocol == IPPROTO_UDP && homa_skb_udp_hijacked(skb));
 }
 
 /**

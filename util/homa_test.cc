@@ -761,6 +761,97 @@ void test_tcp(char *server_name, int port)
 }
 
 /**
+ * udp_ping() - Send a request on a UDP socket and wait for the
+ * corresponding response.
+ * @fd:       File descriptor for a UDP socket.
+ * @dest:     Destination address.
+ * @dest_len: Size of @dest.
+ * @request:  Buffer containing the request message.
+ * @length:   Length of the request message.
+ */
+void udp_ping(int fd, struct sockaddr *dest, socklen_t dest_len,
+		void *request, int length)
+{
+	char response[1000000];
+	int *int_response = reinterpret_cast<int*>(response);
+	ssize_t sent, received;
+
+	sent = sendto(fd, request, length, 0, dest, dest_len);
+	if (sent != length) {
+		printf("UDP sendto failed: %s\n", strerror(errno));
+		exit(1);
+	}
+	received = recvfrom(fd, response, sizeof(response), 0, NULL, NULL);
+	if (received < 0) {
+		printf("UDP recvfrom failed: %s\n", strerror(errno));
+		exit(1);
+	}
+	if (received < (ssize_t)(2 * sizeof(int)))
+		return;
+	if (received != int_response[1])
+		printf("Expected %d bytes in UDP response, got %ld\n",
+				int_response[1], received);
+}
+
+/**
+ * test_udp() - Measure round-trip time for an RPC sent via a UDP socket.
+ * @server_name:  Name of the server machine.
+ * @port:         Server port to connect to.
+ */
+void test_udp(char *server_name, int port)
+{
+	struct addrinfo hints;
+	struct addrinfo *matching_addresses;
+	struct sockaddr *dest;
+	socklen_t dest_len;
+	int status, i;
+	int buffer[250000];
+
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = inet_family;
+	hints.ai_socktype = SOCK_DGRAM;
+	status = getaddrinfo(server_name, "80", &hints, &matching_addresses);
+	if (status != 0) {
+		printf("Couldn't look up address for %s: %s\n",
+				server_name, gai_strerror(status));
+		exit(1);
+	}
+	dest = matching_addresses->ai_addr;
+	((struct sockaddr_in *) dest)->sin_port = htons(port);
+	dest_len = matching_addresses->ai_addrlen;
+
+	int fd = socket(inet_family, SOCK_DGRAM, 0);
+	if (fd == -1) {
+		printf("Couldn't open UDP socket: %s\n", strerror(errno));
+		exit(1);
+	}
+
+	/* Warm up. */
+	buffer[0] = length;
+	buffer[1] = length;
+	seed_buffer(&buffer[2], sizeof32(buffer) - 2*sizeof32(int), seed);
+	for (i = 0; i < 10; i++)
+		udp_ping(fd, dest, dest_len, buffer, length);
+
+	uint64_t times[count+1];
+	for (i = 0; i < count; i++) {
+		times[i] = rdtsc();
+		udp_ping(fd, dest, dest_len, buffer, length);
+	}
+	times[count] = rdtsc();
+	freeaddrinfo(matching_addresses);
+
+	for (i = 0; i < count; i++) {
+		times[i] = times[i+1] - times[i];
+	}
+	print_dist(times, count);
+	printf("Bandwidth at median: %.1f MB/sec\n",
+			2.0*((double) length)/(to_seconds(times[count/2])*1e06));
+	close(fd);
+	return;
+}
+
+/**
  * test_tcpstream() - Measure throughput of a TCP socket using --length as
  * the size of the buffer for each write system call.
  * @server_name:  Name of the server machine.
@@ -1158,6 +1249,8 @@ int main(int argc, char** argv)
 			test_tcpstream(host, port);
 		} else if (strcmp(argv[next_arg], "tmp") == 0) {
 			test_tmp(fd, count);
+		} else if (strcmp(argv[next_arg], "udp") == 0) {
+			test_udp(host, port);
 		} else if (strcmp(argv[next_arg], "udpclose") == 0) {
 			test_udpclose();
 		} else if (strcmp(argv[next_arg], "wmem") == 0) {
