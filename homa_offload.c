@@ -205,6 +205,7 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 	u32 saddr;
 	int busy;
 
+	UNIT_LOG("; ", "homa_gro_receive");
 	if (!homa_make_header_avl(skb))
 		tt_record("homa_gro_receive couldn't pull enough data from packet");
 

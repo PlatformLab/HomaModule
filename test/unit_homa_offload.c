@@ -11,13 +11,13 @@
 
 #define cur_offload_core (&per_cpu(homa_offload_core, smp_processor_id()))
 
-static struct sk_buff **test_tcp_gro_receive(struct sk_buff **gro_list,
+static struct sk_buff *test_tcp_gro_receive(struct list_head *gro_list,
 				       struct sk_buff *skb)
 {
 	UNIT_LOG("; ", "test_tcp_gro_receive");
 	return NULL;
 }
-static struct sk_buff **unit_tcp6_gro_receive(struct sk_buff **gro_list,
+static struct sk_buff *unit_tcp6_gro_receive(struct list_head *gro_list,
 				       struct sk_buff *skb)
 {
 	UNIT_LOG("; ", "unit_tcp6_gro_receive");
@@ -31,8 +31,9 @@ FIXTURE(homa_offload)
 	struct homa_sock hsk;
 	struct in6_addr ip;
 	struct homa_data_hdr header;
-	struct sk_buff *gro_list;
 	struct sk_buff *skb, *skb2;
+	struct list_head gro_list;
+	struct list_head empty_list;
 	struct net_offload tcp_offloads;
 	struct net_offload tcp6_offloads;
 };
@@ -66,9 +67,10 @@ FIXTURE_SETUP(homa_offload)
 	NAPI_GRO_CB(self->skb2)->same_flow = 0;
 	NAPI_GRO_CB(self->skb2)->data_offset = sizeof(struct homa_data_hdr);
 	NAPI_GRO_CB(self->skb2)->last = self->skb2;
-	self->gro_list = self->skb;
-	self->skb->next = self->skb2;
-	self->skb2->next = NULL;
+	INIT_LIST_HEAD(&self->gro_list);
+	list_add_tail(&self->skb->list, &self->gro_list);
+	list_add_tail(&self->skb2->list, &self->gro_list);
+	INIT_LIST_HEAD(&self->empty_list);
 	self->tcp_offloads.callbacks.gro_receive = test_tcp_gro_receive;
 	inet_offloads[IPPROTO_TCP] = &self->tcp_offloads;
 	self->tcp6_offloads.callbacks.gro_receive = unit_tcp6_gro_receive;
@@ -84,12 +86,11 @@ FIXTURE_SETUP(homa_offload)
 }
 FIXTURE_TEARDOWN(homa_offload)
 {
+	struct sk_buff *skb, *next;
+
+	list_for_each_entry_safe(skb, next, &self->gro_list, list)
+		kfree_skb(skb);
 	homa_offload_end();
-	while (self->gro_list) {
-		struct sk_buff *next = self->gro_list->next;
-		kfree_skb(self->gro_list);
-		self->gro_list = next;
-	}
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
@@ -142,7 +143,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");
 	struct in6_addr server_ip = unit_get_in_addr("1.2.3.4");
 	struct sk_buff *skb, *skb2, *skb3, *skb4;
-	struct sk_buff **result;
+	struct sk_buff *result;
 	int client_port = 40000;
 	u64 client_id = 1234;
 	u64 server_id = 1235;
@@ -202,7 +203,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");
 	struct in6_addr server_ip = unit_get_in_addr("1.2.3.4");
 	struct sk_buff *skb, *skb2, *skb3;
-	struct sk_buff **result;
+	struct sk_buff *result;
 	struct homa_grant_hdr h;
 	int client_port = 40000;
 	u64 client_id = 1234;
@@ -231,7 +232,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	result = homa_gro_receive(&self->gro_list, skb);
 	EXPECT_EQ(0, -PTR_ERR(result));
 	EXPECT_EQ(0, homa_metrics_per_cpu()->gro_grant_bypasses);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_STREQ("homa_gro_receive", unit_log_get());
 
 	/* Second attempt: HOMA_FAST_GRANTS is enabled. */
 	self->homa.gro_policy = HOMA_GRO_FAST_GRANTS;
@@ -251,14 +252,13 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 }
 TEST_F(homa_offload, homa_gro_receive__no_held_skbs)
 {
-	struct sk_buff *held_list = NULL;
 	struct sk_buff *skb;
 	int same_flow;
 
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(skb)->same_flow = 0;
-	EXPECT_EQ(NULL, homa_gro_receive(&held_list, skb));
+	EXPECT_EQ(NULL, homa_gro_receive(&self->empty_list, skb));
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(0, same_flow);
 	kfree_skb(skb);
@@ -268,10 +268,10 @@ TEST_F(homa_offload, homa_gro_receive__skip_held_skbs_that_arent_homa_packets)
 	struct sk_buff *skb;
 	int same_flow;
 
-	if (skb_is_ipv6(self->gro_list))
-		ipv6_hdr(self->gro_list)->nexthdr = IPPROTO_TCP;
+	if (skb_is_ipv6(self->skb))
+		ipv6_hdr(self->skb)->nexthdr = IPPROTO_TCP;
 	else
-		ip_hdr(self->gro_list)->protocol = IPPROTO_TCP;
+		ip_hdr(self->skb)->protocol = IPPROTO_TCP;
 
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
@@ -280,11 +280,11 @@ TEST_F(homa_offload, homa_gro_receive__skip_held_skbs_that_arent_homa_packets)
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(1, same_flow);
 	unit_log_clear();
-	unit_log_frag_list(self->gro_list, 0);
+	unit_log_frag_list(self->skb, 0);
 	EXPECT_STREQ("",
 			unit_log_get());
 	unit_log_clear();
-	unit_log_frag_list(self->gro_list->next, 0);
+	unit_log_frag_list(self->skb2, 0);
 	EXPECT_STREQ("DATA 1400@6000",
 			unit_log_get());
 }
@@ -307,7 +307,7 @@ TEST_F(homa_offload, homa_gro_receive__add_to_frag_list)
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(1, same_flow);
 	unit_log_clear();
-	unit_log_frag_list(self->gro_list, 0);
+	unit_log_frag_list(self->skb, 0);
 	EXPECT_STREQ("DATA 1400@6000; DATA 1400@7400", unit_log_get());
 }
 TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
@@ -315,33 +315,32 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	struct homa_common_hdr *h;
 	struct sk_buff *skb;
 
-	h = (struct homa_common_hdr *)skb_transport_header(self->gro_list);
+	h = (struct homa_common_hdr *)skb_transport_header(self->skb);
 
 	// First packet fits below the limit.
 	self->homa.max_gro_skbs = 3;
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	EXPECT_EQ(NULL, homa_gro_receive(&self->gro_list, skb));
-	EXPECT_EQ(1, NAPI_GRO_CB(self->gro_list)->count);
+	EXPECT_EQ(1, NAPI_GRO_CB(self->skb)->count);
 	EXPECT_EQ(1, h->gro_count);
 
 	// Second packet also fits below the limit.
 	self->header.seg.offset = htonl(8000);
 	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	EXPECT_EQ(NULL, homa_gro_receive(&self->gro_list, skb));
-	EXPECT_EQ(2, NAPI_GRO_CB(self->gro_list)->count);
+	EXPECT_EQ(2, NAPI_GRO_CB(self->skb)->count);
 	EXPECT_EQ(2, h->gro_count);
 
 	// Third packet hits the limit.
 	self->header.seg.offset = htonl(10000);
 	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
-	EXPECT_EQ(&self->gro_list, homa_gro_receive(&self->gro_list, skb));
-	EXPECT_EQ(3, NAPI_GRO_CB(self->gro_list)->count);
+	EXPECT_EQ(self->skb, homa_gro_receive(&self->gro_list, skb));
+	EXPECT_EQ(3, NAPI_GRO_CB(self->skb)->count);
 	EXPECT_EQ(3, h->gro_count);
 }
 TEST_F(homa_offload, homa_gro_receive__set_softirq_cpu)
 {
-	struct sk_buff *held_list = NULL;
 	struct sk_buff *skb;
 
 	cpu_number = 5;
@@ -351,12 +350,12 @@ TEST_F(homa_offload, homa_gro_receive__set_softirq_cpu)
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	skb->hash = 0;
 	self->homa.gro_policy &= ~HOMA_GRO_SAME_CORE;
-	EXPECT_EQ(NULL, homa_gro_receive(&held_list, skb));
+	EXPECT_EQ(NULL, homa_gro_receive(&self->empty_list, skb));
 	EXPECT_EQ(0, skb->hash);
 
 	/* Second call: HOMA_GRO_SAME_CORE set. */
 	self->homa.gro_policy |= HOMA_GRO_SAME_CORE;
-	EXPECT_EQ(NULL, homa_gro_receive(&held_list, skb));
+	EXPECT_EQ(NULL, homa_gro_receive(&self->empty_list, skb));
 	EXPECT_EQ(rps_cpu_mask + 6, skb->hash);
 	kfree_skb(skb);
 }

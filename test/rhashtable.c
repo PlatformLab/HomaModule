@@ -14,6 +14,8 @@
  * published by the Free Software Foundation.
  */
 
+#include "rhashtable.h"
+#define _LINUX_RHASHTABLE_TYPES_H
 #include <linux/atomic.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -25,7 +27,6 @@
 #include <linux/mm.h>
 #include <linux/jhash.h>
 #include <linux/random.h>
-#include <linux/rhashtable.h>
 #include <linux/err.h>
 #include <linux/export.h>
 

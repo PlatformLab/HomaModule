@@ -21,7 +21,7 @@
   linux/lib/rbtree.c
 */
 
-#include <linux/rbtree_augmented.h>
+#include "rbtree_augmented.h"
 #include <linux/export.h>
 
 /*

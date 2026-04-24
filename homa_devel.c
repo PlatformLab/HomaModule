@@ -17,7 +17,11 @@
 #endif /* See strip.py */
 #include "homa_wire.h"
 
+#ifndef __UNIT_TEST__
 #include <linux/rbtree_augmented.h>
+#else
+#include "rbtree_augmented.h"
+#endif /* __UNIT_TEST__ */
 
 #ifndef __STRIP__ /* See strip.py */
 /* homa_drop_packet will accept this many more packets before it drops some. */

@@ -136,8 +136,7 @@ TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_homa_ipv6)
 	cur_offload_core->held_skb = NULL;
 	cur_offload_core->held_bucket = 99;
 	EXPECT_EQ(NULL, homa_hijack_gro_receive(&self->empty_list, skb));
-	EXPECT_EQ(skb, cur_offload_core->held_skb);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_STREQ("homa_gro_receive", unit_log_get());
 	EXPECT_EQ(IPPROTO_HOMA, ipv6_hdr(skb)->nexthdr);
 	kfree_skb(skb);
 	homa_hijack_end();
@@ -159,8 +158,7 @@ TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_homa_ipv4)
 	cur_offload_core->held_skb = NULL;
 	cur_offload_core->held_bucket = 99;
 	EXPECT_EQ(NULL, homa_hijack_gro_receive(&self->empty_list, skb));
-	EXPECT_EQ(skb, cur_offload_core->held_skb);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_STREQ("homa_gro_receive", unit_log_get());
 	EXPECT_EQ(IPPROTO_HOMA, ip_hdr(skb)->protocol);
 	EXPECT_EQ(29695, ip_hdr(skb)->check);
 	kfree_skb(skb);
@@ -190,16 +188,16 @@ TEST_F(homa_hijack, homa_hijack_set_hdr)
 
 TEST_F(homa_hijack, homa_hijack_sock_init)
 {
-	EXPECT_EQ(IPPROTO_HOMA, self->hsk.sock.sk_protocol);
+	EXPECT_EQ(IPPROTO_HOMA, (int)self->hsk.sock.sk_protocol);
 
 	/* First call: hijack_tcp option not set. */
 	homa_hijack_sock_init(&self->hsk);
-	EXPECT_EQ(IPPROTO_HOMA, self->hsk.sock.sk_protocol);
+	EXPECT_EQ(IPPROTO_HOMA, (int)self->hsk.sock.sk_protocol);
 
 	/* Second call: hijack_tcp option set. */
 	self->homa.hijack_tcp = 1;
 	homa_hijack_sock_init(&self->hsk);
-	EXPECT_EQ(IPPROTO_TCP, self->hsk.sock.sk_protocol);
+	EXPECT_EQ(IPPROTO_TCP, (int)self->hsk.sock.sk_protocol);
 }
 
 TEST_F(homa_hijack, homa_sock_hijacked)

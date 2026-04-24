@@ -4,6 +4,10 @@
  * objects.
  */
 
+#ifdef __UNIT_TEST__
+#include "rhashtable.h"
+#define _LINUX_RHASHTABLE_TYPES_H
+#endif /* __UNIT_TEST__ */
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"

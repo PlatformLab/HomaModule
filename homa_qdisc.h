@@ -15,7 +15,11 @@
 #pragma GCC diagnostic pop
 #endif /* __UNIT_TEST__*/
 
+#ifndef __UNIT_TEST__
 #include <linux/rbtree.h>
+#else
+#include "rbtree.h"
+#endif /* __UNIT_TEST__ */
 #include <net/pkt_sched.h>
 
 #ifndef _HOMA_QDISC_H

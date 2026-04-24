@@ -5,6 +5,10 @@
  * kernel.
  */
 
+#ifdef __UNIT_TEST__
+#include "rhashtable.h"
+#define _LINUX_RHASHTABLE_TYPES_H
+#endif /* __UNIT_TEST__ */
 #include "homa_impl.h"
 #include "homa_pool.h"
 #ifndef __STRIP__ /* See strip.py */
@@ -14,7 +18,6 @@
 #include "ccutils.h"
 #include "utils.h"
 
-#include <linux/rhashtable.h>
 #include <linux/swait.h>
 
 /* It isn't safe to include some header files, such as stdlib, because
@@ -293,7 +296,7 @@ unsigned int nr_cpu_ids = 8;
 unsigned long page_offset_base;
 unsigned long phys_base;
 unsigned long vmemmap_base;
-struct kmem_cache *kmalloc_caches[KMALLOC_SHIFT_HIGH + 1];
+struct kmem_cache *kmalloc_caches[NR_KMALLOC_TYPES][KMALLOC_SHIFT_HIGH + 1];
 int __preempt_count;
 
 /* Value that will be returned by smp_processor_id. */
@@ -318,8 +321,10 @@ extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
 
-int alloc_bucket_spinlocks(spinlock_t **locks, unsigned int *locks_mask,
-			   size_t max_size, unsigned int cpu_mult, gfp_t gfp)
+int __alloc_bucket_spinlocks(spinlock_t **locks, unsigned int *lock_mask,
+                             size_t max_size, unsigned int cpu_mult,
+                             gfp_t gfp, const char *name,
+                             struct lock_class_key *key)
 {
 	return 0;
 }
@@ -561,7 +566,8 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode)
 {}
 
-void icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info)
+void __icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info,
+                 const struct ip_options *opt)
 {
 	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
 }
@@ -576,7 +582,7 @@ int idle_cpu(int cpu)
 	return mock_check_error(&mock_cpu_idle);
 }
 
-int import_iovec(int type, const struct iovec __user *uvector,
+ssize_t import_iovec(int type, const struct iovec __user *uvector,
 		unsigned nr_segs, unsigned fast_segs,
 		struct iovec **iov, struct iov_iter *iter)
 {
@@ -708,8 +714,9 @@ void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name,
 			   struct lock_class_key *key)
 {}
 
-void iov_iter_init(struct iov_iter *i, int direction, const struct iovec *iov,
-		   unsigned long nr_segs, size_t count)
+void iov_iter_init(struct iov_iter *i, unsigned int direction,
+		   const struct iovec *iov, unsigned long nr_segs,
+		   size_t count)
 {
 	direction &= READ | WRITE;
 	i->type = ITER_IOVEC | direction;
@@ -736,8 +743,9 @@ struct dst_entry *ip6_dst_check(struct dst_entry *dst, u32 cookie)
 	return dst;
 }
 
-struct dst_entry *ip6_dst_lookup_flow(const struct sock *sk, struct flowi6 *fl6,
-				      const struct in6_addr *final_dst)
+struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
+				       struct flowi6 *fl6,
+				       const struct in6_addr *final_dst)
 {
 	struct rtable *route;
 
@@ -1542,6 +1550,9 @@ int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 	return 0;
 }
 
+void synchronize_rcu(void)
+{}
+
 void synchronize_sched(void)
 {}
 
@@ -1566,11 +1577,10 @@ void unregister_net_sysctl_table(struct ctl_table_header *header)
 void unregister_pernet_subsys(struct pernet_operations *ops)
 {}
 
-int unregister_qdisc(struct Qdisc_ops *qops)
+void unregister_qdisc(struct Qdisc_ops *qops)
 {
 	registered_qdiscs--;
 	qdisc_ops = NULL;
-	return 0;
 }
 
 void vfree(const void *block)
