@@ -15,15 +15,15 @@ fi
 
 for t in $targets; do
     echo $t
-    rsync -rtv --exclude-from=rsync-exclude.txt ./ ouster@$t:homaModule/
+    rsync -rtv --exclude-from=rsync-exclude.txt ./ $t:homaModule/
 done
 for t in $targets; do
     echo $t
-    rsync -rtv cloudlab/bin/ ouster@$t:bin/
-    rsync -rtv cloudlab/docker/ ouster@$t:docker/
-    rsync -rtv cloudlab/bash_profile ouster@$t:.bash_profile
-    rsync -rtv cloudlab/bashrc ouster@$t:.bashrc
-    rsync -rtv cloudlab/gdbinit ouster@$t:.gdbinit
+    rsync -rtv cloudlab/bin/ $t:bin/
+    rsync -rtv cloudlab/docker/ $t:docker/
+    rsync -rtv cloudlab/bash_profile $t:.bash_profile
+    rsync -rtv cloudlab/bashrc $t:.bashrc
+    rsync -rtv cloudlab/gdbinit $t:.gdbinit
     rsync -rtv ~/.ssh/cloudlab_rsa.pub ~/.ssh/cloudlab_rsa $t:.ssh/
     ssh $t 'if [ ! -e .ssh/id_rsa ]; then
         cp .ssh/cloudlab_rsa .ssh/id_rsa
