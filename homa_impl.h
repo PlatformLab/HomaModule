@@ -28,6 +28,8 @@
 #define WARN_ONCE(cond, ...) ({ bool __c = (cond); (void)__c; __c; })
 #endif /* __UNIT_TEST__ */
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
 #include <linux/audit.h>
 #include <linux/icmp.h>
 #include <linux/init.h>
@@ -47,6 +49,7 @@
 #include <net/netns/generic.h>
 #include <net/protocol.h>
 #include <net/inet_common.h>
+#pragma GCC diagnostic pop
 
 #ifndef __UPSTREAM__ /* See strip.py */
 #include "homa.h"
