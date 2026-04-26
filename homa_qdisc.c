@@ -683,6 +683,7 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 		bytes_left = rpc->msgout.length - info->offset;
 		if (bytes_left < rpc->qrpc.tx_left)
 			rpc->qrpc.tx_left = bytes_left;
+		rpc->qrpc.qdev = qdev;
 		homa_qdisc_insert_rb(qdev, rpc);
 	}
 	if (qdev->last_defer)
@@ -938,6 +939,34 @@ void homa_qdisc_free_homa(struct homa_qdisc_dev *qdev)
 			break;
 		kfree_skb_reason(skb, SKB_DROP_REASON_QUEUE_PURGE);
 	}
+}
+
+/**
+ * homa_qdisc_flush_rpc() - If an RPC has any packets queued here,
+ * unqueue them and free them (they will not be transmitted).
+ * @rpc:   RPC whose deferred packets should be freed. Caller must
+ *         ensure that there will be no concurrent access to this; normally
+ *         the RPC is dead when this function is called.
+ */
+void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
+{
+	struct homa_qdisc_dev *qdev = rpc->qrpc.qdev;
+
+	if (!qdev)
+		return;
+
+	/* Remove the RPC from the table of deferred RPCs. */
+	spin_lock_bh(&qdev->defer_lock);
+	if (skb_queue_len(&rpc->qrpc.packets) > 0) {
+		rb_erase_cached(&rpc->qrpc.rb_node, &qdev->deferred_rpcs);
+		if (rpc == qdev->oldest_rpc)
+			qdev->oldest_rpc = NULL;
+	}
+
+	/* Free all of the RPC's deferred packets. */
+	while (skb_queue_len(&rpc->qrpc.packets) > 0)
+		kfree_skb(skb_dequeue(&rpc->qrpc.packets));
+	spin_unlock_bh(&qdev->defer_lock);
 }
 
 /**

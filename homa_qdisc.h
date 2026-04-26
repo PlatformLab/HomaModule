@@ -321,6 +321,7 @@ int             homa_qdisc_dointvec(const struct ctl_table *table, int write,
 				    void *buffer, size_t *lenp, loff_t *ppos);
 int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
+void            homa_qdisc_flush_rpc(struct homa_rpc *rpc);
 void            homa_qdisc_free_homa(struct homa_qdisc_dev *qdev);
 struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev);
 struct homa_rpc *
@@ -362,7 +363,7 @@ static inline bool homa_qdisc_active(struct homa *homa)
 
 /**
  * homa_qdisc_rpc_init() - Initialize a homa_rpc_qdisc struct.
- * @qrpc:  Struct to initialize
+ * @qrpc:  Struct to initialize.
  */
 static inline void homa_qdisc_rpc_init(struct homa_rpc_qdisc *qrpc)
 {

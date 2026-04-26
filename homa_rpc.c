@@ -561,6 +561,9 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 					 */
 #endif /* See strip.py */
 					if (refcount_read(&skb->users) > 1) {
+#ifndef __STRIP__ /* See strip.py */
+						homa_qdisc_flush_rpc(rpc);
+#endif /* See strip.py */
 						INC_METRIC(reaper_active_skbs,
 							   1);
 						goto next_rpc;

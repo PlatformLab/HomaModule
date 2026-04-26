@@ -149,6 +149,8 @@ extern int         mock_copy_data_errors;
 extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
+extern struct net_device
+		   mock_devices[];
 extern int         mock_dst_check_errors;
 extern int         mock_ethtool_ksettings_errors;
 extern bool        mock_exit_thread;

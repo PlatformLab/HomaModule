@@ -230,6 +230,12 @@ struct homa_message_in {
  */
 struct homa_rpc_qdisc {
 	/**
+	 * @qdev: If @packets has ever been non-empty, this points to the
+	 * structure where this RPC is enqueued; otherwise NULL.
+	 */
+	struct homa_qdisc_dev *qdev;
+
+	/**
 	 * @packets: List of tx skbs from this RPC that have been deferred
 	 * by homa_qdisc. Non-empty means this RPC is currently linked into
 	 * homa_qdisc_dev->deferred_rpcs.

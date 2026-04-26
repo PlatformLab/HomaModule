@@ -626,35 +626,53 @@ TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_of_refs)
 	EXPECT_STREQ("reaped 1234", unit_log_get());
 	IF_NO_STRIP(EXPECT_EQ(2, homa_metrics_per_cpu()->deferred_rpc_reaps));
 }
-TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_of_skb_refcount)
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_pkt_deferred_in_homa_qdisc)
 {
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 5000, 2000);
-	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id+2, 1000, 2000);
+	struct homa_qdisc_dev *qdev;
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
 
-	ASSERT_NE(NULL, crpc1);
-	ASSERT_NE(NULL, crpc2);
-	homa_rpc_end(crpc1);
-	homa_rpc_end(crpc2);
-	skb_get(crpc1->msgout.packets);
-	EXPECT_EQ(5, self->hsk.dead_skbs);
-	unit_log_clear();
+	qdev = homa_qdisc_qdev_get(&mock_devices[0]);
+	self->homa.max_gso_size = 1400;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 5000, 2000);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.granted = crpc->msgout.length;
+	atomic64_set(&qdev->link_idle_time,
+		     self->homa.qshared->max_nic_est_backlog_cycles +
+		     mock_clock + 100);
+	for (skb = crpc->msgout.packets; skb;
+	     skb = homa_get_skb_info(skb)->next_skb) {
+		skb_get(skb);
+		homa_qdisc_defer_homa(qdev, skb);
+	}
+	EXPECT_STREQ("[id 1234, offsets 0 1400 2800 4200]", unit_log_deferred(qdev));
 
-	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
-	EXPECT_STREQ("reaped 1236", unit_log_get());
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_active_skbs));
+	homa_rpc_end(crpc);
 	EXPECT_EQ(4, self->hsk.dead_skbs);
 
-	kfree_skb(crpc1->msgout.to_free);
+	/* First attempt at reaping doesn't reap RPC, but it flushes the
+	 * packets from homa_qdisc.
+	 */
+
+	unit_log_clear();
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
+	EXPECT_STREQ("", unit_log_get());
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_active_skbs));
+	EXPECT_EQ(4, self->hsk.dead_skbs);
+	EXPECT_STREQ("", unit_log_deferred(qdev));
+
+	/* Second call to reaper frees the RPC. */
 	unit_log_clear();
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
 	EXPECT_STREQ("reaped 1234", unit_log_get());
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_active_skbs));
 	EXPECT_EQ(0, self->hsk.dead_skbs);
+        homa_qdisc_qdev_put(qdev);
 }
+#endif /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_reap__hit_limit_in_msgout_packets)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

@@ -528,3 +528,30 @@ int unit_count_peers(struct homa *homa)
 	rhashtable_walk_exit(&iter);
 	return count;
 }
+
+/**
+ * unit_log_deferred() - Clear the unit test log and append information
+ * about all packets currently queued in homa_qdisc.
+ * @qdev:   Log packets queued here.
+ * Return:  The contents of the unit test log after any appends.
+ */
+const char *unit_log_deferred(struct homa_qdisc_dev *qdev)
+{
+	struct homa_skb_info *info;
+	struct rb_node *node;
+	struct homa_rpc *rpc;
+	struct sk_buff *skb;
+
+	unit_log_clear();
+	for (node = rb_first_cached(&qdev->deferred_rpcs); node;
+	     node = rb_next(node)) {
+		rpc = container_of(node, struct homa_rpc, qrpc.rb_node);
+		unit_log_printf("; ", "[id %llu, offsets", rpc->id);
+        	skb_queue_walk(&rpc->qrpc.packets, skb) {
+			info = homa_get_skb_info(skb);
+			unit_log_printf(" ", "%d", info->offset);
+		}
+		unit_log_printf("", "]");
+	}
+	return unit_log_get();
+}
