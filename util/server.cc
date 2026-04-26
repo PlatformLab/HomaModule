@@ -307,6 +307,72 @@ void tcp_server(int port)
 	}
 }
 
+/**
+ * udp_server() - Opens a UDP socket and handles all requests arriving on
+ * that socket. Each request is a datagram whose first word is the total
+ * message length and second word is the desired response length.
+ * @port:  Port number on which to listen.
+ */
+void udp_server(int port)
+{
+	int fd;
+	char buffer[1000000];
+	sockaddr_in_union addr;
+	sockaddr_in_union source;
+	socklen_t source_len;
+
+	fd = socket(inet_family, SOCK_DGRAM, 0);
+	if (fd < 0) {
+		printf("Couldn't open UDP socket: %s\n", strerror(errno));
+		return;
+	}
+	memset(&addr, 0, sizeof(addr));
+	addr.in4.sin_family = inet_family;
+	addr.in4.sin_port = htons(port);
+	if (bind(fd, &addr.sa, sizeof(addr)) != 0) {
+		printf("Couldn't bind UDP socket to port %d: %s\n", port,
+		       strerror(errno));
+		return;
+	}
+	if (verbose)
+		printf("Successfully bound to UDP port %d\n", port);
+
+	while (1) {
+		int *int_buffer = reinterpret_cast<int*>(buffer);
+		ssize_t length;
+		int resp_length;
+
+		source_len = sizeof(source);
+		length = recvfrom(fd, buffer, sizeof(buffer), 0,
+				  &source.sa, &source_len);
+		if (length < 0) {
+			printf("UDP recvfrom failed: %s\n", strerror(errno));
+			continue;
+		}
+		if (length < (ssize_t)(2 * sizeof(int))) {
+			if (verbose)
+				printf("UDP message too short (%ld bytes) "
+				       "from %s\n", length,
+				       print_address(&source));
+			continue;
+		}
+		resp_length = int_buffer[1];
+		if (verbose)
+			printf("Received UDP message from %s with %ld bytes, "
+			       "response length %d\n",
+			       print_address(&source), length, resp_length);
+		if (resp_length <= 0)
+			continue;
+		if (resp_length > (int)sizeof(buffer))
+			resp_length = sizeof(buffer);
+		/* Echo the header back so the client can match responses. */
+		if (sendto(fd, buffer, resp_length, 0,
+			   &source.sa, source_len) < 0) {
+			printf("UDP sendto failed: %s\n", strerror(errno));
+		}
+	}
+}
+
 int main(int argc, char** argv) {
 	int next_arg;
 	int num_ports = 1;
@@ -355,6 +421,9 @@ int main(int argc, char** argv) {
 		std::thread thread(homa_server, port+i);
 		thread.detach();
 	}
+
+	std::thread udp_thread(udp_server, port);
+	udp_thread.detach();
 
 	tcp_server(port);
 }

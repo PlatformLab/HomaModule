@@ -371,6 +371,14 @@ struct homa {
 	int hijack_tcp;
 
 	/**
+	 * @hijack_udp: Non-zero means encapsulate outgoing Homa packets
+	 * as UDP packets (i.e. use UDP as the IP protocol). This provides
+	 * network traversability similar to TCP hijacking but avoids issues
+	 * with firewalls inspecting TCP flags. Set externally via sysctl.
+	 */
+	int hijack_udp;
+
+	/**
 	 * @max_gro_skbs: Maximum number of socket buffers that can be
 	 * aggregated by the GRO mechanism.  Set externally via sysctl.
 	 */
