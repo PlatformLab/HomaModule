@@ -334,7 +334,10 @@ struct homa_rpc {
 	/**
 	 * @refs: Number of references to this RPC, including one for each
 	 * unmatched call to homa_rpc_hold plus one for the socket's reference
-	 * in either active_rpcs or dead_rpcs.
+	 * in either active_rpcs or dead_rpcs. References are acquired at
+	 * "top level", such as homa_dispatch_pkts or homa_recvmsg. If a
+	 * function receives a locked RPC as parameter, it can assume
+	 * that the caller is also holding a reference to it.
 	 */
 	refcount_t refs;
 
