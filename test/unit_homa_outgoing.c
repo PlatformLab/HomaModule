@@ -407,6 +407,17 @@ TEST_F(homa_outgoing, homa_message_out_fill__basics)
 	EXPECT_EQ(3, crpc->msgout.num_skbs);
 	EXPECT_EQ(3000, crpc->msgout.copied_from_user);
 }
+TEST_F(homa_outgoing, homa_message_out_fill__zero_length_message)
+{
+	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
+			&self->server_addr);
+
+	ASSERT_FALSE(crpc == NULL);
+	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
+			unit_iov_iter((void *) 1000, 0), 0));
+	EXPECT_STREQ("message has length zero", self->hsk.error_msg);
+	homa_rpc_unlock(crpc);
+}
 TEST_F(homa_outgoing, homa_message_out_fill__message_too_long)
 {
 	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
@@ -421,16 +432,6 @@ TEST_F(homa_outgoing, homa_message_out_fill__message_too_long)
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(0, crpc->msgout.skb_memory);
 	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
-}
-TEST_F(homa_outgoing, homa_message_out_fill__zero_length_message)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-
-	ASSERT_FALSE(crpc == NULL);
-	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 0), 0));
-	homa_rpc_unlock(crpc);
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)

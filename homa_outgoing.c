@@ -265,8 +265,12 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	int gso_size;
 	int err;
 
-	if (unlikely(iter->count > HOMA_MAX_MESSAGE_LENGTH ||
-		     iter->count == 0)) {
+	if (unlikely(iter->count == 0)) {
+		rpc->hsk->error_msg = "message has length zero";
+		err = -EINVAL;
+		goto error;
+	}
+	if (unlikely(iter->count > HOMA_MAX_MESSAGE_LENGTH)) {
 		rpc->hsk->error_msg = "message length exceeded HOMA_MAX_MESSAGE_LENGTH";
 		err = -EINVAL;
 		goto error;
