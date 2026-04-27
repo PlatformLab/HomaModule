@@ -417,19 +417,22 @@ TEST_F(homa_rpc, homa_rpc_end__remove_from_ready_rpcs)
 	homa_rpc_end(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 }
-TEST_F(homa_rpc, homa_rpc_end__cleanup_bpool)
+TEST_F(homa_rpc, homa_rpc_end__remove_from_pool_wait_list)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
-	int pool_size = pool->num_bpages * HOMA_BPAGE_SIZE;
+	int saved_free;
 
+	saved_free = atomic_read(&pool->free_bpages);
+	atomic_set(&pool->free_bpages, 0);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			       self->server_ip, 4000, 98, 1000,	150000);
 	ASSERT_NE(NULL, crpc);
+	EXPECT_FALSE(list_empty(&crpc->buf_links));
 
-	EXPECT_EQ(150000, pool_size - homa_pool_avail_bytes(pool));
 	homa_rpc_end(crpc);
-	EXPECT_EQ(0, pool_size - homa_pool_avail_bytes(pool));
+	EXPECT_TRUE(list_empty(&crpc->buf_links));
+	atomic_set(&pool->free_bpages, saved_free);
 }
 TEST_F(homa_rpc, homa_rpc_end__state_ready)
 {
@@ -730,6 +733,23 @@ TEST_F(homa_rpc, homa_rpc_reap__release_peer_ref)
 	homa_rpc_end(crpc);
 	homa_rpc_reap(&self->hsk, false);
 	EXPECT_EQ(1, refcount_read(&peer->refs));
+}
+TEST_F(homa_rpc, homa_rpc_reap__release_bpages)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	struct homa_rpc *crpc;
+	int pool_size = pool->num_bpages * HOMA_BPAGE_SIZE;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, 4000, 98, 1000,	150000);
+	ASSERT_NE(NULL, crpc);
+
+	EXPECT_EQ(150000, pool_size - homa_pool_avail_bytes(pool));
+	homa_rpc_end(crpc);
+	EXPECT_EQ(150000, pool_size - homa_pool_avail_bytes(pool));
+
+	homa_rpc_reap(&self->hsk, false);
+	EXPECT_EQ(0, pool_size - homa_pool_avail_bytes(pool));
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_reap__metrics_for_client_response)

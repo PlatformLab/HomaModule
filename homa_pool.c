@@ -470,22 +470,6 @@ int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 }
 
 /**
- * homa_pool_cleanup() - Invoked when RPCs are being deleted: releases
- * pool space owned by the RPC, unlinks it from pool-related lists, etc.
- * @rpc:        RPC to clean up.
- */
-void homa_pool_cleanup(struct homa_rpc *rpc)
-{
-	if (rpc->msgin.num_bpages > 0) {
-		homa_pool_free_bufs(rpc->hsk->buffer_pool,
-				    rpc->msgin.num_bpages,
-				    rpc->msgin.bpage_offsets);
-		rpc->msgin.num_bpages = 0;
-	}
-	list_del_init(&rpc->buf_links);
-}
-
-/**
  * homa_pool_check_waiting() - Checks to see if there are enough free
  * bpages to wake up any RPCs that were blocked. Whenever
  * homa_pool_free_bufs is invoked, this function must be invoked later,

@@ -208,7 +208,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 
 error:
 	if (srpc) {
-		homa_pool_cleanup(srpc);
+		homa_pool_release(srpc);
 		if (srpc->peer)
 			homa_peer_release(srpc->peer);
 	}
@@ -302,7 +302,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	list_del_rcu(&rpc->active_links);
 	list_add_tail(&rpc->dead_links, &rpc->hsk->dead_rpcs);
 	__list_del_entry(&rpc->ready_links);
-	homa_pool_cleanup(rpc);
+	homa_pool_unlink(rpc);
 	homa_interest_notify_private(rpc);
 //	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
 //			rpc->hsk->client_port,
@@ -623,6 +623,7 @@ release:
 				homa_peer_release(rpc->peer);
 				rpc->peer = NULL;
 			}
+			homa_pool_release(rpc);
 			tt_record2("homa_rpc_reap finished reaping id %d, port %d",
 				   rpc->id, rpc->hsk->port);
 #ifndef __STRIP__ /* See strip.py */

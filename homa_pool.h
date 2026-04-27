@@ -122,7 +122,6 @@ struct   homa_pool *homa_pool_alloc(struct homa_sock *hsk);
 int      homa_pool_alloc_msg(struct homa_rpc *rpc);
 u64      homa_pool_avail_bytes(struct homa_pool *pool);
 void     homa_pool_check_waiting(struct homa_pool *pool);
-void     homa_pool_cleanup(struct homa_rpc *rpc);
 void     homa_pool_free(struct homa_pool *pool);
 void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
 				  int *available);
@@ -134,5 +133,34 @@ int      homa_pool_free_bufs(struct homa_pool *pool, int num_buffers,
 			     u32 *buffers);
 int      homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 			      u64 region_size);
+
+/**
+ * homa_pool_unlink() - Remove an RPC from any lists related to buffer
+ * pool memory, so the RPC will not be accessed by this module again.
+ * @rpc:     RPC to unlink. Must be locked, and the rpc's socket must
+ *           also be locked.
+ */
+static inline void homa_pool_unlink(struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
+	__must_hold(rpc->hsk->lock)
+{
+	list_del_init(&rpc->buf_links);
+}
+
+/**
+ * homa_pool_release() - Invoked when RPCs are being reaped: releases
+ * pool space owned by the RPC.
+ * @rpc:        RPC to clean up. Caller must ensure that no-one else can
+ *              access the RPC concurrently (e.g., it is being reaped).
+ */
+static inline void homa_pool_release(struct homa_rpc *rpc)
+{
+	if (rpc->msgin.num_bpages > 0) {
+		homa_pool_free_bufs(rpc->hsk->buffer_pool,
+				    rpc->msgin.num_bpages,
+				    rpc->msgin.bpage_offsets);
+		rpc->msgin.num_bpages = 0;
+	}
+}
 
 #endif /* _HOMA_POOL_H */
