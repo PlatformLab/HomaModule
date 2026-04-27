@@ -299,11 +299,11 @@ consisting of a pointer to the following structure:
 .vs -2
 .EX
 struct homa_info {
-	struct homa_rpc_info *rpc_info;
+	__u64 *rpc_info;
 	size_t rpc_info_length;
-	__u64 bpool_avail_bytes;
-	__u32 port;
-	__u32 num_rpcs;
+	__u64  bpool_avail_bytes;
+	__u32  port;
+	__u32  num_rpcs;
 	char error_msg[HOMA_ERROR_MSG_SIZE];
 };
 .EE
@@ -320,10 +320,13 @@ fields before invoking
 .BR ioctl.
 The
 .B rpc_info
-field points to an area in application memory that can be used to
-return detailed information about all of the active RPCs on the socket;
+field is the address of an array of
+.B homa_rpc_info structs
+in application
+memory that can be used to return detailed information about all of the
+active RPCs on the socket;
 .B rpc_info_length
-indicates how much memory is available at
+indicates how many bytes of memory are available at
 .BR rpc_info ,
 in bytes. If
 .B rpc_info
