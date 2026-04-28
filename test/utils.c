@@ -529,6 +529,7 @@ int unit_count_peers(struct homa *homa)
 	return count;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * unit_log_deferred() - Clear the unit test log and append information
  * about all packets currently queued in homa_qdisc.
@@ -555,3 +556,4 @@ const char *unit_log_deferred(struct homa_qdisc_dev *qdev)
 	}
 	return unit_log_get();
 }
+#endif /* See strip.py */

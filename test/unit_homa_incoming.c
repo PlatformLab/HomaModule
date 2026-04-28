@@ -58,6 +58,7 @@ static void handoff_hook(char *id)
 	}
 }
 
+#ifndef __STRIP__ /* See strip.py */
 static void reset_msgin(struct homa_rpc *rpc)
 {
 	if (rpc->msgin.num_bpages > 0)
@@ -66,6 +67,7 @@ static void reset_msgin(struct homa_rpc *rpc)
 				    rpc->msgin.bpage_offsets);
 	memset(&rpc->msgin, 0, sizeof(rpc->msgin));
 }
+#endif /* See strip.py */
 
 #ifdef __STRIP__ /* See strip.py */
 int mock_message_in_init(struct homa_rpc *rpc, int length, int unsched)
