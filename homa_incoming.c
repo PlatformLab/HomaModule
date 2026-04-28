@@ -631,6 +631,7 @@ discard:
 	 */
 	if (hsk->dead_skbs > 0) {
 		int waiting_for_wmem = test_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+
 		if (waiting_for_wmem ||
 		    hsk->dead_skbs >= 2 * hsk->homa->dead_buffs_limit) {
 			IF_NO_STRIP(u64 start = homa_clock());

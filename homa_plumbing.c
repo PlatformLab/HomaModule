@@ -1497,18 +1497,19 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		*addr_len = sizeof(*in4);
 	}
 
-	if (result < 0)
+	if (result < 0) {
 		homa_rpc_end(rpc);
-	else {
+	} else {
 		/* This indicates that the application now owns the buffers, so
-		* they won't be freed in homa_rpc_end.
-		*/
+		 * they won't be freed in homa_rpc_end.
+		 */
 		rpc->msgin.num_bpages = 0;
 		if (homa_is_client(rpc->id)) {
 			homa_peer_add_ack(rpc);
 			homa_rpc_end(rpc);
-		} else
+		} else {
 			rpc->state = RPC_IN_SERVICE;
+		}
 	}
 
 done:

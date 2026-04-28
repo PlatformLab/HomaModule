@@ -539,8 +539,7 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 		flow.u.ip6.flowi6_proto = hsk->sock.sk_protocol;
 		flow.u.ip6.daddr = peer->addr;
 		flow.u.ip6.saddr = hsk->inet.pinet6->saddr;
-		flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos,
-							       0);
+		flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos, 0);
 		flow.u.ip6.flowi6_oif = hsk->sock.sk_bound_dev_if;
 		flow.u.ip6.flowi6_mark = hsk->sock.sk_mark;
 		flow.u.ip6.fl6_dport = 0;
