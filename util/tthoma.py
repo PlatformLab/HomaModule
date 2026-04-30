@@ -39,13 +39,8 @@ import time
 # timetrace):
 # found:             Last time when homa_wait_for_message found the RPC
 # gro_core:          Core that handled GRO processing for this RPC
-# gro_data:          List of <time, offset, priority> tuples for all incoming
-#                    data packets processed by GRO
 # gro_data_pkts:     List of packets processed by GRO for this RPC, sorted
 #                    in order of 'gro'
-# gro_grant:         List of <time, offset> tuples for all incoming
-#                    grant packets processed by GRO. Deprecated: use
-#                    gro_grant_pkts instead
 # gro_grant_pkts:    List of all incoming grant packets processed by GRO
 # handoff:           Last time when RPC was handed off to waiting thread
 # id:                RPC's identifier
@@ -66,14 +61,8 @@ import time
 #                    for the incoming message
 # retransmits:       One entry for each packet retransmitted; maps from offset
 #                    to <time, length> tuple
-# softirq_data:      List of <time, offset> tuples for all incoming
-#                    data packets processed by SoftIRQ. Deprecated: used
-#                    softirq_data_pkts instead
 # softirq_data_pkts: List of all incoming data packets processed by SoftIRQ,
 #                    sorted in order of 'softirq'
-# softirq_grant:     List of <time, offset> tuples for all incoming
-#                    grant packets processed by SoftIRQ. Deprecated: use
-#                    softirq_grant_pkts instead
 # softirq_grant_pkts:List of all incoming grant packets processed by SoftIRQ
 # recvmsg_done:      Time when homa_recvmsg returned
 # rx_live:           Range of times [start, end] when the incoming message
@@ -81,14 +70,8 @@ import time
 #                    homa_sendmsg is called on sender, ends when home_recvmsg
 #                    returns. Missing if rx not live during trace.
 # sendmsg:           Time when homa_sendmsg was invoked
-# send_data:         List of <time, offset, length> tuples for outgoing
-#                    data packets (length is message data); time is when
-#                    packet was passed to ip*xmit. Deprecated: used
-#                    send_data_pkts instead.
 # send_data_pkts:    List of outgoing data packets, sorted in order of
 #                    'xmit'.
-# send_grant:        List of <time, offset, priority> tuples for outgoing
-#                    grant packets. Deprecated: used send_grant_pkts instead
 # send_grant_pkts:   List of all outgoing grant packets
 # tx_live:           Range of times [start, end] when the outgoing message was
 #                    partially transmitted. Starts when homa_sendmsg is called,
@@ -110,19 +93,13 @@ import time
 class RpcDict(dict):
     def __missing__(self, id):
         new_rpc = {'node': Dispatcher.cur_trace['node'],
-            'gro_data': [],
             'gro_data_pkts': [],
-            'gro_grant': [],
             'gro_grant_pkts': [],
             'id': id,
             'in_length': None,
-            'softirq_data': [],
             'softirq_data_pkts': [],
-            'softirq_grant': [],
             'softirq_grant_pkts': [],
-            'send_data': [],
             'send_data_pkts': [],
-            'send_grant': [],
             'send_grant_pkts': [],
             'ip_xmits': {},
             'resend_rx': [],
@@ -1028,7 +1005,10 @@ def get_xmit_time(offset, rpc, rx_time=1e20):
 
     xmit = rx_time
     fallback = None
-    for pkt_time, pkt_offset, length in rpc['send_data']:
+    for pkt in rpc['send_data_pkts']:
+        pkt_time = pkt['xmit']
+        pkt_offset = pkt['offset']
+        length = pkt['tso_length']
         if offset < pkt_offset:
             if (fallback == None) and (pkt_time < rx_time):
                 # No record so far for the desired packet; use the time from
@@ -1886,15 +1866,17 @@ class Dispatcher:
     })
 
     def __ip_xmit(self, trace, time, core, match, interests):
-        peer = match.group(1)
-        id = int(match.group(2))
-        offset = int(match.group(3))
+        wire_bytes = int(match.group(1))
+        peer = match.group(2)
+        id = int(match.group(3))
+        offset = int(match.group(4))
         for interest in interests:
-            interest.tt_ip_xmit(trace, time, core, peer, id, offset)
+            interest.tt_ip_xmit(trace, time, core, peer, id, offset, wire_bytes)
 
     patterns.append({
         'name': 'ip_xmit',
-        'regexp': 'calling ip.*_xmit: .* peer ([^,]+), id ([0-9]+), offset ([0-9]+)'
+        'regexp': 'calling ip.*_xmit: wire_bytes ([0-9]+), peer ([^,]+), '
+                'id ([0-9]+), offset ([0-9]+)'
     })
 
     def __send_data(self, trace, time, core, match, interests):
@@ -2767,8 +2749,8 @@ class AnalyzeActivity:
                 self.node_in_msgs[node].append([in_start, 'start'])
                 self.node_in_msgs[node].append([in_end, 'end'])
 
-            for time, offset, priority in rpc['gro_data']:
-                if offset == 0:
+            for pkt in rpc['gro_data_pkts']:
+                if pkt['offset'] == 0:
                     self.node_in_starts[node] += 1
                     break
 
@@ -2785,7 +2767,9 @@ class AnalyzeActivity:
                 sender = rpcs[sender_id]
             else:
                 sender = None
-            for time, offset, prio in rpc['gro_data']:
+            for pkt in rpc['gro_data_pkts']:
+                time = pkt['gro']
+                offset = pkt['offset']
                 xmit = None
                 if sender != None:
                     xmit = get_xmit_time(offset, sender)
@@ -2804,8 +2788,8 @@ class AnalyzeActivity:
                 else:
                     cores[core] += length
 
-            for time, offset, length in rpc['send_data']:
-                self.node_out_bytes[node] += length
+            for pkt in rpc['send_data_pkts']:
+                self.node_out_bytes[node] += pkt['tso_length']
 
     def print_rates(self):
         """
@@ -4613,19 +4597,18 @@ class AnalyzeGrants:
                             unsched = rpc['out_length']
                 events.append([rpc['sendmsg'], 'rxgrant', node, id, unsched])
 
-            if 'send_data' in rpc:
-                for time, offset, length in rpc['send_data']:
-                    events.append([time, 'txdata', node, id, offset, length])
-            if rpc['softirq_data']:
-                for time, offset in rpc['softirq_data']:
-                    events.append([time, 'rxdata', node, id, offset,
-                            get_recv_length(offset, rpc['in_length'])])
-            if 'send_grant' in rpc:
-                for time, offset, priority, increment in rpc['send_grant']:
-                    events.append([time, 'txgrant', node, id, offset])
-            if 'softirq_grant' in rpc:
-                for time, offset in rpc['softirq_grant']:
-                    events.append([time, 'rxgrant', node, id, offset])
+            for pkt in rpc['send_data_pkts']:
+                events.append([pkt['xmit'], 'txdata', node, id, pkt['offset'],
+                        pkt['tso_length']])
+            for pkt in rpc['softirq_data_pkts']:
+                events.append([pkt['softirq'], 'rxdata', node, id,
+                        pkt['offset'],
+                        get_recv_length(pkt['offset'], rpc['in_length'])])
+            for grant in rpc['send_grant_pkts']:
+                events.append([grant['xmit'], 'txgrant', node, id, grant['offset']])
+            for grant in rpc['softirq_grant_pkts']:
+                events.append([grant['softirq'], 'rxgrant', node, id,
+                        grant['offset']])
         return sorted(events)
 
     class RpcDict(dict):
@@ -4656,8 +4639,8 @@ class AnalyzeGrants:
                 record['tx_length'] = rpc['out_length']
             else:
                 record['tx_length'] = -1
-            if rpc['send_data']:
-                record['tx_data_offset'] = rpc['send_data'][0][1]
+            if rpc['send_data_pkts']:
+                record['tx_data_offset'] = rpc['send_data_pkts'][0]['offset']
             return record
 
     class NodeDict(dict):
@@ -5349,8 +5332,9 @@ class AnalyzeIntervals:
         if id^1 in rpcs:
             tx_rpc = rpcs[id^1]
             tx_node = tx_rpc['node']
-            for t, offset in tx_rpc['softirq_grant']:
-                events.append([t, 'grant_softirq', offset])
+            for grant in tx_rpc['softirq_grant_pkts']:
+                events.append([grant['softirq'], 'grant_softirq',
+                        grant['offset']])
             for pkt in tx_rpc['send_data_pkts']:
                 if 'xmit2' in pkt and 'tso_length' in pkt:
                     offset = pkt['offset']
@@ -5362,8 +5346,8 @@ class AnalyzeIntervals:
                         data_offset = offset
 
         node = rpc['node']
-        for t, offset, prio, increment in rpc['send_grant']:
-            events.append([t, 'grant_xmit', offset])
+        for grant in rpc['send_grant_pkts']:
+            events.append([grant['xmit'], 'grant_xmit', grant['offset']])
         if not events:
             return
 
@@ -5656,17 +5640,17 @@ class AnalyzeIntervals:
                 get_interval(node, rpc['sendmsg'])['tx_starts'] += 1
 
             # rx_starts
-            if rpc['gro_data']:
-                t, offset, prio = rpc['gro_data'][0]
-                if offset == 0:
-                    get_interval(node, t)['rx_starts'] += 1
+            if rpc['gro_data_pkts']:
+                pkt = rpc['gro_data_pkts'][0]
+                if pkt['offset'] == 0:
+                    get_interval(node, pkt['gro'])['rx_starts'] += 1
 
             # tx_grant_avl and rx_granted
             self.add_grant_info(rpc)
 
             # rx_grantable
             in_length = rpc['in_length']
-            if rpc['send_grant'] or (('unsched' in rpc) and (in_length != None)
+            if rpc['send_grant_pkts'] or (('unsched' in rpc) and (in_length != None)
                     and (in_length > rpc['unsched']) or (('granted' in rpc)
                     and (in_length != None) and (rpc['granted'] < in_length))):
                 start = traces[rpc['node']]['first_time']
@@ -6567,9 +6551,10 @@ class AnalyzeNet:
                 continue
             core = recv_rpc['gro_core']
 
-            xmit_pkts = sorted(xmit_rpc['send_data'], key=lambda t : t[1])
+            xmit_pkts = sorted(xmit_rpc['send_data_pkts'],
+                    key=lambda pkt : pkt['offset'])
             if xmit_pkts:
-                xmit_end = xmit_pkts[-1][1] + xmit_pkts[-1][2]
+                xmit_end = xmit_pkts[-1]['offset'] + xmit_pkts[-1]['tso_length']
             elif 'out_length' in xmit_rpc:
                 xmit_end = xmit_rpc['out_length']
             elif 'in_length' in recv_rpc:
@@ -6578,11 +6563,13 @@ class AnalyzeNet:
                 # Not enough info to process this RPC
                 continue
 
-            recv_pkts = sorted(recv_rpc['gro_data'],
-                    key=lambda tuple : tuple[1])
+            recv_pkts = sorted(recv_rpc['gro_data_pkts'],
+                    key=lambda pkt : pkt['offset'])
             xmit_ix = 0
             if xmit_pkts:
-                xmit_time, xmit_offset, xmit_length = xmit_pkts[0]
+                xmit_time = xmit_pkts[0]['xmit']
+                xmit_offset = xmit_pkts[0]['offset']
+                xmit_length = xmit_pkts[0]['tso_length']
             else:
                 xmit_offset = 100000000
                 xmit_length = 0
@@ -6598,7 +6585,9 @@ class AnalyzeNet:
                     xmit_ix += 1
                     if xmit_ix >= len(xmit_pkts):
                         break
-                    xmit_time, xmit_offset, xmit_length = xmit_pkts[xmit_ix]
+                    xmit_time = xmit_pkts[xmit_ix]['xmit']
+                    xmit_offset = xmit_pkts[xmit_ix]['offset']
+                    xmit_length = xmit_pkts[xmit_ix]['tso_length']
                     xmit_bytes = 0
                 if recv_offset < xmit_offset:
                     # No xmit record; skip
@@ -8271,10 +8260,10 @@ class AnalyzeOoo:
 
         # Scan the incoming packets in each RPC.
         for id, rpc in rpcs.items():
-            if not 'gro_data' in rpc:
+            if not rpc['gro_data_pkts']:
                 continue
             total_rpcs += 1
-            pkts = rpc['gro_data']
+            pkts = rpc['gro_data_pkts']
             total_packets += len(pkts)
             highest_index = -1
             highest_offset = -1
@@ -8285,7 +8274,9 @@ class AnalyzeOoo:
             max_delay = -1
             info = ''
             for i in range(len(pkts)):
-                time, offset, prio = pkts[i]
+                time = pkts[i]['gro']
+                offset = pkts[i]['offset']
+                prio = pkts[i]['priority']
                 last_time = time
                 if offset > highest_offset:
                     highest_index = i;
@@ -8303,10 +8294,12 @@ class AnalyzeOoo:
                 ooo_packets += 1
                 gap = highest_index
                 while gap > 0:
-                    if pkts[gap-1][1] < offset:
+                    if pkts[gap-1]['offset'] < offset:
                         break
                     gap -= 1
-                gap_time, gap_offset, gap_prio = pkts[gap]
+                gap_time = pkts[gap]['gro']
+                gap_offset = pkts[gap]['offset']
+                gap_prio = pkts[gap]['priority']
                 delay = time - gap_time
                 if max_delay == -1:
                     rpc_id = '%12d' % (id)
@@ -8658,13 +8651,14 @@ class AnalyzePackets:
         # that core (but not yet freed).
         self.copied = defaultdict(list)
 
-    def tt_ip_xmit(self, trace, t, core, peer, id, offset):
+    def tt_ip_xmit(self, trace, t, core, peer, id, offset, wire_bytes):
         global packets, rpcs
         p = packets[pkt_id(id, offset)]
         p['tx_node'] = trace['node']
         if not p['retransmits']:
             p['xmit'] = t
             p['tx_core'] = core
+            p['tso_length'] = wire_bytes
             rpcs[id]['send_data_pkts'].append(p)
         else:
             p['retransmits'][-1]['xmit'] = t
@@ -8815,7 +8809,7 @@ class AnalyzePackets:
         global packets, rpcs, grants
         sync_error_printed = False
 
-        missing_rpc = {'send_data': []}
+        missing_rpc = {}
         new_pkts = []
         for pkt in packets.values():
             id = pkt['id']
@@ -9566,7 +9560,7 @@ class AnalyzeRpcs:
         """
         global rpcs, traces
 
-        if not 'sent' in rpc and (not rpc['send_data']):
+        if not 'sent' in rpc and (not rpc['send_data_pkts']):
             return None
 
         ceiling = None
@@ -9584,22 +9578,22 @@ class AnalyzeRpcs:
                 ceiling = rx_rpc['sendmsg']
             elif 'send_data_pkts' in rx_rpc and rx_rpc['send_data_pkts']:
                 ceiling = rx_rpc['send_data_pkts'][0]['xmit']
-            elif rpc['gro_data']:
-                ceiling = rpc['gro_data'][0][0]
+            elif rpc['gro_data_pkts']:
+                ceiling = rpc['gro_data_pkts'][0]['gro']
             elif 'recvmsg_done' in rpc:
                 ceiling = rpc['recvmsg_done']
             elif 'sent' in rx_rpc:
                 ceiling = traces[rx_rpc['node']]['first_time']
-        if rpc['send_data']:
+        if rpc['send_data_pkts']:
             if ceiling != None:
-                return rpc['send_data'][-1][0]
-            if rpc['send_data'][-1][2] < 1500:
-                return rpc['send_data'][-1][0]
+                return rpc['send_data_pkts'][-1]['xmit']
+            if rpc['send_data_pkts'][-1]['tso_length'] < 1500:
+                return rpc['send_data_pkts'][-1]['xmit']
             if 'out_length' in rpc:
                 length = rpc['out_length']
-                for t, offset, pkt_length in rpc['send_data']:
-                    if (offset + pkt_length) >= length:
-                        return rpc['send_data'][-1][0]
+                for pkt in rpc['send_data_pkts']:
+                    if (pkt['offset'] + pkt['tso_length']) >= length:
+                        return rpc['send_data_pkts'][-1]['xmit']
         if ceiling == None:
             return traces[rpc['node']]['last_time']
         return ceiling
@@ -9666,16 +9660,11 @@ class AnalyzeRpcs:
         rpcs[id]['gro_core'] = core
         recv_offsets[offset] = True
 
-    def tt_gro_grant(self, trace, t, core, peer, id, offset, priority):
-        self.append(trace, id, t, 'gro_grant', [t, offset])
-        rpcs[id]['peer'] = peer
-        rpcs[id]['gro_core'] = core
-
     def tt_rpc_handoff(self, trace, t, core, id):
         rpcs[id]['handoff'] = t
         rpcs.pop('queued', None)
 
-    def tt_ip_xmit(self, trace, t, core, peer, id, offset):
+    def tt_ip_xmit(self, trace, t, core, peer, id, offset, wire_bytes):
         global rpcs
         rpcs[id]['ip_xmits'][offset] = t
 
@@ -9695,11 +9684,6 @@ class AnalyzeRpcs:
         global rpcs
         rpcs[id]['retransmits'][offset] = [t, length]
 
-    def tt_softirq_data(self, trace, t, core, id, offset, length):
-        global rpcs
-        self.append(trace, id, t, 'softirq_data', [t, offset])
-        rpcs[id]['in_length'] = length
-
     def tt_softirq_grant(self, trace, t, core, id, offset, priority, increment):
         self.append(trace, id, t, 'softirq_grant', [t, offset])
 
@@ -9707,10 +9691,9 @@ class AnalyzeRpcs:
         # Combine the length and other info from this record with the time
         # from the ip_xmit call. No ip_xmit call? Skip this record too.
         global rpcs
-        if not offset in rpcs[id]['ip_xmits']:
-            return
         ip_xmits = rpcs[id]['ip_xmits']
-        self.append(trace, id, t, 'send_data', [ip_xmits[offset], offset, length])
+        if not offset in ip_xmits:
+            return
         del ip_xmits[offset]
 
     def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
@@ -9806,13 +9789,13 @@ class AnalyzeRpcs:
                     rpc['out_length'] = peer_rpc['in_length']
                 else:
                     length = -1
-                    if 'send_data' in rpc:
-                        for t, offset, pkt_length in rpc['send_data']:
-                            l2 = offset + pkt_length
-                            if l2 > length:
-                                length = l2
-                    if 'softirq_grant' in rpc:
-                        for t, offset in rpc['softirq_grant']:
+                    for pkt in rpc['send_data_pkts']:
+                        l2 = pkt['offset'] + pkt['tso_length']
+                        if l2 > length:
+                            length = l2
+                    if 'softirq_grant_pkts' in rpc:
+                        for grant in rpc['softirq_grant_pkts']:
+                            offset = grant['offset']
                             if offset > length:
                                 length = offset
                     if length >= 0:
@@ -10023,10 +10006,16 @@ class AnalyzeRtt:
         print('P99:  %6.1f' % rtts[99*len(rtts)//100][0])
         print('Max:  %6.1f' % rtts[len(rtts) - 1][0])
 
-        def get_phase(rpc1, phase1, rpc2, phase2):
+        def get_phase(rpc1, phase1, name1, rpc2, phase2, name2):
             """
-            Returns the elapsed time from phase1 in rpc1 to phase2 in
-            rpc2, or None if the required data is missing.
+            Returns the elapsed time from <phase1, name1> in rpc1 to
+            <phase2, name2> in rpc2, or None if the required data is missing.
+            phase1:   Name of element to lookup in rpc1; if that element is
+                      not a list, then it is used directly.
+            name1:    If the named element is a list, then use this element
+                      in the first dictionary of the list.
+            phase2:   Similar to phase1, except for rpc2.
+            name2:    Similar to name1, except for rpc2.
             """
             if phase1 not in rpc1:
                 return None
@@ -10034,14 +10023,14 @@ class AnalyzeRtt:
             if type(start) == list:
                 if not start:
                     return None
-                start = start[0][0]
+                start = start[0][name1]
             if phase2 not in rpc2:
                 return None
             end = rpc2[phase2]
             if type(end) == list:
                 if not end:
                     return None
-                end = end[0][0]
+                end = end[0][name2]
             return end - start
 
         def get_phases(crpc, srpc):
@@ -10071,38 +10060,54 @@ class AnalyzeRtt:
 
             result = {}
 
-            result['prep'] = get_phase(crpc, 'sendmsg', crpc, 'send_data')
-            result['net'] =  get_phase(crpc, 'send_data', srpc, 'gro_data')
-            result['gro'] = get_phase(srpc, 'gro_data', srpc, 'softirq_data')
+            result['prep'] = get_phase(crpc, 'sendmsg', None, crpc,
+                    'send_data_pkts', 'xmit')
+            result['net'] =  get_phase(crpc, 'send_data_pkts', 'xmit', srpc,
+                    'gro_data_pkts', 'gro')
+            result['gro'] = get_phase(srpc, 'gro_data_pkts', 'gro', srpc,
+                    'softirq_data_pkts', 'softirq')
             if 'queued' in srpc:
-                result['softirq'] = get_phase(srpc, 'softirq_data', srpc, 'queued')
+                result['softirq'] = get_phase(srpc, 'softirq_data_pkts',
+                        'softirq', srpc, 'queued', None)
                 if result['softirq'] < 0:
                     result['softirq'] = 0
-                result['queue'] = get_phase(srpc, 'queued', srpc, 'found')
+                result['queue'] = get_phase(srpc, 'queued', None, srpc,
+                        'found', None)
                 result['handoff'] = None
             else:
-                result['softirq'] = get_phase(srpc, 'softirq_data', srpc, 'handoff')
+                result['softirq'] = get_phase(srpc, 'softirq_data_pkts',
+                        'softirq', srpc, 'handoff', None)
                 if (result['softirq'] != None) and (result['softirq'] < 0):
                     result['softirq'] = 0
-                result['handoff'] = get_phase(srpc, 'handoff', srpc, 'found')
+                result['handoff'] = get_phase(srpc, 'handoff', None, srpc,
+                        'found', None)
                 result['queue'] = None
-            result['sendmsg'] = get_phase(srpc, 'found', srpc, 'sendmsg')
-            result['prep2'] = get_phase(srpc, 'sendmsg', srpc, 'send_data')
-            result['net2'] =  get_phase(srpc, 'send_data', crpc, 'gro_data')
-            result['gro2'] = get_phase(crpc, 'gro_data', crpc, 'softirq_data')
+            result['sendmsg'] = get_phase(srpc, 'found', None, srpc,
+                    'sendmsg', None)
+            result['prep2'] = get_phase(srpc, 'sendmsg', None, srpc,
+                    'send_data_pkts', 'xmit')
+            result['net2'] =  get_phase(srpc, 'send_data_pkts', 'xmit', crpc,
+                    'gro_data_pkts', 'gro')
+            result['gro2'] = get_phase(crpc, 'gro_data_pkts', 'gro', crpc,
+                    'softirq_data_pkts', 'softirq')
             if 'queued' in crpc:
-                result['softirq2'] = get_phase(crpc, 'softirq_data', crpc, 'queued')
+                result['softirq2'] = get_phase(crpc, 'softirq_data_pkts',
+                        'softirq', crpc, 'queued', None)
                 if result['softirq2'] < 0:
                     result['softirq2'] = 0
-                result['queue2'] = get_phase(crpc, 'queued', crpc, 'found')
+                result['queue2'] = get_phase(crpc, 'queued', None, crpc,
+                        'found', None)
                 result['handoff2'] = None
             else:
-                result['softirq2'] = get_phase(crpc, 'softirq_data', crpc, 'handoff')
+                result['softirq2'] = get_phase(crpc, 'softirq_data_pkts',
+                        'softirq', crpc, 'handoff', None)
                 if result['softirq2'] < 0:
                     result['softirq2'] = 0
-                result['handoff2'] = get_phase(crpc, 'handoff', crpc, 'found')
+                result['handoff2'] = get_phase(crpc, 'handoff', None, crpc,
+                        'found', None)
                 result['queue2'] = None
-            result['done'] = get_phase(crpc, 'found', crpc, 'recvmsg_done')
+            result['done'] = get_phase(crpc, 'found', None, crpc,
+                    'recvmsg_done', None)
             return result
 
         print('\nShort RPCs with the longest RTTs:')
@@ -11116,7 +11121,7 @@ class AnalyzeSync:
         # Node name -> node id (position in get_sorted_nodes()).
         self.node_id = {}
 
-    def tt_ip_xmit(self, trace, t, core, peer, id, offset):
+    def tt_ip_xmit(self, trace, t, core, peer, id, offset, wire_bytes):
         node = trace['node']
         key = '%d:%d' % (id, offset)
         if not key in self.tx_pkts:
@@ -12541,36 +12546,71 @@ class AnalyzeTimeline:
         # string for the phase, the name selects an element of an RPC, and
         # the lambda extracts a time from the RPC element.
         client_phases = [
-            ['first request packet sent',     'send_data',    lambda x : x[0][0]],
-            ['softirq gets first grant',      'softirq_grant',lambda x : x[0][0]],
-            ['last request packet sent',      'send_data',    lambda x : x[-1][0]],
-            ['gro gets first response packet','gro_data',     lambda x : x[0][0]],
-            ['softirq gets first response pkt','softirq_data', lambda x : x[0][0]],
-            ['sent grant',                    'send_grant',   lambda x : x[0][0]],
-            ['gro gets last response packet', 'gro_data',     lambda x : x[-1][0]],
-            ['homa_recvmsg returning',        'recvmsg_done', lambda x : x]
-            ]
+            ['first request packet to IP',     'send_data_pkts',
+                    lambda x : x[0].get('xmit')],
+            ['first request packet to NIC',    'send_data_pkts',
+                    lambda x : x[0].get('nic')],
+            ['gro gets first grant',           'gro_grant_pkts',
+                    lambda x : x[0].get('gro')],
+            ['softirq gets first grant',       'softirq_grant_pkts',
+                    lambda x : x[0].get('softirq')],
+            ['last request packet to NIC',      'send_data_pkts',
+                    lambda x : x[-1].get('nic')],
+            ['gro gets first response packet', 'gro_data_pkts',
+                    lambda x : x[0].get('gro')],
+            ['softirq gets first response pkt','softirq_data_pkts',
+                    lambda x : x[0].get('softirq')],
+            ['first grant to IP',              'send_grant_pkts',
+                    lambda x : x[0].get('xmit')],
+            ['first grant to NIC',              'send_grant_pkts',
+                    lambda x : x[0].get('nic')],
+            ['gro gets last response packet',  'gro_data_pkts',
+                    lambda x : x[-1].get('gro')],
+            ['homa_recvmsg returning',         'recvmsg_done',
+                    lambda x : x]
+        ]
         client_extra = [
-            ['finished copying req into pkts','copy_in_done',  lambda x : x],
-            ['started copying to user space', 'copy_out_start',lambda x : x],
-            ['finished copying to user space','copy_out_done', lambda x : x]
+            ['finished copying req into pkts', 'copy_in_done',
+                    lambda x : x],
+            ['started copying to user space',  'copy_out_start',
+                    lambda x : x],
+            ['finished copying to user space', 'copy_out_done',
+                    lambda x : x]
         ]
 
         server_phases = [
-            ['gro gets first request packet',  'gro_data',      lambda x : x[0][0]],
-            ['softirq gets first request pkt', 'softirq_data',  lambda x : x[0][0]],
-            ['sent grant',                     'send_grant',    lambda x : x[0][0]],
-            ['gro gets last request packet',   'gro_data',       lambda x : x[-1][0]],
-            ['homa_recvmsg returning',         'recvmsg_done',  lambda x : x],
-            ['homa_sendmsg response',          'sendmsg',       lambda x : x],
-            ['first response packet sent',     'send_data',     lambda x : x[0][0]],
-            ['softirq gets first grant',       'softirq_grant', lambda x : x[0][0]],
-            ['last response packet sent',      'send_data',     lambda x : x[-1][0]]
+            ['gro gets first request packet',  'gro_data_pkts',
+                    lambda x : x[0].get('gro')],
+            ['softirq gets first request pkt', 'softirq_data_pkts',
+                    lambda x : x[0].get('softirq')],
+            ['first grant to IP',              'send_grant_pkts',
+                    lambda x : x[0].get('xmit')],
+            ['first grant to NIC',              'send_grant_pkts',
+                    lambda x : x[0].get('nic')],
+            ['gro gets last request packet',   'gro_data_pkts',
+                    lambda x : x[-1].get('gro')],
+            ['homa_recvmsg returning',         'recvmsg_done',
+                    lambda x : x],
+            ['homa_sendmsg response',          'sendmsg',
+                    lambda x : x],
+            ['first response packet to IP',    'send_data_pkts',
+                    lambda x : x[0].get('xmit')],
+            ['first response packet to NIC',   'send_data_pkts',
+                    lambda x : x[0].get('nic')],
+            ['gro gets first grant',           'gro_grant_pkts',
+                    lambda x : x[0].get('gro')],
+            ['softirq gets first grant',       'softirq_grant_pkts',
+                    lambda x : x[0].get('softirq')],
+            ['last response packet to NIC',      'send_data_pkts',
+                    lambda x : x[-1].get('nic')]
         ]
         server_extra = [
-            ['started copying to user space', 'copy_out_start', lambda x : x],
-            ['finished copying to user space','copy_out_done',  lambda x : x],
-            ['finished copying resp into pkts','copy_in_done',   lambda x : x]
+            ['started copying to user space', 'copy_out_start',
+                    lambda x : x],
+            ['finished copying to user space','copy_out_done',
+                    lambda x : x],
+            ['finished copying resp into pkts','copy_in_done',
+                    lambda x : x]
         ]
 
         # One entry in each of these lists for each phase of the RPC,
@@ -12595,8 +12635,9 @@ class AnalyzeTimeline:
             srpc = rpcs[id^1]
             if (not 'sendmsg' in crpc) or (not 'recvmsg_done' in crpc):
                 continue
-            if (not crpc['gro_data']) or (crpc['gro_data'][0][1] != 0) \
-                    or (not crpc['send_data']):
+            if ((not crpc['gro_data_pkts']) or
+                    (crpc['gro_data_pkts'][0]['offset'] != 0) or
+                    (not crpc['send_data_pkts'])):
                 continue
             num_rpcs += 1
 
@@ -12639,14 +12680,15 @@ class AnalyzeTimeline:
             deltas.append([])
         prev = start
         for i in range(len(phases)):
-            phase = phases[i]
-            if phase[1] in rpc:
-                rpc_phase = rpc[phase[1]]
+            label, name, func = phases[i]
+            if name in rpc:
+                rpc_phase = rpc[name]
                 if rpc_phase:
-                    t = phase[2](rpc_phase)
-                    totals[i].append(t - start)
-                    deltas[i].append(t - prev)
-                    prev = t
+                    t = func(rpc_phase)
+                    if t != None:
+                        totals[i].append(t - start)
+                        deltas[i].append(t - prev)
+                        prev = t
 
     def __print_phases(self, phases, totals, deltas):
         """
