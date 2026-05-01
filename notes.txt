@@ -1,6 +1,12 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Linux doesn't seem to like packets getting passed to ip*xmit with
+  reference counts > 1. Maybe change Homa to collect packet data in
+  memory pages, separate from skb's? Save the memory pages for the
+  life of the RPC, but don't save skb's once packets have been
+  transmitted.
+
 * Bug with homa_qdisc: if a TSO packet gets segmented in software, the
   homa_skb_info is not replicated in the segments, which causes crashes
   (e.g., homq_qdisc_defer_homa ends up with a NULL value for rpc).
