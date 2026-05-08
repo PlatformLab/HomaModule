@@ -1517,37 +1517,6 @@ TEST_F(homa_incoming, homa_data_pkt__update_delta)
 	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
 			1400, 2800), crpc);
 }
-TEST_F(homa_incoming, homa_data_pkt__handoff)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 1000, 3000);
-
-	ASSERT_NE(NULL, crpc);
-	unit_log_clear();
-	crpc->msgout.next_xmit_offset = crpc->msgout.length;
-
-	/* First packet triggers handoff. */
-	self->data.message_length = htonl(3000);
-	self->data.seg.offset = htonl(1400);
-	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
-			1400, 0), crpc);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
-	EXPECT_TRUE(test_bit(RPC_PKTS_READY, &crpc->flags));
-	EXPECT_EQ(1600, crpc->msgin.bytes_remaining);
-	EXPECT_EQ(1, skb_queue_len(&crpc->msgin.packets));
-	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
-
-	/* Second packet doesn't trigger a handoff because one is
-	 * already pending.
-	 */
-	self->data.message_length = htonl(3000);
-	self->data.seg.offset = htonl(2800);
-	unit_log_clear();
-	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
-			200, 0), crpc);
-	EXPECT_STREQ("", unit_log_get());
-}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_data_pkt__send_cutoffs)
 {
@@ -1584,6 +1553,37 @@ TEST_F(homa_incoming, homa_data_pkt__cutoffs_up_to_date)
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &self->data.common,
 			1400, 0));
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
+}
+TEST_F(homa_incoming, homa_data_pkt__handoff)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 1000, 3000);
+
+	ASSERT_NE(NULL, crpc);
+	unit_log_clear();
+	crpc->msgout.next_xmit_offset = crpc->msgout.length;
+
+	/* First packet triggers handoff. */
+	self->data.message_length = htonl(3000);
+	self->data.seg.offset = htonl(1400);
+	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
+			1400, 0), crpc);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
+	EXPECT_TRUE(test_bit(RPC_PKTS_READY, &crpc->flags));
+	EXPECT_EQ(1600, crpc->msgin.bytes_remaining);
+	EXPECT_EQ(1, skb_queue_len(&crpc->msgin.packets));
+	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
+
+	/* Second packet doesn't trigger a handoff because one is
+	 * already pending.
+	 */
+	self->data.message_length = htonl(3000);
+	self->data.seg.offset = htonl(2800);
+	unit_log_clear();
+	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
+			200, 0), crpc);
+	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_incoming, homa_data_pkt__handle_ack)
 {

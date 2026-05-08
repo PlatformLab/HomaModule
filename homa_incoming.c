@@ -741,7 +741,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 
 	homa_add_packet(rpc, skb);
 
-	/* Note: skb is no longer valid: homa_add_packet may have freed id. */
+	/* Note: skb is no longer valid: homa_add_packet may have freed it. */
 
 	if (skb_queue_len(&rpc->msgin.packets) != 0 &&
 	    !test_bit(RPC_PKTS_READY, &rpc->flags)) {
