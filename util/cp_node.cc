@@ -472,6 +472,30 @@ void kfreeze()
 }
 
 /**
+ * get_homa_error() - Return a string describing the most recent error
+ * detected by Homa for a socket (extracted with HOMAIOCINFO).
+ * @fd:    File descriptor for a Homa socket.
+ * Return: The error string.
+ */
+std::string get_homa_error(int fd) {
+	struct homa_info hinfo;
+	std::string result;
+	int status;
+
+	hinfo.rpc_info = 0;
+	hinfo.rpc_info_length = 0;
+	status = ioctl(fd, HOMAIOCINFO, &hinfo);
+	if (status != 0) {
+		log(NORMAL, "HOMAIOCINFO failed for fd %d (%p): %s\n", fd,
+				&hinfo, strerror(errno));
+		result = "couldn't read Homa error message: HOMAIOCINFO failed";
+	} else {
+		result = hinfo.error_msg;
+	}
+	return result;
+}
+
+/**
  * struct message_header - The first few bytes of each message (request or
  * response) have the structure defined here. The client initially specifies
  * this information in the request, and the server returns the information
@@ -1103,8 +1127,9 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 				return;
 			}
 			else if ((errno != EINTR) && (errno != EAGAIN))
-				log(NORMAL, "recvmsg failed: %s\n",
-						strerror(errno));
+				log(NORMAL, "recvmsg failed: %s (%s)\n",
+						strerror(errno),
+						get_homa_error(fd).c_str());
 		}
 		header = receiver.get<message_header>(0);
 		tt("Received Homa request, cid 0x%08x, id %u, length %d",
@@ -1140,8 +1165,9 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 		result = sendmsg(fd, &msghdr, 0);
 		if (result < 0) {
 			log(NORMAL, "FATAL: sendmsg failed for server "
-					"port %d: %s\n",
-					port, strerror(errno));
+					"port %d: %s (%s)\n",
+					port, strerror(errno),
+					get_homa_error(fd).c_str());
 			fatal();
 		}
 		metrics->requests++;
@@ -1566,8 +1592,8 @@ public:
 	virtual void stop_sender(void) {}
 
 	/**
-	 * @id: unique identifier for this client (index starting at
-	 * 0 for the first client.
+	 * @id: unique identifier for this client among all client objects
+	 * for this node (index starting at 0 for the first client).
 	 */
 	int id;
 
@@ -1703,7 +1729,8 @@ std::vector<client *> clients;
  * client::client() - Constructor for client objects. Uses configuration
  * information from global variables to initialize.
  *
- * @id:         Unique identifier for this client (index starting at 0?)
+ * @id:         Unique identifier for this client among all client objects
+ *              for this node (index starting at 0?)
  * @experiment: Name of experiment in which this client will participate.
  */
 client::client(int id, std::string& experiment)
@@ -1735,15 +1762,15 @@ client::client(int id, std::string& experiment)
 	server_conns.clear();
 	freeze.clear();
 	first_id.clear();
-	for (int node: server_ids) {
+	for (int server_id: server_ids) {
 		char host[100];
 		struct addrinfo hints;
 		struct addrinfo *matching_addresses;
 		sockaddr_in_union *dest;
 
-		if (node == node_id)
+		if (server_id == node_id)
 			continue;
-		snprintf(host, sizeof(host), "node%d", node);
+		snprintf(host, sizeof(host), "node%d", server_id);
 		memset(&hints, 0, sizeof(struct addrinfo));
 		hints.ai_family = inet_family;
 		hints.ai_socktype = SOCK_DGRAM;
@@ -1757,15 +1784,15 @@ client::client(int id, std::string& experiment)
 		}
 		dest = reinterpret_cast<sockaddr_in_union *>
 				(matching_addresses->ai_addr);
-		while (((int) first_id.size()) < node)
+		while (((int) first_id.size()) < server_id)
 			first_id.push_back(-1);
 		first_id.push_back((int) server_addrs.size());
 		for (int thread = 0; thread < server_ports; thread++) {
 			dest->in4.sin_port = htons(first_port + thread);
 			server_addrs.push_back(*dest);
-			server_conns.emplace_back(node, thread, node_id, 0);
+			server_conns.emplace_back(server_id, thread, node_id, 0);
 		}
-		while (((int) freeze.size()) <= node)
+		while (((int) freeze.size()) <= server_id)
 			freeze.push_back(0);
 		freeaddrinfo(matching_addresses);
 	}
@@ -1970,7 +1997,8 @@ public:
 /**
  * homa_client::homa_client() - Constructor for homa_client objects.
  *
- * @id:          Unique identifier for this client (index starting at 0?).
+ * @id:          Unique identifier for this client object, among all objects
+ *               for this node (index starting at 0?).
  * @experiment:  Name of experiment in which this client will participate.
  */
 homa_client::homa_client(int id, std::string& experiment)
@@ -2008,6 +2036,12 @@ homa_client::homa_client(int id, std::string& experiment)
 		printf("FATAL: error in setsockopt(SO_HOMA_RCVBUF): %s\n",
 				strerror(errno));
 		fatal();
+	}
+
+	{
+		int *p = reinterpret_cast<int *>(sender_buffer);
+		for (int i = 0; i < HOMA_MAX_MESSAGE_LENGTH/4; i++)
+			p[i] = 0xf0000000 | i;
 	}
 
 	if (unloaded) {
@@ -2096,9 +2130,10 @@ bool homa_client::wait_response(homa::receiver *receiver, uint64_t rpc_id)
 			timeout(receiver);
 			return true;
 		}
-		log(NORMAL, "FATAL: error in Homa recvmsg: %s (id %lu, "
-				"server %s)\n",
-				strerror(errno), receiver->id(),
+		log(NORMAL, "FATAL: error in Homa recvmsg: %s (%s), id %lu, "
+				"server %s\n",
+				strerror(errno), get_homa_error(fd).c_str(),
+				receiver->id(),
 				print_address((union sockaddr_in_union *)
 					      receiver->src_addr()));
 		fatal();
@@ -2212,8 +2247,9 @@ void homa_client::sender()
 				  sockaddr_size(&server_addrs[server].sa));
 		status = sendmsg(fd, &msghdr, 0);
 		if (status < 0) {
-			log(NORMAL, "FATAL: error in Homa sendmsg: %s (request "
-					"length %d)\n", strerror(errno),
+			log(NORMAL, "FATAL: error in Homa sendmsg: %s (%s), request "
+					"length %d\n", strerror(errno),
+					get_homa_error(fd).c_str(),
 					header->length);
 			fatal();
 		}
@@ -2283,8 +2319,9 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 			  sockaddr_size(&server_addrs[server].sa));
 	status = sendmsg(fd, &msghdr, 0);
 	if (status < 0) {
-		log(NORMAL, "FATAL: error in Homa sendmsg: %s (request "
-				"length %d)\n", strerror(errno),
+		log(NORMAL, "FATAL: error in Homa sendmsg: %s (%s), request "
+				"length %d\n", strerror(errno),
+				get_homa_error(fd).c_str(),
 				header->length);
 		fatal();
 	}
@@ -2709,7 +2746,7 @@ void tcp_client::read(tcp_connection *connection, int pid)
 }
 
 /**
- * homa_info() - Use the HOMAIOCINFO ioctl to extract the status of a
+ * log_homa_info() - Use the HOMAIOCINFO ioctl to extract the status of a
  * Homa socket and print the information to the log.
  * @fd:   File descriptor for a Homa socket.
  */
