@@ -372,6 +372,16 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 			int copied = 0;
 			char __user *dst;
 
+#ifndef __UPSTREAM__ /* See strip.py */
+			if (end_offset == 0) {
+				start_offset = offset;
+			} else if (end_offset != offset) {
+				tt_record3("copied out bytes %d-%d for id %d",
+					   start_offset, end_offset, rpc->id);
+				start_offset = offset;
+			}
+#endif /* See strip.py */
+
 			/* Each iteration of this loop copies to one
 			 * user buffer.
 			 */
@@ -401,13 +411,6 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 				copied += chunk_size;
 			}
 #ifndef __UPSTREAM__ /* See strip.py */
-			if (end_offset == 0) {
-				start_offset = offset;
-			} else if (end_offset != offset) {
-				tt_record3("copied out bytes %d-%d for id %d",
-					   start_offset, end_offset, rpc->id);
-				start_offset = offset;
-			}
 			end_offset = offset + pkt_length;
 #endif /* See strip.py */
 		}
