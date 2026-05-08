@@ -658,28 +658,23 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
-#ifndef __STRIP__ /* See strip.py */
-	struct homa *homa = rpc->hsk->homa;
-#endif /* See strip.py */
+        IF_NO_STRIP(struct homa *homa = rpc->hsk->homa);
+	struct homa_ack ack;
+	bool discard = true;
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 		   homa_local_id(h->common.sender_id),
 		   tt_addr(rpc->peer->addr), ntohl(h->seg.offset),
 		   ntohl(h->message_length));
 
-	if (h->ack.client_id) {
-		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-
-		homa_rpc_unlock(rpc);
-		homa_rpc_acked(rpc->hsk, &saddr, &h->ack);
-		homa_rpc_lock(rpc);
-		if (rpc->state == RPC_DEAD)
-			goto discard;
-	}
+	/* Make a copy of the ack so we can handle it later, even if skb
+	 * has been freed.
+	 */
+	ack = h->ack;
 
 	if (rpc->state != RPC_INCOMING && homa_is_client(rpc->id)) {
 		if (unlikely(rpc->state != RPC_OUTGOING))
-			goto discard;
+			goto handle_ack;
 		INC_METRIC(responses_received, 1);
 		rpc->state = RPC_INCOMING;
 #ifndef __STRIP__ /* See strip.py */
@@ -692,13 +687,13 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 #else /* See strip.py */
 		if (homa_message_in_init(rpc, ntohl(h->message_length)) != 0)
 #endif /* See strip.py */
-			goto discard;
+			goto handle_ack;
 	} else if (rpc->state != RPC_INCOMING) {
 		/* Must be server; note that homa_rpc_alloc_server already
 		 * initialized msgin and allocated buffers.
 		 */
 		if (unlikely(rpc->msgin.length >= 0))
-			goto discard;
+			goto handle_ack;
 	}
 
 	if (rpc->msgin.num_bpages == 0) {
@@ -716,7 +711,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			   rpc->id, ntohl(h->seg.offset), homa_data_len(skb));
 #endif /* See strip.py */
 		INC_METRIC(dropped_data_no_bufs, homa_data_len(skb));
-		goto discard;
+		goto handle_ack;
 	}
 
 #ifndef __STRIP__ /* See strip.py */
@@ -746,16 +741,37 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 
 	homa_add_packet(rpc, skb);
 
+	/* Note: skb is no longer valid: homa_add_packet may have freed id. */
+
 	if (skb_queue_len(&rpc->msgin.packets) != 0 &&
 	    !test_bit(RPC_PKTS_READY, &rpc->flags)) {
 		set_bit(RPC_PKTS_READY, &rpc->flags);
 		homa_rpc_handoff(rpc);
 	}
-	return;
+	discard = false;
 
-discard:
-	kfree_skb(skb);
-	UNIT_LOG("; ", "homa_data_pkt discarded packet");
+handle_ack:
+	/* The reason for handling acks here is a bit subtle. It used to
+	 * be done at the beginning of this function, but that resulted
+	 * in extraneous handoffs (we have to release the RPC lock to
+	 * handle acks, but that could allow some other thread to receive
+	 * a previous handoff made by homa_rpc_alloc_server, even though
+	 * we hadn't yet added the packet to the RPC; if this happens
+	 * the call to homa_rpc_handoff above will have to make an additional
+	 * handoff). Doing it here is a bit awkward because the skb may not
+	 * still be around, so we have to save a copy of the ack.
+	 */
+	if (ack.client_id) {
+		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
+
+		homa_rpc_unlock(rpc);
+		homa_rpc_acked(rpc->hsk, &saddr, &ack);
+		homa_rpc_lock(rpc);
+	}
+	if (unlikely(discard)) {
+		kfree_skb(skb);
+		UNIT_LOG("; ", "homa_data_pkt discarded packet");
+	}
 }
 
 #ifndef __STRIP__ /* See strip.py */

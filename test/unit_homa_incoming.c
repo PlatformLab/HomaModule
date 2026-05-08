@@ -1410,61 +1410,6 @@ TEST_F(homa_incoming, homa_data_pkt__basics)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->responses_received);
 #endif /* See strip.py */
 }
-TEST_F(homa_incoming, homa_data_pkt__handle_ack)
-{
-	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id, 100, 3000);
-	struct homa_rpc *srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id+2, 10000, 1000);
-
-	ASSERT_NE(NULL, srpc1);
-	ASSERT_NE(NULL, srpc2);
-	EXPECT_EQ(8600, srpc2->msgin.bytes_remaining);
-
-	self->data.ack = (struct homa_ack) {
-		       .server_port = htons(self->hsk.port),
-		       .client_id = cpu_to_be64(self->client_id)};
-	self->data.common.sender_id = cpu_to_be64(self->client_id+2);
-	self->data.seg.offset = htonl(1400);
-	unit_log_clear();
-	homa_rpc_lock(srpc2);
-	homa_data_pkt(mock_skb_alloc(self->client_ip, &self->data.common,
-			1400, 0), srpc2);
-	homa_rpc_unlock(srpc2);
-	EXPECT_EQ(RPC_DEAD, srpc1->state);
-	EXPECT_SUBSTR("ack 1235; homa_rpc_end invoked", unit_log_get());
-	EXPECT_EQ(7200, srpc2->msgin.bytes_remaining);
-}
-TEST_F(homa_incoming, homa_data_pkt__handle_ack_rpc_now_dead)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id, 10000, 1000);
-
-	ASSERT_NE(NULL, srpc);
-	EXPECT_EQ(8600, srpc->msgin.bytes_remaining);
-
-	/* This is a bit contrived, but the ack terminates the RPC for which
-	 * the data packet was intended.
-	 */
-	self->data.ack = (struct homa_ack) {
-		       .server_port = htons(self->hsk.port),
-		       .client_id = cpu_to_be64(self->client_id)};
-	self->data.common.sender_id = cpu_to_be64(self->client_id);
-	self->data.seg.offset = htonl(1400);
-	unit_log_clear();
-	homa_rpc_lock(srpc);
-	homa_data_pkt(mock_skb_alloc(self->client_ip, &self->data.common,
-			1400, 0), srpc);
-	homa_rpc_unlock(srpc);
-	EXPECT_EQ(RPC_DEAD, srpc->state);
-	EXPECT_SUBSTR("ack 1235; "
-		      "homa_rpc_end invoked; "
-		      "homa_data_pkt discarded packet", unit_log_get());
-	EXPECT_EQ(8600, srpc->msgin.bytes_remaining);
-}
 TEST_F(homa_incoming, homa_data_pkt__wrong_client_rpc_state)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -1639,6 +1584,33 @@ TEST_F(homa_incoming, homa_data_pkt__cutoffs_up_to_date)
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &self->data.common,
 			1400, 0));
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
+}
+TEST_F(homa_incoming, homa_data_pkt__handle_ack)
+{
+	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 3000);
+	struct homa_rpc *srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id+2, 10000, 1000);
+
+	ASSERT_NE(NULL, srpc1);
+	ASSERT_NE(NULL, srpc2);
+	EXPECT_EQ(8600, srpc2->msgin.bytes_remaining);
+
+	self->data.ack = (struct homa_ack) {
+		       .server_port = htons(self->hsk.port),
+		       .client_id = cpu_to_be64(self->client_id)};
+	self->data.common.sender_id = cpu_to_be64(self->client_id+2);
+	self->data.seg.offset = htonl(1400);
+	unit_log_clear();
+	homa_rpc_lock(srpc2);
+	homa_data_pkt(mock_skb_alloc(self->client_ip, &self->data.common,
+			1400, 0), srpc2);
+	homa_rpc_unlock(srpc2);
+	EXPECT_EQ(RPC_DEAD, srpc1->state);
+	EXPECT_SUBSTR("ack 1235; homa_rpc_end invoked", unit_log_get());
+	EXPECT_EQ(7200, srpc2->msgin.bytes_remaining);
 }
 
 TEST_F(homa_incoming, homa_grant_pkt__basics)
