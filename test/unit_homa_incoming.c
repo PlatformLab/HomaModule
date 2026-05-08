@@ -1418,10 +1418,16 @@ TEST_F(homa_incoming, homa_data_pkt__handle_ack_rpc_now_dead)
 			1400, 0), srpc);
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(RPC_DEAD, srpc->state);
+	/* With the issue #77 fix the piggy-backed ACK is processed *after*
+	 * homa_add_packet has queued the skb, so by the time we observe
+	 * RPC_DEAD the packet has been added (bytes_remaining: 8600 - 1400)
+	 * and the function returns instead of going through `goto discard`
+	 * (kfree_skb on a queued skb would be use-after-free; the msgin
+	 * destructor reaps it on RPC teardown).
+	 */
 	EXPECT_SUBSTR("ack 1235; "
-		      "homa_rpc_end invoked; "
-		      "homa_data_pkt discarded packet", unit_log_get());
-	EXPECT_EQ(8600, srpc->msgin.bytes_remaining);
+		      "homa_rpc_end invoked", unit_log_get());
+	EXPECT_EQ(7200, srpc->msgin.bytes_remaining);
 }
 TEST_F(homa_incoming, homa_data_pkt__wrong_client_rpc_state)
 {

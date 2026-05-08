@@ -668,16 +668,6 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		   tt_addr(rpc->peer->addr), ntohl(h->seg.offset),
 		   ntohl(h->message_length));
 
-	if (h->ack.client_id) {
-		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-
-		homa_rpc_unlock(rpc);
-		homa_rpc_acked(rpc->hsk, &saddr, &h->ack);
-		homa_rpc_lock(rpc);
-		if (rpc->state == RPC_DEAD)
-			goto discard;
-	}
-
 	if (rpc->state != RPC_INCOMING && homa_is_client(rpc->id)) {
 		if (unlikely(rpc->state != RPC_OUTGOING))
 			goto discard;
@@ -726,6 +716,16 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	    !test_bit(RPC_PKTS_READY, &rpc->flags)) {
 		set_bit(RPC_PKTS_READY, &rpc->flags);
 		homa_rpc_handoff(rpc);
+	}
+
+	if (h->ack.client_id) {
+		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
+
+		homa_rpc_unlock(rpc);
+		homa_rpc_acked(rpc->hsk, &saddr, &h->ack);
+		homa_rpc_lock(rpc);
+		if (rpc->state == RPC_DEAD)
+			return;
 	}
 
 #ifndef __STRIP__ /* See strip.py */
