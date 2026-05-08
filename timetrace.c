@@ -114,8 +114,11 @@ int tt_init(char *proc_file)
 		struct tt_buffer *buffer;
 
 		buffer = kmalloc(sizeof(*buffer), GFP_KERNEL);
-		if (!buffer)
+		if (!buffer) {
+			pr_err("tt_init couldn't allocate trace buffer for cpu %d\n",
+			       i);
 			goto error;
+		}
 		memset(buffer, 0, sizeof(*buffer));
 		tt_buffers[i] = buffer;
 	}
