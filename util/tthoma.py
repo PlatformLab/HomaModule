@@ -52,6 +52,7 @@ import time
 #                    (name of trace file without extension)
 # out_length:        Size of the outgoing message, in bytes
 # peer:              Address of the peer host
+# port:              Port of the socket the RPC belongs to.
 # queued:            Last time when RPC was added to ready queue (no
 #                    waiting threads). At most one of 'handoff' and 'queued'
 #                    will be present.
@@ -1026,6 +1027,55 @@ def get_xmit_time(offset, rpc, rx_time=1e20):
 def pkt_id(id, offset):
     return '%d:%d' % (id, offset)
 
+def pkt_state(pkt, t):
+    """
+        Return a string indicating how far a packet has progressed at a
+        given time.
+        pkt:        Packet to check (either data or grant)
+        t:          Time of interest
+
+        The result will be one of the following strings:
+        None:       The packet has not yet been passed to ip*xmit
+        queued:     The packet has been passed to ip*xmit but has been
+                    deferred by homa_qdisc
+        stack:      The packet is somewhere in the networking stack; it
+                    has not yet been passed to the NIC and is not currently
+                    queued in homa_qdisc
+        net:        The packet is somewhere in the network: it has been passed
+                    to the NIC but not yet received by GRO
+        gro:        The packet has been received by GRO but has not yet been
+                    processed by SoftIRQ
+        recvd:      The packet has been processed by SoftIRQ
+    """
+
+    # True means the packet contains an event for nic or later.
+    have_nic_or_later = False
+
+    if 'xmit' in pkt and pkt['xmit'] > t:
+            return None
+    if 'softirq' in pkt:
+        have_nic_or_later = True
+        if pkt['softirq'] <= t:
+            return 'recvd'
+    if 'gro' in pkt:
+        have_nic_or_later = True
+        if pkt['gro'] <= t:
+            return 'gro'
+    if 'nic' in pkt:
+        have_nic_or_later = True
+        if pkt['nic'] <= t:
+            return 'net'
+    if 'qdisc_xmit' in pkt:
+        if pkt['qdisc_xmit'] > t:
+            return 'queued'
+    elif 'qdisc_defer' in pkt and pkt['qdisc_defer'] >= t:
+        return 'queued'
+
+    # This check handles situations where the traces don't include nic
+    # events: stack and nic get lumped together under net (delays are more
+    # likely to occur in the network than the stack).
+    return 'net' if have_nic_or_later else 'stack'
+
 def plot_ccdf(data, file, fig_size=(8,6), title=None, size=10,
         y_label="Cumulative Fraction", x_label="Delay (usecs)"):
     """
@@ -1161,7 +1211,7 @@ def print_pkts(pkts, header=True, comment=False):
         buf.write(prefix + 'FDelay:     Free - Nic\n')
         buf.write(prefix + 'Rx:         Number of times segments in the packet '
                 'were retransmitted\n\n')
-        buf.write('Source   Dest           Xmit      Qdisc     Id/Seq Offset')
+        buf.write('Source    Dest           Xmit      Qdisc     Id/Seq Offset')
         buf.write('  Length Qid        Nic  NDelay        Gro  GDelay')
         buf.write('       Free  FDelay Rx\n')
     for pkt in pkts:
@@ -1190,7 +1240,7 @@ def print_pkts(pkts, header=True, comment=False):
                 rx += len(seg['retransmits'])
         rx_msg = str(rx) if rx > 0 else ""
 
-        line = '%-8s %-8s %10s %10s' % (pkt['tx_node'], pkt['rx_node'],
+        line = ' %-8s %-8s %10s %10s' % (pkt['tx_node'], pkt['rx_node'],
                 print_if(xmit, '%.3f'), qdisc_string)
         if pkt['type'] == 'data':
             line += ' %10d %6d' % (pkt['id'], pkt['offset'])
@@ -1994,13 +2044,14 @@ class Dispatcher:
 
     def __sendmsg_response(self, trace, time, core, match, interests):
         id = int(match.group(1))
-        length = int(match.group(2))
+        port = int(match.group(2))
+        length = int(match.group(3))
         for interest in interests:
-            interest.tt_sendmsg_response(trace, time, core, id, length)
+            interest.tt_sendmsg_response(trace, time, core, id, length, port)
 
     patterns.append({
         'name': 'sendmsg_response',
-        'regexp': 'homa_sendmsg response, id ([0-9]+), .*length ([0-9]+)'
+        'regexp': 'homa_sendmsg response, id ([0-9]+), port ([0-9]+), .*length ([0-9]+)'
     })
 
     def __sendmsg_done(self, trace, time, core, match, interests):
@@ -2011,6 +2062,17 @@ class Dispatcher:
     patterns.append({
         'name': 'sendmsg_done',
         'regexp': 'homa_sendmsg finished, id ([0-9]+)'
+    })
+
+    def __recvmsg_start(self, trace, time, core, match, interests):
+        port = int(match.group(1))
+        pid = int(match.group(2))
+        for interest in interests:
+            interest.tt_recvmsg_start(trace, time, core, port, pid)
+
+    patterns.append({
+        'name': 'recvmsg_start',
+        'regexp': 'homa_recvmsg starting, port ([0-9]+), pid ([0-9]+)'
     })
 
     def __recvmsg_done(self, trace, time, core, match, interests):
@@ -2108,12 +2170,13 @@ class Dispatcher:
 
     def __rpc_queued(self, trace, time, core, match, interests):
         id = int(match.group(1))
+        port = int(match.group(2))
         for interest in interests:
-            interest.tt_rpc_queued(trace, time, core, id)
+            interest.tt_rpc_queued(trace, time, core, id, port)
 
     patterns.append({
         'name': 'rpc_queued',
-        'regexp': 'homa_rpc_handoff queued id ([0-9]+)'
+        'regexp': 'homa_rpc_handoff queued id ([0-9]+) for port ([0-9]+)'
     })
 
     def __wait_found_rpc(self, trace, time, core, match, interests):
@@ -2227,12 +2290,13 @@ class Dispatcher:
 
     def __rpc_end(self, trace, time, core, match, interests):
         id = int(match.group(1))
+        port = int(match.group(2))
         for interest in interests:
-            interest.tt_rpc_end(trace, time, core, id)
+            interest.tt_rpc_end(trace, time, core, id, port)
 
     patterns.append({
         'name': 'rpc_end',
-        'regexp': 'homa_rpc_end invoked for id ([0-9]+)'
+        'regexp': 'homa_rpc_end invoked for id ([0-9]+), port ([0-9]+)'
     })
 
     def __grant_check_start(self, trace, time, core, match, interests):
@@ -2668,6 +2732,16 @@ class Dispatcher:
     patterns.append({
         'name': 'busy_tx',
         'regexp': r'sending BUSY from resend, id ([0-9]+),'
+    })
+
+    def __task_switch(self, trace, time, core, match, interests):
+        pid = int(match.group(2))
+        for interest in interests:
+            interest.tt_task_switch(trace, time, core, pid)
+
+    patterns.append({
+        'name': 'task_switch',
+        'regexp': r'finish_task_switch, old pid ([0-9]+), new pid ([0-9]+)'
     })
 
 #------------------------------------------------
@@ -3610,7 +3684,7 @@ class AnalyzeDelay:
     def tt_poll_success(self, trace, time, core, id):
         self.poll_success[id] = time
 
-    def tt_rpc_queued(self, trace, time, core, id):
+    def tt_rpc_queued(self, trace, time, core, id, port):
         self.rpc_queued[id] = time
 
     def tt_wait_found_rpc(self, trace, time, core, id, type, blocked):
@@ -4993,54 +5067,174 @@ class AnalyzeGrants:
 #------------------------------------------------
 class AnalyzeHandoffs:
     """
-    Analyzes handoff delays for incoming messages (time from when
-    homa_rpc_handoff was called until homa_wait_for_message received
-    the message).
+    Analyzes message handoff from SoftIRQ level to application threads.
+    Outputs information about delays in the handoffs and queues of
+    ready RPCs.
     """
 
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
+
+        # Node name -> Rpc id -> list of <time, event> tuples for that
+        # RPC's arrival on the node, in order of time:
+        # time:    time when event occurred
+        # event:   name of event: handoff (to waiting thread), got_handoff,
+        #          enqueue, dequeue, recvmsg_done
+        self.node_rpc_events = defaultdict(lambda: defaultdict(list))
         return
+
+    def tt_rpc_handoff(self, trace, t, core, id):
+        self.node_rpc_events[trace['node']][id].append([t, 'handoff'])
+
+    def tt_rpc_queued(self, trace, t, core, id, port):
+        self.node_rpc_events[trace['node']][id].append([t, 'enqueue'])
+
+    def tt_wait_found_rpc(self, trace, t, core, id, type, blocked):
+        event = 'got_handoff' if type == 'handoff' else 'dequeue'
+        self.node_rpc_events[trace['node']][id].append([t, event])
+
+    def tt_recvmsg_done(self, trace, t, core, id, status):
+        self.node_rpc_events[trace['node']][id].append([t, 'recvmsg_done'])
+
+    def handoff_delays(self, node, rpc_type):
+        """
+        Returns <handed_off, queued, num_rpcs> tuple.
+        node:       Name of node whose RPCs should be considered
+        rpc_type:   'requests' or 'responses': indicates which kind of
+                    RPCs should be considered
+
+        Results:
+        handed_off:    Dictionary mapping from port -> list of <time, delay>
+                       tuples where time is the time when the user thread
+                       received an RPC handoff (no queuing) and delay is the
+                       elapsed time since homa_rpc_handoff was invoked
+        queued:        same as handed_off except for situations where the
+                       RPC had to be queued on the socket
+        num_rpcs:      port -> number of RPCs received on that port
+        """
+        global rpcs
+
+        bit = 1 if rpc_type == 'requests' else 0
+        queued = defaultdict(list)
+        handed_off = defaultdict(list)
+        num_rpcs = defaultdict(lambda: 0)
+        for id, events in self.node_rpc_events[node].items():
+            if (id & 1) != bit:
+                continue
+            if id == 502412188:
+                print('Event: %s' % (prev_event))
+            prev_event = None
+            prev_time = 0
+            if not 'port' in rpcs[id]:
+                continue
+            port = rpcs[id]['port']
+            num_rpcs[port] += 1
+            for t, event in events:
+                if prev_event == None:
+                    prev_event = event
+                    prev_time = t
+                    continue
+                if event == 'got_handoff' and prev_event == 'handoff':
+                    handed_off[port].append([t, t - prev_time])
+                elif event == 'dequeue' and prev_event == 'enqueue':
+                    queued[port].append([t, t - prev_time])
+                prev = event
+                prev_time = t
+        return handed_off, queued, num_rpcs
+
+    def queue_lengths(self, node, rpc_type):
+        """
+        Analyze the number of RPCs queued for each port of a node over time.
+        node:       Name of node whose RPCs should be considered
+        rpc_type:   'requests' or 'responses': indicates which kind of
+                    RPCs should be considered
+
+        The result is a dictionary mapping from port number to a dictionary
+        with the following elements for that port (port 'all' contains totals
+        for the node):
+        any:        Fraction of the time when one or more RPCs were queued
+        avg:        Average # RPCs queued for the port
+        max:        Maximum number of RPCs queued for the port
+        """
+        global rpcs
+
+        bit = 1 if rpc_type == 'requests' else 0
+
+        # Scan the individual RPCs to produce an event list for each port
+        # containing <time, event> pairs for all RPCs on that port, where
+        # event is either 'enqueue' or 'dequeue'.
+        port_events = defaultdict(list)
+        for id, events in self.node_rpc_events[node].items():
+            if (id & 1) != bit:
+                continue
+            if not 'port' in rpcs[id]:
+                continue
+            port = rpcs[id]['port']
+            queued = 0
+            for t, event in events:
+                if event == 'enqueue':
+                    port_events[port].append([t, 'enqueue'])
+                    port_events['all'].append([t, 'enqueue'])
+                    queued = 1
+                elif event == 'dequeue':
+                    if queued == 0:
+                        port_events[port].append([traces[node]['first_time'],
+                                'enqueue'])
+                        port_events['all'].append([traces[node]['first_time'],
+                                'enqueue'])
+                        queued = traces[node]['first_time']
+                    elif queued == 2:
+                        print('Missing enqueue event for id %d, dequeued on %s at %.3f' %
+                                (id, node, t), file=sys.stderr)
+                    port_events[port].append([t, 'dequeue'])
+                    port_events['all'].append([t, 'dequeue'])
+                    queued = 2
+
+        # Scan the events for each port
+        result = {}
+        result['all'] = {'any': 0, 'avg': 0, 'max': 0, 'sum': 0}
+        for port, events in port_events.items():
+            events.sort()
+            port_info = {'any': 0, 'avg': 0, 'max': 0, 'sum': 0}
+            prev_time = traces[node]['first_time']
+            num_queued = 0
+            for t, event in events:
+                if num_queued > 0:
+                    port_info['any'] += t - prev_time
+                    port_info['avg'] += num_queued * (t - prev_time)
+                if event == 'enqueue':
+                    num_queued += 1
+                    if num_queued > port_info['max']:
+                        port_info['max'] = num_queued
+                elif event == 'dequeue':
+                    num_queued -= 1
+                else:
+                    raise Exception('unknown event type %s for %s at time %.3f' %
+                            (event, node, t))
+                prev_time = t
+            port_info['any'] = port_info['any'] / traces[node]['elapsed_time']
+            port_info['avg'] = port_info['avg'] / traces[node]['elapsed_time']
+            result[port] = port_info
+        return result
 
     def output(self):
         global rpcs
 
-        # node name -> list of delays in cases where there was a thread
-        # waiting for the message; separate info for requests and responses
-        node_req_handoffs = defaultdict(list)
-        node_resp_handoffs = defaultdict(list)
-
-        # node name -> list of delays where messages had to be queued;
-        # separate info for requests and responses
-        node_req_queued = defaultdict(list)
-        node_resp_queued = defaultdict(list)
-
-        for id, rpc in rpcs.items():
-            if not 'found' in rpc:
-                continue
-            if 'handoff' in rpc:
-                delay = rpc['found'] - rpc['handoff']
-                if id & 1:
-                    node_req_handoffs[rpc['node']].append(delay)
-                else:
-                    node_resp_handoffs[rpc['node']].append(delay)
-            elif 'queued' in rpc:
-                delay = rpc['found'] - rpc['queued']
-                if id & 1:
-                    node_req_queued[rpc['node']].append(delay)
-                else:
-                    node_resp_queued[rpc['node']].append(delay)
-
         print('\n------------------')
         print('Analyzer: handoffs')
         print('------------------')
+
         print('')
-        print('Delays in handing off RPCs to an application thread (elapsed ')
-        print('time from when homa_rpc_handoff was called at SoftIRQ level ')
-        print('until homa_wait_for_message received the RPC in the application):')
+        print('Statistics about RPC handoffs (from when homa_rpc_handoff is')
+        print('called at SoftIRQ level until the application receives the')
+        print('RPC in homa_wait_*)')
         print('Node:         Name of node')
-        print('FastFrac:     Fraction of messages that were handed directly to')
-        print('              a waiting thread (no queueing)')
+        print('Port:         Port of socket that received message')
+        print('Handoffs:     Total number of handoffs (fast or queued)')
+        print('RPCs:         Total number of RPCs with handoff events')
+        print('Fast:         Fraction of handoffs that were fast (thread was '
+                'waiting,')
+        print('              no queuing)')
         print('FAvg:         Average delay for fast handoffs')
         print('FP50:         Median delay for fast handoffs')
         print('FP90:         90th percentile delay for fast handoffs')
@@ -5050,45 +5244,127 @@ class AnalyzeHandoffs:
         print('QP50:         Median delay for queued handoffs')
         print('QP90:         90th percentile delay for queued handoffs')
         print('QP99:         99th percentile delay for queued handoffs')
-        print('')
+        print('Any:          Fraction of time that one or more RPCs were queued')
+        print('Avg:          Average number of queued RPCs')
+        print('Max:          Maximum number of queued RPCs')
 
-        for i in [0, 1]:
-            if i == 0:
+        for rpc_type in ['requests', 'responses']:
+            if rpc_type == 'requests':
                 print("\nRequest messages:")
             else:
                 print("\nResponse messages:")
-            print('Node      FastFrac  Favg  FP50   FP90   FP99  QAvg  '
-                    'QP50   QP90   QP99')
-            print('----------------------------------------------------'
-                    '------------------')
+            print('Node           Port Handoffs RPCs  Fast  Favg  FP50   '
+                    'FP90   FP99   QAvg   QP50    QP90    QP99  Any    '
+                    'Avg   Max')
+            print('------------------------------------------------------'
+                    '--------------------------------------------------'
+                    '---------')
 
+            first = True
             for node in get_sorted_nodes():
-                if i == 0:
-                    handoffs = sorted(node_req_handoffs[node])
-                    queued = sorted(node_req_queued[node])
-                else:
-                    handoffs = sorted(node_resp_handoffs[node])
-                    queued = sorted(node_resp_queued[node])
-
-                print('%-10s   %5.3f' % (node,
-                        len(handoffs)/(len(handoffs) + len(queued))),
-                        end='')
-                if handoffs:
-                    print(' %5.1f %5.1f %6.1f %6.1f' % (
-                            sum(handoffs)/len(handoffs),
-                            handoffs[(50*len(handoffs))//100],
-                            handoffs[(90*len(handoffs))//100],
-                            handoffs[(99*len(handoffs))//100]), end='')
-                else:
-                    print(' '*24, end='')
-                if queued:
-                    print(' %5.1f %5.1f %6.1f %6.1f' % (
-                            sum(queued)/len(queued),
-                            queued[(50*len(queued))//100],
-                            queued[(90*len(queued))//100],
-                            queued[(99*len(queued))//100]))
-                else:
+                if not first:
                     print('')
+                else:
+                    first = False
+
+                handoffs, queued, num_rpcs = self.handoff_delays(node, rpc_type)
+                node_handoffs = []
+                node_queued = []
+                node_rpcs = 0
+                q_lengths = self.queue_lengths(node, rpc_type)
+                ports = sorted(handoffs.keys() | queued.keys() |
+                        num_rpcs.keys() | (q_lengths.keys() - {'all'}))
+                for port in ports:
+                    port_handoffs = [item[1] for item in handoffs[port]]
+                    port_handoffs.sort()
+                    port_queued = [item[1] for item in queued[port]]
+                    port_queued.sort()
+                    node_handoffs.extend(port_handoffs)
+                    node_queued.extend(port_queued)
+                    node_rpcs += num_rpcs[port]
+
+                    line = '%-10s   %6d   %6d %4d %5.3f' % (node, port,
+                            len(port_handoffs) + len(port_queued),
+                            num_rpcs[port],
+                            0 if len(port_handoffs) == 0 else
+                            len(port_handoffs) / (len(port_handoffs) +
+                                    len(port_queued)))
+                    if port_handoffs:
+                        line += ' %5.1f %5.1f %6.1f %6.1f' % (
+                                sum(port_handoffs)/len(port_handoffs),
+                                port_handoffs[(50*len(port_handoffs))//100],
+                                port_handoffs[(90*len(port_handoffs))//100],
+                                port_handoffs[(99*len(port_handoffs))//100])
+                    else:
+                        line += ' '*26
+                    if port_queued:
+                        line += ' %6.1f %6.1f %7.1f %7.1f' % (
+                                sum(port_queued)/len(port_queued),
+                                port_queued[(50*len(port_queued))//100],
+                                port_queued[(90*len(port_queued))//100],
+                                port_queued[(99*len(port_queued))//100])
+                    else:
+                        line += ' '*30
+                    if port in q_lengths:
+                        line += ' %6.3f %6.1f %5d' % (q_lengths[port]['any'],
+                                q_lengths[port]['avg'], q_lengths[port]['max'])
+                    print(line.rstrip())
+
+                node_handoffs.sort()
+                node_queued.sort()
+                line = '%-10s   %6s   %6d %4d %5.3f' % (node, 'Total',
+                            len(node_handoffs) + len(node_queued), node_rpcs,
+                        len(node_handoffs) / (len(node_handoffs) +
+                                len(node_queued)))
+                if node_handoffs:
+                    line += ' %5.1f %5.1f %6.1f %6.1f' % (
+                            sum(node_handoffs)/len(node_handoffs),
+                            node_handoffs[(50*len(node_handoffs))//100],
+                            node_handoffs[(90*len(node_handoffs))//100],
+                            node_handoffs[(99*len(node_handoffs))//100])
+                else:
+                    line += ' '*26
+                if node_queued:
+                    line += ' %6.1f %6.1f %7.1f %7.1f' % (
+                            sum(node_queued)/len(node_queued),
+                            node_queued[(50*len(node_queued))//100],
+                            node_queued[(90*len(node_queued))//100],
+                            node_queued[(99*len(node_queued))//100])
+                else:
+                    line += ' '*30
+                line += ' %6.3f %6.1f %5d' % (q_lengths['all']['any'],
+                        q_lengths['all']['avg'], q_lengths['all']['max'])
+                print(line.rstrip())
+
+        print('')
+        print('Number of RPCs queued for each port:')
+        print('Node:         Name of node')
+        print('Port:         Port of socket that received message')
+        print('Any:          Fraction of time that one or more RPCs were queued')
+        print('Max:          Maximum number of queued RPCs')
+
+        for rpc_type in ['requests', 'responses']:
+            if rpc_type == 'requests':
+                print("\nRequest messages:")
+            else:
+                print("\nResponse messages:")
+            print('Node           Port     Any    Avg   Max')
+            print('----------------------------------------')
+            first = True
+            for node in get_sorted_nodes():
+                if not first:
+                    print('')
+                else:
+                    first = False
+
+                port_stats = self.queue_lengths(node, rpc_type)
+                for port in sorted(p for p in port_stats if p != 'all'):
+                    print('%-10s   %6d  %6.3f %6.1f %5d' % (node, port,
+                            port_stats[port]['any'], port_stats[port]['avg'],
+                            port_stats[port]['max']))
+                print('%-10s   %6s  %6.3f %6.1f %5d' % (node, 'Total',
+                        port_stats['all']['any'], port_stats['all']['avg'],
+                        port_stats['all']['max']))
 
 #------------------------------------------------
 # Analyzer: incoming
@@ -5660,7 +5936,7 @@ class AnalyzeIntervals:
                 end = traces[rpc['node']]['last_time']
                 if rpc['send_grant_pkts']:
                     last_grant = rpc['send_grant_pkts'][-1]
-                    if last_grant['offset'] >= rpc['in_length']:
+                    if last_grant['offset'] >= in_length:
                         end = last_grant['xmit']
                 add_to_intervals(node, start, end, 'rx_grantable', 1)
 
@@ -8768,6 +9044,7 @@ class AnalyzePackets:
         g['xmit'] = t
         g['tx_node'] = trace['node']
         g['increment'] = increment
+        g['priority'] = priority
 
     def tt_nic_grant(self, trace, t, core, peer, id, offset, tx_queue):
         global grants
@@ -8800,6 +9077,7 @@ class AnalyzePackets:
         g['softirq'] = t
         g['softirq_core'] = core
         g['increment'] = increment
+        g['priority'] = priority
         g['rx_node'] = trace['node']
 
     def analyze(self):
@@ -9125,6 +9403,90 @@ class AnalyzePass:
             print('  %6.3f%6.1f%6.1f %6.1f' % (
                     num_lpasses/num_pkts, lgains[50*num_lpasses//100],
                     lgains[90*num_lpasses//100], lgains[-1]))
+
+#------------------------------------------------
+# Analyzer: pid
+#------------------------------------------------
+class AnalyzePid:
+    """
+    Extract the application-level trace records for a particular pid and
+    write them to standard output.
+    """
+    def __init__(self, dispatcher):
+        require_options('node', 'pid')
+
+        # pid -> accumulates a list of trace records for user-level activity
+        # (not NAPI or SoftIRQ) for that pid.
+        self.pid_lines = defaultdict(list)
+
+        # core -> current pid on that core, or 0 if none or unknown.
+        self.core_pid = defaultdict(lambda: 0)
+
+    def record(self, core, line):
+        """
+        Called by most of the tt_* methods below: records the current
+        line if it pertains to the desired pid.
+        core:      Core the record describes
+        line:      Trace record from the given core
+        """
+
+        global options
+        pid = self.core_pid[core]
+        if pid == options.pid:
+            self.pid_lines[pid].append(line)
+
+    def tt_task_switch(self, trace, t, core, pid):
+        self.core_pid[core] = pid
+
+    def tt_sendmsg_request(self, trace, t, core, peer, id, length):
+        self.record(core, trace['line'])
+
+    def tt_sendmsg_response(self, trace, t, core, id, length, port):
+        self.record(core, trace['line'])
+
+    def tt_sendmsg_done(self, trace, t, core, id):
+        self.record(core, trace['line'])
+
+    def tt_recvmsg_start(self, trace, t, core, port, pid):
+        self.core_pid[core] = pid
+        self.record(core, trace['line'])
+
+    def tt_recvmsg_done(self, trace, t, core, id, status):
+        self.record(core, trace['line'])
+
+    def tt_copy_in_start(self, trace, t, core):
+        self.record(core, trace['line'])
+
+    def tt_copy_in_done(self, trace, t, core, id, num_bytes):
+        self.record(core, trace['line'])
+
+    def tt_copy_out_start(self, trace, t, core, id):
+        self.record(core, trace['line'])
+
+    def tt_copy_out_done(self, trace, t, core, id, start, end):
+        self.record(core, trace['line'])
+
+    def tt_free_skbs(self, trace, t, core, num_skbs):
+        self.record(core, trace['line'])
+
+    def tt_wait_found_rpc(self, trace, t, core, id, type, blocked):
+        self.record(core, trace['line'])
+
+    def output(self):
+        global options
+
+        prev_time = None
+        if not self.pid_lines[options.pid]:
+            raise Exception('no trace records found for pid %d' % (options.pid))
+        for line in self.pid_lines[options.pid]:
+            match = re.match(r' *([-0-9.]+) us (\(\+ *[-0-9.]+ us\)) (.*)',
+                    line)
+            t = float(match.group(1))
+            if prev_time == None:
+                prev_time = t
+            print('%9.3f us (+%8.3f us) %s\n' % (t, t - prev_time, match.group(3)),
+                    end='')
+            prev_time = t
 
 #------------------------------------------------
 # Analyzer: qbytes
@@ -9662,15 +10024,17 @@ class AnalyzeRpcs:
 
     def tt_rpc_handoff(self, trace, t, core, id):
         rpcs[id]['handoff'] = t
-        rpcs.pop('queued', None)
+        rpcs[id].pop('queued', None)
 
     def tt_ip_xmit(self, trace, t, core, peer, id, offset, wire_bytes):
         global rpcs
         rpcs[id]['ip_xmits'][offset] = t
 
-    def tt_rpc_queued(self, trace, t, core, id):
-        rpcs[id]['queued'] = t
-        rpcs.pop('handoff', None)
+    def tt_rpc_queued(self, trace, t, core, id, port):
+        rpc = rpcs[id]
+        rpc['queued'] = t
+        rpc['port'] = port
+        rpc.pop('handoff', None)
 
     def tt_resend_rx(self, trace, t, core, id, offset, length):
         global rpcs
@@ -9683,6 +10047,10 @@ class AnalyzeRpcs:
     def tt_retransmit(self, trace, t, core, id, offset, length):
         global rpcs
         rpcs[id]['retransmits'][offset] = [t, length]
+
+    def tt_softirq_data(self, trace, t, core, id, offset, length):
+        global rpcs
+        rpcs[id]['in_length'] = length
 
     def tt_softirq_grant(self, trace, t, core, id, offset, priority, increment):
         self.append(trace, id, t, 'softirq_grant', [t, offset])
@@ -9705,10 +10073,12 @@ class AnalyzeRpcs:
         rpcs[id]['peer'] = peer
         rpcs[id]['sendmsg'] = t
 
-    def tt_sendmsg_response(self, trace, t, core, id, length):
+    def tt_sendmsg_response(self, trace, t, core, id, length, port):
         global rpcs
-        rpcs[id]['sendmsg'] = t
-        rpcs[id]['out_length'] = length
+        rpc = rpcs[id]
+        rpc['sendmsg'] = t
+        rpc['out_length'] = length
+        rpc['port'] = port
 
     def tt_recvmsg_done(self, trace, t, core, id, status):
         global rpcs
@@ -9736,9 +10106,11 @@ class AnalyzeRpcs:
         if num_bytes > max_unsched:
             max_unsched = num_bytes
 
-    def tt_rpc_end(self, trace, t, core, id):
+    def tt_rpc_end(self, trace, t, core, id, port):
         global rpcs
-        rpcs[id]['end'] = t
+        rpc = rpcs[id]
+        rpc['end'] = t
+        rpc['port'] = port
 
     def tt_rpc_incoming(self, trace, t, core, id, peer, received, length):
         global rpcs
@@ -10307,7 +10679,7 @@ class AnalyzeRx:
                     'GRO but not yet\n')
             f.write('#             received by SoftIRQ\n')
 
-            f.write('\n#   Time   Gbps  Live  Pkts Grantable TxGrant Granted'
+            f.write('\n#    Time   Gbps  Live  Pkts Grantable TxGrant Granted'
                     '    IP   Net  Late   GRO\n')
             total = 0
             for interval in intervals[node]:
@@ -10315,7 +10687,7 @@ class AnalyzeRx:
                     print('Strange interval for %s: %s' % (node, interval))
                 gbps = interval['rx_bytes'] * 8 / (options.interval * 1000)
                 total += gbps
-                f.write('%8.1f %6.1f %5d  %4d      %4d   %5.0f   %5.0f '
+                f.write(' %8.1f %6.1f %5d  %4d      %4d   %5.0f   %5.0f '
                         '%5.0f %5.0f %5.0f %5.0f\n'
                         % (interval['time'], gbps,
                         interval['rx_live'],
@@ -10459,14 +10831,18 @@ class AnalyzeRxsnapshot:
         The return value is a dictionary mapping RPC id -> dictionary, where
         id is the id of the sending RPC and the dictionary contains the
         following values:
-        pkts:              List of all the data packets in this RPC
-        grants:            List of all the grant packets in this RPC
+        pkts:              List of all the data packets in this RPC, sorted
+                           in order of offset
+        grants:            List of all the grant packets in this RPC,
+                           sorted in order of offset
         unsched:           Number of bytes of unscheduled incoming data,
                            or 0 if unknown
         min_time:          Lowest "interesting" time seen in any packet
                            for this RPC
         lost:              Number of packets that appear to have been lost
                            (transmitted but not received after long delay)
+        cur_prio:          Priority of most recent grant before t, or -1 if
+                           none.
 
         pre_xmit2:         Offset just after highest byte sent in a data
                            packet with 'xmit2' < target time
@@ -10507,7 +10883,8 @@ class AnalyzeRxsnapshot:
                 'pre_grant_xmit': 0, 'post_grant_xmit': 1e20,
                 'pre_grant_gro': 0, 'post_grant_gro': 1e20,
                 'pre_grant_softirq': 0, 'post_grant_softirq': 1e20,
-                'lost': 0, 'min_time': 1e20, 'unsched': max_unsched
+                'lost': 0, 'min_time': 1e20, 'unsched': max_unsched,
+                'cur_prio': -1
         })
 
         def check_live(tx_id, node, t, receive):
@@ -10515,7 +10892,7 @@ class AnalyzeRxsnapshot:
             If receive is True, returns whether the RPC given by tx_id is live
             for receiving on node at t. Otherwise returns whether tx_id is live
             for sending on node at t. In either case, tx_id is the RPC id on
-            atthe sender.
+            the sender.
             """
             if receive:
                 if not tx_id^1 in rpcs:
@@ -10575,6 +10952,8 @@ class AnalyzeRxsnapshot:
                     if pkt_time < t:
                         if end_offset > live_rpc['pre_grant_' + type]:
                             live_rpc['pre_grant_' + type] = end_offset
+                            if type == 'xmit':
+                                live_rpc['cur_prio'] = pkt['priority']
                     else:
                         if offset < live_rpc['post_grant_' + type]:
                             live_rpc['post_grant_' + type] = offset
@@ -10598,6 +10977,8 @@ class AnalyzeRxsnapshot:
                 rx_rpc = rpcs[id^1]
             else:
                 rx_rpc = {}
+            live_rpc['pkts'].sort(key = lambda d : d['offset'])
+            live_rpc['grants'].sort(key = lambda d : d['offset'])
             if 'remaining' in rx_rpc:
                 rcvd = rx_rpc['in_length'] - rx_rpc['remaining']
                 if live_rpc['post_copied'] > 1e19:
@@ -10736,6 +11117,26 @@ class AnalyzeRxsnapshot:
                 result += pkt['length']
         return result
 
+    def get_priority(self, grants, offset):
+        """
+            Use grant packets to determine what priority would have been
+            used when sending a packet with a particular starting offset.
+            grants:   List of grant packets in order of grant offset.
+            offset:   Offset of a data packet.
+
+            The return value is a priority, or -1 if we couldn't even make
+            a reasonable guess about the priority.
+        """
+        priority = -1
+        for grant in grants:
+            priority = grant['priority']
+            if grant['offset'] > offset:
+                return priority
+
+        # There were no grants that covered the desired offset. Use a priority
+        # from an earlier grant, if available.
+        return priority
+
     def output(self):
         global packets, rpcs, options, traces
 
@@ -10753,12 +11154,13 @@ class AnalyzeRxsnapshot:
                 (len(live_rpcs)))
         print('Id:        RPC identifier on the receiver side')
         print('Peer:      Sending node')
+        print('Start:     Time first data packet received in SoftIRQ')
         print('Length:    Length of incoming message, if known')
         print('Gxmit:     Highest offset for which grant has been passed '
                 'to ip_*xmit')
-        print('RxRem:     Bytes in message that haven\'t yet been received '
-                '(Length - Gro);')
-        print('           smaller means higher SRPT priority for grants')
+        print('GrantRem:  Bytes in message that haven\'t yet been granted; '
+                'smaller means')
+        print('           higher SRPT priority for grants')
         print('GGro:      Highest offset in grant that has been received by GRO')
         print('GSoft:     Highest offset in grant that has been processed '
                 'by SoftIRQ')
@@ -10773,11 +11175,12 @@ class AnalyzeRxsnapshot:
                 'copied to user space')
         print('Incoming:  Gxmit - SoftIrq')
         print('Lost:      Packets that appear to have been dropped in the network')
-        print('        Id  Peer       Length   RxRem   GXmit    GGro   GSoft ',
+        print('Prio:      Priority in most recent grant, if any')
+        print('        Id  Peer           Start  Length GrantRem   GXmit    ',
                 end='')
-        print('   Xmit     Gro SoftIrq  Copied Incoming Lost')
-        print('--------------------------------------------------------------', end='')
-        print('---------------------------------------------')
+        print('GGro   GSoft    Xmit     Gro SoftIrq  Copied Incoming Lost Prio')
+        print('-------------------------------------------------------------', end='')
+        print('---------------------------------------------------------------')
 
         for id in sorted_ids:
             rx_rpc = rpcs[id^1]
@@ -10792,37 +11195,131 @@ class AnalyzeRxsnapshot:
             if incoming <= 0:
                 incoming = ''
             if rx_rpc['in_length']:
-                rx_rem = rx_rpc['in_length'] - live_rpc['pre_gro']
+                granted = max(live_rpc['pre_grant_xmit'], live_rpc['unsched'])
+                ungranted = max(0, rx_rpc['in_length'] - granted)
             else:
-                rx_rem = ""
-            print('%10d %-10s %7s %7s %7s %7s %7s ' % (id^1,
-                    rpcs[id]['node'] if id in rpcs else "",
-                    rx_rpc['in_length'] if rx_rpc['in_length'] != None else "",
-                    rx_rem,
+                ungranted = ''
+            if rx_rpc['softirq_data_pkts']:
+                start = '%.3f' % (rx_rpc['softirq_data_pkts'][0]['softirq'])
+            else:
+                start = ''
+            if live_rpc['cur_prio'] >= 0:
+                prio = '%4d' % live_rpc['cur_prio']
+            else:
+                prio = ''
+            print('%10d %-10s %10s %7s %8s %7s ' % (id^1,
+                    rpcs[id]['node'] if id in rpcs else "", start,
+                    rx_rpc['in_length'] if rx_rpc['in_length'] != None else '',
+                    ungranted,
                     str(live_rpc['pre_grant_xmit'])
-                    if live_rpc['pre_grant_xmit'] > live_rpc['unsched'] else "",
+                    if live_rpc['pre_grant_xmit'] > live_rpc['unsched'] else ''), end='')
+            print('%7s %7s %7d %7d %7d %7d  %7s %4d %s' % (
                     str(live_rpc['pre_grant_gro'])
-                    if live_rpc['pre_grant_gro'] > live_rpc['unsched'] else "",
+                    if live_rpc['pre_grant_gro'] > live_rpc['unsched'] else '',
                     str(live_rpc['pre_grant_softirq'])
                     if live_rpc['pre_grant_softirq'] > live_rpc['unsched']
-                    else ""), end='')
-            print('%7d %7d %7d %7d  %7s %4d' % (live_rpc['pre_xmit2'],
+                    else '',
+                    live_rpc['pre_xmit2'],
                     live_rpc['pre_gro'], live_rpc['pre_softirq'],
-                    live_rpc['pre_copied'], incoming, live_rpc['lost']))
+                    live_rpc['pre_copied'], incoming, live_rpc['lost'],
+                    prio))
+
+        # Priority level -> incoming bytes on that priority level
+        prio_bytes = defaultdict(lambda: 0)
+
+        # Incoming bytes that were unscheduled.
+        unsched = 0
+
+        # Incoming bytes that were transmitted beyond what was granted
+        # (e.g. because of rounding up to packet boundary)
+        excess = 0
+
+        total_incoming = 0
+
+        # Collect information about priorities used for incoming data.
+        for id, live_rpc in live_rpcs.items():
+            rpc_unsched = live_rpc['unsched']
+            granted_at_t = live_rpc['pre_grant_xmit']
+
+            # Envelope of all offsets in transit at the reference time.
+            min_start = None
+            max_end = 0
+
+            for pkt in live_rpc['pkts']:
+                state = pkt_state(pkt, options.time)
+                if state == None or state == 'recvd':
+                    continue
+                start = pkt['offset']
+                if min_start == None:
+                    min_start = start
+                end = start + pkt['length']
+                if end > max_end:
+                    max_end = end
+
+                # Figure out the priority for this packet.
+                prio = -1
+                if 'priority' in pkt:
+                    prio = pkt['priority']
+                elif start >= rpc_unsched:
+                    prio = self.get_priority(live_rpc['grants'], start)
+                if prio >= 0:
+                    prio_bytes[prio] += end - start
+
+            if min_start != None:
+                total_incoming += granted_at_t - min_start
+                if max_end > granted_at_t:
+                    excess += max_end - granted_at_t
+                if min_start < rpc_unsched:
+                    if rpc_unsched > max_end:
+                        unsched += max_end - min_start
+                    else:
+                        unsched += rpc_unsched - min_start
+
+            # There may be additional bytes that were granted, but for
+            # which there were no live packets. Scan the grant packets
+            # to collect priority info for those bytes.
+            if max_end < granted_at_t:
+                for grant in live_rpc['grants']:
+                    offset = grant['offset']
+                    if offset <= max_end:
+                        continue
+                    if offset > granted_at_t:
+                        offset = granted_at_t
+                    prio_bytes[grant['priority']] += offset - max_end
+                    if offset == granted_at_t:
+                        break
+                    max_end = offset
+
+        print('\nTotal incoming bytes across all RPCs:   %8d' % (total_incoming))
+        prio_sum = 0
+        for prio in sorted(prio_bytes.keys()):
+            if total_incoming > 0:
+                percent = 100*prio_bytes[prio]/total_incoming
+            else:
+                percent = 0
+            print('Incoming bytes at P%d:                   %8d (%4.1f%%)' % (prio,
+                    prio_bytes[prio], percent))
+            prio_sum += prio_bytes[prio]
+        if prio_sum != total_incoming:
+            print('Incoming bytes with unknown priorities: %8d' %
+                    (total_incoming - prio_sum))
+        print('Unscheduled incoming bytes:             %8d' % (unsched))
+        print('Bytes transmitted beyond grants:        %8d' % (excess))
 
         print('\nFields in the tables below:')
-        print('Id:        Packet\'s RPC identifier on the receiver side')
         print('Offset:    Starting offset of packet data within its message')
+        print('Xmit:      Time when sender passed packet to ip*xmit')
         print('TxCore:    Core where sender passed packet to ip*xmit')
-        print('GCore:     Core where receiver GRO processed packet')
-        print('SCore:     Core where receiver SoftIRQ processed packet')
-        print('Xmit:      Time when sender passed packet to ip*xmit or when '
-                'sender qdisc')
-        print('           requeued packet after deferral, whichever is later')
         print('Nic:       Time when sender handed off packet to NIC')
-        print('Free:      Time when packet buffer freed after tx')
         print('Gro:       Time when receiver GRO processed packet')
+        print('Free:      Time when packet buffer freed after tx')
+        print('GCore:     Core where receiver GRO processed packet')
+        print('Prio:      Priority at which data packet was transmitted, or '
+                'priority in')
+        print('           grant packet')
         print('SoftIrq:   Time when receiver SoftIRQ processed packet')
+        print('SCore:     Core where receiver SoftIRQ processed packet')
+        print('           requeued packet after deferral, whichever is later')
         print('Numbers in parentheses give the difference between the '
                 'preceding value')
         print('and the reference time')
@@ -10834,7 +11331,10 @@ class AnalyzeRxsnapshot:
             live_rpc = live_rpcs[tx_id]
             rx_rpc = rpcs[tx_id^1]
             info = ''
-            prefix = ' ('
+            if rx_rpc['softirq_data_pkts']:
+                info += ', first packet received at %.1f' % (
+                        rx_rpc['softirq_data_pkts'][0]['softirq'])
+            prefix = '\n('
             if rx_rpc['in_length'] != None:
                 info += '%s%d bytes' % (prefix, rx_rpc['in_length'])
                 prefix = ', '
@@ -10848,149 +11348,131 @@ class AnalyzeRxsnapshot:
                 prefix = ', '
             if 'peer' in rx_rpc:
                 info += '%speer %s' % (prefix, ip_to_node[rx_rpc['peer']])
-            if info:
+                prefix = ', '
+            if prefix[0] != '\n':
                 info += ')'
 
-            live_rpc['pkts'].sort(key = lambda d : d['offset'])
+            stack_pkts = []
             net_pkts = []
             gro_pkts = []
             for pkt in live_rpc['pkts']:
-                offset = pkt['offset']
-                keep = True
-                if 'xmit2' in pkt:
-                    xmit2 = pkt['xmit2']
-                    if xmit2 >= options.time:
-                        keep = False
-                    if ((xmit2 < trace_start) and (not 'gro' in pkt) and
-                            (not 'copied' in pkt)):
-                        keep = False
-                elif offset >= live_rpc['pre_xmit2']:
-                        keep = False
-                if 'gro' in pkt:
-                    if pkt['gro'] < options.time:
-                        keep = False
-                elif offset < live_rpc['pre_gro']:
-                    keep = False
-                if keep:
+                state = pkt_state(pkt, options.time)
+                if state == 'stack' or state == 'queued':
+                    stack_pkts.append(pkt)
+                if state == 'net':
                     net_pkts.append(pkt)
-
-                keep = True
-                if 'gro' in pkt:
-                    if pkt['gro'] >= options.time:
-                        keep = False
-                elif offset >= live_rpc['pre_gro']:
-                        keep = False
-                if 'softirq' in pkt:
-                    if pkt['softirq'] < options.time:
-                        keep = False
-                elif offset < live_rpc['pre_softirq']:
-                    keep = False
-                if keep:
+                if state == 'gro':
                     gro_pkts.append(pkt)
 
-            live_rpc['grants'].sort(key = lambda d : d['offset'])
             net_grants = []
             gro_grants = []
             for pkt in live_rpc['grants']:
-                offset = pkt['offset']
-                keep = True
-                if 'xmit' in pkt:
-                    if pkt['xmit'] > options.time:
-                        keep = False
-                elif offset > live_rpc['pre_xmit2']:
-                        keep = False
-                if 'gro' in pkt:
-                    if pkt['gro'] <= options.time:
-                        keep = False
-                elif offset <= live_rpc['pre_gro']:
-                    keep = False
-                if keep:
+                state = pkt_state(pkt, options.time)
+                if state == 'net':
                     net_grants.append(pkt)
-
-                keep = True
-                if 'gro' in pkt:
-                    if pkt['gro'] > options.time:
-                        keep = False
-                elif offset > live_rpc['pre_gro']:
-                        keep = False
-                if 'softirq' in pkt:
-                    if pkt['softirq'] <= options.time:
-                        keep = False
-                elif offset <= live_rpc['pre_softirq']:
-                    keep = False
-                if keep:
+                if state == 'gro':
                     gro_grants.append(pkt)
 
-            if (not net_pkts) and (not gro_pkts) and (not net_grants) and (
-                    not gro_grants):
+            if (not stack_pkts and not net_pkts and not gro_pkts and
+                    not net_grants and not gro_grants):
                 continue
             print('\nRPC id %d%s:' % (tx_id^1, info))
+
+            if stack_pkts:
+                print('Incoming data packets that have not yet been passed '
+                        'to the NIC:')
+                print('Offset      Xmit           TxCore       Nic              '
+                        'Gro             Free        GCore Prio')
+                for pkt in stack_pkts:
+                    print('%6d %7s   %-10s  %4s %7s %8s %7s %8s %7s %8s %5s %4s' % (
+                            pkt['offset'], print_field_if(pkt, 'xmit', '%7.1f'),
+                            print_field_if(pkt, 'xmit2', '(%.1f)',
+                                     lambda t : t - options.time ),
+                            print_field_if(pkt, 'tx_core', '%d'),
+                            print_field_if(pkt, 'nic', '%.1f'),
+                            print_field_if(pkt, 'nic', '(%.1f)',
+                                     lambda t : t - options.time),
+                            print_field_if(pkt, 'gro', '%.1f'),
+                            print_field_if(pkt, 'gro', '(%.1f)',
+                                     lambda t : t - options.time),
+                            print_field_if(pkt, 'free_tx_skb', '%.1f'),
+                            print_field_if(pkt, 'free_tx_skb', '(%.1f)',
+                                     lambda t : t - options.time),
+                            print_field_if(pkt, 'gro_core', '%d'),
+                            print_field_if(pkt, 'priority', '%d')))
 
             if net_pkts:
                 print('Incoming data packets that have been transmitted but '
                         'not received by GRO:')
                 print('Offset      Xmit           TxCore       Nic              '
-                        'Gro             Free        GCore')
+                        'Gro             Free        GCore Prio')
                 for pkt in net_pkts:
-                    print('%6d %7s   %-10s  %4s %7s %8s %7s %8s %7s %8s %5s' % (
-                            pkt['offset'], print_field_if(pkt, 'xmit2', '%7.1f'),
-                            print_field_if(pkt, 'xmit2', '(%7.1f)',
+                    print('%6d %7s   %-10s  %4s %7s %8s %7s %8s %7s %8s %5s %4s' % (
+                            pkt['offset'], print_field_if(pkt, 'xmit', '%7.1f'),
+                            print_field_if(pkt, 'xmit2', '(%.1f)',
                                      lambda t : t - options.time ),
-                            print_field_if(pkt, 'tx_core', '%4d'),
-                            print_field_if(pkt, 'nic', '%7.1f'),
-                            print_field_if(pkt, 'nic', '(%6.1f)',
+                            print_field_if(pkt, 'tx_core', '%d'),
+                            print_field_if(pkt, 'nic', '%.1f'),
+                            print_field_if(pkt, 'nic', '(%.1f)',
                                      lambda t : t - options.time),
-                            print_field_if(pkt, 'gro', '%7.1f'),
-                            print_field_if(pkt, 'gro', '(%6.1f)',
+                            print_field_if(pkt, 'gro', '%.1f'),
+                            print_field_if(pkt, 'gro', '(%.1f)',
                                      lambda t : t - options.time),
-                            print_field_if(pkt, 'free_tx_skb', '%7.1f'),
-                            print_field_if(pkt, 'free_tx_skb', '(%6.1f)',
+                            print_field_if(pkt, 'free_tx_skb', '%.1f'),
+                            print_field_if(pkt, 'free_tx_skb', '(%.1f)',
                                      lambda t : t - options.time),
-                            print_field_if(pkt, 'gro_core', '%3d')))
+                            print_field_if(pkt, 'gro_core', '%d'),
+                            print_field_if(pkt, 'priority', '%d')))
 
             if gro_pkts:
                 print('Incoming data packets that have been seen by GRO but '
                         'not yet by SoftIRQ:')
-                print('Offset        Gro         GCore     SoftIRQ        SCore')
+                print('Offset        Gro         GCore     SoftIRQ        '
+                        'SCore Prio')
                 for pkt in gro_pkts:
-                    print('%6d  %7s %9s %5s %7s %8s %7s' % (
-                            pkt['offset'], print_field_if(pkt, 'gro', '%7.1f'),
-                            print_field_if(pkt, 'gro', '(%7.1f)',
+                    print('%6d  %7s %9s %5s %7s %8s %7s %4s' % (
+                            pkt['offset'], print_field_if(pkt, 'gro', '%.1f'),
+                            print_field_if(pkt, 'gro', '(%.1f)',
                                      lambda t : t - options.time),
-                            print_field_if(pkt, 'gro_core', '%3d'),
-                            print_field_if(pkt, 'softirq', '%7.1f'),
-                            print_field_if(pkt, 'softirq', '(%6.1f)',
+                            print_field_if(pkt, 'gro_core', '%d'),
+                            print_field_if(pkt, 'softirq', '%.1f'),
+                            print_field_if(pkt, 'softirq', '(%.1f)',
                                      lambda t : t - options.time),
-                            print_field_if(pkt, 'softirq_core', '%3d')))
+                            print_field_if(pkt, 'softirq_core', '%d'),
+                            print_field_if(pkt, 'priority', '%d')))
 
             if net_grants:
                 print('Outgoing grants that have been passed to ip*xmit but '
                         'not received by GRO:')
-                print('Offset      Xmit           TxCore       Gro        GCore')
+                print('Offset      Xmit           TxCore       Gro        '
+                        'GCore Prio')
                 for pkt in net_grants:
-                    print('%6d %7s   %-10s  %4s %7s %8s %5s' % (
-                            pkt['offset'], print_field_if(pkt, 'xmit', '%7.1f'),
-                            print_field_if(pkt, 'xmit', '(%7.1f)',
+                    print('%6d %7s   %-10s  %4s %7s %8s %5s %4s' % (
+                            pkt['offset'], print_field_if(pkt, 'xmit', '%.1f'),
+                            print_field_if(pkt, 'xmit', '(%.1f)',
                                      lambda t : t - options.time ),
-                            print_field_if(pkt, 'tx_core', '%4d'),
-                            print_field_if(pkt, 'gro', '%7.1f'),
-                            print_field_if(pkt, 'gro', '(%6.1f)',
+                            print_field_if(pkt, 'tx_core', '%d'),
+                            print_field_if(pkt, 'gro', '%.1f'),
+                            print_field_if(pkt, 'gro', '(%.1f)',
                                      lambda t : t - options.time),
-                            print_field_if(pkt, 'gro_core', '%3d')))
+                            print_field_if(pkt, 'gro_core', '%d'),
+                            print_field_if(pkt, 'priority', '%d')))
             if gro_grants:
                 print('Outgoing grants that have been seen by GRO but not '
                         'yet by SoftIRQ:')
-                print('Offset        Gro         GCore     SoftIRQ        SCore')
+                print('Offset        Gro         GCore     SoftIRQ        '
+                        'SCore Prio')
                 for pkt in gro_grants:
-                    print('%6d  %7s %9s %5s %7s %8s %7s' % (
-                            pkt['offset'], print_field_if(pkt, 'gro', '%7.1f'),
-                            print_field_if(pkt, 'gro', '(%7.1f)',
+                    print('%6d  %7s %9s %5s %7s %8s %7s %4s' % (
+                            pkt['offset'], print_field_if(pkt, 'gro', '%.1f'),
+                            print_field_if(pkt, 'gro', '(%.1f)',
                                      lambda t : t - options.time),
-                            print_field_if(pkt, 'gro_core', '%3d'),
-                            print_field_if(pkt, 'softirq', '%7.1f'),
-                            print_field_if(pkt, 'softirq', '(%6.1f)',
+                            print_field_if(pkt, 'gro_core', '%d'),
+                            print_field_if(pkt, 'softirq', '%.1f'),
+                            print_field_if(pkt, 'softirq', '(%.1f)',
                                      lambda t : t - options.time),
-                            print_field_if(pkt, 'softirq_core', '%3d')))
+                            print_field_if(pkt, 'softirq_core', '%d'),
+                            print_field_if(pkt, 'priority', '%d')))
 
 #------------------------------------------------
 # Analyzer: smis
@@ -13416,6 +13898,9 @@ parser.add_option('--no-update', action='store_false', default=True,
 parser.add_option('--node', dest='node', default=None,
         metavar='N', help='Specifies a particular node (the name of its '
         'trace file without the extension); required by some analyzers')
+parser.add_option('--pid', dest='pid', type=int, default=None,
+        metavar='P', help='Process identifier; used by some analyzers to '
+        'select a particular process.')
 parser.add_option('--pkt', dest='pkt', default=None,
         metavar='ID:OFF', help='Identifies a specific packet with ID:OFF, '
         'where ID is the RPC id on the sender (even means request message, '
