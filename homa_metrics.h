@@ -630,6 +630,12 @@ struct homa_metrics {
 	u64 grant_lock_misses;
 
 	/**
+	 * @grant_locks: total number of times that the grant lock was
+	 * successfully locked.
+	 */
+	u64 grant_locks;
+
+	/**
 	 * @grantable_rpcs_integral: cumulative sum of time_delta*grantable,
 	 * where time_delta is in nanoseconds and grantable is the value of
 	 * homa->num_grantable_rpcs over that time period.
@@ -643,29 +649,10 @@ struct homa_metrics {
 	u64 grant_check_calls;
 
 	/**
-	 * @grant_check_locked: cumulative number of times an invocation of
-	 * homa_grant_check_rpc acquired the grant lock at least once.
+	 * @needy_grants: cumulative number of times that a grant was
+	 * sent by homa_grant_check_needy.
 	 */
-	u64 grant_check_locked;
-
-	/**
-	 * @grant_check_recalcs: cumulative number of times that
-	 * homa_grant_check_rpc verified and/or adjusted the priority of
-	 * active RPCs.
-	 */
-	u64 grant_check_recalcs;
-
-	/**
-	 * @grant_check_others: cumulative number of times homa_grant_check_rpc
-	 * checked other RPCs besides the invoking one for potential grants.
-	 */
-	u64 grant_check_others;
-
-	/**
-	 * @grant_priority_bumps: cumulative number of times the grant priority
-	 * of an RPC has increased above its next-higher-priority neighbor.
-	 */
-	u64 grant_priority_bumps;
+	u64 needy_grants;
 
 	/**
 	 * @fifo_grant_bytes: total number of bytes of grants issued via

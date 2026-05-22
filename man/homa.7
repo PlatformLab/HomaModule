@@ -596,17 +596,6 @@ of the bandwidth is for FIFO and 90% for SRPT). As of October 2020, a small
 value can provide significant benefits for the largest messages under very high
 loads, but for most loads its effect is negligible.
 .TP
-.IR grant_recalc_usecs
-How frequently (in microseconds) to scan the RPCs currently receiving grants
-to see if the priority order is still correct. The order can become incorrect
-if enough data is arrives for a low-priority RPC so that it now has fewer bytes
-left to grant than other RPCs that currently have higher priority.
-Validating the order requires the global grant lock, so checking every time data
-arrives would risk severe lock contention. Instead, the order is only checked
-every
-.I grant_recalc_usecs
-microseconds.
-.TP
 .I gro_busy_usecs
 An integer value used to determine whether or not to perform some
 optimizations specified by
@@ -707,17 +696,6 @@ messages to which Homa will issue grants at any given time. Higher
 numbers generally improve link bandwidth utilization, but can result
 in more buffering and may affect tail latency if there are not many
 priority levels available. Must be at least 1.
-.TP
-.IR max_rpcs_per_peer
-In Homa's original design, if there were multiple incoming RPCs from the
-same peer, Homa would only send grants to the highest-priority of them. The
-thought was that this RPC could consume all of the link bandwidth at both
-sender and receiver, so there would be no point in granting to additional RPCs
-from that peer. However, with faster networks, it isn't currently
-possible for Homa to saturate a link with a single RPC. Homa will now
-grant to multiple RPCs from the same peer; this integer value limits
-the number of active RPCs from a single peer that Homa will grant at
-once.
 .TP
 .IR max_sched_prio
 (Read-only) An integer value specifying the highest priority level that Homa

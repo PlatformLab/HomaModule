@@ -2,6 +2,22 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+71. (May 2026) Changed grant mechanism to maintain active_rpcs as an unsorted
+array, which means it must be scanned to make decisions based on grant
+priority. Here is the cost of those scans, measured running cp_vs_tcp -w4
+on c6620 machines (the difference between "median" and "min" times shows
+the cost of cache misses when the system is under load):
+
+homa_grant_find_victim:
+  full scan:                           min 18 ns, median 200 ns
+  found empty slot:                    min 17 ns, median 140 ns
+
+priority scan in homa_grant_try_send:  min 17 ns, median 90 ns
+
+homa_grant_insert_grantable:
+  insert in peer list:                 min 17 ns, median 36 ns
+  adjust peer position:                min 18 ns, median 120 ns
+
 71. (April 2026) Compared xl170 and c6620 for cp_node benchmarks. Timeline
 for short messages:
 

@@ -289,11 +289,11 @@ void homa_rpc_end(struct homa_rpc *rpc)
 
 #ifndef __STRIP__ /* See strip.py */
 	/* The following line must occur before the socket is locked. This is
-	 * necessary because homa_grant_end_rpc releases the RPC lock and
-	 * reacquires it.
+	 * necessary because homa_grant_unmanage_rpc may releases the RPC lock
+	 * and reacquire it.
 	 */
 	if (rpc->msgin.length >= 0)
-		homa_grant_end_rpc(rpc);
+		homa_grant_unmanage_rpc(rpc);
 #endif /* See strip.py */
 
 	/* Unlink from all lists, so no-one will ever find this RPC again. */

@@ -49,6 +49,9 @@ FIXTURE_SETUP(homa_rpc)
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
+	self->homa.grant->window_param = 10000;
+	self->homa.grant->fifo_fraction = 0;
+	homa_grant_update_sysctl_deps(self->homa.grant);
 #endif /* See strip.py */
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	memset(&self->data, 0, sizeof(self->data));

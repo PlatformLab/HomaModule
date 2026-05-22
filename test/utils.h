@@ -66,7 +66,7 @@ void         unit_sock_destroy(struct homa_sock *hsk);
 void         unit_teardown(void);
 
 #ifndef __STRIP__ /* See strip.py */
-void         unit_log_grantables(struct homa *homa);
+const char  *unit_log_grantables(struct homa *homa);
 void         unit_log_throttled(struct homa *homa);
 #endif /* See strip.py */
 

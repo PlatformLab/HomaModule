@@ -133,7 +133,7 @@ struct homa_peer {
 	 * @refs: Number of outstanding references to this peer. Includes
 	 * one reference for the entry in peertab->ht, plus one for each
 	 * call to homa_peer_get that has not been canceled by a call to
-	 * homa_peer_release; the peer gets freed when this value becomes
+	 * homa_peer_release; the peer can be freed when this value becomes
 	 * zero.
 	 */
 	refcount_t refs;

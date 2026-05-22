@@ -737,7 +737,7 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 	if (rpc->state == RPC_INCOMING) {
 		int received = rpc->msgin.length
 				- rpc->msgin.bytes_remaining;
-		int rank;
+		int active_ix;
 
 		tt_record4("Incoming RPC id %d, peer 0x%x, %d/%d bytes received",
 			   rpc->id, tt_addr(rpc->peer->addr),
@@ -745,13 +745,13 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 #ifndef __STRIP__
 		tt_record3("RPC id %d has incoming %d, granted %d", rpc->id,
 			   rpc->msgin.granted - received, rpc->msgin.granted);
-		rank = rpc->msgin.rank;
+		active_ix = rpc->msgin.active_ix;
 #else /* __STRIP__ */
-		rank = -1;
+		active_ix = -1;
 #endif /* __STRIP__ */
-		tt_record4("RPC id %d: length %d, remaining %d, rank %d",
+		tt_record4("RPC id %d: length %d, remaining %d, active_ix %d",
 			   rpc->id, rpc->msgin.length,
-			   rpc->msgin.bytes_remaining, rank);
+			   rpc->msgin.bytes_remaining, active_ix);
 		if (rpc->msgin.num_bpages == 0) {
 			tt_record1("RPC id %d is blocked waiting for buffers",
 				   rpc->id);

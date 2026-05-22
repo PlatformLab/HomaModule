@@ -201,23 +201,26 @@ void unit_log_frag_list(struct sk_buff *skb, int verbose)
 
 #ifndef __STRIP__ /* See strip.py */
 /**
- * unit_log_grantables() - Append to the test log information about all of
- * the messages under grant->grantable_peers.
+ * unit_log_grantables() - Clear the test log and append information about
+ * all of the messages under grant->grantable_peers.
  * @homa:     Homa's overall state.
+ * Return:    The value of unit_log_get().
  */
-void unit_log_grantables(struct homa *homa)
+const char *unit_log_grantables(struct homa *homa)
 {
 	struct homa_peer *peer;
 	struct homa_rpc *rpc;
 	int i;
 
-	for (i = 0; i < homa->grant->num_active_rpcs; i++) {
-		rpc = homa->grant->active_rpcs[i];
-		unit_log_printf("; ", "active[%d]: id %llu ungranted %d",
-				i, rpc->id,
-				rpc->msgin.length - rpc->msgin.granted);
-		if (rpc->msgin.rank != i) {
-			unit_log_printf(" ", "bad rank %d", rpc->msgin.rank);
+	unit_log_clear();
+	for (i = 0; i < HOMA_MAX_GRANTS; i++) {
+		rpc = homa->grant->active_rpcs[i].rpc;
+		if (!rpc)
+			continue;
+		unit_log_printf("; ", "active[%d]: id %llu remaining %d",
+				i, rpc->id, rpc->msgin.bytes_remaining);
+		if (rpc->msgin.active_ix != i) {
+			unit_log_printf(" ", "bad rank %d", rpc->msgin.active_ix);
 		}
 	}
 	list_for_each_entry(peer, &homa->grant->grantable_peers,
@@ -226,11 +229,11 @@ void unit_log_grantables(struct homa *homa)
 				homa_print_ipv6_addr(&peer->addr));
 		list_for_each_entry(rpc, &peer->grantable_rpcs,
 				grantable_links) {
-			unit_log_printf(" ", "id %llu ungranted %d",
-					rpc->id,
-					rpc->msgin.length - rpc->msgin.granted);
+			unit_log_printf(" ", "id %llu remaining %d",
+					rpc->id, rpc->msgin.bytes_remaining);
 		}
 	}
+	return unit_log_get();
 }
 #endif /* See strip.py */
 

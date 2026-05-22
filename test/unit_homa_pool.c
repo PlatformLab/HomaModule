@@ -25,6 +25,7 @@ FIXTURE_SETUP(homa_pool)
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
+	self->homa.grant->fifo_fraction = 0;
 #endif /* See strip.py */
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
@@ -703,7 +704,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
 	EXPECT_EQ(2, pool->bpages_needed);
-	EXPECT_EQ(-1, crpc->msgin.rank);
+	EXPECT_EQ(-1, crpc->msgin.active_ix);
 
 	/* Free the required pages. */
 	unit_log_clear();
@@ -711,7 +712,6 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 	homa_pool_check_waiting(pool);
 	EXPECT_EQ(2, crpc->msgin.num_bpages);
 	EXPECT_STREQ("xmit RESEND 0--2@6", unit_log_get());
-	EXPECT_EQ(0, crpc->msgin.rank);
 }
 TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_only_one_priority_level)
 {
@@ -734,7 +734,6 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_only_one_priority
 	atomic_set(&pool->free_bpages, 2);
 	homa_pool_check_waiting(pool);
 	EXPECT_EQ(2, crpc->msgin.num_bpages);
-	EXPECT_EQ(0, crpc->msgin.rank);
 	EXPECT_STREQ("xmit RESEND 0--2@0", unit_log_get());
 }
 TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_no_need_for_grants)
@@ -750,7 +749,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_no_need_for_grant
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
 	EXPECT_EQ(1, pool->bpages_needed);
-	EXPECT_EQ(-1, crpc->msgin.rank);
+	EXPECT_EQ(-1, crpc->msgin.active_ix);
 
 	/* Free the required pages. */
 	unit_log_clear();
@@ -758,7 +757,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_no_need_for_grant
 	homa_pool_check_waiting(pool);
 	EXPECT_EQ(1, crpc->msgin.num_bpages);
 	EXPECT_STREQ("xmit RESEND 0--2@6", unit_log_get());
-	EXPECT_EQ(-1, crpc->msgin.rank);
+	EXPECT_EQ(-1, crpc->msgin.active_ix);
 }
 #endif /* See strip.py */
 TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)

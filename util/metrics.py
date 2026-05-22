@@ -405,7 +405,7 @@ if elapsed_secs != 0:
     pacer_bytes = deltas["pacer_homa_bytes"] + deltas["pacer_tcp_bytes"]
     if pacer_bytes != 0:
         print("\nPacer:")
-        print("--------")
+        print("------")
         if packets_sent > 0:
             print("Homa packets sent:              %5.3f M/sec (%.1f %% of all Homa packets)" %
                     (1e-6*deltas["pacer_homa_packets"]/elapsed_secs,
@@ -436,6 +436,36 @@ if elapsed_secs != 0:
                 (100*xmit_secs/elapsed_secs,
                 1e6*xmit_secs/(deltas["pacer_homa_packets"] +
                 deltas["pacer_tcp_packets"])))
+
+    if deltas["packets_sent_GRANT"] > 0:
+        print("\nGrants:")
+        print("-------")
+        print("Grant packets sent:      %s/s" %
+                    (scale_number(deltas["packets_sent_GRANT"]/elapsed_secs)))
+        print("Needy grants sent:       %s/s (%.1f %% of all grants)" %
+                    (scale_number(deltas["needy_grants"]/elapsed_secs),
+                    100 * deltas["needy_grants"]/deltas["packets_sent_GRANT"]))
+        if deltas["grant_check_calls"] != 0:
+            pct = 100  *deltas["grant_locks"]/deltas["grant_check_calls"]
+        else:
+            pct = 0
+        print("Grant lock acquisitions: %s/s (%.1f %% of homa_grant_check_rpc calls)" %
+                    (scale_number(deltas["grant_locks"]/elapsed_secs), pct))
+        if deltas["grant_locks"] != 0:
+            pct = 100 * deltas["grant_lock_misses"]/deltas["grant_locks"]
+        else:
+            pct = 0
+        print("Grant lock misses:       %s/s (%.1f %% of acquisitions)"
+                    % (scale_number(deltas["grant_lock_misses"]/elapsed_secs),
+                    pct))
+        if deltas["grant_locks"] != 0:
+            usecs_per = (float(deltas["grant_lock_cycles"])/
+                    (cpu_khz / 1000.0)/deltas["grant_locks"])
+        else:
+            usecs_per = 0
+        print("Time holding grant lock: %5.1f%%    (%.2f usec/acquisition)"
+                    % (100.0*deltas["grant_lock_cycles"]/time_delta,
+                    usecs_per))
 
     print("\nMiscellaneous:")
     print("--------------")
