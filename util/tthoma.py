@@ -2191,16 +2191,6 @@ class Dispatcher:
         'regexp': 'homa_wait_[^ ]+ found rpc id ([0-9]+).* via ([a-z_]+), blocked ([0-9]+)'
     })
 
-    def __poll_success(self, trace, time, core, match, interests):
-        id = int(match.group(1))
-        for interest in interests:
-            interest.tt_poll_success(trace, time, core, id)
-
-    patterns.append({
-        'name': 'poll_success',
-        'regexp': 'received RPC handoff while polling, id ([0-9]+)'
-    })
-
     def __resend_tx(self, trace, time, core, match, interests):
         id = int(match.group(1))
         peer = match.group(2)
@@ -3655,10 +3645,6 @@ class AnalyzeDelay:
         # (for response messages, i.e. on client)
         self.app_queue_rsp_wakeups = []
 
-        # An entry exists for RPC id if a handoff occurred while a
-        # thread was polling
-        self.poll_success = {}
-
     def init_trace(self, trace):
         # Target core id -> list of times when gro chose that core but
         # SoftIRQ hasn't yet woken up
@@ -3680,9 +3666,6 @@ class AnalyzeDelay:
                     (id, trace['node'], self.rpc_handoffs[id], time),
                     file=sys.stderr)
         self.rpc_handoffs[id] = time
-
-    def tt_poll_success(self, trace, time, core, id):
-        self.poll_success[id] = time
 
     def tt_rpc_queued(self, trace, time, core, id, port):
         self.rpc_queued[id] = time
