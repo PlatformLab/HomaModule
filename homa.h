@@ -321,7 +321,7 @@ struct homa_info {
 	 * or ioctl. Not updated for some obvious return values such as EINTR
 	 * or EWOULDBLOCK.
 	 */
-#define HOMA_ERROR_MSG_SIZE 100
+#define HOMA_ERROR_MSG_SIZE 104
 	char error_msg[HOMA_ERROR_MSG_SIZE];
 };
 
