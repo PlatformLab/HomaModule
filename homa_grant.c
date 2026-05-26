@@ -11,6 +11,64 @@
 #include "homa_rpc.h"
 #include "homa_wire.h"
 
+/* DESIGN NOTES:
+ * 1. Avoid global lock. The simplest way to implement granting is to
+ *    acquire a global lock every time any grant decision is made. Homa
+ *    was originally implemented this way, but the grant lock suffered
+ *    from high contention (and its gets worse with faster networks).
+ *
+ *    This module has been reimplemented several times to reduce usage
+ *    of the global lock. Unfortunately that tends to result in high
+ *    complexity and subtle bugs.
+ *
+ *    The current approach divides grantable RPCs into two groups: the
+ *    highest priority RPCS, which are eligible to receive grants at the
+ *    current time (called "active"), and lower priority RPCs that may not
+ *    receive grants right now. The number of active RPCs is limited by the
+ *    "max_overcommit" parameter. The active RPCs are kept in a small
+ *    array (@active_rpcs) in no particular order; the inactive ones are
+ *    kept in two-level list structure, ordered by priority.
+ *
+ *    The grant lock must be held when moving RPCs into or out of
+ *    @active_rpcs, or when manipulating the lists of low-priority RPCs.
+ *    But grants can be issued to the active RPCs (the fast path) without
+ *    holding the grant lock.
+ *
+ * 2. Racy scans. @active_rpcs is not kept in sorted order (the order can
+ *    change frequently as packets arrive, and re-ordering would require
+ *    the grant lock). Instead, several operations must scan all of the
+ *    entries in @active_rpcs (e.g., to decide what priority level to
+ *    use in an outgoing grant).  The size of @active_rpcs is relatively
+ *    small, so this is not very expensive. However, fast-path operations
+ *    do the scanning without holding the grant lock, which means that
+ *    @active_rpcs could be undergoing updates as it is being scanned.
+ *    These racy scans tolerate concurrent updates: the worst that can
+ *    happen is for a suboptimal priority to be used in a grant.
+ *
+ * 3. Locking issues. Several operations require both the grant lock and
+ *    and an RPC lock. The locking order requires that the grant lock
+ *    be acquired first, but it is often the case that an RPC lock
+ *    is already held when a need for the grant lock arises. When this
+ *    happens the RPC lock may have to be temporarily dropped while
+ *    acquiring the grant lock.
+ *
+ *    Anytime that the lock on an RPC is not held, some other entity could
+ *    acquire the lock and end the RPC. Once that has happened, we must
+ *    be very careful not to perform any state updates that undo the
+ *    cleanups performed by homa_rpc_end.
+ *
+ *    Unfortunately there are quite a few places in this module where RPC
+ *    locks get released and reacquired. Rather than trying to deal with
+ *    dead RPCs everywhere an RPC lock is acquired, we assume that an RPC
+ *    could be dead at any point. Any state change that is disallowed for
+ *    dead RPCs (such as adding to @active_rpcs or the priority queues, or
+ *    updating @rec_incoming in an RPC) must skip its updates if that is the
+ *    case. This code can be found by searching for places whrere the
+ *    RPC_GRANTABLE flag is tested; this flag gets turned off when an
+ *    RPC is ended. Note that code that removes an RPC from the granting
+ *    structures is safe even after death, so no checks are needed there.
+ */
+
 #ifndef __STRIP__ /* See strip.py */
 /* Used to enable sysctl access to grant-specific configuration parameters. The
  * @data fields are actually offsets within a struct homa_grant; these are
@@ -28,13 +86,6 @@ static struct ctl_table grant_ctl_table[] = {
 	{
 		.procname	= "grant_fifo_fraction",
 		.data		= OFFSET(fifo_fraction),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_grant_dointvec
-	},
-	{
-		.procname	= "grant_recalc_usecs",
-		.data		= OFFSET(recalc_usecs),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_grant_dointvec
@@ -61,13 +112,6 @@ static struct ctl_table grant_ctl_table[] = {
 		.proc_handler	= homa_grant_dointvec
 	},
 	{
-		.procname	= "max_rpcs_per_peer",
-		.data		= OFFSET(max_rpcs_per_peer),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_grant_dointvec
-	},
-	{
 		.procname	= "window",
 		.data		= OFFSET(window_param),
 		.maxlen		= sizeof(int),
@@ -88,19 +132,21 @@ struct homa_grant *homa_grant_alloc(struct homa *homa)
 {
 	struct homa_grant *grant;
 	int err;
+	int i;
 
 	grant = kzalloc(sizeof(*grant), GFP_KERNEL);
 	if (!grant)
 		return ERR_PTR(-ENOMEM);
-	grant->homa = homa;
-	atomic_set(&grant->stalled_rank, INT_MAX);
-	grant->max_incoming = 400000;
 	spin_lock_init(&grant->lock);
+	grant->lock_time = homa_clock();
 	INIT_LIST_HEAD(&grant->grantable_peers);
-	grant->window_param = 10000;
-	grant->max_rpcs_per_peer = 1;
+	for (i = 0; i < HOMA_MAX_GRANTS; i++)
+		grant->active_remaining[i] = -1;
+	grant->last_grantable_change = grant->lock_time;
+	grant->homa = homa;
+	grant->max_incoming = 400000;
+	grant->window_param = 0;
 	grant->max_overcommit = 8;
-	grant->recalc_usecs = 20;
 	grant->fifo_grant_increment = 50000;
 	grant->fifo_fraction = 50;
 
@@ -114,7 +160,6 @@ struct homa_grant *homa_grant_alloc(struct homa *homa)
 	}
 #endif /* See strip.py */
 	homa_grant_update_sysctl_deps(grant);
-	grant->next_recalc = homa_clock() + grant->recalc_cycles;
 	return grant;
 
 error:
@@ -149,65 +194,59 @@ void homa_grant_free(struct homa_grant *grant)
 void homa_grant_init_rpc(struct homa_rpc *rpc, int unsched)
 	__must_hold(rpc->bucket->lock)
 {
-	rpc->msgin.rank = -1;
+	rpc->msgin.active_ix = -1;
 	if (unsched >= rpc->msgin.length)
 		unsched = rpc->msgin.length;
+	else
+		set_bit(RPC_GRANTABLE, &rpc->flags);
 	rpc->msgin.granted = unsched;
 	rpc->msgin.prev_grant = unsched;
 }
 
 /**
- * homa_grant_end_rpc() - This function is invoked when homa_rpc_end is
- * invoked; it cleans up any state related to grants for that RPC's
- * incoming message.
- * @rpc:   The RPC to clean up. Must be locked by the caller. This function
- *         may release and then reacquire the lock.
+ * homa_grant_add_active() - Insert an RPC into @active_rpcs.
+ * @grant:  Grant data containing @active_rpcs.
+ * @rpc:    RPC to insert.
+ * @slot:   Slot in @active_rpcs in which to insert @rpc.
+ * Return: NULL if there was room to insert @rpc without ejecting any other
+ *         RPC. Otherwise, returns an RPC that must be added to
+ *         homa->grantable_peers (could be either @rpc or some other RPC
+ *         that @rpc displaced).
  */
-void homa_grant_end_rpc(struct homa_rpc *rpc)
+void homa_grant_add_active(struct homa_grant *grant, struct homa_rpc *rpc,
+			   int slot)
+	__must_hold(grant->lock)
 	__must_hold(rpc->bucket->lock)
 {
-	struct homa_grant *grant = rpc->hsk->homa->grant;
-	struct homa_grant_candidates cand;
-
-	if (rpc->msgin.granted < rpc->msgin.length) {
-		homa_grant_cand_init(&cand);
-		homa_grant_unmanage_rpc(rpc, &cand);
-		if (!homa_grant_cand_empty(&cand)) {
-			homa_rpc_unlock(rpc);
-			homa_grant_cand_check(&cand, grant);
-			homa_rpc_lock(rpc);
-		}
-	}
-
-	if (rpc->msgin.rec_incoming != 0) {
-		atomic_sub(rpc->msgin.rec_incoming, &grant->total_incoming);
-		rpc->msgin.rec_incoming = 0;
-	}
+	if (!test_bit(RPC_GRANTABLE, &rpc->flags))
+		return;
+	grant->active_rpcs[slot].rpc = rpc;
+	grant->active_rpcs[slot].peer = rpc->peer;
+	grant->active_rpcs[slot].birth = rpc->msgin.birth;
+	grant->active_remaining[slot] = rpc->msgin.bytes_remaining;
+	rpc->peer->active_rpcs++;
+	grant->num_active++;
+	grant->window = grant->windows[grant->num_active];
+	rpc->msgin.active_ix = slot;
 }
 
 /**
- * homa_grant_window() - Return the window size (maximum number of granted
- * but not received bytes for a message) given current conditions.
- * @grant:     Overall information for grant management.
- * Return:     See above.
+ * homa_grant_remove_active() - Remove an RPC from active_rpcs.
+ * @grant:  Overall grant information.
+ * @slot:   Index of slot in @active_rpcs that should be vacated. Must
+ *          currently be occupied.
  */
-int homa_grant_window(struct homa_grant *grant)
+void homa_grant_remove_active(struct homa_grant *grant, int slot)
+	__must_hold(grant->lock)
+	__must_hold(rpc->bucket->lock)
 {
-	u64 window;
-
-	window = grant->window_param;
-	if (window == 0) {
-		/* Dynamic window sizing uses the approach described in the
-		 * paper "Dynamic Queue Length Thresholds for Shared-Memory
-		 * Packet Switches" with an alpha value of 1. The idea is to
-		 * maintain unused incoming capacity (for new RPC arrivals)
-		 * equal to the amount of incoming allocated to each of the
-		 * current RPCs.
-		 */
-		window = grant->max_incoming;
-		do_div(window, grant->num_active_rpcs + 1);
-	}
-	return window;
+	grant->active_rpcs[slot].rpc->msgin.active_ix = -1;
+	grant->active_rpcs[slot].rpc = NULL;
+	grant->active_rpcs[slot].peer->active_rpcs--;
+	grant->active_remaining[slot] = -1;
+	grant->num_active--;
+	grant->window = grant->windows[grant->num_active];
+	clear_bit(slot, &grant->needy_active);
 }
 
 /**
@@ -220,23 +259,35 @@ int homa_grant_window(struct homa_grant *grant)
  */
 int homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
 {
-	/* Fewest ungranted bytes is the primary criterion; if those are
-	 * equal, then favor the older RPC.
+	/* The primary criterion is number of unreceived bytes in the
+	 * message. Secondary choice is message age (so "full size" messages
+	 * will be received in FIFO order).
+	 *
+	 * An earlier version of Homa used ungranted bytes instead of
+	 * unreceived bytes, but this resulted in priority inversion:
+	 * - Message A arrives from a host with length 1000000; 800000 bytes
+	 *   are granted immediately, leaving 200000 ungranted
+	 * - Message B arrives from the same host with length 400000, of which
+	 *   300000 bytes are ungranted.
+	 * - If there is room for only one active message from that host,
+	 *   it will be message A.
+	 * - As a result, message B won't be granted until message A completes;
+	 *   if the sender's SRPT mechanism chooses not to transmit A, then
+	 *   B won't be transmitted either.
 	 */
-	int grant_diff;
+	int rem_diff;
 
-	grant_diff = (rpc1->msgin.length - rpc1->msgin.granted) -
-		     (rpc2->msgin.length - rpc2->msgin.granted);
-	return grant_diff < 0 || ((grant_diff == 0) &&
-				  (rpc1->msgin.birth < rpc2->msgin.birth));
+	rem_diff = rpc1->msgin.bytes_remaining - rpc2->msgin.bytes_remaining;
+	return rem_diff < 0 || ((rem_diff == 0) &&
+				(rpc1->msgin.birth < rpc2->msgin.birth));
 }
 
 /**
  * homa_grant_priority() - Return the appropriate priority to use in a
  * grant for an incoming message.
  * @homa:     Overall information about the Homa transport.
- * @rank:     Position of the message's RPC in active_rpcs (lower means
- *            higher priority).
+ * @rank:     The number of RPCs with higher grant priority than the
+ *            RPC being granted.
  * Return:    See above.
  */
 int homa_grant_priority(struct homa *homa, int rank)
@@ -249,92 +300,81 @@ int homa_grant_priority(struct homa *homa, int rank)
 	 */
 	max_sched_prio = homa->max_sched_prio;
 	priority = max_sched_prio - rank;
-	extra_levels = max_sched_prio + 1 - homa->grant->num_active_rpcs;
+	extra_levels = max_sched_prio + 1 - homa->grant->num_active;
 	if (extra_levels >= 0)
 		priority -= extra_levels;
 	return (priority < 0) ? 0 : priority;
 }
 
 /**
- * homa_grant_insert_active() - Try to insert an RPC in homa->active_rpcs.
- * @rpc:   RPC to insert (if possible).
- * Return: NULL if there was room to insert @rpc without ejecting any other
- *         RPC. Otherwise, returns an RPC that must be added to
- *         homa->grantable_peers (could be either @rpc or some other RPC
- *         that @rpc displaced).
+ * homa_grant_find_victim() - Scan the RPCs in @active_rpcs to identify
+ * a slot to use for a new RPC.
+ * @grant:      Overall information about grants
+ * @rpc:        RPC that is being proposed for insertion into @active_rpcs
+ * Return:      Index of a slot to replace (which may be empty), or -1 if
+ *              all slots are in use and all have prioritiy greater than @rpc.
  */
-struct homa_rpc *homa_grant_insert_active(struct homa_rpc *rpc)
-	__must_hold(rpc->hsk->homa->grant->lock)
+int homa_grant_find_victim(struct homa_grant *grant, struct homa_rpc *rpc)
+	__must_hold(grant->lock)
 {
-	struct homa_grant *grant = rpc->hsk->homa->grant;
-	struct homa_rpc *other, *result;
-	int insert_after;
-	int last_to_copy;
-	int peer_index;
-	int i;
+	int lp, lp_remaining, i, cand_remaining;
+	int lp_peer_active, cand_peer_active;
+	struct homa_peer *cand_peer;
 
-	/* Scan active_rpcs backwards to find the lowest-priority message
-	 * with higher priority than @rpc. Also find the lowest-priority
-	 * message with the same peer as @rpc, if one appears.
+	/* Scan all slots to find the lowest priority one ("lp"), according
+	 * to the following considerations:
+	 * - Prefer an empty slot if available.
+	 * - Prefer slot with lowest SRPT priority.
+	 * - However, if there are peers with multiple RPCs in @active_rpcs,
+	 *   choose a victim from one of the peers with the highest
+	 *   number of RPCs in @active_rpcs.
 	 */
-	insert_after = -1;
-	peer_index = -1;
-	for (i = grant->num_active_rpcs - 1; i >= 0; i--) {
-		other = grant->active_rpcs[i];
-		if (!homa_grant_outranks(rpc, other)) {
-			insert_after = i;
-			break;
-		}
-		if (peer_index < 0 && other->peer == rpc->peer)
-			peer_index = i;
-	}
-
-	if (rpc->peer->active_rpcs >= grant->max_rpcs_per_peer) {
-		if (peer_index <= i)
-			/* All the other RPCs with the same peer are higher
-			 * priority than @rpc and we can't have any more RPCs
-			 * with the same peer, so bump @rpc.
+	lp = -1;
+	lp_peer_active = 0;
+	for (i = 0; i < grant->max_overcommit; i++) {
+		cand_remaining = READ_ONCE(grant->active_remaining[i]);
+		if (cand_remaining < 0)
+			return i;
+		cand_peer = grant->active_rpcs[i].peer;
+		cand_peer_active = cand_peer->active_rpcs;
+		if (cand_peer == rpc->peer)
+			/* This increment reflects the state if both this
+			 * RPC and @rpc are active.
 			 */
-			return rpc;
-
-		/* Bump the lowest priority RPC from the same peer to make room
-		 * for the new RPC. @rpc will be in a slot with lower index
-		 * (higher priority) than the bumped one.
-		 */
-		result = grant->active_rpcs[peer_index];
-		result->msgin.rank = -1;
-		result->peer->active_rpcs--;
-		last_to_copy = peer_index - 1;
-	} else {
-		if (insert_after >= grant->max_overcommit - 1)
-			/* active_rpcs is full and @rpc is too low priority;
-			 * bump it.
-			 */
-			return rpc;
-
-		if (grant->num_active_rpcs >= grant->max_overcommit) {
-			result = grant->active_rpcs[grant->num_active_rpcs - 1];
-			result->msgin.rank = -1;
-			result->peer->active_rpcs--;
-			last_to_copy = grant->num_active_rpcs - 2;
-		} else {
-			result = NULL;
-			last_to_copy = grant->num_active_rpcs - 1;
-			grant->num_active_rpcs++;
+			cand_peer_active++;
+		if (cand_peer_active != lp_peer_active) {
+			if (cand_peer_active > lp_peer_active) {
+				lp = i;
+				lp_peer_active = cand_peer_active;
+				lp_remaining = cand_remaining;
+			}
+			continue;
 		}
+		if (lp_remaining > cand_remaining)
+			continue;
+		if ((lp_remaining == cand_remaining) &&
+		    (grant->active_rpcs[lp].birth >
+		     grant->active_rpcs[i].birth))
+			continue;
+		lp = i;
+		lp_peer_active = cand_peer_active;
+		lp_remaining = cand_remaining;
 	}
 
-	/* Move existing RPCs in active_rpcs down to make room for @rpc. */
-	for (i = last_to_copy; i > insert_after; i--) {
-		other = grant->active_rpcs[i];
-		other->msgin.rank = i + 1;
-		grant->active_rpcs[i + 1] = other;
-	}
-	grant->active_rpcs[insert_after + 1] = rpc;
-	rpc->msgin.rank = insert_after + 1;
-	rpc->peer->active_rpcs++;
-
-	return result;
+	/* We now have a non-empty "lp" slot; see if it has lower priority
+	 * than @rpc. Note: when we get here, lp can't have a smaller
+	 * peer_active than rpc (if it did, we would have chosen a
+	 * different lp).
+	 */
+	if (lp_peer_active > (rpc->peer->active_rpcs + 1))
+		return lp;
+	if ((grant->active_remaining[lp] > rpc->msgin.bytes_remaining))
+		return lp;
+	if (grant->active_remaining[lp] < rpc->msgin.bytes_remaining)
+		return -1;
+	if ((grant->active_rpcs[lp].birth > rpc->msgin.birth))
+		return lp;
+	return -1;
 }
 
 /**
@@ -406,15 +446,18 @@ void homa_grant_adjust_peer(struct homa_grant *grant, struct homa_peer *peer)
 /**
  * homa_grant_insert_grantable() - Insert an RPC into the grantable list
  * for its peer.
+ * @grant:  Overall grant management information.
  * @rpc:    The RPC to add. Must not currently be in either active_rpcs
  *          or grantable_peers.
  */
-void homa_grant_insert_grantable(struct homa_rpc *rpc)
+void homa_grant_insert_grantable(struct homa_grant *grant, struct homa_rpc *rpc)
 	__must_hold(rpc->hsk->homa->grant->lock)
 {
-	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_peer *peer = rpc->peer;
 	struct homa_rpc *other;
+
+	if (!test_bit(RPC_GRANTABLE, &rpc->flags))
+		return;
 
 	/* Insert @rpc in the right place in the grantable_rpcs list for
 	 * its peer.
@@ -433,51 +476,14 @@ position_peer:
 }
 
 /**
- * homa_grant_manage_rpc() - Insert an RPC into the priority-based data
- * structures for managing grantable RPCs (active_rpcs or grantable_peers).
- * Ensures that the RPC will be sent grants as needed.
- * @rpc:    The RPC to add. Must be locked by caller. May already be
- *          inserted into the grant structures.
- */
-void homa_grant_manage_rpc(struct homa_rpc *rpc)
-	__must_hold(rpc->bucket->lock)
-{
-	struct homa_grant *grant = rpc->hsk->homa->grant;
-	struct homa_rpc *bumped;
-	u64 time = homa_clock();
-
-	homa_grant_lock(grant);
-
-	if (rpc->msgin.rank >= 0 || !list_empty(&rpc->grantable_links)) {
-		homa_grant_unlock(grant);
-		return;
-	}
-
-	INC_METRIC(grantable_rpcs_integral, grant->num_grantable_rpcs *
-		   (time - grant->last_grantable_change));
-	grant->last_grantable_change = time;
-	grant->num_grantable_rpcs++;
-	tt_record2("Incremented num_grantable_rpcs to %d, id %d",
-		   grant->num_grantable_rpcs, rpc->id);
-	if (grant->num_grantable_rpcs > grant->max_grantable_rpcs)
-		grant->max_grantable_rpcs = grant->num_grantable_rpcs;
-
-	bumped = homa_grant_insert_active(rpc);
-	if (bumped)
-		homa_grant_insert_grantable(bumped);
-	grant->window = homa_grant_window(grant);
-
-	homa_grant_unlock(grant);
-}
-
-/**
- * homa_grant_remove_grantable() - Unlink an RPC from the grantable lists,
- * so it will no longer be considered for grants.
+ * homa_grant_remove_grantable() - Unlink an RPC from the grantable lists.
+ * @grant:   Overall information about grants
  * @rpc:     RPC to remove from grantable lists.  Must currently be in
  *           a grantable list.
  */
-void homa_grant_remove_grantable(struct homa_rpc *rpc)
-	__must_hold(rpc->hsk->homa->grant->lock)
+void homa_grant_remove_grantable(struct homa_grant *grant, struct homa_rpc *rpc)
+	__must_hold(grant->lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_peer *peer = rpc->peer;
 	struct homa_rpc *head;
@@ -486,104 +492,262 @@ void homa_grant_remove_grantable(struct homa_rpc *rpc)
 				 struct homa_rpc, grantable_links);
 	list_del_init(&rpc->grantable_links);
 	if (rpc == head)
-		homa_grant_adjust_peer(rpc->hsk->homa->grant, peer);
+		homa_grant_adjust_peer(grant, peer);
 }
 
 /**
- * homa_grant_remove_active() - Remove an RPC from active_rpcs and promote
- * an RPC from grantable_peers if possible.
- * @rpc:    RPC that no longer needs grants. Must have rank > 0.
- * @cand:   If an RPC is promoted into active_rpcs it is added here.
+ * homa_grant_manage_rpc() - Insert an RPC into the priority-based data
+ * structures for managing grantable RPCs (active_rpcs or grantable_peers).
+ * Ensures that the RPC will eventually be sent grants.
+ * @grant:  Overall grant management information.
+ * @rpc:    The RPC to add. Must be locked and referenced by caller. The
+ *          RPC is temporarily unlocked by this function, so it may be
+ *          dead on return.
  */
-void homa_grant_remove_active(struct homa_rpc *rpc,
-			      struct homa_grant_candidates *cand)
-	__must_hold(rpc->hsk->homa->grant->lock)
+void homa_grant_manage_rpc(struct homa_grant *grant, struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
 {
-	struct homa_grant *grant = rpc->hsk->homa->grant;
-	struct homa_peer *peer;
-	struct homa_rpc *other;
-	int i;
+	struct homa_rpc *bumped;
+	u64 time;
+	int slot;
 
-	for (i = rpc->msgin.rank + 1; i < grant->num_active_rpcs; i++) {
-		other = grant->active_rpcs[i];
-		other->msgin.rank = i - 1;
-		grant->active_rpcs[i - 1] = other;
-	}
-	rpc->msgin.rank = -1;
-	rpc->peer->active_rpcs--;
-	grant->num_active_rpcs--;
-	grant->active_rpcs[grant->num_active_rpcs] = NULL;
-
-	/* Pull the highest-priority entry (if there is one) from
-	 * grantable_peers into active_rpcs.
+	homa_rpc_unlock(rpc);
+	/* In this gap, another core can call this function, so that rpc
+	 * is actually managed by the time we acquire the grant lock. In
+	 * addition, rpc can potentially be dead by the time the rpc
+	 * lock is reacquired below.
 	 */
-	list_for_each_entry(peer, &grant->grantable_peers, grantable_links) {
-		if (peer->active_rpcs >= grant->max_rpcs_per_peer)
-			continue;
-		other =	list_first_entry(&peer->grantable_rpcs,
-					 struct homa_rpc,
-					 grantable_links);
-		homa_grant_remove_grantable(other);
-		peer->active_rpcs++;
-		grant->active_rpcs[grant->num_active_rpcs] = other;
-		other->msgin.rank = grant->num_active_rpcs;
-		grant->num_active_rpcs++;
-		homa_grant_cand_add(cand, other);
-		break;
+	homa_grant_lock(grant);
+
+	/* See if there is an active slot available, or if an existing active
+	 * RPC can be demoted.
+	 */
+	slot = homa_grant_find_victim(grant, rpc);
+	if (slot >= 0) {
+		/* If the victim slot was occupied, move its RP
+		 * from @active_rpcs to a grantable list.
+		 */
+		bumped = grant->active_rpcs[slot].rpc;
+		if (bumped) {
+			homa_rpc_lock(bumped);
+			homa_grant_remove_active(grant, slot);
+			homa_grant_insert_grantable(grant, bumped);
+			homa_rpc_unlock(bumped);
+		}
 	}
+	homa_rpc_lock(rpc);
+
+	/* Now that we have both the RPC lock and the grant lock, recheck to
+	 * make sure rpc is still alive and unmanaged.
+	 */
+	if (test_bit(RPC_GRANT_MANAGED, &rpc->flags) ||
+	    !test_bit(RPC_GRANTABLE, &rpc->flags)) {
+		/* There is no need to insert this RPC after all (but if we
+		 * emptied a slot in @active_rpcs we need to refill it).
+		 */
+		if (slot >= 0) {
+			homa_rpc_unlock(rpc);
+			homa_grant_promote_queued(grant, slot);
+			homa_grant_unlock(grant);
+			homa_rpc_lock(rpc);
+		} else {
+			homa_grant_unlock(grant);
+		}
+		return;
+	}
+
+	if (slot >= 0)
+		homa_grant_add_active(grant, rpc, slot);
+	else
+		homa_grant_insert_grantable(grant, rpc);
+	set_bit(RPC_GRANT_MANAGED, &rpc->flags);
+
+	/* Update statistics. */
+	time = homa_clock();
+	INC_METRIC(grantable_rpcs_integral, grant->num_grantable_rpcs *
+		   (time - grant->last_grantable_change));
+	grant->last_grantable_change = time;
+	grant->num_grantable_rpcs++;
+	tt_record2("Incremented num_grantable_rpcs to %d, id %d",
+		   grant->num_grantable_rpcs, rpc->id);
+	if (grant->num_grantable_rpcs > grant->max_grantable_rpcs)
+		grant->max_grantable_rpcs = grant->num_grantable_rpcs;
+	homa_grant_unlock(grant);
 }
 
 /**
  * homa_grant_unmanage_rpc() - Make sure that an RPC is no longer present
  * in the priority structures used to manage grants (active_rpcs and
- * grantable_rpcs). The RPC will no longer receive grants.
- * @rpc:     RPC to unlink.
- * @cand:    If an RPC is promoted into active_rpcs, it is added here.
+ * grantable_rpcs). The RPC will no longer receive grants. If a slot in
+ * @active_rpcs is opened up, this function will try to promote an RPC
+ * from the grantable lists.
+ * @rpc:     RPC to unlink. Gets unlocked temporarily by this function,
+ *           so may be dead on return.
  */
-void homa_grant_unmanage_rpc(struct homa_rpc *rpc,
-			     struct homa_grant_candidates *cand)
+void homa_grant_unmanage_rpc(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
-	struct homa_grant *grant = rpc->hsk->homa->grant;
-	u64 time = homa_clock();
+	struct homa_grant *grant;
 	bool removed = false;
 
-	homa_grant_lock(grant);
+	if (!test_bit(RPC_GRANTABLE, &rpc->flags))
+		return;
 
-	if (rpc->msgin.rank >= 0) {
-		homa_grant_remove_active(rpc, cand);
+	grant = rpc->hsk->homa->grant;
+	homa_grant_add_lock(grant, rpc);
+
+	clear_bit(RPC_GRANTABLE, &rpc->flags);
+	clear_bit(RPC_GRANT_MANAGED, &rpc->flags);
+
+	if (rpc->msgin.active_ix >= 0) {
+		int slot = rpc->msgin.active_ix;
+
+		homa_grant_remove_active(grant, slot);
 		removed = true;
-	}
-	if (!list_empty(&rpc->grantable_links)) {
-		homa_grant_remove_grantable(rpc);
+		if (!list_empty(&grant->grantable_peers)) {
+			homa_rpc_unlock(rpc);
+			homa_grant_promote_queued(grant, slot);
+			homa_rpc_lock(rpc);
+		}
+	} else if (!list_empty(&rpc->grantable_links)) {
+		homa_grant_remove_grantable(grant, rpc);
 		removed = true;
 	}
 	if (removed) {
+		u64 time = homa_clock();
+
 		INC_METRIC(grantable_rpcs_integral, grant->num_grantable_rpcs
 				* (time - grant->last_grantable_change));
 		grant->last_grantable_change = time;
 		grant->num_grantable_rpcs--;
 		tt_record2("Decremented num_grantable_rpcs to %d, id %d",
 			   grant->num_grantable_rpcs, rpc->id);
-		grant->window = homa_grant_window(grant);
 	}
 	if (rpc == grant->oldest_rpc) {
 		homa_rpc_put(rpc);
 		grant->oldest_rpc = NULL;
+	}
+	if (rpc->msgin.rec_incoming != 0) {
+		atomic_sub(rpc->msgin.rec_incoming, &grant->total_incoming);
+		rpc->msgin.rec_incoming = 0;
 	}
 
 	homa_grant_unlock(grant);
 }
 
 /**
+ * homa_grant_promote_queued() - This function is invoked when a slot
+ * becomes available in @active_rpcs. It checks to see if there are any
+ * queued RPCs; if so, it promotes the highest-priority one into the slot.
+ * @grant:       Overall information about granting, such as @active_rpcs.
+ * @slot:        Slot in @grant->active_rpcs that is unoccupied.
+ */
+void homa_grant_promote_queued(struct homa_grant *grant, int slot)
+	__must_hold(grant->lock)
+{
+	struct homa_peer *peer, *best_peer;
+	struct homa_rpc *rpc;
+	int best_active;
+
+	/* Priority for choice: first choose from peer with fewest active
+	 * RPCs; then pick peer with highest SRPT priority (closest to front
+	 * of list).
+	 */
+	best_peer = NULL;
+	best_active = 1000;
+	list_for_each_entry(peer, &grant->grantable_peers, grantable_links) {
+		if (peer->active_rpcs == 0) {
+			best_peer = peer;
+			break;
+		}
+		if (peer->active_rpcs < best_active) {
+			best_active = peer->active_rpcs;
+			best_peer = peer;
+		}
+	}
+	if (!best_peer)
+		return;
+	rpc =	list_first_entry(&best_peer->grantable_rpcs, struct homa_rpc,
+				 grantable_links);
+	homa_rpc_lock(rpc);
+	homa_grant_remove_grantable(grant, rpc);
+	homa_grant_add_active(grant, rpc, slot);
+	set_bit(slot, &grant->needy_active);
+	homa_rpc_unlock(rpc);
+}
+
+/**
+ * homa_grant_promote_rpc() - This function is invoked when the grant priority
+ * of an inactive RPC may have increased (e.g., because data packets arrived);
+ * it adjusts the position of the RPC within the grantable lists and may
+ * promote it into grant->active_rpcs.
+ * @grant:  Overall grant management information.
+ * @rpc:    The RPC to consider for promotion. Must currently be managed for
+ *          grants. The lock may be released and reacquired.
+ */
+void homa_grant_promote_rpc(struct homa_grant *grant, struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
+{
+	struct homa_peer *peer = rpc->peer;
+	struct homa_rpc *other, *victim;
+	int slot;
+
+	homa_grant_add_lock(grant, rpc);
+	if (list_empty(&rpc->grantable_links))
+		goto done;
+
+	/* Promote within the grantable list for its peer. */
+	while (rpc != list_first_entry(&peer->grantable_rpcs,
+				       struct homa_rpc, grantable_links)) {
+		other = list_prev_entry(rpc, grantable_links);
+		if (!homa_grant_outranks(rpc, other))
+			goto done;
+		list_del(&rpc->grantable_links);
+		list_add_tail(&rpc->grantable_links, &other->grantable_links);
+	}
+
+	/* If the RPC is now the highest priority one for its peer, see if
+	 * it can be promoted into active_rpcs.
+	 */
+	if (rpc != list_first_entry(&peer->grantable_rpcs,
+				    struct homa_rpc, grantable_links))
+		goto done;
+
+	/* The RPC is now the highest priority one for its peer; see if
+	 * it can be promoted into active_rpcs.
+	 */
+	slot = homa_grant_find_victim(grant, rpc);
+	if (slot >= 0) {
+		victim = grant->active_rpcs[slot].rpc;
+		if (victim) {
+			homa_rpc_unlock(rpc);
+			homa_rpc_lock(victim);
+			homa_grant_remove_active(grant, slot);
+			homa_grant_insert_grantable(grant, victim);
+			homa_rpc_unlock(victim);
+			homa_rpc_lock(rpc);
+		}
+		homa_grant_remove_grantable(grant, rpc);
+		homa_grant_add_active(grant, rpc, slot);
+	} else {
+		/* See if the peer can be promoted in the global list. */
+		homa_grant_adjust_peer(grant, peer);
+	}
+
+done:
+	homa_grant_unlock(grant);
+}
+
+/**
  * homa_grant_update_incoming() - Figure out how much incoming data there is
  * for an RPC (i.e., data that has been granted but not yet received) and make
- * sure this is properly reflected in rpc->msgin.incoming
- * and homa->total_incoming.
+ * sure this is properly reflected in rpc->msgin.incoming and
+ * homa->total_incoming. Also, if the RPC is not in @active_rpcs and its grant
+ * priority has changed, see if it can be promoted into @active_rpcs
  * @rpc:    RPC to check; must be locked.
  * @grant:  Grant information for a Homa transport.
  */
-void homa_grant_update_incoming(struct homa_rpc *rpc, struct homa_grant *grant)
+void homa_grant_update_incoming(struct homa_grant *grant, struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	int incoming, delta;
@@ -593,65 +757,12 @@ void homa_grant_update_incoming(struct homa_rpc *rpc, struct homa_grant *grant)
 	if (incoming < 0)
 		incoming = 0;
 	delta = incoming - rpc->msgin.rec_incoming;
-	if (delta != 0)
+	if (delta != 0 && test_bit(RPC_GRANTABLE, &rpc->flags)) {
 		atomic_add(delta, &grant->total_incoming);
-	rpc->msgin.rec_incoming = incoming;
-}
-
-/**
- * homa_grant_update_granted() - Compute a new grant offset for an RPC.
- * @rpc:   RPC whose msgin.granted should be updated. Must be locked by
- *         caller.
- * @grant: Information for managing grants. This function may set
- *         incoming_hit_limit.
- * Return: >= 0 means the offset was increased and a grant should be
- *         sent for the RPC; the return value gives the priority to
- *         use in the grant. -1 means the grant offset was not changed
- *         and no grant should be sent.
- */
-int homa_grant_update_granted(struct homa_rpc *rpc, struct homa_grant *grant)
-	__must_hold(rpc->bucket->lock)
-{
-	int received, new_grant_offset, incoming_delta, avl_incoming, rank;
-	int prev_stalled;
-
-	/* Don't increase the grant if the node has been slow to send
-	 * data already granted: no point in wasting grants on this
-	 * node.
-	 */
-	if (rpc->silent_ticks > 1)
-		return -1;
-	rank = READ_ONCE(rpc->msgin.rank);
-	if (rank < 0 || rpc->msgin.granted >= rpc->msgin.length)
-		return -1;
-
-	received = rpc->msgin.length - rpc->msgin.bytes_remaining;
-	new_grant_offset = received + grant->window;
-	if (new_grant_offset > rpc->msgin.length)
-		new_grant_offset = rpc->msgin.length;
-	incoming_delta = new_grant_offset - received - rpc->msgin.rec_incoming;
-	avl_incoming = grant->max_incoming - atomic_read(&grant->total_incoming);
-	if (avl_incoming < incoming_delta) {
-		tt_record4("insufficient headroom for grant for RPC id %d (rank %d): desired increment %d, available %d",
-			   rpc->id, rank, incoming_delta, avl_incoming);
-		prev_stalled = atomic_read(&grant->stalled_rank);
-		while (prev_stalled > rank)
-			prev_stalled = atomic_cmpxchg(&grant->stalled_rank,
-						      prev_stalled, rank);
-		new_grant_offset -= incoming_delta - avl_incoming;
+		rpc->msgin.rec_incoming = incoming;
+		if (rpc->msgin.active_ix < 0)
+			homa_grant_promote_rpc(rpc->hsk->homa->grant, rpc);
 	}
-	if (new_grant_offset <= rpc->msgin.granted)
-		return -1;
-	rpc->msgin.granted = new_grant_offset;
-
-	/* The reason we compute the priority here rather than, say, in
-	 * homa_grant_send is that rpc->msgin.rank could change to -1
-	 * before homa_grant_send is invoked (it could change at any time,
-	 * since we don't have homa->grant->lock; that's why READ_ONCE
-	 * is used above). It's OK to still send a grant in that case, but
-	 * we need to have a meaningful priority level for it.
-	 */
-	return homa_grant_priority(rpc->hsk->homa, rank);
 }
 
 /**
@@ -677,181 +788,205 @@ void homa_grant_send(struct homa_rpc *rpc, int priority)
 }
 
 /**
- * homa_grant_check_rpc() - This function is responsible for generating
+ * homa_grant_try_send() - Send a grant to an RPC, if needed and appropriate.
+ * If the RPC is ready for a grant but we can't send one now (because of
+ * needy RPCs or insufficient headroom), add the RPC to grant->needy_active.
+ * This function also takes care of sending FIFO grants as needed.
+ * @grant:        Overall information about grants.
+ * @rpc:          RPC to check; must be in grant->active_rpcs.
+ * @check_needy:  True means don't issue a grant if there are needy RPCs.
+ *                False means don't consider grant->needy_active.
+ */
+void homa_grant_try_send(struct homa_grant *grant, struct homa_rpc *rpc,
+			 bool check_needy)
+	__must_hold(rpc->bucket->lock)
+{
+	int i, received, delta, avl_incoming, rank;
+	int birth, cand_remaining, other_remaining;
+	bool fully_granted = false;
+
+	if (!test_bit(RPC_GRANTABLE, &rpc->flags))
+		return;
+
+	/* See if we can issue a new grant for the RPC. */
+	received = rpc->msgin.length - rpc->msgin.bytes_remaining;
+	delta = received + grant->window - rpc->msgin.granted;
+	if (delta <= 0)
+	        /* The RPC already has a full window of grant. */
+		return;
+	if (delta > (rpc->msgin.length - rpc->msgin.granted))
+		delta = rpc->msgin.length - rpc->msgin.granted;
+	avl_incoming = grant->max_incoming -
+		       atomic_read(&grant->total_incoming);
+	if (avl_incoming <= 0 ||
+	    (check_needy && grant->needy_active != 0))
+	        /* Can't grant to this RPC: either no headroom in incoming
+		 * or needy RPCs might have priority.
+		 */
+		goto needy;
+	if (delta > avl_incoming)
+		delta = avl_incoming;
+	else
+		fully_granted = true;
+	rpc->msgin.granted += delta;
+	rpc->msgin.rec_incoming += delta;
+	atomic_add(delta, &grant->total_incoming);
+
+	/* Scan the active RPCs to compute rpc's rank (how many active RPCs
+	 * have higher grant priority). This is racy in that the priority
+	 * information for other RPCs could be changing as we access it.
+	 * That's OK, though: the worst that can happen is to compute
+	 * a suboptimal priority.
+	 */
+	rank = 0;
+	cand_remaining = rpc->msgin.bytes_remaining;
+	birth = rpc->msgin.birth;
+	for (i = 0; i < HOMA_MAX_GRANTS; i++) {
+		if (!grant->active_rpcs[i].rpc ||
+		    grant->active_rpcs[i].rpc == rpc)
+			continue;
+		other_remaining = READ_ONCE(grant->active_remaining[i]);
+		if (cand_remaining < other_remaining)
+			continue;
+		if (cand_remaining == other_remaining &&
+		    birth <= grant->active_rpcs[i].birth)
+			continue;
+		rank++;
+	}
+
+	/* Sending a grant takes a long time, so release the RPC lock to
+	 * allow others to use the RPC. This is also a convenient time to check
+	 * for FIFO grants, since that requires us to release the lock also.
+	 */
+	homa_rpc_unlock(rpc);
+	homa_grant_send(rpc, homa_grant_priority(grant->homa, rank));
+	homa_grant_check_fifo(grant);
+	homa_rpc_lock(rpc);
+
+needy:
+	if (!fully_granted)
+		set_bit(rpc->msgin.active_ix, &grant->needy_active);
+}
+
+/**
+ * homa_grant_check_needy() - If there is available headroom for grants and
+ * there are RPCs in @needy_active, apply the headroom to those RPCs in
+ * priority order.
+ * @grant:    Grant management info. Must not be locked (and caller must
+ *            not hold any RPC locks).
+ */
+void homa_grant_check_needy(struct homa_grant *grant)
+{
+	int i, cand_remaining, best, best_remaining;
+	struct homa_rpc *rpc;
+
+	while (1) {
+		if (atomic_read(&grant->total_incoming) >= grant->max_incoming)
+			return;
+		if (READ_ONCE(grant->needy_active) == 0)
+			return;
+
+		/* Need the grant lock to make sure RPCs don't get removed
+		 * from @active_rpcs until after we have acquired the lock
+		 * for a needy RPC; otherwise RPCs could get deleted from
+		 * under us.
+		 */
+		homa_grant_lock(grant);
+
+		/* Find the highest-priority needy RPC. */
+		best = -1;
+		best_remaining = HOMA_MAX_MESSAGE_LENGTH + 1;
+		for (i = 0; i < HOMA_MAX_GRANTS; i++) {
+			if (!test_bit(i, &grant->needy_active))
+				continue;
+			cand_remaining = READ_ONCE(grant->active_remaining[i]);
+			if (cand_remaining > best_remaining)
+				continue;
+			if (cand_remaining == best_remaining &&
+			    grant->active_rpcs[i].birth >
+			    grant->active_rpcs[best].birth)
+				continue;
+			best = i;
+			best_remaining = cand_remaining;
+		}
+
+		if (best < 0) {
+			/* Racing threads must have taken care of all needy. */
+			homa_grant_unlock(grant);
+			return;
+		}
+		rpc = grant->active_rpcs[best].rpc;
+
+		/* We need to take a reference on rpc to ensure that it stays
+		 * alive through the call to homa_grant_try_send. Otherwise,
+		 * once we release the grant lock, it could be removed from
+		 * @active_rpcs, leaving it unprotected against reaping.
+		 */
+		homa_rpc_hold(rpc);
+		homa_rpc_lock(rpc);
+		homa_grant_unlock(grant);
+		clear_bit(best, &grant->needy_active);
+		homa_grant_try_send(grant, rpc, false);
+		INC_METRIC(needy_grants, 1);
+		homa_rpc_unlock(rpc);
+		homa_rpc_put(rpc);
+	}
+}
+
+/**
+ * homa_grant_check_rpc() - This is the primary function invoked by code
+ * outside this module. It is responsible for updating grant state and issuing
  * grant packets.  It is invoked when the state of an RPC has changed in
  * ways that might permit grants to be issued (either to this RPC or other
- * RPCs), such as the arrival of a DATA packet. It reviews the state of
- * grants and issues grant packets as appropriate.
- * @rpc:    RPC to check. Must be locked by the caller.
+ * RPCs), such as the arrival of a DATA packet.
+ * @rpc:    RPC to check. Must be locked by the caller. The lock may get
+ *          released and reacquired, which means it's possible that the
+ *          RPC will be dead on return.
  */
 void homa_grant_check_rpc(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
-	int needy_rank, stalled_rank, rank;
-	struct homa_grant_candidates cand;
-	int locked = 0;
-	u64 now;
-	int i;
 
-	/* The challenge for this function is to minimize use of the grant
-	 * lock, since that is global. Early versions of Homa acquired the
-	 * grant lock on every call to this function, but that resulted in
-	 * too much contention for the grant lock (especially at network
-	 * speeds of 100 Gbps or more).
-	 *
-	 * This implementation is designed in the hopes that most calls can
-	 * follow a fast path that does not require the grant lock: just
-	 * update grant state for @rpc and possibly issue a new grant for
-	 * @rpc, without considering other RPCs.
-	 *
-	 * However, there are some situations where other RPCs must be
-	 * considered:
-	 * 1. If there are higher-priority RPCs that are stalled (they would
-	 *    like to issue grants but could not because @total_incoming
-	 *    was exceeded), then they must get first shot at any headroom
-	 *    that has become available.
-	 * 2. The priority order of RPCs could change, if data packets arrive
-	 *    for lower priority RPCs but not for higher priority ones.
-	 *    Rather than checking every time data arrives (which would
-	 *    require the grant lock), we recheck the priorities at regular
-	 *    time intervals.
-	 * 3. Occasionally we need to send grants to the oldest message (FIFO
-	 *    priority) in order to prevent starvation.
-	 *
-	 * Each of these situations requires the grant lock.
-	 */
-
-	if (rpc->msgin.length < 0 || rpc->msgin.num_bpages <= 0 ||
-	    rpc->state == RPC_DEAD)
+	if (!test_bit(RPC_GRANTABLE, &rpc->flags))
 		return;
 
-	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, recv_end %d, length %d",
-		   rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,
+	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, remaining %d, length %d",
+		   rpc->id, rpc->msgin.granted, rpc->msgin.bytes_remaining,
 		   rpc->msgin.length);
 	INC_METRIC(grant_check_calls, 1);
 
-	/* Races can cause the test below to invoke homa_grant_manage_rpc when
-	 * rpc is already managed, but it will never fail to invoke
-	 * homa_grant_manage_rpc if the RPC is unmanaged. This is an
-	 * optimization to reduce the number of times the grant lock must
-	 * be acquired.
+	if (rpc->msgin.bytes_remaining == 0) {
+		homa_grant_unmanage_rpc(rpc);
+		goto check_needy;
+	}
+
+	/* In theory it would be possible to call homa_grant_manage_rpc from
+	 * homa_grant_init_rpc, which would eliminate the need for this check.
+	 * However, homa_grant_manage_rpc may have to release the RPC lock,
+	 * which could allow the RPC to be killed, and that would create
+	 * extra complexity in the contexts where homa_grant_init_rpc is
+	 * invoked. Thus it's cleaner to do it here, since we already have
+	 * to deal with the consequences of releasing the RPC lock.
 	 */
-	if (rpc->msgin.granted < rpc->msgin.length &&
-	    READ_ONCE(rpc->msgin.rank) < 0 &&
-	    list_empty(&rpc->grantable_links))
-		homa_grant_manage_rpc(rpc);
-
-	needy_rank = INT_MAX;
-	now = homa_clock();
-	homa_grant_update_incoming(rpc, grant);
-	if (now >= READ_ONCE(grant->next_recalc)) {
-		/* Situation 2. */
-		locked = 1;
-		tt_record1("homa_grant_check_rpc acquiring grant lock to fix order (id %d)",
-			   rpc->id);
-		homa_grant_lock(grant);
-		grant->next_recalc = now + grant->recalc_cycles;
-		needy_rank = homa_grant_fix_order(grant);
-		homa_grant_unlock(grant);
-		tt_record2("homa_grant_check_rpc released grant lock (id %d, needy_rank %d)",
-			   rpc->id, needy_rank);
-		INC_METRIC(grant_check_recalcs, 1);
+	if (!test_bit(RPC_GRANT_MANAGED, &rpc->flags)) {
+		if (rpc->msgin.num_bpages <= 0)
+			goto check_needy;
+		homa_grant_manage_rpc(grant, rpc);
 	}
 
-	rank = READ_ONCE(rpc->msgin.rank);
-	stalled_rank = atomic_read(&grant->stalled_rank);
-	if (stalled_rank < needy_rank)
-		needy_rank = stalled_rank;
+	homa_grant_update_incoming(grant, rpc);
+	if (rpc->msgin.active_ix >= 0)
+		homa_grant_try_send(grant, rpc, true);
 
-	if (rank >= 0 && rank <= needy_rank) {
-		int priority;
-
-		/* Fast path. */
-		priority = homa_grant_update_granted(rpc, grant);
-		homa_grant_update_incoming(rpc, grant);
-		if (priority >= 0) {
-			homa_grant_cand_init(&cand);
-			if (rpc->msgin.granted >= rpc->msgin.length)
-				homa_grant_unmanage_rpc(rpc, &cand);
-
-			/* Sending a grant is slow, so release the RPC lock while
-			 * sending the grant to reduce contention.
-			 */
-			homa_rpc_unlock(rpc);
-			homa_grant_send(rpc, priority);
-			if (!homa_grant_cand_empty(&cand))
-				homa_grant_cand_check(&cand, grant);
-			homa_grant_check_fifo(grant);
-			homa_rpc_lock(rpc);
-		}
+check_needy:
+	if (grant->needy_active != 0) {
+		homa_rpc_unlock(rpc);
+		homa_grant_check_needy(grant);
+		homa_rpc_lock(rpc);
 	}
-
-	if (needy_rank < INT_MAX &&
-	    atomic_read(&grant->total_incoming) < grant->max_incoming) {
-		UNIT_HOOK("grant_check_needy");
-		/* Situations 1 and 2. */
-		stalled_rank = atomic_xchg(&grant->stalled_rank, INT_MAX);
-		if (stalled_rank < needy_rank)
-			needy_rank = stalled_rank;
-		homa_grant_cand_init(&cand);
-		locked = 1;
-		tt_record3("homa_grant_check_rpc acquiring grant lock, needy_rank %d, id %d, num_active %d",
-			   needy_rank, rpc->id, grant->num_active_rpcs);
-		homa_grant_lock(grant);
-		for (i = needy_rank; i < grant->num_active_rpcs; i++) {
-			struct homa_rpc *rpc2 = grant->active_rpcs[i];
-
-			if (rpc2->msgin.rec_incoming < grant->window &&
-			    rpc2->state != RPC_DEAD)
-				homa_grant_cand_add(&cand, rpc2);
-		}
-		homa_grant_unlock(grant);
-		tt_record1("homa_grant_check_rpc released grant lock (id %d)",
-			   rpc->id);
-		if (!homa_grant_cand_empty(&cand)) {
-			homa_rpc_unlock(rpc);
-			homa_grant_cand_check(&cand, grant);
-			homa_rpc_lock(rpc);
-		}
-		INC_METRIC(grant_check_others, 1);
-	}
-
-	INC_METRIC(grant_check_locked, locked);
 	tt_record2("homa_grant_check_rpc finished with id %d, total_incoming %d",
 		   rpc->id, atomic_read(&grant->total_incoming));
-}
-
-/**
- * homa_grant_fix_order() - This function scans all of the RPCS in
- * @active_rpcs and repairs any priority inversions that may exist.
- * @grant:      Overall grant management information.
- * Return:      The new rank of the highest-priority RPC whose rank improved,
- *              or INT_MAX if no RPCs were promoted.
- */
-int homa_grant_fix_order(struct homa_grant *grant)
-	__must_hold(grant->lock)
-{
-	struct homa_rpc *rpc, *other;
-	int result = INT_MAX;
-	int i, j;
-
-	for (i = 1; i < grant->num_active_rpcs; i++) {
-		rpc = grant->active_rpcs[i];
-		for (j = i - 1; j >= 0; j--) {
-			other = grant->active_rpcs[j];
-			if (!homa_grant_outranks(rpc, other))
-				break;
-			grant->active_rpcs[j + 1] = other;
-			other->msgin.rank = j + 1;
-			grant->active_rpcs[j] = rpc;
-			rpc->msgin.rank = j;
-			if (j < result)
-				result = j;
-			INC_METRIC(grant_priority_bumps, 1);
-		}
-	}
-	return result;
 }
 
 /**
@@ -886,19 +1021,23 @@ void homa_grant_find_oldest(struct homa_grant *grant)
 				 */
 				continue;
 			}
+			if (rpc->msgin.granted >= rpc->msgin.length)
+				continue;
 			oldest = rpc;
 			oldest_birth = rpc->msgin.birth;
 		}
 	}
 
-	/* Check the active RPCs (skip the highest priority one, since
-	 * it is already getting lots of grants).
-	 */
-	for (i = 1; i < grant->num_active_rpcs; i++) {
-		rpc = grant->active_rpcs[i];
+	/* Check the active RPCs. */
+	for (i = 0; i < HOMA_MAX_GRANTS; i++) {
+		rpc = grant->active_rpcs[i].rpc;
+		if (!rpc)
+			continue;
 		if (rpc->msgin.birth >= oldest_birth)
 			continue;
 		if (rpc->msgin.rec_incoming >= max_incoming)
+			continue;
+		if (rpc->msgin.granted >= rpc->msgin.length)
 			continue;
 		oldest = rpc;
 		oldest_birth = rpc->msgin.birth;
@@ -912,56 +1051,6 @@ void homa_grant_find_oldest(struct homa_grant *grant)
 }
 
 /**
- * homa_grant_promote_rpc() - This function is invoked when the grant priority
- * of an RPC has increased (e.g., because it received a FIFO grant); it adjusts
- * the position of the RPC within the grantable lists and may promote it into
- * grant->active_rpcs. This function does not promote within grant->active_rpcs:
- * that is handled by homa_grant_fix_order.
- * @grant:  Overall grant management information.
- * @rpc:    The RPC to consider for promotion. Must currently be managed for
- *          grants.
- */
-void homa_grant_promote_rpc(struct homa_grant *grant, struct homa_rpc *rpc)
-	__must_hold(rpc->bucket->lock)
-{
-	struct homa_peer *peer = rpc->peer;
-	struct homa_rpc *other, *bumped;
-
-	homa_grant_lock(grant);
-	if (rpc->msgin.rank >= 0)
-		goto done;
-
-	/* Promote into active_rpcs if appropriate. */
-	if (grant->num_active_rpcs < grant->max_overcommit ||
-	    homa_grant_outranks(rpc, grant->active_rpcs[grant->num_active_rpcs -
-							1])) {
-		homa_grant_remove_grantable(rpc);
-		bumped = homa_grant_insert_active(rpc);
-		if (bumped)
-			homa_grant_insert_grantable(bumped);
-		goto done;
-	}
-
-	/* Promote within the grantable lists. */
-	while (rpc != list_first_entry(&peer->grantable_rpcs,
-				       struct homa_rpc, grantable_links)) {
-		other = list_prev_entry(rpc, grantable_links);
-		if (!homa_grant_outranks(rpc, other))
-			goto done;
-		list_del(&rpc->grantable_links);
-		list_add_tail(&rpc->grantable_links, &other->grantable_links);
-	}
-
-	/* The RPC is now at the head of its peer list, so the peer may need
-	 * to be promoted also.
-	 */
-	homa_grant_adjust_peer(grant, peer);
-
-done:
-	homa_grant_unlock(grant);
-}
-
-/**
  * homa_grant_check_fifo() - Check to see if it is time to make the next
  * FIFO grant; if so, make the grant. FIFO grants keep long messages from
  * being starved by Homa's SRPT grant mechanism.
@@ -969,8 +1058,8 @@ done:
  */
 void homa_grant_check_fifo(struct homa_grant *grant)
 {
-	struct homa_grant_candidates cand;
 	struct homa_rpc *rpc;
+	int old_granted;
 	u64 now;
 
 	/* Note: placing this check before locking saves lock overhead
@@ -993,11 +1082,13 @@ void homa_grant_check_fifo(struct homa_grant *grant)
 	rpc = grant->oldest_rpc;
 	if (rpc) {
 		/* If the oldest RPC hasn't been responding to FIFO grants
-		 * then switch to a different RPC.
+		 * then switch to a different RPC. Also switch if the oldest
+		 * RPC is fully granted.
 		 */
 		int max_incoming = grant->window + 2 *
 				   grant->fifo_grant_increment;
-		if (rpc->msgin.rec_incoming >= max_incoming) {
+		if (rpc->msgin.rec_incoming >= max_incoming ||
+		    rpc->msgin.granted >= rpc->msgin.length) {
 			grant->oldest_rpc = NULL;
 			homa_rpc_put(rpc);
 			rpc = NULL;
@@ -1012,96 +1103,29 @@ void homa_grant_check_fifo(struct homa_grant *grant)
 		}
 	}
 
-	/* Trickiness here: must release the grant lock before acquiring
-	 * the RPC lock. Must acquire a reference on the RPC to keep it
-	 * from being deleted in the gap where no lock is held.
+	/* Need the RPC lock to send a grant; can release the grant lock
+	 * once the RPC has been locked. We must take a reference on the
+	 * RPC, because the RPC will be unlocked at various points below;
+	 * without the reference, the RPC could be killed.
 	 */
-	homa_rpc_hold(rpc);
-	homa_grant_unlock(grant);
 	homa_rpc_lock(rpc);
+	homa_grant_unlock(grant);
 	if (rpc->state == RPC_DEAD) {
 		homa_rpc_unlock(rpc);
-		homa_rpc_put(rpc);
 		return;
 	}
-	homa_grant_cand_init(&cand);
+	homa_rpc_hold(rpc);
+	old_granted = rpc->msgin.granted;
 	rpc->msgin.granted += grant->fifo_grant_increment;
-	tt_record2("homa_grant_check_fifo granted %d more bytes to id %d",
-		   grant->fifo_grant_increment, rpc->id);
-	if (rpc->msgin.granted >= rpc->msgin.length) {
-		INC_METRIC(fifo_grant_bytes, grant->fifo_grant_increment +
-					     rpc->msgin.length -
-					     rpc->msgin.granted);
+	if (rpc->msgin.granted >= rpc->msgin.length)
 		rpc->msgin.granted = rpc->msgin.length;
-		homa_grant_unmanage_rpc(rpc, &cand);
-	} else {
-		INC_METRIC(fifo_grant_bytes, grant->fifo_grant_increment);
-		homa_grant_promote_rpc(grant, rpc);
-	}
-	homa_grant_update_incoming(rpc, grant);
+	INC_METRIC(fifo_grant_bytes, rpc->msgin.granted - old_granted);
+	tt_record3("homa_grant_check_fifo granted %d more bytes to id %d, granted now %d",
+		   rpc->msgin.granted - old_granted, rpc->id, rpc->msgin.granted);
+	homa_grant_update_incoming(grant, rpc);
 	homa_rpc_unlock(rpc);
 	homa_grant_send(rpc, homa_high_priority(grant->homa));
 	homa_rpc_put(rpc);
-	if (!homa_grant_cand_empty(&cand))
-		homa_grant_cand_check(&cand, grant);
-}
-
-/**
- * homa_grant_cand_add() - Add an RPC into the struct, if there is
- * space. After this function is called, homa_grant_cand_check must
- * eventually be called to process the entries and release reference
- * counts.
- * @cand:   Structure in which to add @rpc.
- * @rpc:    RPC to add.  If added successfully its reference count will
- *          be incremented
- */
-void homa_grant_cand_add(struct homa_grant_candidates *cand,
-			 struct homa_rpc *rpc)
-{
-	if (cand->inserts < cand->removes + HOMA_MAX_CAND_RPCS) {
-		homa_rpc_hold(rpc);
-		cand->rpcs[cand->inserts & HOMA_CAND_MASK] = rpc;
-		cand->inserts++;
-	}
-}
-
-/**
- * homa_grant_cand_check() - Scan all of the entries in @cand, issuing
- * grants if possible and releasing reference counts. This function
- * will acquire each RPCs lock, so the caller must not hold RPC locks
- * or locks that conflict with RPC locks, such as the
- * grant lock.
- * @cand:    Check all of the RPCs in this struct.
- * @grant:   Grant management information.
- */
-void homa_grant_cand_check(struct homa_grant_candidates *cand,
-			   struct homa_grant *grant)
-{
-	struct homa_rpc *rpc;
-	int priority;
-	bool locked;
-
-	while (cand->removes < cand->inserts) {
-		rpc = cand->rpcs[cand->removes & HOMA_CAND_MASK];
-		cand->removes++;
-		homa_rpc_lock(rpc);
-		locked = true;
-
-		if (rpc->state != RPC_DEAD) {
-			priority = homa_grant_update_granted(rpc, grant);
-			if (priority >= 0) {
-				homa_grant_update_incoming(rpc, grant);
-				if (rpc->msgin.granted >= rpc->msgin.length)
-					homa_grant_unmanage_rpc(rpc, cand);
-				homa_rpc_unlock(rpc);
-				locked = false;
-				homa_grant_send(rpc, priority);
-			}
-		}
-		if (locked)
-			homa_rpc_unlock(rpc);
-		homa_rpc_put(rpc);
-	}
 }
 
 /**
@@ -1131,6 +1155,7 @@ void homa_grant_lock_slow(struct homa_grant *grant)
 void homa_grant_update_sysctl_deps(struct homa_grant *grant)
 {
 	u64 fifo_mbps, clocks_per_fifo_mbit, interval;
+	int i;
 
 	if (grant->max_overcommit > HOMA_MAX_GRANTS)
 		grant->max_overcommit = HOMA_MAX_GRANTS;
@@ -1150,9 +1175,23 @@ void homa_grant_update_sysctl_deps(struct homa_grant *grant)
 		grant->fifo_grant_interval = 1000 * homa_clock_khz();
 	}
 
-	grant->recalc_cycles = homa_usecs_to_cycles(grant->recalc_usecs);
+	/* Dynamic window sizing uses the approach described in the paper
+	 * "Dynamic Queue Length Thresholds for Shared-Memory Packet Switches"
+	 * with an alpha value of 1. The idea is to maintain unused incoming
+	 * capacity (for new RPC arrivals) equal to the amount of incoming
+	 * allocated to each of the currently active RPCs.
+	 */
+	for (i = 0; i <= HOMA_MAX_GRANTS; i++) {
+		if (grant->window_param != 0) {
+			grant->windows[i] = grant->window_param;
+		} else {
+			u64 window;
 
-	grant->window = homa_grant_window(grant);
+			window = grant->max_incoming;
+			do_div(window, i + 1);
+			grant->windows[i] = window;
+		}
+	}
 }
 
 #ifndef __STRIP__ /* See strip.py */

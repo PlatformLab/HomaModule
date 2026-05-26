@@ -1,6 +1,10 @@
 This directory contains unit tests for the Homa Linux kernel module.
 Here are a few overall notes:
 
+* To run the tests, invoke "make test" in this directory. This will
+  compile a binary named `unit` and run it. You can run `unit` under
+  `gdb` for debugging.
+
 * These are "white box" tests, not "black box" tests. Tests are written
   by looking at the code and writing enough tests to make sure all of the
   major code elements are covered.

@@ -169,7 +169,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	int length = homa_data_len(skb);
 	int end = start + length;
 
-	if ((start + length) > rpc->msgin.length) {
+	if (start >= rpc->msgin.length ||
+	    length > (rpc->msgin.length - start)) {
 		tt_record3("Packet extended past message end; id %d, offset %d, length %d",
 			   rpc->id, start, length);
 		goto discard;
@@ -364,6 +365,16 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 			int copied = 0;
 			char __user *dst;
 
+#ifndef __UPSTREAM__ /* See strip.py */
+			if (end_offset == 0) {
+				start_offset = offset;
+			} else if (end_offset != offset) {
+				tt_record3("copied out bytes %d-%d for id %d",
+					   start_offset, end_offset, rpc->id);
+				start_offset = offset;
+			}
+#endif /* See strip.py */
+
 			/* Each iteration of this loop copies to one
 			 * user buffer.
 			 */
@@ -392,13 +403,6 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 				copied += chunk_size;
 			}
 #ifndef __UPSTREAM__ /* See strip.py */
-			if (end_offset == 0) {
-				start_offset = offset;
-			} else if (end_offset != offset) {
-				tt_record3("copied out bytes %d-%d for id %d",
-					   start_offset, end_offset, rpc->id);
-				start_offset = offset;
-			}
 			end_offset = offset + pkt_length;
 #endif /* See strip.py */
 		}
@@ -440,11 +444,6 @@ free_skbs:
  */
 void homa_dispatch_pkts(struct sk_buff *skb)
 {
-#ifdef __UNIT_TEST__
-#define MAX_ACKS 2
-#else /* __UNIT_TEST__ */
-#define MAX_ACKS 10
-#endif /* __UNIT_TEST__ */
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
 	u64 id = homa_local_id(h->common.sender_id);
@@ -626,8 +625,8 @@ discard:
 	 *    code for details).
 	 */
 	if (hsk->dead_skbs > 0) {
-		int waiting_for_wmem = test_bit(SOCK_NOSPACE,
-						&hsk->sock.sk_socket->flags);
+		int waiting_for_wmem = test_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+
 		if (waiting_for_wmem ||
 		    hsk->dead_skbs >= 2 * hsk->homa->dead_buffs_limit) {
 			IF_NO_STRIP(u64 start = homa_clock());
@@ -1092,8 +1091,8 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		if (rpc->msgin.length >= 0 &&
 		    rpc->msgin.bytes_remaining == 0 &&
 		    skb_queue_len(&rpc->msgin.packets) == 0) {
-			tt_record2("homa_wait_private found rpc id %d, pid %d via null, blocked 0",
-				   rpc->id, current->pid);
+			tt_record3("homa_wait_private found rpc id %d, pid %d, port %d via null, blocked 0",
+				   rpc->id, current->pid, rpc->hsk->port);
 			break;
 		}
 
@@ -1116,8 +1115,9 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 
 		homa_rpc_lock_preempt(rpc);
 		homa_interest_unlink_private(&interest);
-		tt_record3("homa_wait_private found rpc id %d, pid %d via handoff, blocked %d",
-			   rpc->id, current->pid, interest.blocked);
+		tt_record4("homa_wait_private found rpc id %d, pid %d, port %d via handoff, blocked %d",
+			   rpc->id, current->pid, rpc->hsk->port,
+			   interest.blocked);
 
 		/* Abort on error, but if the interest actually got ready
 		 * in the meantime the ignore the error (loop back around
@@ -1179,8 +1179,8 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 			rpc = list_first_entry(&hsk->ready_rpcs,
 					       struct homa_rpc,
 					       ready_links);
-			tt_record2("homa_wait_shared found rpc id %d, pid %d via ready_rpcs, blocked 0",
-				   rpc->id, current->pid);
+			tt_record3("homa_wait_shared found rpc id %d, pid %d, port %d via ready_rpcs, blocked 0",
+				   rpc->id, current->pid, hsk->port);
 			homa_rpc_hold(rpc);
 			list_del_init(&rpc->ready_links);
 			if (!list_empty(&hsk->ready_rpcs)) {
@@ -1234,8 +1234,9 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 				rpc = ERR_PTR(-ESHUTDOWN);
 				goto done;
 			}
-			tt_record3("homa_wait_shared found rpc id %d, pid %d via handoff, blocked %d",
-				   rpc->id, current->pid, interest.blocked);
+			tt_record4("homa_wait_shared found rpc id %d, pid %d, port %d via handoff, blocked %d",
+				   rpc->id, current->pid, hsk->port,
+				   interest.blocked);
 		}
 
 		homa_rpc_lock_preempt(rpc);
@@ -1300,7 +1301,8 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 		list_del_init(&interest->links);
 		interest->rpc = rpc;
 		homa_rpc_hold(rpc);
-		tt_record1("homa_rpc_handoff handing off id %d", rpc->id);
+		tt_record2("homa_rpc_handoff handing off id %d for port %d",
+			   rpc->id, hsk->port);
 		atomic_set_release(&interest->ready, 1);
 		wake_up(&interest->wait_queue);
 		INC_METRIC(handoffs_thread_waiting, 1);

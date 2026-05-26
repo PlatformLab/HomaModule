@@ -27,11 +27,13 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   run under several earlier versions of Linux. There is a separate branch
   for each of these
   older versions, with names such as linux_4.15.18. Older branches
-  except for linux_4.18.0 are out of date feature-wise: recent commits have
+  are generally out of date feature-wise: recent commits have
   not been back-ported to them. Other versions of Linux have not been tested and
   may require code changes (typically this is easy to do). If you get Homa
   working on some other version, please submit a pull request with the
-  required code changes.
+  required code changes. The branches `rhel8` and `rhel9.5` are known to run
+  on the corresdponding versions of Red Hat Enterprise Linux and are
+  relatively up to date.
 
 - Related work that you may find useful:
   - [Preliminary support for using Homa with gRPC](https://github.com/PlatformLab/grpc_homa)

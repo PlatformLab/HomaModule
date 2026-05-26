@@ -367,6 +367,8 @@ char *homa_metrics_print(void)
 		  "Misses on peer ack locks\n");
 		M("peer_ack_lock_miss_cycles", m->peer_ack_lock_miss_cycles,
 		  "Time lost waiting for peer ack locks\n");
+		M("grant_locks", m->grant_locks,
+		  "Grant lock acquisitions\n");
 		M("grant_lock_misses", m->grant_lock_misses,
 		  "Grant lock misses\n");
 		M("grant_lock_miss_cycles", m->grant_lock_miss_cycles,
@@ -375,14 +377,8 @@ char *homa_metrics_print(void)
 		  "Integral of homa->num_grantable_rpcs*dt\n");
 		M("grant_check_calls", m->grant_check_calls,
 		  "Number of calls to homa_grant_check_rpc\n");
-		M("grant_check_locked", m->grant_check_locked,
-		  "Number of calls to homa_grant_check_rpc that acquired grant lock\n");
-		M("grant_check_others", m->grant_check_others,
-		  "Number of times homa_grant_check_rpc checked non-caller RPCs for grants\n");
-		M("grant_check_recalcs", m->grant_check_recalcs,
-		  "Number of times homa_grant_check_rpc updated grant priority order\n");
-		M("grant_priority_bumps", m->grant_priority_bumps,
-		  "Number of times an RPC moved up in the grant priority order\n");
+		M("needy_grants", m->needy_grants,
+		  "Number of times grants were issued by homa_grant_check_needy\n");
 		M("fifo_grant_bytes", m->fifo_grant_bytes,
 		  "Bytes of grants issued using the FIFO mechanism\n");
 		M("disabled_reaps", m->disabled_reaps,

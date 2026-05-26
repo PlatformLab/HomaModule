@@ -148,6 +148,10 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 		err = -ENOMEM;
 		goto error;
 	}
+
+	/* Must be initialized before any errors can occur in this function. */
+	INIT_LIST_HEAD(&srpc->buf_links);
+
 	srpc->hsk = hsk;
 	srpc->bucket = bucket;
 	srpc->state = RPC_INCOMING;
@@ -164,7 +168,6 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->msgout.length = -1;
 	IF_NO_STRIP(homa_qdisc_rpc_init(&srpc->qrpc));
 	INIT_LIST_HEAD(&srpc->ready_links);
-	INIT_LIST_HEAD(&srpc->buf_links);
 	INIT_LIST_HEAD(&srpc->dead_links);
 #ifndef __STRIP__ /* See strip.py */
 	INIT_LIST_HEAD(&srpc->grantable_links);
@@ -204,9 +207,12 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	return srpc;
 
 error:
+	if (srpc) {
+		homa_pool_release(srpc);
+		if (srpc->peer)
+			homa_peer_release(srpc->peer);
+	}
 	homa_bucket_unlock(bucket, id);
-	if (srpc && srpc->peer)
-		homa_peer_release(srpc->peer);
 	kfree(srpc);
 	return ERR_PTR(err);
 }
@@ -283,11 +289,11 @@ void homa_rpc_end(struct homa_rpc *rpc)
 
 #ifndef __STRIP__ /* See strip.py */
 	/* The following line must occur before the socket is locked. This is
-	 * necessary because homa_grant_end_rpc releases the RPC lock and
-	 * reacquires it.
+	 * necessary because homa_grant_unmanage_rpc may releases the RPC lock
+	 * and reacquire it.
 	 */
 	if (rpc->msgin.length >= 0)
-		homa_grant_end_rpc(rpc);
+		homa_grant_unmanage_rpc(rpc);
 #endif /* See strip.py */
 
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
@@ -296,7 +302,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	list_del_rcu(&rpc->active_links);
 	list_add_tail(&rpc->dead_links, &rpc->hsk->dead_rpcs);
 	__list_del_entry(&rpc->ready_links);
-	__list_del_entry(&rpc->buf_links);
+	homa_pool_unlink(rpc);
 	homa_interest_notify_private(rpc);
 //	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
 //			rpc->hsk->client_port,
@@ -555,6 +561,9 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 					 */
 #endif /* See strip.py */
 					if (refcount_read(&skb->users) > 1) {
+#ifndef __STRIP__ /* See strip.py */
+						homa_qdisc_flush_rpc(rpc);
+#endif /* See strip.py */
 						INC_METRIC(reaper_active_skbs,
 							   1);
 						goto next_rpc;
@@ -609,14 +618,11 @@ release:
 			rpc = rpcs[i];
 
 			UNIT_LOG("; ", "reaped %llu", rpc->id);
-			if (unlikely(rpc->msgin.num_bpages))
-				homa_pool_free_bufs(rpc->hsk->buffer_pool,
-						    rpc->msgin.num_bpages,
-						    rpc->msgin.bpage_offsets);
 			if (rpc->peer) {
 				homa_peer_release(rpc->peer);
 				rpc->peer = NULL;
 			}
+			homa_pool_release(rpc);
 			tt_record2("homa_rpc_reap finished reaping id %d, port %d",
 				   rpc->id, rpc->hsk->port);
 #ifndef __STRIP__ /* See strip.py */

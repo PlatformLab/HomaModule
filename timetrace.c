@@ -12,7 +12,7 @@
  * timetrace stubs; we will then connect the timetrace mechanism here with
  * those stubs to allow the rest of the kernel to log in our buffers.
  */
-//#define TT_KERNEL 1
+#define TT_KERNEL 1
 #endif /* __UNIT_TEST__ */
 #ifdef TT_KERNEL
 extern struct tt_buffer *tt_linux_buffers[];
@@ -114,8 +114,11 @@ int tt_init(char *proc_file)
 		struct tt_buffer *buffer;
 
 		buffer = kmalloc(sizeof(*buffer), GFP_KERNEL);
-		if (!buffer)
+		if (!buffer) {
+			pr_err("tt_init couldn't allocate trace buffer for cpu %d\n",
+			       i);
 			goto error;
+		}
 		memset(buffer, 0, sizeof(*buffer));
 		tt_buffers[i] = buffer;
 	}

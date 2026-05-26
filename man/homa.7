@@ -299,11 +299,11 @@ consisting of a pointer to the following structure:
 .vs -2
 .EX
 struct homa_info {
-	struct homa_rpc_info *rpc_info;
+	__u64 *rpc_info;
 	size_t rpc_info_length;
-	__u64 bpool_avail_bytes;
-	__u32 port;
-	__u32 num_rpcs;
+	__u64  bpool_avail_bytes;
+	__u32  port;
+	__u32  num_rpcs;
 	char error_msg[HOMA_ERROR_MSG_SIZE];
 };
 .EE
@@ -320,10 +320,13 @@ fields before invoking
 .BR ioctl.
 The
 .B rpc_info
-field points to an area in application memory that can be used to
-return detailed information about all of the active RPCs on the socket;
+field is the address of an array of
+.B homa_rpc_info structs
+in application
+memory that can be used to return detailed information about all of the
+active RPCs on the socket;
 .B rpc_info_length
-indicates how much memory is available at
+indicates how many bytes of memory are available at
 .BR rpc_info ,
 in bytes. If
 .B rpc_info
@@ -593,17 +596,6 @@ of the bandwidth is for FIFO and 90% for SRPT). As of October 2020, a small
 value can provide significant benefits for the largest messages under very high
 loads, but for most loads its effect is negligible.
 .TP
-.IR grant_recalc_usecs
-How frequently (in microseconds) to scan the RPCs currently receiving grants
-to see if the priority order is still correct. The order can become incorrect
-if enough data is arrives for a low-priority RPC so that it now has fewer bytes
-left to grant than other RPCs that currently have higher priority.
-Validating the order requires the global grant lock, so checking every time data
-arrives would risk severe lock contention. Instead, the order is only checked
-every
-.I grant_recalc_usecs
-microseconds.
-.TP
 .I gro_busy_usecs
 An integer value used to determine whether or not to perform some
 optimizations specified by
@@ -680,7 +672,9 @@ than 100, since most NICs cannot transmit at full link speed under all
 conditions.
 .TP
 .IR max_nic_est_backlog_usecs
-This value is used to prevent the buildup of large queues of packets
+This value and
+.I max_nic_queue_usecs
+are used to prevent the buildup of large queues of packets
 waiting to be transmitted in the NIC. Homa keeps a running
 estimate of how many bytes are currently queued in the NIC, assuming
 the NIC transmits at full link speed. If the queue gets long enough
@@ -698,23 +692,26 @@ a better approximation of SRPT, but the value must be high enough to
 allow time to queue the next packet before
 the NIC becomes idle; otherwise, output bandwidth will be lost.
 .TP
+.IR max_nic_queue_usecs
+This value is used along with
+.I max_nic_est_backlog_usecs
+to limit packet queuing in the NIC  (see comments at the beginning of
+homa_qdisc.c for a discussion of how these two parameters work together).
+This parameter places a limit on the
+number of packets that have been passed to the NIC for transmission but not
+yet returned to Linux after transmission. If the data in such packets
+would take more than
+.I max_nic_queue_usecs
+to transmit (assuming full uplink bandwidth), then Homa will not queue
+additional packets in the NIC until the queued data gets back below
+.I max_nic_queue_usecs.
+.TP
 .IR max_overcommit
 An integer value setting an upper limit on the number of incoming
 messages to which Homa will issue grants at any given time. Higher
 numbers generally improve link bandwidth utilization, but can result
 in more buffering and may affect tail latency if there are not many
 priority levels available. Must be at least 1.
-.TP
-.IR max_rpcs_per_peer
-In Homa's original design, if there were multiple incoming RPCs from the
-same peer, Homa would only send grants to the highest-priority of them. The
-thought was that this RPC could consume all of the link bandwidth at both
-sender and receiver, so there would be no point in granting to additional RPCs
-from that peer. However, with faster networks, it isn't currently
-possible for Homa to saturate a link with a single RPC. Homa will now
-grant to multiple RPCs from the same peer; this integer value limits
-the number of active RPCs from a single peer that Homa will grant at
-once.
 .TP
 .IR max_sched_prio
 (Read-only) An integer value specifying the highest priority level that Homa

@@ -16,17 +16,6 @@
 /* Used when determining how many bpages to consider for allocation. */
 #define MIN_EXTRA 4
 
-#ifdef __UNIT_TEST__
-/* When running unit tests, allow HOMA_BPAGE_SIZE and HOMA_BPAGE_SHIFT
- * to be overridden.
- */
-#include "mock.h"
-#undef HOMA_BPAGE_SIZE
-#define HOMA_BPAGE_SIZE mock_bpage_size
-#undef HOMA_BPAGE_SHIFT
-#define HOMA_BPAGE_SHIFT mock_bpage_shift
-#endif /* __UNIT_TEST__ */
-
 /**
  * set_bpages_needed() - Set the bpages_needed field of @pool based
  * on the length of the first RPC that's waiting for buffer space.
@@ -135,6 +124,9 @@ error:
  */
 void homa_pool_free(struct homa_pool *pool)
 {
+#ifdef __UNIT_TEST__
+	mock_free_pool(pool);
+#endif /* __UNIT_TEST__ */
 	if (pool->region) {
 		kfree(pool->descriptors);
 		free_percpu(pool->cores);
@@ -298,6 +290,8 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 
 	if (!pool->region)
 		return -ENOMEM;
+	if (rpc->state == RPC_DEAD)
+		return 0;
 
 	/* First allocate any full bpages that are needed. */
 	full_pages = rpc->msgin.length >> HOMA_BPAGE_SHIFT;
@@ -538,7 +532,6 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			resend.length = htonl(-1);
 			resend.priority = homa_high_priority(rpc->hsk->homa);
 			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
-			homa_grant_check_rpc(rpc);
 		}
 #endif /* See strip.py */
 		homa_rpc_unlock(rpc);
@@ -554,6 +547,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 u64 homa_pool_avail_bytes(struct homa_pool *pool)
 {
 	struct homa_pool_core *core;
+	struct homa_bpage *bpage;
 	u64 avail;
 	int cpu;
 
@@ -563,8 +557,13 @@ u64 homa_pool_avail_bytes(struct homa_pool *pool)
 	avail *= HOMA_BPAGE_SIZE;
 	for (cpu = 0; cpu < nr_cpu_ids; cpu++) {
 		core = per_cpu_ptr(pool->cores, cpu);
-		if (pool->descriptors[core->page_hint].owner == cpu)
-			avail += HOMA_BPAGE_SIZE - core->allocated;
+		bpage = &pool->descriptors[core->page_hint];
+		if (bpage->owner == cpu) {
+			if (atomic_read(&bpage->refs) > 1)
+				avail += HOMA_BPAGE_SIZE - core->allocated;
+			else
+				avail += HOMA_BPAGE_SIZE;
+		}
 	}
 	return avail;
 }

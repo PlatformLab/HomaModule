@@ -37,9 +37,8 @@ endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -Wno-pointer-sign -MD -no-pie \
-		-g $(CINCLUDES) $(DEFS) -fsanitize=address \
-		-fno-omit-frame-pointer
+CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS) \
+		-fsanitize=address -fno-omit-frame-pointer
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) \
 		-fsanitize=address -fno-omit-frame-pointer
 
