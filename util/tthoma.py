@@ -37,7 +37,7 @@ import time
 # dictionaries of info about that RPC, with the following elements (some
 # elements may be missing if the RPC straddled the beginning or end of the
 # timetrace):
-# found:             Last time when homa_wait_for_message found the RPC
+# found:             Last time when homa_wait_* found the RPC
 # gro_core:          Core that handled GRO processing for this RPC
 # gro_data_pkts:     List of packets processed by GRO for this RPC, sorted
 #                    in order of 'gro'
@@ -89,8 +89,8 @@ import time
 # granted:           # of bytes granted for the incoming message
 # sent:              # of bytes that have been sent for the outgoing message
 #                    as of the end of the trace
-# rank:              RPC's rank in list of grantable RPCs (0 -> highest
-#                    priority) or -1 if not in grantable list
+# active_ix:         RPC's location in array of grantable RPCs or -1 if not
+#                    in grantable_rpcs
 class RpcDict(dict):
     def __missing__(self, id):
         new_rpc = {'node': Dispatcher.cur_trace['node'],
@@ -2160,12 +2160,13 @@ class Dispatcher:
 
     def __rpc_handoff(self, trace, time, core, match, interests):
         id = int(match.group(1))
+        port = int(match.group(2))
         for interest in interests:
-            interest.tt_rpc_handoff(trace, time, core, id)
+            interest.tt_rpc_handoff(trace, time, core, id, port)
 
     patterns.append({
         'name': 'rpc_handoff',
-        'regexp': 'homa_rpc_handoff handing off id ([0-9]+)'
+        'regexp': 'homa_rpc_handoff handing off id ([0-9]+) for port ([0-9]+)'
     })
 
     def __rpc_queued(self, trace, time, core, match, interests):
@@ -2181,14 +2182,18 @@ class Dispatcher:
 
     def __wait_found_rpc(self, trace, time, core, match, interests):
         id = int(match.group(1))
-        type = match.group(2)
-        blocked = int(match.group(3))
+        pid = int(match.group(2))
+        port = int(match.group(3))
+        type = match.group(4)
+        blocked = int(match.group(5))
         for interest in interests:
-            interest.tt_wait_found_rpc(trace, time, core, id, type, blocked)
+            interest.tt_wait_found_rpc(trace, time, core, id, pid, port,
+                    type, blocked)
 
     patterns.append({
         'name': 'wait_found_rpc',
-        'regexp': 'homa_wait_[^ ]+ found rpc id ([0-9]+).* via ([a-z_]+), blocked ([0-9]+)'
+        'regexp': 'homa_wait_[^ ]+ found rpc id ([0-9]+), pid ([0-9]+), '
+                'port ([0-9]+) via ([a-z_]+), blocked ([0-9]+)'
     })
 
     def __resend_tx(self, trace, time, core, match, interests):
@@ -2371,15 +2376,15 @@ class Dispatcher:
         id = int(match.group(1))
         length = int(match.group(2))
         remaining = int(match.group(3))
-        rank = int(match.group(4))
+        active_ix = int(match.group(4))
         for interest in interests:
             interest.tt_rpc_incoming3(trace, time, core, id, length,
-                    remaining, rank)
+                    remaining, active_ix)
 
     patterns.append({
         'name': 'rpc_incoming3',
         'regexp': 'RPC id ([0-9]+): length ([0-9]+), remaining ([0-9]+), '
-                'rank ([-0-9]+)'
+                'active_ix ([-0-9]+)'
     })
 
     def __bpages_alloced(self, trace, time, core, match, interests):
@@ -3660,7 +3665,7 @@ class AnalyzeDelay:
                 trace['node']])
         self.gro_handoffs[core].pop(0)
 
-    def tt_rpc_handoff(self, trace, time, core, id):
+    def tt_rpc_handoff(self, trace, time, core, id, port):
         if id in self.rpc_handoffs:
             print('Multiple RPC handoffs for id %s on %s: %9.3f and %9.3f' %
                     (id, trace['node'], self.rpc_handoffs[id], time),
@@ -3670,7 +3675,8 @@ class AnalyzeDelay:
     def tt_rpc_queued(self, trace, time, core, id, port):
         self.rpc_queued[id] = time
 
-    def tt_wait_found_rpc(self, trace, time, core, id, type, blocked):
+    def tt_wait_found_rpc(self, trace, time, core, id, pid, port, type,
+            blocked):
         if id in self.rpc_handoffs:
             delay = time - self.rpc_handoffs[id]
             if blocked:
@@ -5066,13 +5072,13 @@ class AnalyzeHandoffs:
         self.node_rpc_events = defaultdict(lambda: defaultdict(list))
         return
 
-    def tt_rpc_handoff(self, trace, t, core, id):
+    def tt_rpc_handoff(self, trace, t, core, id, port):
         self.node_rpc_events[trace['node']][id].append([t, 'handoff'])
 
     def tt_rpc_queued(self, trace, t, core, id, port):
         self.node_rpc_events[trace['node']][id].append([t, 'enqueue'])
 
-    def tt_wait_found_rpc(self, trace, t, core, id, type, blocked):
+    def tt_wait_found_rpc(self, trace, t, core, id, pid, port, type, blocked):
         event = 'got_handoff' if type == 'handoff' else 'dequeue'
         self.node_rpc_events[trace['node']][id].append([t, event])
 
@@ -9452,7 +9458,7 @@ class AnalyzePid:
     def tt_free_skbs(self, trace, t, core, num_skbs):
         self.record(core, trace['line'])
 
-    def tt_wait_found_rpc(self, trace, t, core, id, type, blocked):
+    def tt_wait_found_rpc(self, trace, t, core, id, pid, port, type, blocked):
         self.record(core, trace['line'])
 
     def output(self):
@@ -10005,9 +10011,11 @@ class AnalyzeRpcs:
         rpcs[id]['gro_core'] = core
         recv_offsets[offset] = True
 
-    def tt_rpc_handoff(self, trace, t, core, id):
-        rpcs[id]['handoff'] = t
-        rpcs[id].pop('queued', None)
+    def tt_rpc_handoff(self, trace, t, core, id, port):
+        rpc = rpcs[id]
+        rpc['handoff'] = t
+        rpc['port'] = port
+        rpc.pop('queued', None)
 
     def tt_ip_xmit(self, trace, t, core, peer, id, offset, wire_bytes):
         global rpcs
@@ -10067,7 +10075,8 @@ class AnalyzeRpcs:
         global rpcs
         rpcs[id]['recvmsg_done'] = t
 
-    def tt_wait_found_rpc(self, trace, t, core, id, type, blocked):
+    def tt_wait_found_rpc(self, trace, t, core, id, pid, port, type, blocked):
+        rpcs[id]['port'] = port
         rpcs[id]['found'] = t
 
     def tt_copy_out_start(self, trace, t, core, id):
@@ -10108,9 +10117,9 @@ class AnalyzeRpcs:
         rpc['granted'] = granted
         rpc['stats_time'] = t
 
-    def tt_rpc_incoming3(self, trace, t, core, id, length, remaining, rank):
+    def tt_rpc_incoming3(self, trace, t, core, id, length, remaining, active_ix):
         global rpcs
-        rpcs[id]['rank'] = rank
+        rpcs[id]['active_ix'] = active_ix
 
     def tt_rpc_outgoing(self, trace, t, core, id, peer, sent, length):
         global rpcs
@@ -11496,6 +11505,150 @@ class AnalyzeSmis:
         for smi in sorted(self.smis, key=lambda t : t[0]):
             start, end, node = smi
             print('%9.3f  %9.3f  %6.1f  %s' % (start, end, end - start, node))
+
+#------------------------------------------------
+# Analyzer: sockqs
+#------------------------------------------------
+class AnalyzeSockqs:
+    """
+    Analyze the per-socket queues of ready RPCs and generate a file for each
+    node with one record for each completed RPC handoff to a user app.
+    Requires the --data option.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpcs')
+        require_options('sockqs', 'data')
+
+        # node -> list of events for the node. Events are tuples containing
+        # <time, type, id, ...> where type is an event type and id is an RPC
+        # id. Sorted in order of time. Specific events:
+        # <time, 'handoff', id>
+        # <time, 'queued', id>
+        # <time, 'found', id, type, blocked>
+        self.node_events = {}
+
+    def init_trace(self, trace):
+        self.cur_events = []
+        self.node_events[trace['node']] = self.cur_events
+
+    def tt_rpc_handoff(self, trace, t, core, id, port):
+        self.cur_events.append([t, 'handoff', id])
+
+    def tt_rpc_queued(self, trace, t, core, id, port):
+        self.cur_events.append([t, 'queued', id])
+
+    def tt_wait_found_rpc(self, trace, t, core, id, pid, port, type, blocked):
+        self.cur_events.append([t, 'found', id, type, blocked, pid])
+
+    def output(self):
+        global rpcs, traces, options
+
+        # node -> list of packets transmitted by that node
+        node_pkts = defaultdict(list)
+
+        print('\n----------------')
+        print('Analyzer: sockqs')
+        print('----------------')
+        print('See data files %s/sockqs*.dat' % (options.data))
+
+        # Each iteration in this loops generates data for one node.
+        for node in get_sorted_nodes():
+            f = open('%s/sockqs_%s.dat' % (options.data, node), 'w')
+            f.write('# Node: %s\n' % (node))
+            f.write('# Generated at %s.\n\n' %
+                    (time.strftime('%I:%M %p on %m/%d/%Y')))
+            f.write('# Each line represents a time when homa_wait_shared '
+                    'or homa_wait_private\n')
+            f.write('# received an RPC to process:\n')
+            f.write('Time:     Time when the RPC was received by the user app\n')
+            f.write('Id:       Identifier of the RPC\n')
+            f.write('KB:       Length of RPC message (KBytes)\n')
+            f.write('Port:     Port for the RPC\'s socket\n')
+            f.write('Pid:      Process id of application thread\n')
+            f.write('Type:     How the RPC was passed to the thread: poll, '
+                    'block, or queue\n')
+            f.write('Delay:    Elapsed time from when RPC was handed off '
+                    'or queued\n')
+            f.write('QLen:     Number of other RPCs in the socket queue when '
+                    'RPC added to queue\n')
+            f.write('Ahead:    Number of RPCs removed from the socket queue '
+                    'after this one was\n')
+            f.write('          queued but before it was removed\n')
+            f.write('Final:    X means this handoff completes the message, '
+                    'blank means this\n')
+            f.write('          handoff was just to copy data.\n\n')
+
+            f.write('Time              Id   Length   Port    Pid   Type   Delay QLen  Ahead  Final\n')
+
+            # port -> cumulative count of RPCs removed from the queue for
+            # that port.
+            port_found = defaultdict(lambda: 0)
+
+            # port -> dictionary of id -> 1: keeps track of all RPCs
+            # currently known to be queued for port.
+            port_queued = defaultdict(dict)
+
+            # id -> <time, queued, found> tuple where time is the most recent
+            # time that RPC id was either handed off or queued, queued is
+            # the length of the socket queue for id's socket, and found is the
+            # value of port_found for RPC's port at the time of the handoff.
+            rpc_handoff = {}
+
+            for t, event, id, *extra in self.node_events[node]:
+                rpc = rpcs[id]
+                try:
+                    port = rpc['port']
+                except KeyError:
+                    print('No port in RPC id %d: %s' % (id, rpc))
+                    continue
+                if event == 'handoff':
+                    rpc_handoff[id] = [t, len(port_queued[port]),
+                            port_found[port]]
+                    if 0 and port == 4000 and node == 'node5':
+                        print('%9.3f handoff id %d on port %d, length %s' % (t,
+                                id, port, rpc['in_length']))
+                    continue
+                if event == 'queued':
+                    rpc_handoff[id] = [t, len(port_queued[port]),
+                            port_found[port]]
+                    port_queued[port][id] = 1
+                    if 0 and port == 4000 and node == 'node5':
+                        print('%9.3f queue id %d on port %d, length %s, others queued: %s (len %d)' % (t,
+                                id, port, rpc['in_length'], port_queued[port].keys(), len(port_queued[port])))
+                    continue
+                if event != 'found':
+                    raise Exception('unknown event type "%s"' % (event))
+
+                # We have a 'found' event.
+                if 0 and port == 4000 and node == 'node5':
+                    print('%9.3f found id %d on port %d, type %s blocked %d, pid %d, length %s' % (
+                            t, id, port, type, blocked, pid, rpc['in_length']))
+                type, blocked, pid = extra
+                length = rpc['in_length']
+                if length == None:
+                    length = ''
+                if type == 'ready_rpcs':
+                    type = 'queue'
+                elif type == 'handoff':
+                    type = 'block' if blocked else 'poll'
+                if id in rpc_handoff:
+                    handoff, queued, found = rpc_handoff[id];
+                    delay_string = '%.1f' % (t - handoff)
+                    ahead_string = port_found[port] - found
+                else:
+                    delay_string = ''
+                    queued = ''
+                    ahead_string = ''
+                final = '    X' if t == rpc['found'] else ''
+
+                f.write('%9.3f %10d  %7s %6d %5d  %5s %7s %4s   %4s%s\n' % (
+                        t, id, length, port, pid, type, delay_string, queued,
+                        ahead_string, final))
+                port_found[port] += 1
+                if id in port_queued[port]:
+                    del port_queued[port][id]
+            f.close()
 
 #------------------------------------------------
 # Analyzer: sync
