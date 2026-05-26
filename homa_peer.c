@@ -277,13 +277,8 @@ int homa_peer_pick_victims(struct homa_peertab *peertab,
 				peer = NULL;
 				break;
 			}
-			if (homa_peer_prefer_evict(peertab, peer, victims[i])) {
-				struct homa_peer *tmp;
-
-				tmp = victims[i];
-				victims[i] = peer;
-				peer = tmp;
-			}
+			if (homa_peer_prefer_evict(peertab, peer, victims[i]))
+				swap(peer, victims[i]);
 		}
 
 		if (num_victims < max_victims && peer) {
@@ -323,11 +318,11 @@ void homa_peer_gc(struct homa_peertab *peertab)
 
 		if (rhashtable_remove_fast(&peertab->ht, &peer->ht_linkage,
 					   ht_params) == 0) {
-			homa_peer_release(peer);
 			peertab->num_peers--;
 			peer->ht_key.hnet->num_peers--;
 			tt_record1("homa_peer_gc removed homa_peer 0x%x",
 				   tt_addr(peer->addr));
+			homa_peer_release(peer);
 		}
 	}
 done:
@@ -510,8 +505,7 @@ struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
  * @peer:   The peer whose dst field should be reset.
  * @hsk:    Socket that will be used for sending packets.
  * Return:  Zero for success, or a negative errno if there was an error
- *          (in which case the existing value for the dst field is left
- *          in place).
+ *          (in which case peer is unmodified).
  */
 int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 {

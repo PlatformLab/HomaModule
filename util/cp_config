@@ -19,9 +19,10 @@ parser.add_argument('-c', '--config', dest='config',
         choices=['balance', 'buffers', 'busy_usecs', 'client_threads',
                 'dctcp_buffers', 'defer_min_bytes', 'fifo', 'gbps',
                 'gen2', 'gen3', 'grant_policy', 'gro_busy_usecs', 'load',
-                'max_gro', 'max_gso', 'max_nic_queue', 'mtu', 'nic_backlog',
-                'poll', 'ports', 'prios', 'receivers', 'repeat',
-                'tcp_buffers', 'throttle', 'time', 'unsched_bytes'],
+                'max_gro', 'max_gso', 'max_incoming', 'mtu', 'nic_backlog',
+                'nic_queue', 'poll', 'ports', 'prios', 'receivers', 'repeat',
+                'tcp_buffers', 'throttle', 'time', 'unsched_bytes',
+                'window'],
         required = True,
         help='Aspect of configuration to change')
 options = parser.parse_args()
@@ -186,12 +187,13 @@ elif options.config == 'max_gso':
                 'label': 'max_gso_size %d' % (count),
                 'sysctl': ['.net.homa.max_gso_size', count]
                 })
-elif options.config == 'max_nic_queue':
-    # Vary the limit on length of any individual NIC queue
-    for usecs in [5, 10, 20, 40]:
-        specs.append({'exp_name': 'nicq_%d' % (usecs),
-                'label': 'max_nic_queue_usecs %d' % (usecs),
-                'sysctl': ['.net.homa.max_nic_queue_usecs', usecs]})
+elif options.config == 'max_incoming':
+    # Vary the max_incoming configuration parameter
+    for count in [200000, 400000, 800000, 1600000]:
+        specs.append({'exp_name': 'max_gso_%d' % (count/1000),
+                'label': 'max_incoming %d KB' % (count/1000),
+                'sysctl': ['.net.homa.max_incoming', count]
+                })
 elif options.config == 'mtu':
     # Vary the maximum packet size
     for length in [1500, 3000, 5000, 7000, 9000]:
@@ -200,11 +202,18 @@ elif options.config == 'mtu':
                 'mtu': length
                 })
 elif options.config == 'nic_backlog':
-    # Vary the limit on an NIC queue length
+    # Vary the limit on estimated NIC queue length
     for micros in [5, 10, 20, 100, 10000]:
         specs.append({'exp_name': 'nic_%d' % (micros),
-                'label': 'nic queue %d us' % (micros),
+                'label': 'est. nic queue %d us' % (micros),
                 'sysctl': ['.net.homa.max_nic_est_backlog_usecs', micros]
+                })
+elif options.config == 'nic_queue':
+    # Vary the limit on actual bytes pending with NIC
+    for micros in [10, 20, 40, 80, 200]:
+        specs.append({'exp_name': 'nicq_%d' % (micros),
+                'label': 'nic pending %d us' % (micros),
+                'sysctl': ['.net.homa.max_nic_queue_usecs', micros]
                 })
 elif options.config == 'poll':
     # Vary the polling interval
@@ -274,6 +283,13 @@ elif options.config == 'unsched_bytes':
         specs.append({'exp_name': 'unsched_%dk' % (unsched),
                 'label': 'unsched_bytes %dk' % (unsched),
                 'sysctl': ['.net.homa.unsched_bytes', unsched*1000]
+                })
+elif options.config == 'window':
+    # Vary the size of the grant window
+    for value in [0, 200]:
+        specs.append({'exp_name': "win%d" % (value),
+                'label': "window %d" % (value),
+                'sysctl': ['.net.homa.window', value*1000]
                 })
 
 # Keys are parameter names, values are old values to restore.

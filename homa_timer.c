@@ -153,12 +153,12 @@ void homa_timer(struct homa *homa)
 
 	if (atomic_read(&homa->grant->total_incoming) != 0 ||
 	    homa->grant->num_grantable_rpcs != 0 ||
-	    homa->grant->num_active_rpcs != 0 ||
+	    homa->grant->num_active != 0 ||
 	    total_grants - prev_grant_count != 0)
 		tt_record4("homa_timer found total_incoming %d, num_grantable_rpcs %d, num_active_rpcs %d, new grants %d",
 			   atomic_read(&homa->grant->total_incoming),
 			   homa->grant->num_grantable_rpcs,
-			   homa->grant->num_active_rpcs,
+			   homa->grant->num_active,
 			   total_grants - prev_grant_count);
 	if (total_grants == prev_grant_count &&
 	    homa->grant->num_grantable_rpcs > 20) {

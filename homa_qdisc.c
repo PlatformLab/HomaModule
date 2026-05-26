@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
 
-/* This file implements a special-purpose queuing discipline for Homa.
- * This queuing discipline serves the following purposes:
+/* This file implements a special-purpose queuing discipline for Homa,
+ * which serves the following purposes:
  * - It paces output traffic so that queues do not build up in the NIC
  *   (they build up here instead).
  * - It implements the SRPT policy for Homa traffic (highest priority goes
@@ -15,7 +15,16 @@
  *
  * Preventing congestion in the NIC is essential for a proper implementation
  * of SRPT (otherwise a short message could get stuck behind a long message
- * in the NIC). This file implements a two-part strategy:
+ * in the NIC). The Linux DQL mechanism is inadequate for this purpose in
+ * two ways. First, it allows large queues to accumulate in the NIC (100 usec
+ * of delay or more). Second, when queues build up, Homa wants to know so
+ * it can throttle long messages more than short ones in order to implement
+ * SRPT. DQL provides no feedback to qdiscs; it simply stops the entire output
+ * queue, throttling short and long messages alike. This nullifies Homa's
+ * SRPT scheduler.
+ *
+ * This file uses two techniques to limit NIC queues to much lower occupancy
+ * than DQL, while still maintaining full link throughput.
  *
  * First, it paces output traffic so that packets are passed to the NIC at
  * a data rate no more than the uplink bandwidth. It implements this by
@@ -48,23 +57,23 @@
  * January 2026).
  *
  * It might seem that the second approach is sufficient by itself, so the
- * first approach is not needed. Unfortunately, updates to the DQL counters
- * don't happen until packets are actually transmitted. This means that a
- * a large burst of packets could pass through the qdisc mechanism before the
- * DQL counters are updated, resulting in significant queue buildup before
- * the counters get updated.  The first technique prevents this from
- * happening.
+ * first approach is not needed. Unfortunately there can be a significant lag
+ * (10's of usecs) between when a packet is transmitted and when the DQL
+ * counters get updated. In order to keep the NIC running at line rate,
+ * max_nic_queue_usecs must be high enough to cover that lag (40 usecs as
+ * of May 2026); this means that outgoing packets can be queued for as much
+ * as 40 usecs. In contrast, max_nic_est_backlog_usecs can be set to around
+ * 5 usecs, which provides a much tighter bound on NIC queue length. Thus,
+ * P99 latency for short packets is minimized with a dual approach:
+ * max_nic_est_backlog_usecs keeps the NIC queue very short in the normal
+ * case where the NIC can transmit at full link speed, and max_nic_queue_usecs
+ * limits queue buildup in situations where the NIC can't transmit at full
+ * link speed. Measurements in May 2026 indicate that disabling either of
+ * these techniques increases P99 latency for short packets by 10-15%.
  *
  * There is one additional twist, which is that the rate limits above do
  * not apply to small packets. The reasons for this are explained in a comment
  * in homa_qdisc_enqueue.
- *
- * In case you're wondering "why don't you just use DQL?", the DQL mechanism
- * is inadequate in two ways. First, it allows large queues to accumulate in
- * the NIC. Second, when queues build up, Homa wants to know so it can
- * throttle long messages more than short ones. DQL provides no feedback
- * to qdiscs; it simply stops the entire output queue, throttling short and
- * long messages alike. This interferes with Homa's SRPT scheduler.
  */
 
 #include "homa_impl.h"
@@ -302,8 +311,10 @@ void homa_qdisc_shared_free(struct homa_qdisc_shared *qshared)
 struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 {
 	struct homa_qdisc_shared *qshared;
+	struct homa_nic_queue *queues;
 	struct homa_qdisc_dev *qdev;
 	struct homa_net *hnet;
+	int i;
 
 	rcu_read_lock();
 	hnet = homa_net(dev_net(dev));
@@ -333,15 +344,24 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 		qdev = ERR_PTR(-ENOMEM);
 		goto done;
 	}
+	queues = kzalloc(dev->num_tx_queues * sizeof(*queues), GFP_KERNEL);
+	if (!queues) {
+		kfree(qdev);
+		qdev = ERR_PTR(-ENOMEM);
+		goto done;
+	}
 	qdev->dev = dev;
 	qdev->hnet = hnet;
 	refcount_set(&qdev->refs, 1);
 	homa_qdev_update_sysctl(qdev);
 	INIT_LIST_HEAD(&qdev->links);
+	spin_lock_init(&qdev->defer_lock);
 	qdev->deferred_rpcs = RB_ROOT_CACHED;
 	INIT_LIST_HEAD(&qdev->deferred_qdiscs);
 	qdev->next_qdisc = &qdev->deferred_qdiscs;
-	spin_lock_init(&qdev->defer_lock);
+	qdev->nic_queues = queues;
+	for (i = 0; i < dev->real_num_tx_queues; i++)
+		qdev->nic_queues[i].num_queued = dev->_tx[i].dql.num_queued;
 	init_waitqueue_head(&qdev->pacer_sleep);
 	spin_lock_init(&qdev->pacer_mutex);
 
@@ -352,6 +372,7 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 
 		pr_err("couldn't create homa qdisc pacer thread: error %d\n",
 		       error);
+		kfree(qdev->nic_queues);
 		kfree(qdev);
 		qdev = ERR_PTR(error);
 		goto done;
@@ -400,6 +421,7 @@ void homa_qdisc_dev_callback(struct rcu_head *head)
 	qdev = container_of(head, struct homa_qdisc_dev, rcu_head);
 	homa_qdisc_free_homa(qdev);
 	WARN_ON(!list_empty(&qdev->deferred_qdiscs));
+	kfree(qdev->nic_queues);
 	kfree(qdev);
 }
 
@@ -452,10 +474,47 @@ void homa_qdisc_destroy(struct Qdisc *qdisc)
 	while (!skb_queue_empty(&q->deferred_tcp))
 		kfree_skb(__skb_dequeue(&q->deferred_tcp));
 	list_del_init(&q->defer_links);
-	if (q->qdev->congested_qdisc == q)
-		q->qdev->congested_qdisc = NULL;
 	spin_unlock_bh(&q->qdev->defer_lock);
 	homa_qdisc_qdev_put(q->qdev);
+}
+
+/**
+ * homa_qdisc_add_queued() - This function is invoked just before Homa
+ * forwards a packet downward towards the NIC (it must be invoked *before*
+ * the packet is actually handed off to the NIC). It incorporates info
+ * about this packet into queue length information.
+ * @qdev:    Our information about all the qdiscs for a device.
+ * @skb:     Packet that is going to be transmitted.
+ */
+void homa_qdisc_add_queued(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
+{
+	int dql_queued, queued, pending, old;
+	struct homa_nic_queue *queue;
+	struct dql *dql;
+
+	queue = &qdev->nic_queues[skb_get_queue_mapping(skb)];
+	dql = &qdev->dev->_tx[skb_get_queue_mapping(skb)].dql;
+	dql_queued = READ_ONCE(dql->num_queued);
+	queued = READ_ONCE(queue->num_queued);
+
+	/* Check to see if queue->num_queued lags behind dql->num_queued
+	 * (perhaps races in updates?); if so, correct it.
+	 */
+	if (after(dql_queued, queued)) {
+		tt_record4("dql_queued (%d) ahead of queued (%d), diff %d, for qix %d\n",
+			dql_queued, queued, dql_queued - queued,
+			skb_get_queue_mapping(skb));
+		queued = dql_queued;
+	}
+	queued += qdisc_pkt_len(skb);
+	queue->num_queued = queued;
+	pending = queued - READ_ONCE(dql->num_completed);
+	old = atomic_xchg_relaxed(&queue->length, pending);
+	atomic_add(pending - old, &qdev->total_nic_queue);
+	if (pending != old)
+		tt_record4("homa_qdisc_add_queued added %d to total_nic_queue, now %d, pending for qix %d now %d",
+			   pending - old, atomic_read(&qdev->total_nic_queue),
+			   skb_get_queue_mapping(skb), pending);
 }
 
 /**
@@ -475,8 +534,6 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	struct homa_data_hdr *h;
 	int offset = 0;
 	int pkt_len;
-
-	homa_qdisc_update_congested(q);
 
 	/* This function tries to transmit short packets immediately for both
 	 * Homa and TCP, even when the NIC queue is long. We do this because
@@ -503,7 +560,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 			homa_qdisc_defer_tcp(q, skb);
 			return NET_XMIT_SUCCESS;
 		}
-		if (!READ_ONCE(qdev->congested_qdisc) &&
+		if (atomic_read(&qdev->total_nic_queue) <=
+		    qdev->max_nic_queue_bytes &&
 		    !homa_qdisc_any_deferred(qdev) &&
 		    homa_qdisc_update_link_idle(qdev, pkt_len,
 				qshared->max_nic_est_backlog_cycles))
@@ -531,7 +589,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		goto enqueue;
 	}
 
-	if (!READ_ONCE(qdev->congested_qdisc) &&
+	if (atomic_read(&qdev->total_nic_queue) <= qdev->max_nic_queue_bytes &&
 	    !homa_qdisc_any_deferred(qdev) &&
 	    homa_qdisc_update_link_idle(qdev, pkt_len,
 					qshared->max_nic_est_backlog_cycles))
@@ -559,6 +617,7 @@ enqueue:
 	}
 	if (unlikely(sch->q.qlen >= READ_ONCE(sch->limit)))
 		return qdisc_drop(skb, sch, to_free);
+	homa_qdisc_add_queued(qdev, skb);
 	return qdisc_enqueue_tail(skb, sch);
 }
 
@@ -683,6 +742,7 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 		bytes_left = rpc->msgout.length - info->offset;
 		if (bytes_left < rpc->qrpc.tx_left)
 			rpc->qrpc.tx_left = bytes_left;
+		rpc->qrpc.qdev = qdev;
 		homa_qdisc_insert_rb(qdev, rpc);
 	}
 	if (qdev->last_defer)
@@ -781,8 +841,8 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 		tt_record_tcp("homa_qdisc_pacer requeued TCP packet from "
 			"0x%x to 0x%x, data bytes %d, seq/ack %u",
 			skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
+	homa_qdisc_add_queued(qdev, skb);
 	homa_qdisc_schedule_skb(skb, q->qdisc);
-	homa_qdisc_update_congested(q);
 	return pkt_len;
 }
 
@@ -914,8 +974,8 @@ int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 	txq = netdev_get_tx_queue(skb->dev, skb_get_queue_mapping(skb));
 	qdisc = rcu_dereference_bh(txq->qdisc);
 	if (qdisc->ops == &homa_qdisc_ops) {
+		homa_qdisc_add_queued(qdev, skb);
 		homa_qdisc_schedule_skb(skb, qdisc);
-		homa_qdisc_update_congested(qdisc_priv(qdisc));
 	} else {
 		kfree_skb(skb);
 	}
@@ -938,6 +998,34 @@ void homa_qdisc_free_homa(struct homa_qdisc_dev *qdev)
 			break;
 		kfree_skb(skb);
 	}
+}
+
+/**
+ * homa_qdisc_flush_rpc() - If an RPC has any packets queued here,
+ * unqueue them and free them (they will not be transmitted).
+ * @rpc:   RPC whose deferred packets should be freed. Caller must
+ *         ensure that there will be no concurrent access to this; normally
+ *         the RPC is dead when this function is called.
+ */
+void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
+{
+	struct homa_qdisc_dev *qdev = rpc->qrpc.qdev;
+
+	if (!qdev)
+		return;
+
+	/* Remove the RPC from the table of deferred RPCs. */
+	spin_lock_bh(&qdev->defer_lock);
+	if (skb_queue_len(&rpc->qrpc.packets) > 0) {
+		rb_erase_cached(&rpc->qrpc.rb_node, &qdev->deferred_rpcs);
+		if (rpc == qdev->oldest_rpc)
+			qdev->oldest_rpc = NULL;
+	}
+
+	/* Free all of the RPC's deferred packets. */
+	while (skb_queue_len(&rpc->qrpc.packets) > 0)
+		kfree_skb(skb_dequeue(&rpc->qrpc.packets));
+	spin_unlock_bh(&qdev->defer_lock);
 }
 
 /**
@@ -1066,7 +1154,6 @@ int homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 	 */
 	max_cycles = qdev->hnet->homa->qshared->max_nic_est_backlog_cycles;
 	for (i = 0; i < 5; i++) {
-		struct homa_qdisc *congested;
 		u64 idle_time, now;
 
 		/* Return if the NIC is congested using either of the two
@@ -1078,16 +1165,16 @@ int homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 		if (idle_time > now + max_cycles)
 			goto done;
 
-		congested = READ_ONCE(qdev->congested_qdisc);
-		if (congested && homa_qdisc_bytes_pending(congested) <=
-				qdev->max_nic_queue_bytes) {
-			WRITE_ONCE(qdev->congested_qdisc, NULL);
-			tt_record1("homa_qdisc_pacer cleared congested_qdisc (was qid %d)",
-				congested->ix);
-			congested = NULL;
+		if (atomic_read(&qdev->total_nic_queue) >
+		    qdev->max_nic_queue_bytes) {
+			/* The NIC appears to be congested; refresh our
+			 * info about queue lengths and check again.
+			 */
+			homa_qdisc_refresh_from_dql(qdev);
+			if (atomic_read(&qdev->total_nic_queue) >
+		    	    qdev->max_nic_queue_bytes)
+				goto done;
 		}
-		if (congested)
-			goto done;
 
 		/* Decide whether to transmit a Homa or TCP packet. If
 		 * only one protocol has packets, reset homa_credit to
@@ -1109,6 +1196,9 @@ int homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 				qdev->homa_credit -= xmit_bytes * (100 -
 					qdev->hnet->homa->qshared->homa_share);
 			}
+			tt_record2("homa_qdisc total_nic_queue %d, max_nic_queue_bytes %d",
+				   atomic_read(&qdev->total_nic_queue),
+				   qdev->max_nic_queue_bytes);
 		} else {
 			xmit_bytes = homa_qdisc_xmit_deferred_tcp(qdev);
 			if (xmit_bytes > 0) {
@@ -1161,6 +1251,39 @@ void homa_qdisc_pacer_check(struct homa *homa)
 		INC_METRIC(pacer_help_bytes, xmit_bytes);
 	}
 	rcu_read_unlock();
+}
+
+/**
+ * homa_qdisc_refresh_from_dql() - Read completion information from DQL
+ * for all of the queues for a device and use that to update our estimate
+ * of total queued bytes. This function is needed because we have no
+ * reliable way of being notified when packets are returned by the NIC
+ * after transmission. Thus this function must be called to scan all of the
+ * queues and collect the latest information about completions.
+ * @qdev:    Homa's information about the device.
+ */
+void homa_qdisc_refresh_from_dql(struct homa_qdisc_dev *qdev)
+{
+	struct homa_nic_queue *queue;
+	int pending, old, i;
+	struct dql *dql;
+	int recovered = 0;
+	int num_updates = 0;
+
+	for (i = 0; i < qdev->dev->real_num_tx_queues; i++) {
+		queue = &qdev->nic_queues[i];
+		if (atomic_read(&queue->length) == 0)
+			continue;
+		dql = &qdev->dev->_tx[i].dql;
+		pending = READ_ONCE(queue->num_queued) -
+			  READ_ONCE(dql->num_completed);
+		old = atomic_xchg_relaxed(&queue->length, pending);
+		atomic_add(pending - old, &qdev->total_nic_queue);
+		if (pending - old != 0) {
+			recovered += old - pending;
+			num_updates++;
+		}
+	}
 }
 
 /**

@@ -54,6 +54,38 @@ struct homa_qdisc {
 };
 
 /**
+ * struct homa_nic_queue - Contains Homa-specific information for a
+ * particular netdev_queue.
+ */
+struct homa_nic_queue {
+	/**
+	 * @length: Estimate of the bytes in packets that Homa has decided to
+	 * pass to the NIC for this queue but which have not yet been returned
+	 * after transmission. This amount is included in qdev->total_nic_queue.
+	 * Manipulated locklessly with atomic_xchg.
+	 */
+	atomic_t length;
+
+	/**
+	 * @num_queued: This has the same meaning as dql->num_queued, except
+	 * that it is incremented as soon as homa_qdisc decides that a
+	 * packet is ready to transmit, whereas dql->num_queued is not
+	 * incremented until the packet is actually queued for the NIC.
+	 * Thus, this is an estimate of what dql->num_queued will be once
+	 * all packets that homa_qdisc has decided to transmit have actually
+	 * been passed to the NIC.
+	 *
+	 * Homa initially used dql->num_queued directly, but there can be
+	 * a significant lag before Homa sees changes to dql->num_queued,
+	 * which resulted in overloading of NIC queues.
+	 *
+	 * This value may be manipulated without synchronzation: any
+	 * race-induced errors will eventually be corrected.
+	 */
+	unsigned int num_queued;
+};
+
+/**
  * struct homa_qdisc_dev - Contains information shared across all of the
  * homa_qdiscs associated with a net_device.
  */
@@ -102,23 +134,17 @@ struct homa_qdisc_dev {
 	atomic64_t link_idle_time __aligned(L1_CACHE_BYTES);
 
 	/**
+	 * @defer_lock: Synchronizes access to information about deferred
+	 * packets, including deferred_rpcs, deferred_qdiscs, next_qdisc,
+	 * last_defer, and some information in homa_qdiscs.
+	 */
+	spinlock_t defer_lock;
+
+	/**
 	 * @deferred_rpcs: Contains all homa_rpc's with deferred packets, in
 	 * SRPT order.
 	 */
 	struct rb_root_cached deferred_rpcs;
-
-	/**
-	 * @oldest_rpc: The RPC in deferred_rpcs with the oldest init_time, or
-	 * NULL if not currently known.
-	 */
-	struct homa_rpc *oldest_rpc;
-
-	/**
-	 * @srpt_bytes: The number of bytes that should be transmitted from
-	 * SRPT packets before transmitting a FIFO packet. <= 0 means
-	 * the next packet transmission should be FIFO.
-	 */
-	s64 srpt_bytes;
 
 	/**
 	 * @deferred_qdiscs: List of all homa_qdiscs with non-Homa packets
@@ -141,29 +167,6 @@ struct homa_qdisc_dev {
 	u64 last_defer;
 
 	/**
-	 * @max_nic_queue_bytes: The number of bytes corresponding to
-	 * qdev->max_nic_queue_usecs.
-	 */
-	int max_nic_queue_bytes;
-
-	/**
-	 * @congested_qdisc: If non-NULL, this variable identifies a qdisc
-	 * whose NIC queue is overloaded according to @homa_max_nic_queue_bytes.
-	 * NULL means no queue is currently known to be congested. This
-	 * variable is accessed without synchronization. See the PACING comment
-	 * at the top of homa_qdisc.c for a discussion of the packet pacing
-	 * architecture.
-	 */
-	struct homa_qdisc *congested_qdisc;
-
-	/**
-	 * @defer_lock: Synchronizes access to information about deferred
-	 * packets, including deferred_rpcs, deferred_qdiscs, next_qdisc,
-	 * last_defer, and some information in homa_qdiscs.
-	 */
-	spinlock_t defer_lock;
-
-	/**
 	 * @homa_credit: When there are both Homa and TCP deferred packets,
 	 * this is used to balance output between them according to the
 	 * homa_share sysctl value. Positive means that Homa packets should
@@ -174,6 +177,37 @@ struct homa_qdisc_dev {
 	 * by the pacer, so no need for synchronization.
 	 */
 	int homa_credit;
+
+	/**
+	 * @oldest_rpc: The RPC in deferred_rpcs with the oldest init_time, or
+	 * NULL if not currently known.
+	 */
+	struct homa_rpc *oldest_rpc;
+
+	/**
+	 * @srpt_bytes: The number of bytes that should be transmitted from
+	 * SRPT packets before transmitting a FIFO packet. <= 0 means
+	 * the next packet transmission should be FIFO.
+	 */
+	s64 srpt_bytes;
+
+	/**
+	 * @max_nic_queue_bytes: The number of bytes corresponding to
+	 * qdev->max_nic_queue_usecs.
+	 */
+	int max_nic_queue_bytes;
+
+	/**
+	 * @nic_queue_info: Information used to compute @total_nic_queue,
+	 * one struct for each entry in @dev->_tx.
+	 */
+	struct homa_nic_queue *nic_queues;
+
+	/**
+	 * @total_nic_queue: Sum of all the @length values in @nic_queues.
+	 * Manipulated locklessly with atomic_xchg.
+	 */
+	atomic_t total_nic_queue;
 
 	/**
 	 * @pacer_kthread: Kernel thread that eventually transmits packets
@@ -310,6 +344,8 @@ struct homa_rcu_kfreer {
 };
 
 void            homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev);
+void            homa_qdisc_add_queued(struct homa_qdisc_dev *qdev,
+				      struct sk_buff *skb);
 bool            homa_qdisc_can_bypass(struct sk_buff *skb,
 				      struct homa_qdisc *q);
 void            homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev,
@@ -321,6 +357,7 @@ int             homa_qdisc_dointvec(struct ctl_table *table, int write,
 				    void *buffer, size_t *lenp, loff_t *ppos);
 int             homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				   struct sk_buff **to_free);
+void            homa_qdisc_flush_rpc(struct homa_rpc *rpc);
 void            homa_qdisc_free_homa(struct homa_qdisc_dev *qdev);
 struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev);
 struct homa_rpc *
@@ -335,6 +372,7 @@ int             homa_qdisc_pacer_main(void *device);
 struct homa_qdisc_dev *
 		homa_qdisc_qdev_get(struct net_device *dev);
 void            homa_qdisc_qdev_put(struct homa_qdisc_dev *qdev);
+void            homa_qdisc_refresh_from_dql(struct homa_qdisc_dev *qdev);
 int             homa_qdisc_register(void);
 struct homa_qdisc_shared *
 		homa_qdisc_shared_alloc(void);
@@ -362,7 +400,7 @@ static inline bool homa_qdisc_active(struct homa *homa)
 
 /**
  * homa_qdisc_rpc_init() - Initialize a homa_rpc_qdisc struct.
- * @qrpc:  Struct to initialize
+ * @qrpc:  Struct to initialize.
  */
 static inline void homa_qdisc_rpc_init(struct homa_rpc_qdisc *qrpc)
 {
@@ -421,39 +459,6 @@ static inline bool homa_qdisc_precedes(struct homa_rpc *rpc1,
 	else if (rpc2->msgout.init_time < rpc1->msgout.init_time)
 		return false;
 	return rpc1 < rpc2;
-}
-
-/**
- * homa_qdisc_bytes_pending() - Return the total number of bytes in skbs
- * that have been enqueued in the NIC for transmission via a given queue
- * but have not yet been returned after transmission.
- * @q:    Return the pending bytes for the devqueue associated with
- *        this qdisc.
- * Return:   See above
- */
-static inline int homa_qdisc_bytes_pending(struct homa_qdisc *q)
-{
-	/* Ideally this function would be provided by dynamic_queue_limits.h
-	 * so that we don't have to root around in its data structures.
-	 */
-	struct dql *dql = &q->qdisc->dev_queue->dql;
-
-	return READ_ONCE(dql->num_queued) - READ_ONCE(dql->num_completed);
-}
-
-/**
- * homa_qdisc_update_congested() - If the NIC queue for a qdisc has
- * become too long, record the fact that this qdisc is congested.
- * @q:     qdisc whose netdev_queue should be checked.
- */
-static inline void homa_qdisc_update_congested(struct homa_qdisc *q)
-{
-	if (homa_qdisc_bytes_pending(q) > q->qdev->max_nic_queue_bytes) {
-		if (!READ_ONCE(q->qdev->congested_qdisc))
-			tt_record2("homa_qdisc_update_congested marked qid %d congested (%d bytes)",
-				   q->ix, homa_qdisc_bytes_pending(q));
-		WRITE_ONCE(q->qdev->congested_qdisc, q);
-	}
 }
 
 #endif /* _HOMA_QDISC_H */

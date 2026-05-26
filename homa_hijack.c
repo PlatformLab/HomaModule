@@ -73,7 +73,7 @@ void homa_hijack_end(void)
  * @skb:        The newly arrived packet.
  */
 struct sk_buff *homa_hijack_gro_receive(struct list_head *held_list,
-				        struct sk_buff *skb)
+					struct sk_buff *skb)
 {
 	// tt_record4("homa_hijack_gro_receive got type 0x%x, flags 0x%x, "
 	//		"urgent 0x%x, id %d", h->type, h->flags,

@@ -151,7 +151,7 @@ TEST_F(homa_sock, homa_sock_init__cant_allocate_buffer_pool)
 	struct homa_sock sock;
 
 	mock_kmalloc_errors = 1;
-	EXPECT_EQ(ENOMEM, -homa_sock_init(&sock));
+	EXPECT_EQ(ENOMEM, -mock_sock_init(&sock, self->hnet, 0));
 	unit_sock_destroy(&sock);
 }
 TEST_F(homa_sock, homa_sock_init__skip_port_in_use)
@@ -425,13 +425,13 @@ TEST_F(homa_sock, homa_sock_lock_slow)
 TEST_F(homa_sock, homa_sock_wait_wmem__no_memory_shortage)
 {
 	EXPECT_EQ(0, -homa_sock_wait_wmem(&self->hsk, 1));
-	EXPECT_EQ(1, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 }
 TEST_F(homa_sock, homa_sock_wait_wmem__nonblocking)
 {
 	self->hsk.sock.sk_sndbuf = 0;
 	EXPECT_EQ(EWOULDBLOCK, -homa_sock_wait_wmem(&self->hsk, 1));
-	EXPECT_EQ(1, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 }
 TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_then_wakes)
 {
@@ -442,7 +442,7 @@ TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_then_wakes)
 	unit_hook_register(schedule_hook);
 
 	EXPECT_EQ(0, -homa_sock_wait_wmem(&self->hsk, 0));
-	EXPECT_EQ(1, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 }
 TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_but_times_out)
 {
@@ -466,17 +466,17 @@ TEST_F(homa_sock, homa_sock_wait_wmem__interrupted_by_signal)
 TEST_F(homa_sock, homa_sock_wakeup_wmem)
 {
 	self->hsk.sock.sk_sndbuf = 0;
-	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
 
 	/* First call: no memory available. */
 	homa_sock_wakeup_wmem(&self->hsk);
-	EXPECT_EQ(1, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 
 	/* Second call: memory now available. */
 	self->hsk.sock.sk_sndbuf = 1000000;
 	mock_log_wakeups = 1;
 	unit_log_clear();
 	homa_sock_wakeup_wmem(&self->hsk);
-	EXPECT_EQ(0, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 	EXPECT_STREQ("wake_up", unit_log_get());
 }

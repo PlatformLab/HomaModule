@@ -929,9 +929,11 @@ static inline int homa_high_priority(struct homa *homa)
  * There are several other locks in Homa besides RPC locks, all of which
  * are spinlocks. When multiple locks are held, they must be acquired in a
  * consistent order in order to prevent deadlock. Here are the rules for Homa:
- * 1. Except for RPC and socket locks, all locks should be considered
- *    "leaf" locks: don't acquire other locks while holding them.
+ * 1. Except for RPC locks, socket locks, and the grant lock, all locks
+ *    should be considered "leaf" locks: don't acquire other locks while
+ *    holding them.
  * 2. The lock order is:
+ *    * Grant lock
  *    * RPC lock
  *    * Socket lock
  *    * Other lock
@@ -953,7 +955,7 @@ static inline int homa_high_priority(struct homa *homa)
  * creation might be underway when a socket is shut down. The RPC creation
  * will eventually acquire the socket lock and add the new RPC to those
  * for the socket; it would be very bad if this were to happen after
- * homa_sock_shutdown things is has deleted all RPCs for the socket.
+ * homa_sock_shutdown thinks it has deleted all RPCs for the socket.
  * In general, any operation that acquires a socket lock must check
  * hsk->shutdown after acquiring the lock and abort if hsk->shutdown is set.
  *

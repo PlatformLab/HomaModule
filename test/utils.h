@@ -3,6 +3,7 @@
 /* Utility functions for unit tests, implemented in C. */
 
 struct homa_message_out;
+struct homa_qdisc_dev;
 struct homa_rpc;
 struct unit_hash;
 
@@ -44,6 +45,7 @@ struct iov_iter
 	    *unit_iov_iter(void *buffer, size_t length);
 int          unit_list_length(struct list_head *head);
 void         unit_log_active_ids(struct homa_sock *hsk);
+const char  *unit_log_deferred(struct homa_qdisc_dev *qdev);
 void         unit_log_filled_skbs(struct sk_buff *skb, int verbose);
 void         unit_log_frag_list(struct sk_buff *skb, int verbose);
 void         unit_log_hashed_rpcs(struct homa_sock *hsk);
@@ -64,7 +66,7 @@ void         unit_sock_destroy(struct homa_sock *hsk);
 void         unit_teardown(void);
 
 #ifndef __STRIP__ /* See strip.py */
-void         unit_log_grantables(struct homa *homa);
+const char  *unit_log_grantables(struct homa *homa);
 void         unit_log_throttled(struct homa *homa);
 #endif /* See strip.py */
 

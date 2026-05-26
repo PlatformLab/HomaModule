@@ -874,11 +874,15 @@ int homa_ioc_abort(struct socket *sock, unsigned long arg)
 int homa_ioc_info(struct socket *sock, unsigned long arg)
 {
 	struct homa_sock *hsk = homa_sk(sock->sk);
+	struct homa_rpc **rpcs = NULL;
 	struct homa_rpc_info rinfo;
 	struct homa_info hinfo;
 	struct homa_rpc *rpc;
+	int result = 0;
 	int bytes_avl;
+	int num_rpcs;
 	char *dst;
+	int i;
 
 	if (unlikely(copy_from_user(&hinfo, (void __user *)arg,
 				    sizeof(hinfo)))) {
@@ -890,35 +894,80 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		hsk->error_msg = "socket has been shut down";
 		return -ESHUTDOWN;
 	}
-	rcu_read_lock();
 	hinfo.bpool_avail_bytes = homa_pool_avail_bytes(hsk->buffer_pool);
 	hinfo.port = hsk->port;
 	dst = (char *)hinfo.rpc_info;
 	bytes_avl = hinfo.rpc_info_length;
 	hinfo.num_rpcs = 0;
-	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+
+	/* This function is tricky because we need to hold an RCU lock
+	 * while scanning the RPCs of the socket, but we can't hold the
+	 * RCU lock while copying status information out to user space.
+	 * Thus, we first collect pointers to all the RPCs in a separate
+	 * array (while holding an RCU lock), acquire a reference on each
+	 * RPC, then release the RCU lock and copy out to user space.
+	 */
+	num_rpcs = 0;
+	rcu_read_lock();
+	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links)
+		num_rpcs++;
+
+	if (num_rpcs > 0) {
+		/* Allocate an array and populate it with homa_rpc pointers.
+		 * Must release the RCU lock temporarily while allocating.
+		 */
+		rcu_read_unlock();
+		rpcs = kmalloc(num_rpcs * sizeof(*rpcs), GFP_KERNEL);
+		if (!rpcs) {
+			homa_unprotect_rpcs(hsk);
+			return -ENOMEM;
+		}
+		rcu_read_lock();
+		i = 0;
+		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			homa_rpc_lock(rpc);
+			if (rpc->state != RPC_DEAD) {
+				rpcs[i] = rpc;
+				homa_rpc_hold(rpc);
+				i++;
+			}
+			homa_rpc_unlock(rpc);
+			if (i == num_rpcs)
+				break;
+		}
+		/* The number of RPCs could have changed between the first
+		 * pass and the second pass.
+		 */
+		num_rpcs = i;
+	}
+	rcu_read_unlock();
+	homa_unprotect_rpcs(hsk);
+
+	/* Now scan the array and copy information out to user space.  Note
+	 * that RPCs could have ended since we added them to the array.
+	 */
+	for (i = 0; i < num_rpcs; i++) {
+		rpc = rpcs[i];
 		homa_rpc_lock(rpc);
+		homa_rpc_put(rpc);
 		if (rpc->state == RPC_DEAD) {
 			homa_rpc_unlock(rpc);
 			continue;
 		}
 		homa_rpc_get_info(rpc, &rinfo);
-		homa_rpc_unlock(rpc);
-		if (dst && bytes_avl >= sizeof(rinfo)) {
+		if (dst && bytes_avl >= sizeof(rinfo) && result == 0) {
 			if (copy_to_user((void __user *)dst, &rinfo,
 					 sizeof(rinfo))) {
-				rcu_read_unlock();
-				homa_unprotect_rpcs(hsk);
 				hsk->error_msg = "couldn't copy homa_rpc_info to user space: invalid or read-only address?";
-				return -EFAULT;
+				result = -EFAULT;
 			}
 			dst += sizeof(rinfo);
 			bytes_avl -= sizeof(rinfo);
 		}
+		homa_rpc_unlock(rpc);
 		hinfo.num_rpcs++;
 	}
-	rcu_read_unlock();
-	homa_unprotect_rpcs(hsk);
+	kfree(rpcs);
 
 	if (hsk->error_msg)
 		snprintf(hinfo.error_msg, HOMA_ERROR_MSG_SIZE, "%s",
@@ -930,7 +979,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		hsk->error_msg = "couldn't copy homa_info to user space: read-only address?";
 		return -EFAULT;
 	}
-	return 0;
+	return result;
 }
 
 /**
@@ -981,7 +1030,7 @@ int homa_socket(struct sock *sk)
 }
 
 /**
- * homa_setsockopt() - Implements the getsockopt system call for Homa sockets.
+ * homa_setsockopt() - Implements the setsockopt system call for Homa sockets.
  * @sk:      Socket on which the system call was invoked.
  * @level:   Level at which the operation should be handled; will always
  *           be IPPROTO_HOMA.
@@ -1316,6 +1365,8 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	IF_NO_STRIP(u64 finish);
 
 	INC_METRIC(recv_calls, 1);
+	tt_record2("homa_recvmsg starting, port %d, pid %d",
+		   hsk->port, current->pid);
 #ifndef __STRIP__ /* See strip.py */
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active = start;
 #endif /* See strip.py */
@@ -1336,8 +1387,6 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		return -EFAULT;
 	}
 	control.completion_cookie = 0;
-	tt_record2("homa_recvmsg starting, port %d, pid %d",
-		   hsk->port, current->pid);
 
 	if (control.num_bpages > HOMA_MAX_BPAGES) {
 		hsk->error_msg = "num_pages exceeds HOMA_MAX_BPAGES";
@@ -1420,7 +1469,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	/* Collect result information. */
 	control.id = rpc->id;
 	control.completion_cookie = rpc->completion_cookie;
-	if (likely(rpc->msgin.length >= 0)) {
+	if (likely(result > 0)) {
 		control.num_bpages = rpc->msgin.num_bpages;
 		memcpy(control.bpage_offsets, rpc->msgin.bpage_offsets,
 		       sizeof(rpc->msgin.bpage_offsets));
@@ -1441,19 +1490,19 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		*addr_len = sizeof(*in4);
 	}
 
-	/* This indicates that the application now owns the buffers, so
-	 * we won't free them in homa_rpc_end.
-	 */
-	rpc->msgin.num_bpages = 0;
-
-	if (homa_is_client(rpc->id)) {
-		homa_peer_add_ack(rpc);
+	if (result < 0) {
 		homa_rpc_end(rpc);
 	} else {
-		if (result < 0)
+		/* This indicates that the application now owns the buffers, so
+		 * they won't be freed in homa_rpc_end.
+		 */
+		rpc->msgin.num_bpages = 0;
+		if (homa_is_client(rpc->id)) {
+			homa_peer_add_ack(rpc);
 			homa_rpc_end(rpc);
-		else
+		} else {
 			rpc->state = RPC_IN_SERVICE;
+		}
 	}
 
 done:
@@ -1467,7 +1516,7 @@ done:
 		homa_rpc_unlock(rpc);
 	}
 
-	if (test_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags)) {
+	if (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags)) {
 		/* There are tasks waiting for tx memory, so reap
 		 * immediately.
 		 */
@@ -1720,7 +1769,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
  * @opt:    Not used.
  * @type:   Type of ICMP packet.
  * @code:   Additional information about the error.
- * @offset: Not used.
+ * @offset: Total length of IPv6 header, including any extension headers.
  * @info:   Information about the error that occurred?
  *
  * Return: zero, or a negative errno if the error couldn't be handled here.
@@ -1736,7 +1785,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_PORT_UNREACH) {
 		const struct homa_common_hdr *h;
 
-		h = (struct homa_common_hdr *)(skb->data + sizeof(*iph));
+		h = (struct homa_common_hdr *)(skb->data + offset);
 		port = ntohs(h->dport);
 		error = -ENOTCONN;
 	} else if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_ADDR_UNREACH) {
@@ -1775,7 +1824,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	if (homa_sock_wmem_avl(hsk))
 		mask |= EPOLLOUT | EPOLLWRNORM;
 	else
-		set_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags);
+		set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
 
 	if (hsk->shutdown)
 		mask |= EPOLLIN;

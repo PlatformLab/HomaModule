@@ -2,6 +2,104 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+71. (May 2026) Changed grant mechanism to maintain active_rpcs as an unsorted
+array, which means it must be scanned to make decisions based on grant
+priority. Here is the cost of those scans, measured running cp_vs_tcp -w4
+on c6620 machines (the difference between "median" and "min" times shows
+the cost of cache misses when the system is under load):
+
+homa_grant_find_victim:
+  full scan:                           min 18 ns, median 200 ns
+  found empty slot:                    min 17 ns, median 140 ns
+
+priority scan in homa_grant_try_send:  min 17 ns, median 90 ns
+
+homa_grant_insert_grantable:
+  insert in peer list:                 min 17 ns, median 36 ns
+  adjust peer position:                min 18 ns, median 120 ns
+
+71. (April 2026) Compared xl170 and c6620 for cp_node benchmarks. Timeline
+for short messages:
+
+Timeline for clients:            xl170                     c6620
+
+first request packet to IP       Avg  0.7 us (+  0.7 us)   Avg  0.6 us (+  0.6 us)
+first request packet to NIC      Avg  1.4 us (+  0.6 us)   Avg  1.7 us (+  1.1 us)
+gro gets first response packet   Avg 14.8 us (+ 13.5 us)   Avg 24.2 us (  22.5 us)
+softirq gets first response pkt  Avg 15.1 us (+  0.2 us)   Avg 24.5 us (   0.3 us)
+homa_recvmsg returning           Avg 16.9 us (+  1.8 us)   Avg 26.2 us (+  0.7 us)
+
+Timeline for servers:
+
+gro gets first request packet    Avg  6.1 us (+  6.1 us)   Avg 10.3 us (+ 10.3 us)
+softirq gets first request pkt   Avg  7.1 us (   1.0 us)   Avg 11.2 us (+  1.0 us)
+homa_recvmsg returning           Avg  8.7 us (+  1.6 us)   Avg 13.5 us (+  2.3 us)
+homa_sendmsg response            Avg  9.3 us (+  0.6 us)   Avg 13.9 us (+  0.4 us)
+first response packet to IP      Avg 10.0 us (+  0.7 us)   Avg 14.5 us (+  0.6 us)
+first response packet to NIC     Avg 10.8 us (+  0.8 us)   Avg 15.5 us (+  1.1 us)
+
+The additional time for c6620 seems to be in the NIC/network: about 4 us extra
+each way. Note: the time from common_interrupt to homa_gro_receive is about
+the same (400 ns on c6620, 580 ns on xl170).
+
+Timeline for getting first grant for long messages:
+
+Timeline for clients:
+
+first request packet to IP       Avg  2.2 us (   2.2 us)  Avg  2.2 us (+  2.2 us)
+first request packet to NIC      Avg  3.3 us (   1.1 us)  Avg  3.4 us (+  1.2 us)
+gro gets first grant             Avg 25.4 us (+ 22.2 us)  Avg 36.8 us (+ 33.5 us)
+softirq gets first grant         Avg 25.7 us (+  0.3 us)  Avg 37.1 us (+  0.3 us)
+
+Timeline for servers:
+
+gro gets first request packet    Avg  9.6 us (+  9.6 us)  Avg 16.3 us (+ 16.3 us)
+softirq gets first request pkt   Avg 18.2 us (+  8.6 us)  Avg 25.5 us (+  9.2 us)
+first grant to IP                Avg 19.6 us (+  1.4 us)  Avg 26.6 us (+  1.1 us)
+first grant to NIC               Avg 21.1 us (+  1.5 us)  Avg 28.2 us (+  1.5 us)
+
+Again, the extra delay for c6620s appears to be in the network.
+
+It takes a long time to get from GRO to SoftIRQ for the first data packet
+on the server. Here is the time breakdown on xl170s:
+
+Event                               Time (ns)
+homa_gro_receive got packet                 0
+enqueue_to_backlog starting              2297
+common_interrupt starting                3795
+Starting net_rx_action                   4016
+homa_softirq starting                    4816
+incoming data packet                     6924
+
+Major components of delay:
+* Before enqueue_to_backlog: GRO may receive several packets before waking
+  up SoftIRQ. In addition, it may post new WQEs, which can add another 5
+  usec of latency.
+* After homa_softirq starts:
+  * Pre-processing packets in homa_softirq takes about 0.6 usec
+  * Allocating bpages takes about 0.5 usec
+  * homa_rpc_handoff takes about 0.5 usec
+
+Here is the delay breakdown on c6620's (note that the SoftIRQ CPU doesn't
+take an interrupt; it wakes up directly from a C-state):
+
+Event                               Time (ns)
+homa_gro_receive got packet                 0
+enqueue_to_backlog starting              1451
+flush_smp_call_function_queue starting   3998
+Starting net_rx_action                   5277
+homa_softirq starting                    5634
+incoming data packet                     6933
+
+Major components of delay:
+* Before enqueue_to_backlog: GRO may receive several packets before waking
+  up SoftIRQ. Posting new rx buffers is much faster on c6620s than xl170s.
+* Long delay to wakeup target CPU: it appears to be coming out of C-state 1,
+  which takes about 2 usecs.
+* There is also a significant delay to get to net_rx_action; don't know
+  what is causing this.
+* Delay from homa_softirq to incoming data packet is less than xl170s.
+
 70. (April 2026) Impact of using skb_attempt_defer_free to move skb
 freeing off the critical path copying data out to user space. On
 c6620's running 'cp_vs_tcp -w w4 -b 80' this improves copy-out throughput

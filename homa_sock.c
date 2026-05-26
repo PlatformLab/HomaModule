@@ -137,7 +137,7 @@ void homa_socktab_end_scan(struct homa_socktab_scan *scan)
 
 /**
  * homa_sock_init() - Constructor for homa_sock objects. This function
- * initializes only the parts of the socket that are owned by Homa.
+ * handles Homa-specific initialization.
  * @hsk:    Object to initialize. The Homa-specific parts must have been
  *          initialized to zeroes by the caller.
  *
@@ -166,15 +166,13 @@ int homa_sock_init(struct homa_sock *hsk)
 	if (IS_ERR(buffer_pool))
 		return PTR_ERR(buffer_pool);
 
-	/* Initialize Homa-specific fields. We can initialize everything
-	 * except the port and hash table links without acquiring the
-	 * socket lock.
+	/* Initialize the fields private to Homa. We can initialize
+	 * everything except the port and hash table links without acquiring
+	 * the socket table lock.
 	 */
 	hsk->homa = homa;
 	hsk->hnet = hnet;
 	hsk->buffer_pool = buffer_pool;
-	hsk->inet.inet_num = hsk->port;
-	hsk->inet.inet_sport = htons(hsk->port);
 
 	hsk->is_server = false;
 	hsk->shutdown = false;
@@ -234,6 +232,8 @@ int homa_sock_init(struct homa_sock *hsk)
 		spin_lock_bh(&socktab->write_lock);
 	}
 	hsk->port = hnet->prev_default_port;
+	hsk->inet.inet_num = hsk->port;
+	hsk->inet.inet_sport = htons(hsk->port);
 	hlist_add_head_rcu(&hsk->socktab_links,
 			   &socktab->buckets[homa_socktab_bucket(hnet,
 								 hsk->port)]);
@@ -483,7 +483,7 @@ void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
 	tt_record2("beginning wait for rpc lock, id %d, (bucket %d)",
 		   id, bucket->id);
 	spin_lock_bh(&bucket->lock);
-	tt_record2("ending wait for bucket lock, id %d, (bucket %d)",
+	tt_record2("ending wait for rpc lock, id %d, (bucket %d)",
 		   id, bucket->id);
 	if (homa_is_client(id)) {
 		INC_METRIC(client_lock_misses, 1);
@@ -514,7 +514,7 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 
 	if (nonblocking)
 		timeo = 0;
-	set_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags);
+	set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
 	tt_record2("homa_sock_wait_wmem waiting on port %d, wmem %d",
 		   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
 	result = wait_event_interruptible_timeout(*sk_sleep(&hsk->sock),

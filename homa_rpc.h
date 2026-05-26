@@ -189,12 +189,13 @@ struct homa_message_in {
 	u32 bpage_offsets[HOMA_MAX_BPAGES];
 
 #ifndef __STRIP__ /* See strip.py */
+
 	/**
-	 * @rank: Position of this RPC in homa->grant->active_rpcs, or -1
-	 * if not in homa->grant->active_rpcs. Managed by homa_grant.c;
-	 * unsafe to access unless holding homa->grant->lock.
+	 * @active_ix: Index of slot in @grant->active_rpcs that refers
+	 * to this RPC, or -1 if none. Managed by homa_grant.c; must hold
+	 * grant lock to modify.
 	 */
-	int rank;
+	int active_ix;
 
 	/**
 	 * @granted: Total # of bytes (starting from offset 0) that the sender
@@ -229,6 +230,12 @@ struct homa_message_in {
  * each RPC. Managed entirely by homa_qdisc.
  */
 struct homa_rpc_qdisc {
+	/**
+	 * @qdev: If @packets has ever been non-empty, this points to the
+	 * structure where this RPC is enqueued; otherwise NULL.
+	 */
+	struct homa_qdisc_dev *qdev;
+
 	/**
 	 * @packets: List of tx skbs from this RPC that have been deferred
 	 * by homa_qdisc. Non-empty means this RPC is currently linked into
@@ -320,15 +327,33 @@ struct homa_rpc {
 	 * RPC_PRIVATE -           This RPC will be waited on in "private" mode,
 	 *                         where the app explicitly requests the
 	 *                         response from this particular RPC.
+	 * RPC_GRANTABLE -         1 means this RPC needs help from the grant
+	 *                         mechanism to receive its incoming message. 0
+	 *                         means either it is entirely unscheduled or
+	 *                         the message has been completely received.
+	 *                         This bit gets set at most once in the life
+	 *                         of an RPC; once cleared, it never gets set
+	 *                         again.
+	 * RPC_GRANT_MANAGED -     1 means this RPC has been inserted in the
+	 *                         grant management data structures. This
+	 *                         doesn't happen until the first time
+	 *                         homa_grant_check_rpc is called, so it is
+	 *                         possible for RPC_GRANTABLE to be set but
+	 *                         not RPC_GRANT_MANAGED.
 	 */
 #define RPC_PKTS_READY        0
 #define APP_NEEDS_LOCK        1
 #define RPC_PRIVATE           2
+#define RPC_GRANTABLE         3
+#define RPC_GRANT_MANAGED     4
 
 	/**
 	 * @refs: Number of references to this RPC, including one for each
 	 * unmatched call to homa_rpc_hold plus one for the socket's reference
-	 * in either active_rpcs or dead_rpcs.
+	 * in either active_rpcs or dead_rpcs. References are acquired at
+	 * "top level", such as homa_dispatch_pkts or homa_recvmsg. If a
+	 * function receives a locked RPC as parameter, it can assume
+	 * that the caller is also holding a reference to it.
 	 */
 	refcount_t refs;
 
