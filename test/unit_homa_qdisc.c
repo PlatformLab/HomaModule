@@ -929,9 +929,11 @@ TEST_F(homa_qdisc, homa_qdisc_defer_homa__basics)
 	struct homa_qdisc_dev *qdev;
 
 	qdev = homa_qdisc_qdev_get(self->dev);
+	mock_clock = 1000;
 	srpc1 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
 				&self->server_ip, self->client_port,
 				self->server_id, 10000, 10000);
+	mock_clock = 2000;
 	srpc2 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
 				&self->server_ip, self->client_port,
 				self->server_id + 2, 10000, 10000);
