@@ -8,11 +8,6 @@
 
 /* This file contains functions that manage user-space buffer pools. */
 
-/* Pools must always have at least this many bpages (no particular
- * reasoning behind this value).
- */
-#define MIN_POOL_SIZE 2
-
 /* Used when determining how many bpages to consider for allocation. */
 #define MIN_EXTRA 4
 
@@ -65,16 +60,39 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 	struct homa_bpage *descriptors;
 	int i, result, num_bpages;
 	struct homa_pool *pool;
+	u64 min_size;
 
-	if (((uintptr_t)region) & ~PAGE_MASK)
+	if (((uintptr_t)region) & ~PAGE_MASK) {
+		hsk->error_msg = "buffer pool is not page aligned";
 		return -EINVAL;
+	}
+
+	/* The region must be large enough to hold a private bpage for
+	 * each core, plus enough additional space for a couple of
+	 * full-size messages. Otherwise we could deadlock over allocation
+	 * (no free pages available, so no attempt is made to steal back
+	 * private pages).
+	 */
+	min_size = nr_cpu_ids;
+	min_size = min_size * HOMA_BPAGE_SIZE + 2 * HOMA_MAX_MESSAGE_LENGTH;
+	if (region_size < min_size) {
+		hsk->error_msg = "buffer pool is not large enough";
+		return -EINVAL;
+	}
+
+	/* The region must not be so large that offsets into the region
+	 * overflow the 32-bit values used in bpage_offsets in
+	 * homa_recvmsg_args.
+	 */
+	if (region_size > 0x100000000ULL) {
+		hsk->error_msg = "buffer pool cannot be larger than 4 GB";
+		return -EINVAL;
+	}
 
 	/* Allocate memory before locking the socket, so we can allocate
 	 * without GFP_ATOMIC.
 	 */
 	num_bpages = region_size >> HOMA_BPAGE_SHIFT;
-	if (num_bpages < MIN_POOL_SIZE)
-		return -EINVAL;
 	descriptors = kmalloc_array(num_bpages, sizeof(struct homa_bpage),
 				    GFP_KERNEL | __GFP_ZERO | __GFP_ACCOUNT);
 	if (!descriptors)

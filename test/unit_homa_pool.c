@@ -61,6 +61,7 @@ static void steal_bpages_hook(char *id)
 		atomic_set(&cur_pool->descriptors[3].refs, 1);
 	}
 }
+
 #ifndef __STRIP__ /* See strip.py */
 static void change_owner_hook(char *id)
 {
@@ -111,8 +112,8 @@ TEST_F(homa_pool, homa_pool_set_region__region_not_page_aligned)
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 
 	EXPECT_EQ(EINVAL, -homa_pool_set_region(&self->hsk,
-			((char *) 0x1000000) + 10,
-			100*HOMA_BPAGE_SIZE));
+		  ((char *) 0x1000000) + 10, 100*HOMA_BPAGE_SIZE));
+	EXPECT_STREQ("buffer pool is not page aligned", self->hsk.error_msg);
 }
 TEST_F(homa_pool, homa_pool_set_region__region_too_small)
 {
@@ -120,7 +121,23 @@ TEST_F(homa_pool, homa_pool_set_region__region_too_small)
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 
 	EXPECT_EQ(EINVAL, -homa_pool_set_region(&self->hsk, (void *) 0x1000000,
-			HOMA_BPAGE_SIZE));
+		  nr_cpu_ids * HOMA_BPAGE_SIZE));
+	EXPECT_STREQ("buffer pool is not large enough", self->hsk.error_msg);
+}
+TEST_F(homa_pool, homa_pool_set_region__region_too_large)
+{
+	u64 size;
+
+	homa_pool_free(self->hsk.buffer_pool);
+	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
+
+	size = 1;
+	size <<= 32;
+	size++;
+	EXPECT_EQ(EINVAL, -homa_pool_set_region(&self->hsk, (void *) 0x1000000,
+		  size));
+	EXPECT_STREQ("buffer pool cannot be larger than 4 GB",
+		     self->hsk.error_msg);
 }
 TEST_F(homa_pool, homa_pool_set_region__cant_allocate_descriptors)
 {
@@ -165,10 +182,10 @@ TEST_F(homa_pool, homa_pool_get_rcvbuf)
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 
 	EXPECT_EQ(0, -homa_pool_set_region(&self->hsk, (void *)0x40000,
-		  10*HOMA_BPAGE_SIZE + 1000));
+		  100*HOMA_BPAGE_SIZE + 1000));
 	homa_pool_get_rcvbuf(self->hsk.buffer_pool, &args);
 	EXPECT_EQ(0x40000, args.start);
-	EXPECT_EQ(10*HOMA_BPAGE_SIZE, args.length);
+	EXPECT_EQ(100*HOMA_BPAGE_SIZE, args.length);
 
 	/* Check for proper 64-bit arithmetic. */
 	saved_num_bpages = self->hsk.buffer_pool->num_bpages;
