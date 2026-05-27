@@ -184,12 +184,21 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 	u64 now = homa_clock();
 	int alloced = 0;
 	int limit = 0;
+	int free;
 
 	core = this_cpu_ptr(pool->cores);
-	if (atomic_sub_return(num_pages, &pool->free_bpages) < 0) {
-		atomic_add(num_pages, &pool->free_bpages);
-		return -1;
-	}
+
+	/* Atomically check for available space and decrement the
+	 * free page counter.
+	 */
+	free = atomic_read_acquire(&pool->free_bpages);
+	while (1) {
+		if (free < num_pages)
+			return -1;
+		if (atomic_try_cmpxchg(&pool->free_bpages, &free,
+				       free - num_pages))
+			break;
+        }
 
 	/* Once we get to this point we know we will be able to find
 	 * enough free pages; now we just have to find them.
@@ -251,7 +260,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 			continue;
 		}
 		if (bpage->owner >= 0)
-			atomic_inc(&pool->free_bpages);
+			atomic_fetch_inc_release(&pool->free_bpages);
 		if (set_owner) {
 			atomic_set(&bpage->refs, 2);
 			bpage->owner = core_num;
@@ -454,11 +463,12 @@ int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 		return result;
 	for (i = 0; i < num_buffers; i++) {
 		u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
-		struct homa_bpage *bpage = &pool->descriptors[bpage_index];
+		struct homa_bpage *bpage;
 
+		bpage = &pool->descriptors[bpage_index];
 		if (bpage_index < pool->num_bpages) {
 			if (atomic_dec_return(&bpage->refs) == 0)
-				atomic_inc(&pool->free_bpages);
+				atomic_fetch_inc_release(&pool->free_bpages);
 		} else {
 			result = -EINVAL;
 		}
@@ -485,7 +495,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 #endif /* __UNIT_TEST__ */
 	if (!smp_load_acquire(&pool->region))
 		return;
-	while (atomic_read(&pool->free_bpages) >= pool->bpages_needed) {
+	while (atomic_read_acquire(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
 
 		homa_sock_lock(pool->hsk);
