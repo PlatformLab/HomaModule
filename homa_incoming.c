@@ -1131,7 +1131,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		 * in the meantime the ignore the error (loop back around
 		 * to process the RPC).
 		 */
-		if (result != 0 && atomic_read(&interest.ready) == 0)
+		if (result != 0 && atomic_read_acquire(&interest.ready) == 0)
 			break;
 	}
 
@@ -1229,7 +1229,7 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 				 */
 				homa_sock_lock(hsk);
 				homa_interest_unlink_shared(&interest);
-				ready = atomic_read(&interest.ready);
+				ready = atomic_read_acquire(&interest.ready);
 				homa_sock_unlock(hsk);
 				if (ready == 0) {
 					rpc = ERR_PTR(result);

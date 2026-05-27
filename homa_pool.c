@@ -93,7 +93,6 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 		goto error;
 	}
 
-	pool->region = (char __user *)region;
 	pool->num_bpages = num_bpages;
 	pool->descriptors = descriptors;
 	atomic_set(&pool->free_bpages, pool->num_bpages);
@@ -108,6 +107,7 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 		bp->owner = -1;
 	}
 
+	smp_store_release(&pool->region, (char __user *)region);
 	homa_sock_unlock(hsk);
 	return 0;
 
@@ -127,7 +127,7 @@ void homa_pool_free(struct homa_pool *pool)
 #ifdef __UNIT_TEST__
 	mock_free_pool(pool);
 #endif /* __UNIT_TEST__ */
-	if (pool->region) {
+	if (smp_load_acquire(&pool->region)) {
 		kfree(pool->descriptors);
 		free_percpu(pool->cores);
 		pool->region = NULL;
@@ -288,7 +288,7 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	struct homa_bpage *bpage;
 	struct homa_rpc *other;
 
-	if (!pool->region)
+	if (!smp_load_acquire(&pool->region))
 		return -ENOMEM;
 	if (rpc->state == RPC_DEAD)
 		return 0;
@@ -450,7 +450,7 @@ int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 	int result = 0;
 	int i;
 
-	if (!pool->region)
+	if (!smp_load_acquire(&pool->region))
 		return result;
 	for (i = 0; i < num_buffers; i++) {
 		u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
@@ -483,7 +483,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 #ifdef __UNIT_TEST__
 	pool->check_waiting_invoked += 1;
 #endif /* __UNIT_TEST__ */
-	if (!pool->region)
+	if (!smp_load_acquire(&pool->region))
 		return;
 	while (atomic_read(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
@@ -551,7 +551,7 @@ u64 homa_pool_avail_bytes(struct homa_pool *pool)
 	u64 avail;
 	int cpu;
 
-	if (!pool->region)
+	if (!smp_load_acquire(&pool->region))
 		return 0;
 	avail = atomic_read(&pool->free_bpages);
 	avail *= HOMA_BPAGE_SIZE;
