@@ -145,7 +145,7 @@ void homa_pool_get_rcvbuf(struct homa_pool *pool,
 			  struct homa_rcvbuf_args *args)
 {
 	args->start = (uintptr_t)pool->region;
-	args->length = pool->num_bpages << HOMA_BPAGE_SHIFT;
+	args->length = (u64)pool->num_bpages << HOMA_BPAGE_SHIFT;
 }
 
 /**

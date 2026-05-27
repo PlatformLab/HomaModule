@@ -159,6 +159,7 @@ TEST_F(homa_pool, homa_pool_set_region__success)
 TEST_F(homa_pool, homa_pool_get_rcvbuf)
 {
 	struct homa_rcvbuf_args args;
+	int saved_num_bpages;
 
 	homa_pool_free(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
@@ -168,6 +169,14 @@ TEST_F(homa_pool, homa_pool_get_rcvbuf)
 	homa_pool_get_rcvbuf(self->hsk.buffer_pool, &args);
 	EXPECT_EQ(0x40000, args.start);
 	EXPECT_EQ(10*HOMA_BPAGE_SIZE, args.length);
+
+	/* Check for proper 64-bit arithmetic. */
+	saved_num_bpages = self->hsk.buffer_pool->num_bpages;
+	self->hsk.buffer_pool->num_bpages = 0x1000000;
+	homa_pool_get_rcvbuf(self->hsk.buffer_pool, &args);
+	self->hsk.buffer_pool->num_bpages = saved_num_bpages;
+	EXPECT_EQ(0x1000000LLU << HOMA_BPAGE_SHIFT, args.length);
+
 }
 
 TEST_F(homa_pool, homa_pool_get_pages__basics)
