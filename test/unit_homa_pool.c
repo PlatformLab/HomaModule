@@ -47,32 +47,20 @@ static void steal_bpages_hook(char *id)
 		return;
 	switch (cur_pool->cores[1].next_candidate) {
 	case 1:
-		atomic_set(&cur_pool->descriptors[0].refs, 2);
+		cur_pool->descriptors[0].refs = 2;
 		break;
 	case 2:
-		atomic_set(&cur_pool->descriptors[1].refs, 1);
+		cur_pool->descriptors[1].refs = 1;
 		cur_pool->descriptors[1].owner = 3;
 		cur_pool->descriptors[1].expiration = mock_clock + 1;
 	case 3:
-		atomic_set(&cur_pool->descriptors[2].refs, 1);
+		cur_pool->descriptors[2].refs = 1;
 		cur_pool->descriptors[2].owner = 3;
 		cur_pool->descriptors[2].expiration = mock_clock - 1;
 	case 4:
-		atomic_set(&cur_pool->descriptors[3].refs, 1);
+		cur_pool->descriptors[3].refs = 1;
 	}
 }
-
-#ifndef __STRIP__ /* See strip.py */
-static void change_owner_hook(char *id)
-{
-	if (strcmp(id, "spin_lock") != 0)
-		return;
-	if (!cur_pool)
-		return;
-	cur_pool->descriptors[cur_pool->cores[smp_processor_id()]
-			.page_hint].owner = -1;
-}
-#endif /* See strip.py */
 
 TEST_F(homa_pool, set_bpages_needed)
 {
@@ -196,6 +184,25 @@ TEST_F(homa_pool, homa_pool_get_rcvbuf)
 
 }
 
+TEST_F(homa_pool, homa_bpage_available)
+{
+	struct homa_bpage bpage;
+
+	bpage.refs = 2;
+	bpage.owner = 100;
+	bpage.expiration = 1000;
+
+	EXPECT_EQ(0, homa_bpage_available(&bpage, 500));
+	bpage.refs = 1;
+	EXPECT_EQ(0, homa_bpage_available(&bpage, 500));
+	EXPECT_EQ(1, homa_bpage_available(&bpage, 2000));
+        bpage.owner = -1;
+	EXPECT_EQ(0, homa_bpage_available(&bpage, 2000));
+	bpage.refs = 0;
+	EXPECT_EQ(1, homa_bpage_available(&bpage, 500));
+
+}
+
 TEST_F(homa_pool, homa_pool_get_pages__basics)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
@@ -205,7 +212,7 @@ TEST_F(homa_pool, homa_pool_get_pages__basics)
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(0, pages[0]);
 	EXPECT_EQ(1, pages[1]);
-	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
+	EXPECT_EQ(1, pool->descriptors[1].refs);
 	EXPECT_EQ(-1, pool->descriptors[1].owner);
 	EXPECT_EQ(2, pool->cores[smp_processor_id()].next_candidate);
 	EXPECT_EQ(98, atomic_read(&pool->free_bpages));
@@ -252,14 +259,14 @@ TEST_F(homa_pool, homa_pool_get_pages__skip_unusable_bpages)
 
 	mock_check_bpool_leaks = false;
 	mock_clock = 1000;
-	atomic_set(&pool->descriptors[0].refs, 2);
-	atomic_set(&pool->descriptors[1].refs, 1);
+	pool->descriptors[0].refs = 2;
+	pool->descriptors[1].refs = 1;
 	pool->descriptors[1].owner = 3;
 	pool->descriptors[1].expiration = mock_clock + 1;
-	atomic_set(&pool->descriptors[2].refs, 1);
+	pool->descriptors[2].refs = 1;
 	pool->descriptors[2].owner = 3;
 	pool->descriptors[2].expiration = mock_clock - 1;
-	atomic_set(&pool->descriptors[3].refs, 1);
+	pool->descriptors[3].refs = 1;
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(2, pages[0]);
 	EXPECT_EQ(4, pages[1]);
@@ -316,7 +323,7 @@ TEST_F(homa_pool, homa_pool_get_pages__set_owner)
 	EXPECT_EQ(1, pool->descriptors[pages[0]].owner);
 	EXPECT_EQ(mock_clock + 1000,
 			pool->descriptors[pages[1]].expiration);
-	EXPECT_EQ(2, atomic_read(&pool->descriptors[1].refs));
+	EXPECT_EQ(2, pool->descriptors[1].refs);
 }
 
 TEST_F(homa_pool, homa_pool_alloc_msg__basics)
@@ -382,7 +389,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__no_partial_page)
 	EXPECT_EQ(0, atomic_read(&pool->free_bpages));
 }
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_pool, homa_pool_alloc_msg__owned_page_locked_and_page_stolen)
+TEST_F(homa_pool, homa_pool_alloc_msg__private_page_stolen)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
@@ -400,8 +407,8 @@ TEST_F(homa_pool, homa_pool_alloc_msg__owned_page_locked_and_page_stolen)
 	// Try a second allocation; the lock hook steals the partial bpage,
 	// so a new one has to be allocated.
 	crpc->msgin.num_bpages = 0;
-	mock_trylock_errors = 1;
-	unit_hook_register(change_owner_hook);
+	pool->descriptors[cur_pool->cores[smp_processor_id()]
+			  .page_hint].owner = -1;
 	EXPECT_EQ(0, homa_pool_alloc_msg(crpc));
 	EXPECT_EQ(1, crpc->msgin.num_bpages);
 	EXPECT_EQ(3*HOMA_BPAGE_SIZE, crpc->msgin.bpage_offsets[0]);
@@ -420,7 +427,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__page_wrap_around)
 	mock_check_bpool_leaks = false;
 	pool->cores[smp_processor_id()].page_hint = 2;
 	pool->cores[smp_processor_id()].allocated = HOMA_BPAGE_SIZE-1900;
-	atomic_set(&pool->descriptors[2].refs, 1);
+	pool->descriptors[2].refs = 1;
 	pool->descriptors[2].owner = smp_processor_id();
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 2000);
@@ -456,7 +463,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__owned_page_overflow)
 	EXPECT_EQ(3, pool->cores[smp_processor_id()].page_hint);
 	EXPECT_EQ(2000, pool->cores[smp_processor_id()].allocated);
 	EXPECT_EQ(-1, pool->descriptors[2].owner);
-	EXPECT_EQ(1, atomic_read(&pool->descriptors[2].refs));
+	EXPECT_EQ(1, pool->descriptors[2].refs);
 	EXPECT_EQ(1, pool->descriptors[3].owner);
 	EXPECT_EQ(48, atomic_read(&pool->free_bpages));
 }
@@ -477,7 +484,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__reuse_owned_page)
 	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc1->msgin.bpage_offsets[0]);
 	EXPECT_EQ(1, crpc2->msgin.num_bpages);
 	EXPECT_EQ(2*HOMA_BPAGE_SIZE + 2000, crpc2->msgin.bpage_offsets[0]);
-	EXPECT_EQ(3, atomic_read(&pool->descriptors[2].refs));
+	EXPECT_EQ(3, pool->descriptors[2].refs);
 	EXPECT_EQ(2, pool->cores[smp_processor_id()].page_hint);
 	EXPECT_EQ(5000, pool->cores[smp_processor_id()].allocated);
 }
@@ -494,9 +501,9 @@ TEST_F(homa_pool, homa_pool_alloc_msg__cant_allocate_partial_bpage)
 	ASSERT_NE(NULL, crpc);
 
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[4].refs));
+	EXPECT_EQ(0, pool->descriptors[0].refs);
+	EXPECT_EQ(0, pool->descriptors[1].refs);
+	EXPECT_EQ(0, pool->descriptors[4].refs);
 	EXPECT_EQ(5, atomic_read(&pool->free_bpages));
 }
 TEST_F(homa_pool, homa_pool_alloc_msg__out_of_space)
@@ -571,7 +578,6 @@ TEST_F(homa_pool, homa_pool_free_bufs__basics)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc1, *crpc2;
-	char *saved_region;
 
 	mock_check_bpool_leaks = false;
 	crpc1 = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
@@ -581,24 +587,35 @@ TEST_F(homa_pool, homa_pool_free_bufs__basics)
 			&self->server_ip, 4000, 98, 1000, 2000);
 	ASSERT_NE(NULL, crpc2);
 
-	EXPECT_EQ(1, atomic_read(&pool->descriptors[0].refs));
-	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
-	EXPECT_EQ(3, atomic_read(&pool->descriptors[2].refs));
+	EXPECT_EQ(1, pool->descriptors[0].refs);
+	EXPECT_EQ(1, pool->descriptors[1].refs);
+	EXPECT_EQ(3, pool->descriptors[2].refs);
 	EXPECT_EQ(97, atomic_read(&pool->free_bpages));
 
 	homa_pool_free_bufs(pool, crpc1->msgin.num_bpages,
 			    crpc1->msgin.bpage_offsets);
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
-	EXPECT_EQ(2, atomic_read(&pool->descriptors[2].refs));
+	EXPECT_EQ(0, pool->descriptors[0].refs);
+	EXPECT_EQ(0, pool->descriptors[1].refs);
+	EXPECT_EQ(2, pool->descriptors[2].refs);
 	EXPECT_EQ(99, atomic_read(&pool->free_bpages));
+}
+TEST_F(homa_pool, homa_pool_free_bufs__pool_not_initialized)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	struct homa_rpc *crpc1;
+	char *saved_region;
 
-	/* Ignore requests if pool not initialized. */
+	mock_check_bpool_leaks = false;
+	crpc1 = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			&self->server_ip, 4000, 98, 1000, 150000);
+	ASSERT_NE(NULL, crpc1);
+	EXPECT_EQ(1, pool->descriptors[0].refs);
+
 	saved_region = pool->region;
 	pool->region = NULL;
-	homa_pool_free_bufs(pool, crpc1->msgin.num_bpages,
-			    crpc1->msgin.bpage_offsets);
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
+	EXPECT_EQ(EINVAL, -homa_pool_free_bufs(pool, crpc1->msgin.num_bpages,
+					       crpc1->msgin.bpage_offsets));
+	EXPECT_EQ(1, pool->descriptors[0].refs);
 	pool->region = saved_region;
 }
 TEST_F(homa_pool, homa_pool_free_bufs__bogus_offset)
@@ -607,6 +624,36 @@ TEST_F(homa_pool, homa_pool_free_bufs__bogus_offset)
 
 	EXPECT_EQ(EINVAL, -homa_pool_free_bufs(self->hsk.buffer_pool, 1,
 					       &buffer));
+}
+TEST_F(homa_pool, homa_pool_free_bufs__bpage_already_free)
+{
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	struct homa_rpc *crpc1;
+
+	mock_check_bpool_leaks = false;
+	crpc1 = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			&self->server_ip, 4000, 98, 1000, 150000);
+	ASSERT_NE(NULL, crpc1);
+	EXPECT_EQ(1, pool->descriptors[0].refs);
+
+	/* First call: ref count 0. */
+	pool->descriptors[0].refs = 0;
+	EXPECT_EQ(EINVAL, -homa_pool_free_bufs(pool, crpc1->msgin.num_bpages,
+					       crpc1->msgin.bpage_offsets));
+	EXPECT_EQ(0, pool->descriptors[0].refs);
+
+	/* Second call: ref count 1 and page owned by a core. */
+	pool->descriptors[0].refs = 1;
+	pool->descriptors[0].owner = 2;
+	EXPECT_EQ(EINVAL, -homa_pool_free_bufs(pool, crpc1->msgin.num_bpages,
+					       crpc1->msgin.bpage_offsets));
+	EXPECT_EQ(1, pool->descriptors[0].refs);
+
+	/* Third call: ref count 1 but page not owned, so free is OK. */
+	pool->descriptors[0].owner = -1;
+	EXPECT_EQ(0, -homa_pool_free_bufs(pool, crpc1->msgin.num_bpages,
+					 crpc1->msgin.bpage_offsets));
+	EXPECT_EQ(0, pool->descriptors[0].refs);
 }
 
 TEST_F(homa_pool, homa_pool_check_waiting__basics)

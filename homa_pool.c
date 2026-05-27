@@ -175,10 +175,8 @@ void homa_pool_get_rcvbuf(struct homa_pool *pool,
  */
 bool homa_bpage_available(struct homa_bpage *bpage, u64 now)
 {
-	int ref_count = atomic_read(&bpage->refs);
-
-	return ref_count == 0 || (ref_count == 1 && bpage->owner >= 0 &&
-			bpage->expiration <= now);
+	return bpage->refs == 0 || (bpage->refs == 1 && bpage->owner >= 0 &&
+				    bpage->expiration <= now);
 }
 
 /**
@@ -280,12 +278,12 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 		if (bpage->owner >= 0)
 			atomic_fetch_inc_release(&pool->free_bpages);
 		if (set_owner) {
-			atomic_set(&bpage->refs, 2);
+			bpage->refs = 2;
 			bpage->owner = core_num;
 			bpage->expiration = now +
 					    pool->hsk->homa->bpage_lease_cycles;
 		} else {
-			atomic_set(&bpage->refs, 1);
+			bpage->refs = 1;
 			bpage->owner = -1;
 		}
 		spin_unlock_bh(&bpage->lock);
@@ -340,27 +338,19 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	core_id = smp_processor_id();
 	core = this_cpu_ptr(pool->cores);
 	bpage = &pool->descriptors[core->page_hint];
-#ifndef __STRIP__ /* See strip.py */
-	if (!spin_trylock_bh(&bpage->lock)) {
-		tt_record("beginning wait for bpage lock");
-		spin_lock_bh(&bpage->lock);
-		tt_record("ending wait for bpage lock");
-	}
-#else /* See strip.py */
 	spin_lock_bh(&bpage->lock);
-#endif /* See strip.py */
 	if (bpage->owner != core_id) {
 		spin_unlock_bh(&bpage->lock);
 		goto new_page;
 	}
 	if ((core->allocated + partial) > HOMA_BPAGE_SIZE) {
 #ifndef __STRIP__ /* See strip.py */
-		if (atomic_read(&bpage->refs) == 1) {
+		if (bpage->refs == 1) {
 			/* Bpage is totally free, so we can reuse it. */
 			core->allocated = 0;
 			INC_METRIC(bpage_reuses, 1);
 #else /* See strip.py */
-		if (atomic_read(&bpage->refs) == 1) {
+		if (bpage->refs == 1) {
 			/* Bpage is totally free, so we can reuse it. */
 			core->allocated = 0;
 #endif /* See strip.py */
@@ -371,14 +361,14 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 			 * because of check above, so we won't have to decrement
 			 * pool->free_bpages.
 			 */
-			atomic_dec_return(&bpage->refs);
+			bpage->refs--;
 			spin_unlock_bh(&bpage->lock);
 			goto new_page;
 		}
 	}
 	bpage->expiration = homa_clock() +
 			    pool->hsk->homa->bpage_lease_cycles;
-	atomic_inc(&bpage->refs);
+	bpage->refs++;
 	spin_unlock_bh(&bpage->lock);
 	goto allocate_partial;
 
@@ -474,27 +464,38 @@ void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
  */
 int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 {
-	int result = 0;
 	int i;
 
 	if (!smp_load_acquire(&pool->region))
-		return result;
+		return -EINVAL;
 	for (i = 0; i < num_buffers; i++) {
 		u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
 		struct homa_bpage *bpage;
 
+		tt_record("homa_pool_free_bufs starting token");
+		if (bpage_index >= pool->num_bpages)
+			return -EINVAL;
 		bpage = &pool->descriptors[bpage_index];
-		if (bpage_index < pool->num_bpages) {
-			if (atomic_dec_return(&bpage->refs) == 0)
-				atomic_fetch_inc_release(&pool->free_bpages);
-		} else {
-			result = -EINVAL;
+
+		spin_lock_bh(&bpage->lock);
+		if (bpage->refs == 0 || (bpage->refs == 1 &&
+					 bpage->owner >= 0)) {
+			/* This bpage is already free; looks like the app
+			 * has misbehaved and freed an offset multiple times.
+			 */
+			spin_unlock_bh(&bpage->lock);
+			return -EINVAL;
 		}
+		bpage->refs--;
+		if (bpage->refs == 0)
+			atomic_fetch_inc(&pool->free_bpages);
+		spin_unlock_bh(&bpage->lock);
+		tt_record("homa_pool_free_bufs finished token");
 	}
 	tt_record3("Released %d bpages, free_bpages for port %d now %d",
 		   num_buffers, pool->hsk->port,
 		   atomic_read(&pool->free_bpages));
-	return result;
+	return 0;
 }
 
 /**
@@ -587,7 +588,7 @@ u64 homa_pool_avail_bytes(struct homa_pool *pool)
 		core = per_cpu_ptr(pool->cores, cpu);
 		bpage = &pool->descriptors[core->page_hint];
 		if (bpage->owner == cpu) {
-			if (atomic_read(&bpage->refs) > 1)
+			if (bpage->refs > 1)
 				avail += HOMA_BPAGE_SIZE - core->allocated;
 			else
 				avail += HOMA_BPAGE_SIZE;

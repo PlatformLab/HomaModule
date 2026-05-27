@@ -1084,16 +1084,16 @@ TEST_F(homa_plumbing, homa_recvmsg__release_buffers)
 {
 	EXPECT_EQ(0, -homa_pool_get_pages(self->hsk.buffer_pool, 2,
 			self->recvmsg_args.bpage_offsets, 0));
-	EXPECT_EQ(1, atomic_read(&self->hsk.buffer_pool->descriptors[0].refs));
-	EXPECT_EQ(1, atomic_read(&self->hsk.buffer_pool->descriptors[1].refs));
+	EXPECT_EQ(1, self->hsk.buffer_pool->descriptors[0].refs);
+	EXPECT_EQ(1, self->hsk.buffer_pool->descriptors[1].refs);
 	self->recvmsg_args.num_bpages = 2;
 	self->recvmsg_args.bpage_offsets[0] = 0;
 	self->recvmsg_args.bpage_offsets[1] = HOMA_BPAGE_SIZE;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
-	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[0].refs));
-	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[1].refs));
+	EXPECT_EQ(0, self->hsk.buffer_pool->descriptors[0].refs);
+	EXPECT_EQ(0, self->hsk.buffer_pool->descriptors[1].refs);
 	EXPECT_EQ(0, self->recvmsg_args.num_bpages);
 }
 TEST_F(homa_plumbing, homa_recvmsg__error_in_release_buffers)
@@ -1351,8 +1351,8 @@ TEST_F(homa_plumbing, homa_recvmsg__copy_back_args_even_after_error)
 {
 	EXPECT_EQ(0, -homa_pool_get_pages(self->hsk.buffer_pool, 2,
 			self->recvmsg_args.bpage_offsets, 0));
-	EXPECT_EQ(1, atomic_read(&self->hsk.buffer_pool->descriptors[0].refs));
-	EXPECT_EQ(1, atomic_read(&self->hsk.buffer_pool->descriptors[1].refs));
+	EXPECT_EQ(1, self->hsk.buffer_pool->descriptors[0].refs);
+	EXPECT_EQ(1, self->hsk.buffer_pool->descriptors[1].refs);
 	self->recvmsg_args.num_bpages = 2;
 	self->recvmsg_args.bpage_offsets[0] = 0;
 	self->recvmsg_args.bpage_offsets[1] = HOMA_BPAGE_SIZE;

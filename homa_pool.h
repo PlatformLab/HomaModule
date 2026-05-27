@@ -24,7 +24,7 @@ struct homa_bpage {
 	 * this page, plus an additional tick if the @owner
 	 * field is set).
 	 */
-	atomic_t refs;
+	int refs;
 
 	/**
 	 * @owner: kernel core that currently owns this page
