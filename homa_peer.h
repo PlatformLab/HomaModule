@@ -73,7 +73,7 @@ struct homa_peertab {
 	 * @idle_jiffies_min: Same as idle_secs_min except in units
 	 * of jiffies.
 	 */
-	unsigned long idle_jiffies_min;
+	int idle_jiffies_min;
 
 	/**
 	 * @idle_secs_max: A peer that has been idle for less than
@@ -87,7 +87,7 @@ struct homa_peertab {
 	 * @idle_jiffies_max: Same as idle_secs_max except in units
 	 * of jiffies.
 	 */
-	unsigned long idle_jiffies_max;
+	int idle_jiffies_max;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**

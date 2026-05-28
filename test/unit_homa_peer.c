@@ -277,14 +277,27 @@ TEST_F(homa_peer, homa_peer_pick_victims__filter_idle_jiffies_min)
 	mock_rht_num_walk_results = 2;
 	jiffies = peertab->idle_jiffies_min + 150;
 	self->hnet->num_peers = peertab->net_max + 1000;
+	memset(victims, 0, sizeof(victims));
 
+	/* First call selects one victim */
 	EXPECT_EQ(1, homa_peer_pick_victims(peertab, victims, 5));
 	EXPECT_EQ(peers[1], victims[0]);
+
+	/* Second call tests whether the comparison with idle_jiffies_min
+	 * is robust if somehow jiffies < peer->access_jiffies.
+	 */
+	mock_rht_walk_results = (void **)peers;
+	mock_rht_num_walk_results = 2;
+	peers[1]->access_jiffies = 500;
+	jiffies = 400;
+	memset(victims, 0, sizeof(victims));
+	EXPECT_EQ(0, homa_peer_pick_victims(peertab, victims, 5));
+	EXPECT_EQ(NULL, victims[0]);
 }
 TEST_F(homa_peer, homa_peer_pick_victims__filter_idle_jiffies_max)
 {
 	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peers[3], *victims[5];
+	struct homa_peer *peers[4], *victims[5];
 	struct homa_net *hnet2;
 	struct homa_sock hsk2;
 
@@ -307,8 +320,16 @@ TEST_F(homa_peer, homa_peer_pick_victims__filter_idle_jiffies_max)
 	peers[2] = homa_peer_get(&self->hsk, ip3333);
 	homa_peer_release(peers[2]);
 
+	/* Fourth peer: net below limit, idle negative (to test robustness). */
+	jiffies = peertab->idle_jiffies_max + 200;
+	peers[3] = homa_peer_get(&self->hsk, ip4444);
+	homa_peer_release(peers[3]);
+
+	/* Make sure idle_jiffies_min test is a no-op. */
+	peertab->idle_jiffies_min = -10000;
+
 	mock_rht_walk_results = (void **)peers;
-	mock_rht_num_walk_results = 3;
+	mock_rht_num_walk_results = 4;
 	jiffies = peertab->idle_jiffies_max + 100;
 
 	EXPECT_EQ(2, homa_peer_pick_victims(peertab, victims, 5));
