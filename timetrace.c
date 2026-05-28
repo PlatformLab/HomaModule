@@ -12,7 +12,7 @@
  * timetrace stubs; we will then connect the timetrace mechanism here with
  * those stubs to allow the rest of the kernel to log in our buffers.
  */
-#define TT_KERNEL 1
+//#define TT_KERNEL 1
 #endif /* __UNIT_TEST__ */
 #ifdef TT_KERNEL
 extern struct tt_buffer *tt_linux_buffers[];
