@@ -534,6 +534,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			 */
 			homa_sock_unlock(pool->hsk);
 			UNIT_LOG("; ", "rpc lock unavailable in %s", __func__);
+			cpu_relax();
 			continue;
 		}
 		list_del_init(&rpc->buf_links);
