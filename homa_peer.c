@@ -205,12 +205,14 @@ int homa_peer_prefer_evict(struct homa_peertab *peertab,
 		if (peer2->ht_key.hnet->num_peers <= peertab->net_max)
 			return true;
 		else
-			return peer1->access_jiffies < peer2->access_jiffies;
+			return time_before(peer1->access_jiffies,
+					   peer2->access_jiffies);
 	}
 	if (peer2->ht_key.hnet->num_peers > peertab->net_max)
 		return false;
 	else
-		return peer1->access_jiffies < peer2->access_jiffies;
+		return time_before(peer1->access_jiffies,
+				   peer2->access_jiffies);
 }
 
 /**
