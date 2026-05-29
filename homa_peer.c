@@ -412,6 +412,8 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 
 	key.addr = *addr;
 	key.hnet = hsk->hnet;
+
+	/* Fast path: use existing entry if it exists. */
 	rcu_read_lock();
 	peer = rhashtable_lookup(&peertab->ht, &key, ht_params);
 	if (peer && refcount_inc_not_zero(&peer->refs)) {
@@ -420,12 +422,16 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 		return peer;
 	}
 
-	/* No existing entry, so we have to create a new one. */
+	/* No existing entry, so we have to create a new one. This could
+	 * sleep, so must release the RCU lock.
+	 */
+        rcu_read_unlock();
 	peer = homa_peer_alloc(hsk, addr);
 	if (IS_ERR(peer)) {
-		rcu_read_unlock();
 		return peer;
 	}
+
+	rcu_read_lock();
 	spin_lock_bh(&peertab->lock);
 	other = rhashtable_lookup_get_insert_fast(&peertab->ht,
 						  &peer->ht_linkage, ht_params);
@@ -465,14 +471,15 @@ struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
 	struct dst_entry *dst;
 	int pass;
 
-	rcu_read_lock();
 	for (pass = 0; ; pass++) {
+		rcu_read_lock();
 		do {
 			/* This loop repeats only if we happen to fetch
 			 * the dst right when it is being reset.
 			 */
 			dst = rcu_dereference(peer->dst);
 		} while (!dst_hold_safe(dst));
+		rcu_read_unlock();
 
 		/* After the first pass it's OK to return an obsolete dst
 		 * (we're basically giving up; continuing could result in
@@ -484,7 +491,6 @@ struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
 		INC_METRIC(peer_dst_refreshes, 1);
 		homa_peer_reset_dst(peer, hsk);
 	}
-	rcu_read_unlock();
 
 	/* This code is needed to handle situations where the same peer
 	 * is used by multiple sockets, some of which use TCP hijacking
@@ -513,8 +519,9 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 	struct dst_entry *dst;
 	struct flowi flow;
 	int result = 0;
+	u32 cookie;
 
-	homa_peer_lock(peer);
+	/* Collect information before locking the peer. */
 	memset(&flow, 0, sizeof(flow));
 	if (hsk->sock.sk_family == AF_INET) {
 		struct rtable *rt;
@@ -535,7 +542,7 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 			goto done;
 		}
 		dst = &rt->dst;
-		peer->dst_cookie = 0;
+		cookie = 0;
 	} else {
 		/* This code is derived from code in tcp_v6_connect. */
 		flow.u.ip6.flowi6_proto = hsk->sock.sk_protocol;
@@ -556,9 +563,12 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 			INC_METRIC(peer_route_errors, 1);
 			goto done;
 		}
-		peer->dst_cookie = rt6_get_cookie(dst_rt6_info(dst));
+		cookie = rt6_get_cookie(dst_rt6_info(dst));
 	}
+
+	homa_peer_lock(peer);
 	memcpy(&peer->flow, &flow, sizeof(flow));
+	peer->dst_cookie = cookie;
 
 	/* From the standpoint of homa_get_dst, peer->dst is not updated
 	 * atomically with peer->dst_cookie, which means homa_get_dst could
@@ -568,9 +578,9 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 	 * unnecessary work).
 	 */
 	dst_release(rcu_replace_pointer(peer->dst, dst, true));
+	homa_peer_unlock(peer);
 
 done:
-	homa_peer_unlock(peer);
 	return result;
 }
 

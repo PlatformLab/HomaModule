@@ -206,6 +206,12 @@ int homa_sock_init(struct homa_sock *hsk)
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
 	IF_NO_STRIP(homa_hijack_sock_init(hsk));
 
+	/* This is needed to prevent blocking when allocating memory in
+	 * functions like ip_route_output_flow, which could be invoked
+	 * while atomic.
+	 */
+	hsk->sock.sk_allocation = GFP_ATOMIC;
+
 	/* Pick a default port. Must keep the socktab locked from now
 	 * until the new socket is added to the socktab, to ensure that
 	 * no other socket chooses the same port.

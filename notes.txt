@@ -1,6 +1,9 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* homa_get_dst is invoked with rpc lock held, but it could sleep
+ (via call to homa_peer_reset_dst).
+
 * Linux doesn't seem to like packets getting passed to ip*xmit with
   reference counts > 1. Maybe change Homa to collect packet data in
   memory pages, separate from skb's? Save the memory pages for the
