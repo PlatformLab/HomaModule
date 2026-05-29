@@ -1,8 +1,13 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* homa_get_dst is invoked with rpc lock held, but it could sleep
- (via call to homa_peer_reset_dst).
+* By sharing peers across sockets, Homa doesn't account for information
+  in the flows such as sk_uid, sk_mark, tos, and sk_bound_dev_if, which
+  could vary from socket to socket. This means a socket for one user could
+  use security or routing information from another socket. Maybe peers
+  need to be divided into two levels: the top level contains the flow and
+  dst and may be socket-specific, and the lower level contains stuff that must
+  be shared, such as priorities.
 
 * Linux doesn't seem to like packets getting passed to ip*xmit with
   reference counts > 1. Maybe change Homa to collect packet data in
@@ -29,6 +34,10 @@ Notes for Homa implementation in Linux:
     times" below).
   * Implement some of the ideas from SIRD to reduce buffer utilization.
   * Refactor the granting mechanism to grant separately for each device.
+  * Don't use sk.sk_family to decide IPv4 vs. IPv6: use the address itself,
+    using ipv6_addr_v4mapped. Once this is done it should be possible to
+    use either IPv4 or IPv6 addresses regardless of how the socket was
+    created?
 
 * Move interest cleanup code from homa_sock to a new function in
   homa_interest. Also move wakeup code from homa_rpc_handoff.

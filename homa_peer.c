@@ -528,7 +528,7 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 
 	/* Collect information before locking the peer. */
 	memset(&flow, 0, sizeof(flow));
-	if (hsk->sock.sk_family == AF_INET) {
+	if (ipv6_addr_v4mapped(&peer->addr)) {
 		struct rtable *rt;
 
 		flowi4_init_output(&flow.u.ip4, hsk->sock.sk_bound_dev_if,
