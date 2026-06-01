@@ -91,38 +91,81 @@ TEST_F(homa_sock, homa_socktab_start_scan)
 	homa_socktab_end_scan(&scan);
 }
 
-TEST_F(homa_sock, homa_socktab_next)
+TEST_F(homa_sock, homa_socktab_next__no_sockets)
+{
+	struct homa_socktab_scan scan;
+
+	homa_destroy(&self->homa);
+	homa_init(&self->homa);
+	EXPECT_EQ(NULL, homa_socktab_start_scan(self->homa.socktab, &scan));
+}
+TEST_F(homa_sock, homa_socktab_next__iteration_basics)
 {
 	struct homa_sock hsk1, hsk2, hsk3, hsk4, *hsk;
 	struct homa_socktab_scan scan;
 	int first_port = 34000;
+	int bucket;
 
 	homa_destroy(&self->homa);
 	homa_init(&self->homa);
 	mock_sock_init(&hsk1, self->hnet, first_port);
-	mock_sock_init(&hsk2, self->hnet, first_port+HOMA_SOCKTAB_BUCKETS);
-	mock_sock_init(&hsk3, self->hnet, first_port+2*HOMA_SOCKTAB_BUCKETS);
-	mock_sock_init(&hsk4, self->hnet, first_port+5);
+	mock_sock_init(&hsk2, self->hnet, first_port + HOMA_SOCKTAB_BUCKETS);
+	mock_sock_init(&hsk3, self->hnet, first_port + 2 * HOMA_SOCKTAB_BUCKETS);
+	mock_sock_init(&hsk4, self->hnet, first_port + 5);
 	hsk = homa_socktab_start_scan(self->homa.socktab, &scan);
-	EXPECT_EQ(first_port+2*HOMA_SOCKTAB_BUCKETS, hsk->port);
+	EXPECT_EQ(first_port + 2 * HOMA_SOCKTAB_BUCKETS, hsk->port);
 	EXPECT_EQ(1, mock_sock_holds);
+	bucket = scan.current_bucket;
+
 	hsk = homa_socktab_next(&scan);
-	EXPECT_EQ(first_port+HOMA_SOCKTAB_BUCKETS, hsk->port);
+	EXPECT_EQ(first_port + HOMA_SOCKTAB_BUCKETS, hsk->port);
 	EXPECT_EQ(1, mock_sock_holds);
+	EXPECT_EQ(bucket, scan.current_bucket);
+
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(first_port, hsk->port);
 	EXPECT_EQ(1, mock_sock_holds);
+	EXPECT_EQ(bucket, scan.current_bucket);
+
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(first_port+5, hsk->port);
 	EXPECT_EQ(1, mock_sock_holds);
+	EXPECT_NE(bucket, scan.current_bucket);
+	bucket = scan.current_bucket;
+
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(NULL, hsk);
 	EXPECT_EQ(0, mock_sock_holds);
+	EXPECT_NE(bucket, scan.current_bucket);
+	homa_socktab_end_scan(&scan);
 	unit_sock_destroy(&hsk1);
 	unit_sock_destroy(&hsk2);
 	unit_sock_destroy(&hsk3);
 	unit_sock_destroy(&hsk4);
+}
+TEST_F(homa_sock, homa_socktab_next__skip_if_refcount_zero)
+{
+	struct homa_socktab_scan scan;
+	struct homa_sock hsk1, *hsk;
+	int saved_refcnt;
+
+	homa_destroy(&self->homa);
+	homa_init(&self->homa);
+	mock_sock_init(&hsk1, self->hnet, 34000);
+
+	/* First scan: reference count is zero. */
+	saved_refcnt = atomic_read(&hsk1.sock.sk_refcnt.refs);
+	atomic_set(&hsk1.sock.sk_refcnt.refs, 0);
+	hsk = homa_socktab_start_scan(self->homa.socktab, &scan);
+	EXPECT_EQ(NULL, hsk);
 	homa_socktab_end_scan(&scan);
+
+	/* Second scan: reference count nonzero. */
+	atomic_set(&hsk1.sock.sk_refcnt.refs, saved_refcnt);
+	hsk = homa_socktab_start_scan(self->homa.socktab, &scan);
+	EXPECT_NE(NULL, hsk);
+	homa_socktab_end_scan(&scan);
+	unit_sock_destroy(&hsk1);
 }
 
 TEST_F(homa_sock, homa_socktab_end_scan)
@@ -368,6 +411,18 @@ TEST_F(homa_sock, homa_sock_find__same_port_in_different_hnets)
 	sock_put(&hsk2.sock);
 	unit_sock_destroy(&hsk1);
 	unit_sock_destroy(&hsk2);
+}
+TEST_F(homa_sock, homa_sock_find__skip_zero_reference_count)
+{
+	int saved_refcnt;
+
+	EXPECT_EQ(&self->hsk, homa_sock_find(self->hnet, self->hsk.port));
+	sock_put(&self->hsk.sock);
+
+	saved_refcnt = atomic_read(&self->hsk.sock.sk_refcnt.refs);
+	atomic_set(&self->hsk.sock.sk_refcnt.refs, 0);
+	EXPECT_EQ(NULL, homa_sock_find(self->hnet, self->hsk.port));
+	atomic_set(&self->hsk.sock.sk_refcnt.refs, saved_refcnt);
 }
 
 TEST_F(homa_sock, homa_sock_find__long_hash_chain)

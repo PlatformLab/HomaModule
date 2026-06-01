@@ -89,35 +89,38 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
  *             returned all of the sockets in the table.  If non-NULL, a
  *             reference is held on the socket to prevent its deletion.
  *             Sockets are not returned in any particular order. It's
- *             possible that the returned socket has been destroyed.
+ *             possible that the returned socket has been shutdown.
  */
 struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 {
 	struct hlist_head *bucket;
 	struct hlist_node *next;
+	struct homa_sock *hsk;
 
 	rcu_read_lock();
 	if (scan->hsk) {
 		sock_put(&scan->hsk->sock);
 		next = rcu_dereference(hlist_next_rcu(&scan->hsk->socktab_links));
-		if (next)
-			goto success;
+		scan->hsk = NULL;
+	} else {
+		next = NULL;
 	}
-	for (scan->current_bucket++;
-	     scan->current_bucket < HOMA_SOCKTAB_BUCKETS;
-	     scan->current_bucket++) {
-		bucket = &scan->socktab->buckets[scan->current_bucket];
-		next = rcu_dereference(hlist_first_rcu(bucket));
-		if (next)
-			goto success;
+	while (1) {
+		if (!next) {
+			scan->current_bucket++;
+			if (scan->current_bucket >= HOMA_SOCKTAB_BUCKETS)
+				break;
+			bucket = &scan->socktab->buckets[scan->current_bucket];
+			next = rcu_dereference(hlist_first_rcu(bucket));
+			continue;
+		}
+		hsk = hlist_entry(next, struct homa_sock, socktab_links);
+		if (refcount_inc_not_zero(&hsk->sock.sk_refcnt)) {
+			scan->hsk = hsk;
+			break;
+		}
+		next = rcu_dereference(hlist_next_rcu(next));
 	}
-	scan->hsk = NULL;
-	rcu_read_unlock();
-	return NULL;
-
-success:
-	scan->hsk = hlist_entry(next, struct homa_sock, socktab_links);
-	sock_hold(&scan->hsk->sock);
 	rcu_read_unlock();
 	return scan->hsk;
 }
@@ -302,7 +305,6 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 * about locking.
 	 */
 	hsk->shutdown = true;
-	homa_sock_unlink(hsk);
 	homa_sock_unlock(hsk);
 
 	rcu_read_lock();
@@ -341,6 +343,18 @@ void homa_sock_destroy(struct sock *sk)
 		return;
 
 	tt_record1("Starting to destroy socket %d", hsk->port);
+
+	/* It is crucial that the following statement is here rather than
+	 * in homa_sock_shutdown. If unlinking were to happen in
+	 * homa_sock_shutdown, and if that socket happened to be the
+	 * current one in a scan, it's possible that the *next* socket in
+	 * the scan could be deleted and freed without updating the pointer
+	 * in the current socket, causing the next call to homa_socktab_next
+	 * to return freed memory. By the time we get here we know that the
+	 * socket isn't the current one in a scan (courtesy of the reference
+	 * count).
+	 */
+	homa_sock_unlink(hsk);
 	while (!list_empty(&hsk->dead_rpcs)) {
 		homa_rpc_reap(hsk, true);
 #ifndef __STRIP__ /* See strip.py */
@@ -442,9 +456,10 @@ struct homa_sock *homa_sock_find(struct homa_net *hnet, u16 port)
 	rcu_read_lock();
 	hlist_for_each_entry_rcu(hsk, &hnet->homa->socktab->buckets[bucket],
 				 socktab_links) {
-		if (hsk->port == port && hsk->hnet == hnet) {
+		if (hsk->port == port && hsk->hnet == hnet &&
+		    !hsk->shutdown &&
+		    refcount_inc_not_zero(&hsk->sock.sk_refcnt)) {
 			result = hsk;
-			sock_hold(&hsk->sock);
 			break;
 		}
 	}

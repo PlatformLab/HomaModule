@@ -99,6 +99,8 @@
 
 #define rcu_read_unlock_bh mock_rcu_read_unlock
 
+#define refcount_inc_not_zero mock_refcount_inc_not_zero
+
 #undef register_net_sysctl
 #define register_net_sysctl mock_register_net_sysctl
 
@@ -242,6 +244,7 @@ void        mock_rcu_read_lock(void);
 void        mock_rcu_read_unlock(void);
 void        mock_record_locked(void *lock);
 void        mock_record_unlocked(void *lock);
+bool        mock_refcount_inc_not_zero(refcount_t *r);
 struct ctl_table_header *
 	    mock_register_net_sysctl(struct net *net,
 				     const char *path,

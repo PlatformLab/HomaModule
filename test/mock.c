@@ -283,6 +283,13 @@ int mock_netif_schedule_calls;
  */
 bool mock_check_bpool_leaks = true;
 
+/* Keeps track of all of the sockets created during the current test.
+ * Used to attribute calls to refcount_inc_not_zero to a socket (or not).
+ */
+#define MOCK_MAX_SOCKS 100
+struct homa_sock *mock_socks[MOCK_MAX_SOCKS];
+int mock_num_socks;
+
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
 struct net_offload tcp_offload;
@@ -2135,6 +2142,29 @@ void mock_record_unlocked(void *lock)
 }
 
 /**
+ * mock_refcount_inc_not_zero() - Called instead of refcount_inc_not_zero;
+ * behaves the same, except records information used to track socket
+ * reference counts.
+ */
+bool mock_refcount_inc_not_zero(refcount_t *r)
+{
+	int i;
+
+	if (atomic_read(&r->refs) == 0)
+		return false;
+	atomic_inc(&r->refs);
+
+	/* See if this is a socket reference count. */
+	for (i = 0; i < mock_num_socks; i++) {
+		if (r == &mock_socks[i]->sock.sk_refcnt) {
+			mock_sock_holds++;
+			break;
+		}
+	}
+	return true;
+}
+
+/**
  * mock_register_net_sysctl() - Called instead of register_net_sysctl
  * when Homa is compiled for unit testing.
  */
@@ -2387,8 +2417,16 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	int saved_port;
 	int err = 0;
 
+	if (mock_num_socks < MOCK_MAX_SOCKS) {
+		mock_socks[mock_num_socks] = hsk;
+		mock_num_socks++;
+	} else {
+		FAIL("ran out of space in mock_socks; need to increase MOCK_MAX_SOCKS");
+	}
+
 	saved_port = hnet->prev_default_port;
 	memset(hsk, 0, sizeof(*hsk));
+	atomic_set(&sk->sk_refcnt.refs, 1);
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	sk->sk_socket = &mock_socket;
@@ -2510,6 +2548,7 @@ void mock_teardown(void)
 	mock_queue_index = 0;
 	mock_netif_schedule_calls = 0;
 	mock_check_bpool_leaks = true;
+	mock_num_socks = 0;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));
