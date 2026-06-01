@@ -1123,7 +1123,7 @@ def print_analyzer_help():
         if (options.analyzers != 'all') and (not analyzer in analyzers):
             continue
         if hasattr(object, 'output'):
-            print('%s: %s' % (analyzer, object.__doc__))
+            print('%s:%s' % (analyzer, object.__doc__))
 
 def print_field_if(dict, field, fmt, modifier=None):
     """
@@ -4059,16 +4059,80 @@ class AnalyzeDelay:
         verbose += print_worst('SoftIRQ to client via queue', app_queue_rsp)
         return verbose
 
+    def print_qdisc_delays(self):
+        """
+        Prints information about delays related to homa_qdisc.
+        """
+        global options, packets
+
+        qdisc_defer_delays = []
+        qdisc_pacer_to_nic = []
+
+        for pkt in packets.values():
+            if not 'tso_length' in pkt:
+                continue
+            if 'qdisc_defer' in pkt and 'qdisc_xmit' in pkt:
+                delay = pkt['qdisc_xmit'] - pkt['qdisc_defer']
+                if delay > 0:
+                    qdisc_defer_delays.append([delay, pkt, pkt['qdisc_xmit']])
+            if 'nic' in pkt and 'qdisc_xmit' in pkt:
+                delay = pkt['nic'] - pkt['qdisc_xmit']
+                if delay > 0:
+                    qdisc_pacer_to_nic.append([delay, pkt, pkt['nic']])
+
+        qdisc_defer_delays.sort(key = lambda t: t[0])
+        qdisc_pacer_to_nic.sort(key = lambda t: t[0])
+
+        print('\nDelays related to homa_qdisc:')
+        print('                               Count   Min    P10    P50    '
+                'P90    P99    Max    Avg')
+        print('------------------------------------------------------------'
+                '------------------------')
+        for data, label in [[qdisc_defer_delays, 'Time deferred in homa_qdisc'],
+                [qdisc_pacer_to_nic, 'homa_qdisc pacer to NIC']]:
+            num = len(data)
+            if num == 0:
+                print('%-30s %6d' % (label, 0))
+            else:
+                print('%-30s %6d %5.1f %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f'
+                    % (label, num, data[0][0], data[10*num//100][0],
+                    data[50*num//100][0], data[90*num//100][0],
+                    data[99*num//100][0], data[num-1][0], list_avg(data, 0)))
+
+        verbose = 'Worst-case homa_qdisc delays:\n'
+        verbose += 'Type                        Delay (us)    End Time       Node  Pctl\n'
+        verbose += '-------------------------------------------------------------------\n'
+
+        for data, label in [[qdisc_defer_delays, 'Time deferred in homa_qdisc'],
+                [qdisc_pacer_to_nic, 'homa_qdisc pacer to NIC']]:
+            # The goal is to print about 10 records covering the 98th-100th
+            # percentiles; we'll print one out of every "interval" packets.
+            num = len(data)
+            interval = num//(50*10)
+            if interval == 0:
+                interval = 1
+            for i in range(num-1, num - 10*interval, -interval):
+                if i < 0:
+                    break
+                delay, pkt, t = data[i]
+                verbose += '%-30s %8.1f   %10.3f %10s %5.1f\n' % (
+                        label, delay, t, pkt['tx_node'],
+                        100*i/(num-1) if num > 1 else 100)
+        return verbose
+
     def output(self):
         global options
 
         delay_verbose = self.print_pkt_delays()
         wakeup_verbose = self.print_wakeup_delays()
+        qdisc_verbose = self.print_qdisc_delays()
         if options.verbose:
             print('')
             print(delay_verbose, end='')
             print('')
             print(wakeup_verbose, end='')
+            print('')
+            print(qdisc_verbose, end='')
 
 #------------------------------------------------
 # Analyzer: filter
@@ -7627,7 +7691,7 @@ class AnalyzeNicqueues:
         print('P90:         90th percentile delay experienced by Homa data packets')
         print('P99:         99th percentile delay experienced by Homa data packets')
         print('')
-        print('Node        MaxLength       Time   Delay     P50     P90     P99')
+        print('Node        MaxLength        Time   Delay     P50     P90     P99')
 
         for node in get_sorted_nodes():
             pkts = self.nodes[node]
@@ -7666,7 +7730,7 @@ class AnalyzeNicqueues:
                 pkts[i][2] = cur_queue
             data_pkts = sorted(filter(lambda t: t[3] == 'homa_data', pkts),
                     key=lambda t: t[2])
-            print('%-10s  %9d  %9.3f %7.1f %7.1f %7.1f %7.1f' % (
+            print('%-10s  %9d  %10.3f %7.1f %7.1f %7.1f %7.1f' % (
                     node, max_queue, max_time,
                     (max_queue*8)/(options.gbps*1000),
                     data_pkts[50*len(data_pkts)//100][2]*8/(options.gbps*1000),
@@ -12695,240 +12759,144 @@ class AnalyzeTemp:
     debugging. Consult the code to see what it does right now.
     """
     def __init__(self, dispatcher):
-        dispatcher.interest('AnalyzeIntervals')
+        dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeRpcs')
 
     def output(self):
-        global packets
+        global packets, rpcs
 
-        tx_in_nic = []
-        print('\nMaximum NIC queue occupancy (KB):')
+        slow_rpcs = {}
+        free_lags = []
+        qlengths = []
+        totals = []
+
+        # Select RPCs that we are interested in.
+        for id, rpc in rpcs.items():
+            if id & 1:
+                continue
+            if not 'out_length' in rpc or rpc['out_length'] > 1000:
+                continue
+            if not 'recvmsg_done' in rpc or not 'sendmsg' in rpc:
+                continue
+            rtt = rpc['recvmsg_done'] - rpc['sendmsg']
+            if rtt < 100 or rtt > 110:
+                continue
+            slow_rpcs[id] = {'id': id, 'rtt': rtt}
+            slow_rpcs[id + 1] = {'id': id + 1, 'rtt': rtt}
+
         for node in get_sorted_nodes():
-            max = 0
-            max_time = 0.0
-            for interval in intervals[node]:
-                sample = interval['tx_in_nic']
-                tx_in_nic.append(sample)
-                if sample > max:
-                    max = sample
-                    max_time = interval['time']
-            print('%-10s  %.1f (%9.3f)' % (node, max * 1e-3, max_time))
+            # All packets passed to NIC from this node.
+            nic_pkts = []
 
-        tx_in_nic.sort()
-        print('\nTx Kbytes in possession of NIC:')
-        print('Avg:   %6.1f' % (1e-3 * sum(tx_in_nic) / len(tx_in_nic)))
-        print('P50:   %6.1f' % (1e-3 * tx_in_nic[50 * len(tx_in_nic) // 100]))
-        print('P90:   %6.1f' % (1e-3 * tx_in_nic[90 * len(tx_in_nic) // 100]))
-        print('P99:   %6.1f' % (1e-3 * tx_in_nic[99 * len(tx_in_nic) // 100]))
-        print('Max:   %6.1f' % (1e-3 * tx_in_nic[-1]))
+            # All packets freed after return from NIC on this node.
+            free_pkts = []
 
-    def output_slow_pkts(self):
-        pkts = []
-        delays = []
-        for pkt in packets.values():
-            if (pkt['msg_length'] == None or pkt['msg_length'] <= 1000 or
-                    pkt['msg_length'] >= 60000):
+            for pkt in packets.values():
+                if not 'tx_node' in pkt or pkt['tx_node'] != node:
+                    continue
+                if not 'nic' in pkt or not 'free_tx_skb' in pkt:
+                    continue
+                if not 'tx_qid' in pkt or not 'tso_length' in pkt:
+                    continue
+                nic_pkts.append(pkt)
+                free_pkts.append(pkt)
+            nic_pkts.sort(key = lambda pkt: pkt['nic'])
+            free_pkts.sort(key = lambda pkt: pkt['free_tx_skb'])
+
+            # Current bytes in each NIC queue.
+            qbytes = defaultdict(lambda: 0)
+
+            # Total across all queues.
+            total_bytes = 0
+
+            print('Packets passed to the NIC with long queue:')
+            print('Time           Node         Id  PktLen  Qid   Qlen NicTotal')
+            while nic_pkts and free_pkts:
+                nic = nic_pkts[0]['nic']
+                free = free_pkts[0]['free_tx_skb']
+                if (nic < free):
+                    pkt = nic_pkts.pop(0)
+                    qid = pkt['tx_qid']
+
+                    if pkt['id'] in slow_rpcs:
+                        slow = slow_rpcs[pkt['id']]
+                        lag = pkt['free_tx_skb'] - pkt['nic']
+                        slow['free_lag'] = pkt['free_tx_skb'] - pkt['nic']
+                        free_lags.append(lag)
+                        slow['qlength'] = qbytes[qid]
+                        qlengths.append(qbytes[qid])
+                        slow['total_queued'] = total_bytes
+                        totals.append(total_bytes)
+                        slow['nic'] = nic
+                        slow['qid'] = qid
+
+                    if qbytes[qid] > 50000:
+                        print('%10.3f %8s %10d %7d %4d %6d  %7d' % (nic,
+                                node, pkt['id'], pkt['tso_length'], qid,
+                                qbytes[qid], total_bytes))
+
+                    length = pkt['tso_length']
+                    qbytes[qid] += length
+                    total_bytes +=  length
+                    # print('%9.3f queue %2d: %5d bytes added, now %6d (total %7d)'
+                    #         % (nic, qid, length, qbytes[qid], total_bytes))
+                else:
+                    pkt = free_pkts.pop(0)
+                    qid = pkt['tx_qid']
+                    length = pkt['tso_length']
+                    qbytes[qid] -= length
+                    total_bytes -=  length
+                    # print('%9.3f queue %2d: %5d bytes freed, now %6d (total %7d)'
+                    #         % (free, qid, length, qbytes[qid], total_bytes))
+
+        free_lags.sort()
+        qlengths.sort()
+        totals.sort()
+        print('\nStatistics across all packets passed to NICs:')
+        print('                     P10     P50     P90     P99     Max     Avg')
+        print('Free_lag:          %5.1f   %5.1f   %5.1f   %5.1f   %5.1f   %5.1f' % (
+                free_lags[10 * len(free_lags)//100],
+                free_lags[50 * len(free_lags)//100],
+                free_lags[90 * len(free_lags)//100],
+                free_lags[99 * len(free_lags)//100],
+                free_lags[-1], sum(free_lags)/len(free_lags)))
+        print('Queue length:     %6.0f  %6.0f  %6.0f  %6.0f  %6.0f  %6.0f' % (
+                qlengths[10 * len(qlengths)//100],
+                qlengths[50 * len(qlengths)//100],
+                qlengths[90 * len(qlengths)//100],
+                qlengths[99 * len(qlengths)//100],
+                qlengths[-1], sum(qlengths)/len(qlengths)))
+        print('Total NIC bytes:  %6.0f  %6.0f  %6.0f  %6.0f  %6.0f  %6.0f' % (
+                totals[10 * len(totals)//100],
+                totals[50 * len(totals)//100],
+                totals[90 * len(totals)//100],
+                totals[99 * len(totals)//100],
+                totals[-1], sum(totals)/len(totals)))
+
+        print('\nId           Client   Server RqQid      RqNic RqFree RqQlen   RqTot',
+                end='')
+        print(' RspQid     RspNic RspFree RspQlen  RspTot')
+        for client in sorted(slow_rpcs.values(),
+                key = lambda d: d['nic'] if 'nic' in d else 1e20):
+            id = client['id']
+            if id & 1:
                 continue
-            if not 'nic' in pkt or not 'gro' in pkt or not 'tso_length' in pkt:
+            rpc = rpcs[id]
+            server = slow_rpcs[id + 1]
+            # print('client: %s\nserver:%s\n' % (client, server))
+            if not 'free_lag' in server or not 'free_lag' in client:
                 continue
-            delay = pkt['gro'] - pkt['nic']
-            if delay >= 300:
-                pkts.append(pkt)
-            else:
-                if pkt['id'] == 400376130 or pkt['id'] == 400376131:
-                    print('Packet id %d, offset %d, delay %.1f: %s' %
-                            (pkt['id'], pkt['offset'], delay, pkt))
-                delays.append(delay)
-        print('# Packets from messages with length 1000-60000 and')
-        print('# nic->gro delays > 300 usecs:')
-        print(print_pkts(pkts), end='')
-
-    def output_delays(self):
-        global packets, options, rpcs
-
-        delays = []
-
-        for pkt in packets.values():
-            if not 'nic' in pkt or not 'gro' in pkt:
-                continue
-            if options.node != None and pkt['tx_node'] != options.node:
-                continue
-            if not pkt['id'] in rpcs:
-                continue
-            rpc = rpcs[pkt['id']]
-            if not 'out_length' in rpc:
-                continue
-            length = rpc['out_length']
-            if length <= 1000 or length > 1400:
-                continue
-            delays.append(pkt['gro'] - pkt['nic'])
-        if not delays:
-            print('No packets matched!')
-            return
-        delays.sort()
-        plot_ccdf(delays, 'temp_delays.pdf')
-        print('%d data points, P50 %.1f P90 %.1f P99 %.1f max %.1f' % (
-                len(delays), delays[50*len(delays)//100],
-                delays[90*len(delays)//100],
-                delays[99*len(delays)//100], delays[-1]))
-
-    def output_slow_rpcs(self):
-        global packets, rpcs
-
-        matches = []
-        max_rpc = None
-        max_rtt = 0
-        for rpc in rpcs.values():
-            # print('RPC id %d: %s\n' % (rpc['id'], rpc))
-            if not 'sendmsg' in rpc or not 'recvmsg_done' in rpc:
-                continue
-            if rpc['out_length'] < 1000 or rpc['out_length'] > 1400:
-                continue
-            if rpc['id'] & 1:
-                continue
-            rtt = rpc['recvmsg_done'] - rpc['sendmsg']
-            if rtt > max_rtt:
-                max_rpc = rpc
-                max_rtt = rtt
-            if rtt >= 150:
-                matches.append(rpc)
-        if not matches and max_rpc != None:
-            matches = [max_rpc]
-        for rpc in matches:
-            peer = rpc['peer']
-            rtt = rpc['recvmsg_done'] - rpc['sendmsg']
-            print('RPC id %d (%s -> %s) took %.1f usecs, length %d, %.3f -> %.3f' %
-                    (rpc['id'], rpc['node'],
-                    ip_to_node[peer] if peer in ip_to_node else peer,
-                    rtt, rpc['out_length'], rpc['sendmsg'], rpc['recvmsg_done']))
-            if rpc['send_data_pkts']:
-                pkt = rpc['send_data_pkts'][0]
-                if 'nic' in pkt and 'gro' in pkt:
-                    print('  Request packet network time %.1f usecs (nic %.3f, gro %.3f)' %
-                            (pkt['gro'] - pkt['nic'], pkt['nic'], pkt['gro']))
-            if rpc['softirq_data_pkts']:
-                pkt = rpc['softirq_data_pkts'][0]
-                if 'nic' in pkt and 'gro' in pkt:
-                    print('  Response packet network time %.1f usecs (nic %.3f, gro %.3f)' %
-                            (pkt['gro'] - pkt['nic'], pkt['nic'], pkt['gro']))
-
-        max_free_delay = 0
-        max_pkt = None
-        max_gro_free = 0
-        max_gro_free_pkt = None
-        for pkt in packets.values():
-            if not 'nic' in pkt or not 'free_tx_skb' in pkt:
-                continue
-            if not 'tso_length' in pkt or not 'gro' in pkt:
-                continue
-            if 'tx_qid' in pkt and pkt['tx_qid'] <= 1:
-                delay = min(pkt['free_tx_skb'], pkt['gro']) - pkt['nic']
-                if delay > max_free_delay:
-                    max_free_delay = delay
-                    max_pkt = pkt
-            delay = pkt['free_tx_skb'] - pkt['gro']
-            if delay > max_gro_free:
-                max_gro_free = delay
-                max_gro_free_pkt = pkt
-                # print("New max_gro_free_pkt: %s" % (pkt))
-        print('\nMax NIC delay: %.1f usecs, id %d, offset %d, node %s, nic %.3f, free %.3f, gro %.3f' %
-                (max_free_delay, max_pkt['id'], max_pkt['offset'],
-                max_pkt['tx_node'], max_pkt['nic'], max_pkt['free_tx_skb'],
-                max_pkt['gro']))
-        print('\nMax GRO->free delay: %.1f usecs, id %d, offset %d, node %s, nic %.3f, free %.3f, gro %.3f' %
-                (max_gro_free, max_gro_free_pkt['id'],
-                 max_gro_free_pkt['offset'], max_gro_free_pkt['tx_node'],
-                 max_gro_free_pkt['nic'], max_gro_free_pkt['free_tx_skb'],
-                max_gro_free_pkt['gro']))
-
-    def output_snapshot(self):
-        global packets, rpcs
-
-        # Desired time for snapshot
-        t = 18000.0
-
-        # Desired target node
-        target = 'node3'
-
-        print('\n-------------------')
-        print('Analyzer: temp')
-        print('-------------------')
-        print('Packets incoming to %s at time %.1f' % (target, t))
-
-        # Node name -> {pkts, bytes} in transit from node at given time.
-        nodes = {}
-
-        # Core number -> {pkts, bytes} in transit to GRO core at given time.
-        cores = {}
-
-        # RPC id -> {pkts, bytes} in transit for that RPC at given time.
-        rpc_counts = {}
-
-        total_packets = 0
-        total_bytes = 0
-
-        for pkt in packets.values():
-            if False:
-                print('Packet: %s' % (pkt))
-            missing_fields = False
-            for field in ['xmit', 'gro', 'id', 'gro_core', 'offset']:
-                if not field in pkt:
-                    missing_fields = True
-                    break
-            if missing_fields:
-                continue
-            if pkt['xmit'] > t:
-                continue
-            if pkt['gro'] < t:
-                continue
-            id = pkt['id']
-            tx_node = rpcs[id]['node']
-            rx_node = rpcs[id^1]['node']
-            if rx_node != target:
-                continue
-            length = get_recv_length(pkt['offset'], pkt['msg_length'])
-            total_packets += 1
-            total_bytes += length
-
-            if not tx_node in nodes:
-                nodes[tx_node] = {'pkts': 0, 'bytes': 0}
-            node = nodes[tx_node]
-            node['pkts'] += 1
-            node['bytes'] += length
-
-            if not pkt['gro_core'] in cores:
-                cores[pkt['gro_core']] = {'pkts': 0, 'bytes': 0}
-            core = cores[pkt['gro_core']]
-            core['pkts'] += 1
-            core['bytes'] += length
-
-            if not id in rpc_counts:
-                rpc_counts[id] = {'pkts': 0, 'bytes': 0}
-            rpc = rpc_counts[id]
-            rpc['pkts'] += 1
-            rpc['bytes'] += length
-
-        print('\nTotal packets %d, total bytes %d' % (total_packets, total_bytes))
-
-        print('\nSource nodes:')
-        print('Node        Pkts    Bytes')
-        for name in get_sorted_nodes():
-            if not name in nodes:
-                continue
-            node = nodes[name]
-            print('%-10s %5d %8d' % (name, node['pkts'], node['bytes']))
-
-
-        print('\nGRO cores:')
-        print('Node   Pkts    Bytes')
-        for core_num in sorted(cores.keys()):
-            core = cores[core_num]
-            print('%4d  %5d %8d' % (core_num, core['pkts'], core['bytes']))
-
-        print('\nRPCs:')
-        print('Id           Pkts    Bytes')
-        for id in sorted(rpc_counts.keys()):
-            rpc = rpc_counts[id]
-            print('%-10d  %5d %8d' % (id, rpc['pkts'], rpc['bytes']))
+            if not 'qid' in client:
+                print('No client qid: %s' % (client))
+            if not 'qid' in server:
+                print('No server qid: %s' % (server))
+            print('%-10d %8s %8s %5d %10.3f %6.1f %6d %7d' % (id, rpc['node'],
+                    get_rpc_node(id + 1), client['qid'], client['nic'],
+                    client['free_lag'], client['qlength'],
+                    client['total_queued']), end='')
+            print('    %3d %10.3f %7.1f  %6d %7d' % (server['qid'],
+                    server['nic'], server['free_lag'], server['qlength'],
+                    server['total_queued']))
 
 #------------------------------------------------
 # Analyzer: temp2
