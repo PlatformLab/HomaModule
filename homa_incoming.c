@@ -1126,12 +1126,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		tt_record4("homa_wait_private found rpc id %d, pid %d, port %d via handoff, blocked %d",
 			   rpc->id, current->pid, rpc->hsk->port,
 			   interest.blocked);
-
-		/* Abort on error, but if the interest actually got ready
-		 * in the meantime the ignore the error (loop back around
-		 * to process the RPC).
-		 */
-		if (result != 0 && atomic_read_acquire(&interest.ready) == 0)
+		if (result != 0)
 			break;
 	}
 
@@ -1169,8 +1164,6 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 	IF_NO_STRIP(int avail_immediately = 1);
 	IF_NO_STRIP(int blocked = 0);
 
-	INIT_LIST_HEAD(&interest.links);
-	init_waitqueue_head(&interest.wait_queue);
 	/* Each iteration through this loop waits until an RPC needs attention
 	 * in some way (e.g. packets have arrived), then deals with that need
 	 * (e.g. copy to user space). It may take many iterations until an
@@ -1216,25 +1209,8 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 #endif /* See strip.py */
 
 			if (result != 0) {
-				int ready;
-
-				/* homa_interest_wait returned an error, so we
-				 * have to do two things. First, unlink the
-				 * interest from the socket. Second, check to
-				 * see if in the meantime the interest received
-				 * a handoff. If so, ignore the error. Very
-				 * important to hold the socket lock while
-				 * checking, in order to eliminate races with
-				 * homa_rpc_handoff.
-				 */
-				homa_sock_lock(hsk);
-				homa_interest_unlink_shared(&interest);
-				ready = atomic_read_acquire(&interest.ready);
-				homa_sock_unlock(hsk);
-				if (ready == 0) {
-					rpc = ERR_PTR(result);
-					goto done;
-				}
+				rpc = ERR_PTR(result);
+				goto done;
 			}
 
 			rpc = interest.rpc;
@@ -1284,7 +1260,6 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_sock *hsk = rpc->hsk;
-	struct homa_interest *interest;
 
 	if (test_bit(RPC_PRIVATE, &rpc->flags)) {
 		homa_interest_notify_private(rpc);
@@ -1300,28 +1275,11 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 		return;
 	}
 	if (!list_empty(&hsk->interests)) {
-#ifndef __STRIP__ /* See strip.py */
-		interest = homa_choose_interest(hsk);
-#else /* See strip.py */
-		interest = list_first_entry(&hsk->interests,
-					    struct homa_interest, links);
-#endif /* See strip.py */
-		list_del_init(&interest->links);
-		interest->rpc = rpc;
-		homa_rpc_hold(rpc);
 		tt_record2("homa_rpc_handoff handing off id %d for port %d",
 			   rpc->id, hsk->port);
-		atomic_set_release(&interest->ready, 1);
-		wake_up(&interest->wait_queue);
+		homa_rpc_hold(rpc);
+		homa_interest_notify_shared(hsk, rpc);
 		INC_METRIC(handoffs_thread_waiting, 1);
-
-#ifndef __STRIP__ /* See strip.py */
-		/* Update the last_app_active time for the thread's core, so
-		 * Homa will try to avoid assigning any work there.
-		 */
-		per_cpu(homa_offload_core, interest->core).last_app_active =
-				homa_clock();
-#endif /* See strip.py */
 	} else if (list_empty(&rpc->ready_links)) {
 		list_add_tail(&rpc->ready_links, &hsk->ready_rpcs);
 		hsk->sock.sk_data_ready(&hsk->sock);

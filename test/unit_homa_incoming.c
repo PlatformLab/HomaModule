@@ -2645,26 +2645,15 @@ TEST_F(homa_incoming, homa_wait_shared__reap_when_nonblocking)
 	EXPECT_EQ(EAGAIN, -PTR_ERR(rpc));
 	EXPECT_EQ(5, self->hsk.dead_skbs);
 }
-TEST_F(homa_incoming, homa_wait_shared__signal_race_with_handoff)
+TEST_F(homa_incoming, homa_wait_shared__signal_while_blocked)
 {
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 20000, 1600);
 	struct homa_rpc *rpc;
 
-	ASSERT_NE(NULL, crpc);
-	crpc->error = -ENOENT;
-	unit_hook_register(handoff_hook);
-	hook_rpc = crpc;
-	hook_count = 2;
 	mock_prepare_to_wait_errors = 1;
 
 	rpc = homa_wait_shared(&self->hsk, 0);
-	EXPECT_EQ(crpc, rpc);
-	EXPECT_EQ(ENOENT, -rpc->error);
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_block));
-	homa_rpc_put(rpc);
-	homa_rpc_unlock(rpc);
+	EXPECT_TRUE(IS_ERR(rpc));
+	EXPECT_EQ(EINTR, -PTR_ERR(rpc));
 }
 TEST_F(homa_incoming, homa_wait_shared__socket_shutdown_while_blocked)
 {
@@ -2789,7 +2778,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__handoff_to_shared_interest)
 	EXPECT_EQ(1, atomic_read(&interest2.ready));
 	EXPECT_EQ(crpc, interest2.rpc);
 	homa_rpc_put(crpc);
-	homa_interest_unlink_shared(&interest1);
+	list_del_init(&interest1.links);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->handoffs_thread_waiting));
 }
 TEST_F(homa_incoming, homa_rpc_handoff__queue_rpc_on_socket)

@@ -279,7 +279,6 @@ void homa_sock_unlink(struct homa_sock *hsk)
  */
 void homa_sock_shutdown(struct homa_sock *hsk)
 {
-	struct homa_interest *interest;
 	struct homa_rpc *rpc;
 
 	tt_record1("Starting shutdown for socket %d", hsk->port);
@@ -316,13 +315,8 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	rcu_read_unlock();
 
 	homa_sock_lock(hsk);
-	while (!list_empty(&hsk->interests)) {
-		interest = list_first_entry(&hsk->interests,
-					    struct homa_interest, links);
-		list_del_init(&interest->links);
-		atomic_set_release(&interest->ready, 1);
-		wake_up(&interest->wait_queue);
-	}
+	while (!list_empty(&hsk->interests))
+		homa_interest_notify_shared(hsk, NULL);
 	homa_sock_unlock(hsk);
 	tt_record1("Finished shutdown for socket %d", hsk->port);
 }

@@ -64,19 +64,6 @@ struct homa_interest {
 };
 
 /**
- * homa_interest_unlink_shared() - Remove an interest from the list for a
- * socket. Note: this can race with homa_rpc_handoff, so on return it's
- * possible that the interest is ready.
- * @interest:    Interest to remove. Must have been initialized with
- *               homa_interest_init_shared.
- */
-static inline void homa_interest_unlink_shared(struct homa_interest *interest)
-	__must_hold(interest->hsk->lock)
-{
-	list_del_init(&interest->links);
-}
-
-/**
  * homa_interest_unlink_private() - Detach a private interest from its
  * RPC. Note: this can race with homa_rpc_handoff, so on return it's
  * possible that the interest is ready.
@@ -96,6 +83,8 @@ void     homa_interest_init_shared(struct homa_interest *interest,
 int      homa_interest_init_private(struct homa_interest *interest,
 				    struct homa_rpc *rpc);
 void     homa_interest_notify_private(struct homa_rpc *rpc);
+void     homa_interest_notify_shared(struct homa_sock *hsk,
+				     struct homa_rpc *rpc);
 int      homa_interest_wait(struct homa_interest *interest);
 
 #ifndef __STRIP__ /* See strip.py */

@@ -66,7 +66,8 @@ int homa_interest_init_private(struct homa_interest *interest,
  *                it may still be linked.
  *
  * Return: 0 for success (the ready flag is set in the interest), or -EINTR
- * if the thread received an interrupt.
+ * if the thread received an interrupt. When this function returns, the
+ * interest will no longer be linked to a socket (if it ever was).
  */
 int homa_interest_wait(struct homa_interest *interest)
 {
@@ -97,6 +98,7 @@ int homa_interest_wait(struct homa_interest *interest)
 			continue;
 
 #ifndef __STRIP__ /* See strip.py */
+		/* See if the polling limit has been reached. */
 		now = homa_clock();
 		per_cpu(homa_offload_core,
 			raw_smp_processor_id()).last_app_active = now;
@@ -112,8 +114,25 @@ int homa_interest_wait(struct homa_interest *interest)
 	wait_err = wait_event_interruptible_exclusive(interest->wait_queue,
 						      atomic_read_acquire(&interest->ready) != 0);
 	IF_NO_STRIP(blocked_time = homa_clock() - block_start);
-	if (wait_err == -ERESTARTSYS)
-		result = -EINTR;
+	if (wait_err == -ERESTARTSYS) {
+		int ready;
+
+		/* An interrupt occurred. We have to do two things.  First,
+		 * unlink the interest from the socket (if it was linked).
+		 * Second, check to see if in the meantime the interest
+		 * received a handoff. If so, ignore the interrupt. Must hold
+		 * the socket lock while checking, in order to eliminate races
+		 * with homa_rpc_handoff. Technically these are only needed
+		 * for shared interests, but it's harmless to do them for
+		 * private interests as well.
+		 */
+		homa_sock_lock(hsk);
+		list_del_init(&interest->links);
+		ready = atomic_read_acquire(&interest->ready);
+		homa_sock_unlock(hsk);
+		if (ready == 0)
+			result = -EINTR;
+	}
 
 done:
 #ifndef __STRIP__ /* See strip.py */
@@ -137,6 +156,37 @@ void homa_interest_notify_private(struct homa_rpc *rpc)
 		atomic_set_release(&rpc->private_interest->ready, 1);
 		wake_up(&rpc->private_interest->wait_queue);
 	}
+}
+
+/**
+ * homa_interest_notify_shared() - Hand an RPC off to one of the interests
+ * available for a socket.
+ * @hsk:      Socket for the handoff; must have at least one interest.
+ *            Must be locked by caller.
+ * @rpc:      RPC to handoff; can be NULL to indicate that the socket
+ *            has been shutdown. Caller must have taken a reference.
+ */
+void homa_interest_notify_shared(struct homa_sock *hsk, struct homa_rpc *rpc)
+	__must_hold(hsk->lock)
+{
+	struct homa_interest *interest;
+
+#ifndef __STRIP__ /* See strip.py */
+	interest = homa_choose_interest(hsk);
+
+	/* Update the last_app_active time for the thread's core, so Homa
+	 * will try to avoid assigning any work there.
+	 */
+	per_cpu(homa_offload_core, interest->core).last_app_active =
+			homa_clock();
+#else /* See strip.py */
+	interest = list_first_entry(&hsk->interests,
+					    struct homa_interest, links);
+#endif /* See strip.py */
+	list_del_init(&interest->links);
+	interest->rpc = rpc;
+	atomic_set_release(&interest->ready, 1);
+	wake_up(&interest->wait_queue);
 }
 
 #ifndef __STRIP__ /* See strip.py */
