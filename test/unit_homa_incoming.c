@@ -2741,7 +2741,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__private_rpc)
 
 	homa_rpc_handoff(crpc);
 	EXPECT_STREQ("wake_up", unit_log_get());
-	EXPECT_EQ(1, atomic_read(&interest.ready));
+	EXPECT_EQ(HOMA_INTEREST_READY, atomic_read(&interest.state));
 	EXPECT_TRUE(list_empty(&self->hsk.ready_rpcs));
 	homa_interest_unlink_private(&interest);
 }
@@ -2774,8 +2774,8 @@ TEST_F(homa_incoming, homa_rpc_handoff__handoff_to_shared_interest)
 
 	homa_rpc_handoff(crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.interests));
-	EXPECT_EQ(0, atomic_read(&interest1.ready));
-	EXPECT_EQ(1, atomic_read(&interest2.ready));
+	EXPECT_EQ(0, atomic_read(&interest1.state));
+	EXPECT_EQ(HOMA_INTEREST_READY, atomic_read(&interest2.state));
 	EXPECT_EQ(crpc, interest2.rpc);
 	homa_rpc_put(crpc);
 	list_del_init(&interest1.links);

@@ -38,7 +38,7 @@ static void notify_hook(char *id)
 	hook_count--;
 	if (hook_count != 0)
 		return;
-	atomic_set(&hook_interest->ready, 1);
+	atomic_set(&hook_interest->state, HOMA_INTEREST_READY);
 }
 
 static void signal_hook(char *id)
@@ -47,9 +47,22 @@ static void signal_hook(char *id)
 		return;
 	if (hook_interest) {
 		hook_interest->rpc = NULL;
-		atomic_set(&hook_interest->ready, 1);
+		atomic_set(&hook_interest->state, HOMA_INTEREST_READY);
 		hook_interest = NULL;
 	}
+}
+
+static void relax_hook(char *id)
+{
+	if (strcmp(id, "cpu_relax") != 0)
+		return;
+	if (hook_count <= 0)
+		return;
+	hook_count--;
+	unit_log_printf("; ", "relax_hook");
+	if (hook_count != 0)
+		return;
+	atomic_set(&hook_interest->state, HOMA_INTEREST_READY);
 }
 
 FIXTURE(homa_interest) {
@@ -148,7 +161,7 @@ TEST_F(homa_interest, homa_interest_wait__already_ready)
 	struct homa_interest interest;
 
 	homa_interest_init_shared(&interest, &self->hsk);
-	atomic_set(&interest.ready, 1);
+	atomic_set(&interest.state, HOMA_INTEREST_READY);
 	EXPECT_EQ(0, homa_interest_wait(&interest));
 	EXPECT_EQ(0, interest.blocked);
 
@@ -241,7 +254,24 @@ TEST_F(homa_interest, homa_interest_wait__handoff_occurs_during_signal)
 
 	EXPECT_EQ(0, -homa_interest_wait(&interest));
 	EXPECT_EQ(1, interest.blocked);
-	EXPECT_EQ(1, atomic_read(&interest.ready));
+	EXPECT_EQ(1, atomic_read(&interest.state));
+}
+TEST_F(homa_interest, homa_interest_wait__wait_for_state_to_clear)
+{
+	struct homa_interest interest;
+
+	homa_interest_init_shared(&interest, &self->hsk);
+	atomic_set(&interest.state, HOMA_INTEREST_READY |
+				    HOMA_INTEREST_HANDOFF_ACTIVE);
+	unit_hook_register(relax_hook);
+	hook_interest = &interest;
+	hook_count = 3;
+	unit_log_clear();
+
+	EXPECT_EQ(0, -homa_interest_wait(&interest));
+	EXPECT_EQ(HOMA_INTEREST_READY, atomic_read(&interest.state));
+	EXPECT_STREQ("relax_hook; relax_hook; relax_hook", unit_log_get());
+	list_del_init(&interest.links);
 }
 TEST_F(homa_interest, homa_interest_wait__time_metrics)
 {
@@ -272,13 +302,13 @@ TEST_F(homa_interest, homa_interest_notify_private)
 	ASSERT_NE(NULL, crpc);
 
 	homa_interest_init_private(&interest, crpc);
-	EXPECT_EQ(0, atomic_read(&interest.ready));
+	EXPECT_EQ(0, atomic_read(&interest.state));
 	unit_log_clear();
 	mock_log_wakeups = 1;
 
 	/* First call: RPC has an interest. */
 	homa_interest_notify_private(crpc);
-	EXPECT_EQ(1, atomic_read(&interest.ready));
+	EXPECT_EQ(HOMA_INTEREST_READY, atomic_read(&interest.state));
 	EXPECT_STREQ("wake_up", unit_log_get());
 	homa_interest_unlink_private(&interest);
 
@@ -299,13 +329,13 @@ TEST_F(homa_interest, homa_interest_notify_shared)
 	ASSERT_NE(NULL, crpc);
 
 	homa_interest_init_shared(&interest, &self->hsk);
-	EXPECT_EQ(0, atomic_read(&interest.ready));
+	EXPECT_EQ(0, atomic_read(&interest.state));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.interests));
 	unit_log_clear();
 	mock_log_wakeups = 1;
 
 	homa_interest_notify_shared(&self->hsk, crpc);
-	EXPECT_EQ(1, atomic_read(&interest.ready));
+	EXPECT_EQ(HOMA_INTEREST_READY, atomic_read(&interest.state));
 	EXPECT_STREQ("wake_up", unit_log_get());
 	EXPECT_EQ(crpc, interest.rpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.interests));

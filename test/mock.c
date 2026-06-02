@@ -1807,6 +1807,11 @@ unsigned int mock_compound_order(struct page *page)
 }
 #endif /* See strip.py */
 
+void mock_cpu_relax(void)
+{
+	UNIT_HOOK("cpu_relax");
+}
+
 /**
  * mock_cpu_to_node() - Replaces cpu_to_node to determine NUMA node for
  * a CPU.

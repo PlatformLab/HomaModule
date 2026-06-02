@@ -17,6 +17,9 @@
 
 #define compound_order mock_compound_order
 
+#undef cpu_relax
+#define cpu_relax mock_cpu_relax
+
 #ifdef cpu_to_node
 #undef cpu_to_node
 #endif
@@ -213,6 +216,7 @@ int         mock_check_error(int *errorMask);
 void        mock_clear_xmit_prios(void);
 s64         mock_cmpxchg(atomic64_t *target, s64 old, s64 new);
 unsigned int mock_compound_order(struct page *page);
+void        mock_cpu_relax(void);
 int         mock_cpu_to_node(int core);
 void        mock_data_ready(struct sock *sk);
 struct net_device

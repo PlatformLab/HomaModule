@@ -11,6 +11,17 @@
 #include "homa_offload.h"
 #endif /* See strip.py */
 
+/* DESIGN NOTES:
+ * The key idea behind the design of the interest mechanism is to reduce usage
+ * of socket locks while handing off ready RPCs to application threads. Private
+ * handoffs do not requrie the socket lock to be acquired at all. Shared
+ * handoffs must acquire the socket lock to select one thread from a pool of
+ * waiting threads. But in the normal case the thread receiving the ready RPC
+ * does not need to acquire the socket lock again after the RPC has been
+ * handed off to it. The HOMA_INTEREST_HANDOFF_ACTIVE mechanism eliminates
+ * races that would otherwise be present in the absence of locking.
+ */
+
 /**
  * homa_interest_init_shared() - Initialize an interest and queue it up on
  * a socket.
@@ -23,7 +34,7 @@ void homa_interest_init_shared(struct homa_interest *interest,
 	__must_hold(hsk->lock)
 {
 	interest->rpc = NULL;
-	atomic_set(&interest->ready, 0);
+	atomic_set(&interest->state, 0);
 	IF_NO_STRIP(interest->core = raw_smp_processor_id());
 	interest->blocked = 0;
 	init_waitqueue_head(&interest->wait_queue);
@@ -48,11 +59,12 @@ int homa_interest_init_private(struct homa_interest *interest,
 		return -EINVAL;
 
 	interest->rpc = rpc;
-	atomic_set(&interest->ready, 0);
+	atomic_set(&interest->state, 0);
 	IF_NO_STRIP(interest->core = raw_smp_processor_id());
 	interest->blocked = 0;
 	init_waitqueue_head(&interest->wait_queue);
 	interest->hsk = rpc->hsk;
+	INIT_LIST_HEAD(&interest->links);
 	rpc->private_interest = interest;
 	return 0;
 }
@@ -90,7 +102,7 @@ int homa_interest_wait(struct homa_interest *interest)
 			/* Give NAPI/SoftIRQ tasks a chance to run. */
 			schedule();
 
-		if (atomic_read_acquire(&interest->ready) != 0)
+		if (atomic_read_acquire(&interest->state) & HOMA_INTEREST_READY)
 			goto done;
 
 		/* See if we can cleanup dead RPCs while waiting. */
@@ -112,7 +124,8 @@ int homa_interest_wait(struct homa_interest *interest)
 	interest->blocked = 1;
 	IF_NO_STRIP(block_start = now);
 	wait_err = wait_event_interruptible_exclusive(interest->wait_queue,
-						      atomic_read_acquire(&interest->ready) != 0);
+						      atomic_read_acquire(&interest->state) &
+						      HOMA_INTEREST_READY);
 	IF_NO_STRIP(blocked_time = homa_clock() - block_start);
 	if (wait_err == -ERESTARTSYS) {
 		int ready;
@@ -128,13 +141,20 @@ int homa_interest_wait(struct homa_interest *interest)
 		 */
 		homa_sock_lock(hsk);
 		list_del_init(&interest->links);
-		ready = atomic_read_acquire(&interest->ready);
+		ready = atomic_read_acquire(&interest->state) &
+		        HOMA_INTEREST_READY;
 		homa_sock_unlock(hsk);
 		if (ready == 0)
 			result = -EINTR;
 	}
 
 done:
+	/* Make sure that the handing off thread has completely finished
+	 * accessing the interest, so that it's safe for our caller to
+	 * reuse the interest's memory.
+	 */
+	while (atomic_read(&interest->state) & HOMA_INTEREST_HANDOFF_ACTIVE)
+		cpu_relax();
 #ifndef __STRIP__ /* See strip.py */
 	if (interest->blocked)
 		INC_METRIC(blocked_cycles, blocked_time);
@@ -153,8 +173,13 @@ void homa_interest_notify_private(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	if (rpc->private_interest) {
-		atomic_set_release(&rpc->private_interest->ready, 1);
+		/* See comment in homa_interest_notify_shared. */
+		atomic_set_release(&rpc->private_interest->state,
+				   HOMA_INTEREST_READY |
+				   HOMA_INTEREST_HANDOFF_ACTIVE);
 		wake_up(&rpc->private_interest->wait_queue);
+		atomic_set_release(&rpc->private_interest->state,
+				   HOMA_INTEREST_READY);
 	}
 }
 
@@ -185,8 +210,16 @@ void homa_interest_notify_shared(struct homa_sock *hsk, struct homa_rpc *rpc)
 #endif /* See strip.py */
 	list_del_init(&interest->links);
 	interest->rpc = rpc;
-	atomic_set_release(&interest->ready, 1);
+
+	/* The dance below eliminates two race conditions: (a) a waking up
+	 * thread doesn't see the change to state and (b) a waking up thread
+	 * recycles the memory of the interest before we have finished
+	 * accessing it in wake_up.
+	 */
+	atomic_set_release(&interest->state,
+			   HOMA_INTEREST_READY | HOMA_INTEREST_HANDOFF_ACTIVE);
 	wake_up(&interest->wait_queue);
+	atomic_set_release(&interest->state, HOMA_INTEREST_READY);
 }
 
 #ifndef __STRIP__ /* See strip.py */

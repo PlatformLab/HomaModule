@@ -334,8 +334,8 @@ TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests)
 
 	homa_sock_shutdown(&self->hsk);
 	EXPECT_TRUE(self->hsk.shutdown);
-	EXPECT_EQ(1, atomic_read(&interest1.ready));
-	EXPECT_EQ(1, atomic_read(&interest2.ready));
+	EXPECT_EQ(HOMA_INTEREST_READY, atomic_read(&interest1.state));
+	EXPECT_EQ(HOMA_INTEREST_READY, atomic_read(&interest2.state));
 	EXPECT_EQ(NULL, interest1.rpc);
 	EXPECT_EQ(NULL, interest2.rpc);
 	EXPECT_TRUE(list_empty(&interest1.links));

@@ -28,10 +28,20 @@ struct homa_interest {
 	struct homa_rpc *rpc;
 
 	/**
-	 * @ready: Nonzero means the interest is ready for attention: either
-	 * there is an RPC that needs attention or @hsk has been shutdown.
+	 * @state: Used to manage the process of handing off an RPC.  Consists
+	 * of the following bits:
+	 * HOMA_INTEREST_READY:
+	 *     Nonzero means the interest is ready for attention: either there
+	 *     is an RPC that needs attention or @hsk has been shutdown.
+	 * HOMA_INTEREST_HANDOFF_ACTIVE:
+	 *     Nonzero means a handing-off thread is still accessing the
+	 *     interest. Used to ensure that the handing-off thread is
+	 *     completely finished before homa_interest_wait returns (so
+	 *     that the interest can safely be deleted).
 	 */
-	atomic_t ready;
+#define HOMA_INTEREST_READY           1
+#define HOMA_INTEREST_HANDOFF_ACTIVE  2
+	atomic_t state;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
