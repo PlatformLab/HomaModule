@@ -491,6 +491,17 @@ int debug_lockdep_rcu_enabled(void)
 }
 #endif
 
+int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
+{
+	struct homa_data_hdr *h;
+
+	h = (struct homa_data_hdr *)skb_transport_header(skb);
+	unit_log_printf("; ", "__dev_queue_xmit invoked for id %llu, offset %d",
+			be64_to_cpu(h->common.sender_id), ntohl(h->seg.offset));
+	kfree_skb(skb);
+	return 0;
+}
+
 int do_wait_intr_irq(wait_queue_head_t *, wait_queue_entry_t *)
 {
 	UNIT_HOOK("do_wait_intr_irq");

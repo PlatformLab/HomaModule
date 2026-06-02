@@ -570,6 +570,11 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		return NET_XMIT_SUCCESS;
 	}
 
+	if (homa_get_skb_info(skb)->dont_defer) {
+		homa_qdisc_add_queued(qdev, skb);
+		return qdisc_enqueue_tail(skb, sch);
+	}
+
 	/* For Homa packets it's important to use message length, not packet
 	 * length when deciding whether to bypass the pacer. If packet
 	 * length were used, then the short packet at the end of a long
@@ -615,8 +620,6 @@ enqueue:
 		tt_record1("homa_qdisc_enqueue queuing non-homa packet, qid %d",
 			   q->ix);
 	}
-	if (unlikely(sch->q.qlen >= READ_ONCE(sch->limit)))
-		return qdisc_drop(skb, sch, to_free);
 	homa_qdisc_add_queued(qdev, skb);
 	return qdisc_enqueue_tail(skb, sch);
 }
@@ -798,6 +801,7 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 {
 	struct homa_qdisc *q;
 	struct sk_buff *skb;
+	struct Qdisc *qdisc;
 	int pkt_len;
 
 	/* When there are deferred TCP packets on multiple queues, we
@@ -842,7 +846,17 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 			"0x%x to 0x%x, data bytes %d, seq/ack %u",
 			skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
 	homa_qdisc_add_queued(qdev, skb);
-	homa_qdisc_schedule_skb(skb, qdisc_from_priv(q));
+
+	/* Can't invoke dev_queue_xmit as for Homa packets, because it
+	 * will choose a new output queue for the skb, which could result
+	 * in undesirable packet reordering.
+	 */
+	qdisc = qdisc_from_priv(q);
+	spin_lock_bh(qdisc_lock(qdisc));
+	qdisc_enqueue_tail(skb, qdisc);
+	spin_unlock_bh(qdisc_lock(qdisc));
+	__netif_schedule(qdisc);
+
 	return pkt_len;
 }
 
@@ -953,9 +967,7 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
  */
 int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 {
-	struct netdev_queue *txq;
 	struct homa_data_hdr *h;
-	struct Qdisc *qdisc;
 	struct sk_buff *skb;
 	int pkt_len;
 
@@ -966,20 +978,23 @@ int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 	pkt_len = qdisc_pkt_len(skb);
 	homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 	h = (struct homa_data_hdr *)skb_transport_header(skb);
-	tt_record3("homa_qdisc_pacer queuing homa data packet for id %d, offset %d on qid %d",
-		   be64_to_cpu(h->common.sender_id),
-		   homa_get_offset(h), skb_get_queue_mapping(skb));
+	tt_record2("homa_qdisc_pacer queuing homa data packet for id %d, offset %d",
+		   be64_to_cpu(h->common.sender_id), homa_get_offset(h));
 
-	rcu_read_lock_bh();
-	txq = netdev_get_tx_queue(skb->dev, skb_get_queue_mapping(skb));
-	qdisc = rcu_dereference_bh(txq->qdisc);
-	if (qdisc->ops == &homa_qdisc_ops) {
-		homa_qdisc_add_queued(qdev, skb);
-		homa_qdisc_schedule_skb(skb, qdisc);
-	} else {
-		kfree_skb_reason(skb, SKB_DROP_REASON_QDISC_DROP);
-	}
-	rcu_read_unlock_bh();
+	/* Run the packet through dev_queue_xmit again to transmit it;
+	 * this means it will pass through homa_disc_enqueue again, but
+	 * homa_qdisc_enqueue will see dont_defer and pass it along
+	 * without additional deferral. We call dev_queue_xmit rather
+	 * than enqueuing the packet and calling __netif_schedule (as in
+	 * homa_qdisc_xmit_deferred_tcp) so that the packet is transmitted
+	 * immediately. The __netif_schedule approach runs the qdisc
+	 * asynchronously, which means it won't run until other SoftIRQ
+	 * handlers complete. This can result in significant delays in
+	 * getting the packet out, which can then cause multiple output
+	 * packets to bunch up, creating undesirable queues in the NIC.
+	 */
+	homa_get_skb_info(skb)->dont_defer = true;
+	dev_queue_xmit(skb);
 	return pkt_len;
 }
 

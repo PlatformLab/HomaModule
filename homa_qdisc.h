@@ -421,20 +421,6 @@ static inline bool homa_qdisc_any_deferred(struct homa_qdisc_dev *qdev)
 }
 
 /**
- * homa_qdisc_schedule_skb() - Enqueue an skb on a qdisc and schedule the
- * qdisc for execution.
- * @skb:         Packet buffer to queue for output
- * @qdisc:       homa_qdisc on which to schedule it.
- */
-static inline void homa_qdisc_schedule_skb(struct sk_buff *skb,
-					   struct Qdisc *qdisc) {
-	spin_lock_bh(qdisc_lock(qdisc));
-	qdisc_enqueue_tail(skb, qdisc);
-	spin_unlock_bh(qdisc_lock(qdisc));
-	__netif_schedule(qdisc);
-}
-
-/**
  * homa_qdisc_precedes() - Return true if @rpc1 is considered "less" than
  * @rpc2 (i.e. higher priority) for the purposes of qdev->deferred_rpcs, or
  * false if @rpc1 is consdered "greater" (ties not allowed).

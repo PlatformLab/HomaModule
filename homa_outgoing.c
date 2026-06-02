@@ -184,6 +184,7 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	homa_info->seg_length = max_seg_data;
 	homa_info->offset = offset;
 	homa_info->rpc = rpc;
+	homa_info->dont_defer = false;
 
 #ifndef __STRIP__ /* See strip.py */
 	if (segs > 1 && !homa_sock_hijacked(hsk)) {
@@ -824,6 +825,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			new_homa_info->seg_length = seg_length;
 			new_homa_info->offset = offset;
 			new_homa_info->rpc = rpc;
+			new_homa_info->dont_defer = false;
 
 			rpc->msgout.to_free = new_skb;
 			rpc->msgout.num_skbs++;

@@ -567,6 +567,13 @@ struct homa_skb_info {
 
 	/** @rpc: RPC that this packet belongs to. */
 	void *rpc;
+
+	/**
+	 * @dont_defer: True means that homa_qdisc_enqueue should pass this
+	 * packet along without considering NIC congestion. This flag is set
+	 * by the pacer when it retransmits packets after deferral.
+	 */
+	bool dont_defer;
 };
 
 /**
