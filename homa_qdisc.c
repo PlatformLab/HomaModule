@@ -1211,9 +1211,6 @@ int homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 				qdev->homa_credit -= xmit_bytes * (100 -
 					qdev->hnet->homa->qshared->homa_share);
 			}
-			tt_record2("homa_qdisc total_nic_queue %d, max_nic_queue_bytes %d",
-				   atomic_read(&qdev->total_nic_queue),
-				   qdev->max_nic_queue_bytes);
 		} else {
 			xmit_bytes = homa_qdisc_xmit_deferred_tcp(qdev);
 			if (xmit_bytes > 0) {

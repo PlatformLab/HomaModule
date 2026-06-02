@@ -472,7 +472,6 @@ int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 		u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
 		struct homa_bpage *bpage;
 
-		tt_record("homa_pool_free_bufs starting token");
 		if (bpage_index >= pool->num_bpages)
 			return -EINVAL;
 		bpage = &pool->descriptors[bpage_index];
@@ -490,7 +489,6 @@ int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 		if (bpage->refs == 0)
 			atomic_fetch_inc(&pool->free_bpages);
 		spin_unlock_bh(&bpage->lock);
-		tt_record("homa_pool_free_bufs finished token");
 	}
 	tt_record3("Released %d bpages, free_bpages for port %d now %d",
 		   num_buffers, pool->hsk->port,
