@@ -291,14 +291,13 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	/* The order of cleanup is very important, because there could be
 	 * active operations that hold RPC locks but not the socket lock.
 	 * 1. Set @shutdown; this ensures that no new RPCs will be created for
-	 *    this socket (though some creations might already be in progress).
-	 * 2. Remove the socket from its socktab: this ensures that
-	 *    incoming packets for the socket will be dropped.
-	 * 3. Go through all of the RPCs and delete them; this will
+	 *    this socket (though some creations might already be in progress)
+	 *    and incoming packets will be dropped.
+	 * 2. Go through all of the RPCs and delete them; this will
 	 *    synchronize with any operations in progress.
-	 * 4. Perform other socket cleanup: at this point we know that
+	 * 3. Perform other socket cleanup: at this point we know that
 	 *    there will be no concurrent activities on individual RPCs.
-	 * 5. Don't delete the buffer pool until after all of the RPCs
+	 * 4. Don't delete the buffer pool until after all of the RPCs
 	 *    have been reaped.
 	 * See "Homa Locking Strategy" in homa_impl.h for additional information
 	 * about locking.
@@ -312,6 +311,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc);
 	}
+	wake_up_interruptible_poll(sk_sleep(&hsk->sock), EPOLLOUT);
 	rcu_read_unlock();
 
 	homa_sock_lock(hsk);
@@ -538,6 +538,8 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 	tt_record4("homa_sock_wait_wmem woke up on port %d with result %d, wmem %d, signal pending %d",
 		   hsk->port, result, refcount_read(&hsk->sock.sk_wmem_alloc),
 		   signal_pending(current));
+	if (hsk->shutdown)
+		return -ESHUTDOWN;
 	if (signal_pending(current))
 		return -EINTR;
 	if (result == 0)

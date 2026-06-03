@@ -27,6 +27,13 @@ static void schedule_hook(char *id)
 				   + 100;
 }
 
+static void shutdown_hook(char *id)
+{
+	if (strcmp(id, "prepare_to_wait") != 0)
+		return;
+	homa_sock_shutdown(hook_hsk);
+}
+
 FIXTURE(homa_sock) {
 	struct homa homa;
 	struct homa_net *hnet;
@@ -323,7 +330,7 @@ TEST_F(homa_sock, homa_sock_shutdown__delete_rpcs)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	homa_sock_destroy(&self->hsk.sock);
 }
-TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests)
+TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests_and_wmem)
 {
 	struct homa_interest interest1, interest2;
 
@@ -339,7 +346,7 @@ TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests)
 	EXPECT_EQ(NULL, interest1.rpc);
 	EXPECT_EQ(NULL, interest2.rpc);
 	EXPECT_TRUE(list_empty(&interest1.links));
-	EXPECT_STREQ("wake_up; wake_up", unit_log_get());
+	EXPECT_STREQ("wake_up; wake_up; wake_up", unit_log_get());
 	homa_sock_destroy(&self->hsk.sock);
 }
 
@@ -496,6 +503,23 @@ TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_then_wakes)
 	EXPECT_EQ(0, -homa_sock_wait_wmem(&self->hsk, 0));
 	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 }
+TEST_F(homa_sock, homa_sock_wait_wmem__socket_shutdown)
+{
+	self->hsk.sock.sk_sndbuf = 0;
+	unit_hook_register(shutdown_hook);
+	hook_hsk = &self->hsk;
+
+	EXPECT_EQ(ESHUTDOWN, -homa_sock_wait_wmem(&self->hsk, 0));
+	EXPECT_EQ(1, self->hsk.shutdown);
+}
+TEST_F(homa_sock, homa_sock_wait_wmem__interrupted_by_signal)
+{
+	self->hsk.sock.sk_sndbuf = 0;
+	mock_prepare_to_wait_errors = 1;
+	mock_signal_pending = 1;
+
+	EXPECT_EQ(EINTR, -homa_sock_wait_wmem(&self->hsk, 0));
+}
 TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_but_times_out)
 {
 	self->hsk.sock.sk_sndbuf = 0;
@@ -505,14 +529,6 @@ TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_but_times_out)
 	unit_hook_register(schedule_hook);
 
 	EXPECT_EQ(EWOULDBLOCK, -homa_sock_wait_wmem(&self->hsk, 0));
-}
-TEST_F(homa_sock, homa_sock_wait_wmem__interrupted_by_signal)
-{
-	self->hsk.sock.sk_sndbuf = 0;
-	mock_prepare_to_wait_errors = 1;
-	mock_signal_pending = 1;
-
-	EXPECT_EQ(EINTR, -homa_sock_wait_wmem(&self->hsk, 0));
 }
 
 TEST_F(homa_sock, homa_sock_wakeup_wmem)
