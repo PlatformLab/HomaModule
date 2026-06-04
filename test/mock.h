@@ -244,6 +244,7 @@ int         mock_processor_id(void);
 void        mock_put_page(struct page *page);
 struct sk_buff *
 	    mock_raw_skb(struct in6_addr *saddr, int protocol, int length);
+void        mock_rcu_free(void);
 void        mock_rcu_read_lock(void);
 void        mock_rcu_read_unlock(void);
 void        mock_record_locked(void *lock);

@@ -161,6 +161,15 @@ int mock_total_spin_locks;
  */
 static int mock_active_rcu_locks;
 
+/* Pointers to memory blocks that need to be freed when mock_active_rcu_locks
+ * becomes zero.
+ */
+#define MAX_RCU_FREES 100
+static void *rcu_frees[MAX_RCU_FREES];
+
+/* The number of entries in rcu_frees that are currently occupied. */
+static int num_rcu_frees;
+
 /* Number of calls to sock_hold that haven't been matched with calls
  * to sock_put.
  */
@@ -995,6 +1004,26 @@ void kfree_skb_list_reason(struct sk_buff *segs, enum skb_drop_reason reason)
 void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 {
 	return mock_kmalloc(size, gfpflags);
+}
+
+
+void kvfree_call_rcu(struct rcu_head *head, void *block)
+{
+	if (block == NULL)
+		return;
+	UNIT_HOOK("kfree");
+	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
+		FAIL(" %s on unknown block %p", __func__, block);
+		return;
+	}
+	unit_hash_erase(kmallocs_in_use, block);
+	if (num_rcu_frees >= MAX_RCU_FREES) {
+		FAIL(" num_rcu_frees exceeded MAX_RCU_FREES (%d)",
+		     MAX_RCU_FREES);
+	} else {
+		rcu_frees[num_rcu_frees] = block;
+		num_rcu_frees++;
+	}
 }
 
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
@@ -2119,6 +2148,18 @@ struct sk_buff *mock_raw_skb(struct in6_addr *saddr, int protocol, int length)
 }
 
 /**
+ * mock_rcu_free() - Called to simulate RCU's cleanup after the grace period.
+ * Frees objects previously passed to .
+ */
+void mock_rcu_free(void)
+{
+	while (num_rcu_frees > 0) {
+		num_rcu_frees--;
+		free(rcu_frees[num_rcu_frees]);
+	}
+}
+
+/**
  * mock_rcu_read_lock() - Called instead of rcu_read_lock when Homa is compiled
  * for unit testing.
  */
@@ -2493,6 +2534,8 @@ void mock_spin_unlock(spinlock_t *lock)
 void mock_teardown(void)
 {
 	int count, i;
+
+	mock_rcu_free();
 
 	cpu_number = 1;
 	current_task = &mock_task;

@@ -76,6 +76,7 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
 {
 	scan->socktab = socktab;
 	scan->hsk = NULL;
+	scan->slink = NULL;
 	scan->current_bucket = -1;
 
 	return homa_socktab_next(scan);
@@ -93,14 +94,14 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
  */
 struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 {
+	struct homa_sock_link *slink;
 	struct hlist_head *bucket;
 	struct hlist_node *next;
-	struct homa_sock *hsk;
 
 	rcu_read_lock();
 	if (scan->hsk) {
 		sock_put(&scan->hsk->sock);
-		next = rcu_dereference(hlist_next_rcu(&scan->hsk->socktab_links));
+		next = rcu_dereference(hlist_next_rcu(&scan->slink->links));
 		scan->hsk = NULL;
 	} else {
 		next = NULL;
@@ -114,9 +115,11 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 			next = rcu_dereference(hlist_first_rcu(bucket));
 			continue;
 		}
-		hsk = hlist_entry(next, struct homa_sock, socktab_links);
-		if (refcount_inc_not_zero(&hsk->sock.sk_refcnt)) {
-			scan->hsk = hsk;
+		slink = hlist_entry(next, struct homa_sock_link, links);
+		if (slink->hsk &&
+		    refcount_inc_not_zero(&slink->hsk->sock.sk_refcnt)) {
+			scan->slink = slink;
+			scan->hsk = slink->hsk;
 			break;
 		}
 		next = rcu_dereference(hlist_next_rcu(next));
@@ -231,8 +234,6 @@ int homa_sock_init(struct homa_sock *hsk)
 		sock_put(&other->sock);
 		if (hnet->prev_default_port == starting_port) {
 			spin_unlock_bh(&socktab->write_lock);
-			hsk->shutdown = true;
-			hsk->homa = NULL;
 			result = -EADDRNOTAVAIL;
 			goto error;
 		}
@@ -240,33 +241,69 @@ int homa_sock_init(struct homa_sock *hsk)
 		cond_resched();
 		spin_lock_bh(&socktab->write_lock);
 	}
-	hsk->port = hnet->prev_default_port;
-	hsk->inet.inet_num = hsk->port;
-	hsk->inet.inet_sport = htons(hsk->port);
-	hlist_add_head_rcu(&hsk->socktab_links,
-			   &socktab->buckets[homa_socktab_bucket(hnet,
-								 hsk->port)]);
+	result = homa_sock_link(hsk, hnet->prev_default_port);
 	spin_unlock_bh(&socktab->write_lock);
-	return result;
+	if (result == 0)
+		return result;
 
 error:
+	hsk->shutdown = true;
+	hsk->homa = NULL;
 	homa_pool_free(buffer_pool);
 	return result;
 }
 
+/**
+ * homa_sock_link() - Add a socket to the hash table for its socktab,
+ * so that it will be discoverable through homa_sock_find. If the socket
+ * is already linked, the current link will be removed.
+ * @hsk:    Socket to link in; hsk->port will be used to determine
+ *          where the socket is linked in it socktab. Caller must hold
+ *          the lock for the socket's socktab.
+ * @port:   Port to use for the socket; if this function succeeds, this
+ *          number will be stored in hsk.
+ *
+ * Return:  0 for success, otherwise a negative errno.
+ */
+int homa_sock_link(struct homa_sock *hsk, int port)
+	__must_hold(hsk->homa->socktab->write_lock)
+{
+	struct homa_sock_link *slink;
+	struct homa_socktab *socktab;
+
+	slink = kmalloc(sizeof(*slink), GFP_ATOMIC);
+	if (!slink)
+		return -ENOMEM;
+	homa_sock_unlink(hsk);
+	slink->hsk = hsk;
+	socktab = hsk->homa->socktab;
+	hlist_add_head_rcu(&slink->links,
+			   &socktab->buckets[homa_socktab_bucket(hsk->hnet,
+								 port)]);
+	hsk->port = port;
+	hsk->inet.inet_num = port;
+	hsk->inet.inet_sport = htons(port);
+	hsk->slink = slink;
+	return 0;
+}
+
 /*
- * homa_sock_unlink() - Unlinks a socket from its socktab and does
- * related cleanups. Once this method returns, the socket will not be
- * discoverable through the socktab.
- * @hsk:  Socket to unlink.
+ * homa_sock_unlink() - Unlinks a socket from its socktab. Once this method
+ * returns, the socket will not be discoverable through the socktab.
+ * @hsk:  Socket to unlink. Caller must hold the lock for the socket's
+ *        socktab.
  */
 void homa_sock_unlink(struct homa_sock *hsk)
+	__must_hold(hsk->homa->socktab->write_lock)
 {
-	struct homa_socktab *socktab = hsk->homa->socktab;
+	struct homa_sock_link *slink;
 
-	spin_lock_bh(&socktab->write_lock);
-	hlist_del_rcu(&hsk->socktab_links);
-	spin_unlock_bh(&socktab->write_lock);
+	slink = hsk->slink;
+	if (!slink)
+		return;
+	hsk->slink = NULL;
+	hlist_del_rcu(&slink->links);
+	kfree_rcu(slink, rcu_head);
 }
 
 /**
@@ -420,13 +457,9 @@ int homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 		}
 		goto done;
 	}
-	hlist_del_rcu(&hsk->socktab_links);
-	hsk->port = port;
-	hsk->inet.inet_num = port;
-	hsk->inet.inet_sport = htons(hsk->port);
-	hlist_add_head_rcu(&hsk->socktab_links,
-			   &socktab->buckets[homa_socktab_bucket(hnet, port)]);
-	hsk->is_server = true;
+	result = homa_sock_link(hsk, port);
+	if (result == 0)
+		hsk->is_server = true;
 done:
 	spin_unlock_bh(&socktab->write_lock);
 	homa_sock_unlock(hsk);
@@ -445,12 +478,14 @@ struct homa_sock *homa_sock_find(struct homa_net *hnet, u16 port)
 {
 	int bucket = homa_socktab_bucket(hnet, port);
 	struct homa_sock *result = NULL;
+	struct homa_sock_link *slink;
 	struct homa_sock *hsk;
 
 	rcu_read_lock();
-	hlist_for_each_entry_rcu(hsk, &hnet->homa->socktab->buckets[bucket],
-				 socktab_links) {
-		if (hsk->port == port && hsk->hnet == hnet &&
+	hlist_for_each_entry_rcu(slink, &hnet->homa->socktab->buckets[bucket],
+				 links) {
+		hsk = slink->hsk;
+		if (hsk && hsk->port == port && hsk->hnet == hnet &&
 		    !hsk->shutdown &&
 		    refcount_inc_not_zero(&hsk->sock.sk_refcnt)) {
 			result = hsk;

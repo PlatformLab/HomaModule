@@ -30,9 +30,35 @@ struct homa_socktab {
 
 	/**
 	 * @buckets: Heads of chains for hash table buckets. Chains
-	 * consist of homa_sock objects.
+	 * consist of homa_sock_link objects.
 	 */
 	struct hlist_head buckets[HOMA_SOCKTAB_BUCKETS];
+};
+
+/**
+ * struct homa_sock_link - Used to link a socket into a list associated
+ * with a bucket in a homa_socktab. This is a separate dynamically
+ * allocated object because a socket may need to change its position in
+ * the homa_socktab (because its port number changes); during the
+ * transition, multiple of these objects may exist for a socket so that
+ * socktab scans are not disrupted by the change in position. The lifetime
+ * of these objects is managed with RCU.
+ */
+struct homa_sock_link {
+	/**
+	 * @hsk: The socket associated with this link, or NULL if there
+	 * is no association.
+	 */
+	struct homa_sock *hsk;
+
+	/**
+	 * @links: Links this object into the chain for a bucket in a
+	 * homa_socktab.
+	 */
+	struct hlist_node links;
+
+	/** @rcu_head: Used for RCU-based freeing of this object. */
+	struct rcu_head rcu_head;
 };
 
 /**
@@ -46,10 +72,18 @@ struct homa_socktab_scan {
 
 	/**
 	 * @hsk: Points to the current socket in the iteration, or NULL if
-	 * we're at the beginning or end of the iteration. If non-NULL then
-	 * we are holding a reference to this socket.
+	 * we're at the beginning of the iteration or have reached the end of
+	 * the current bucket. If non-NULL then we are holding a reference
+	 * to this socket.
 	 */
 	struct homa_sock *hsk;
+
+	/**
+	 * @slink: Identifies our current position in the scan; only valid
+	 * if hsk is non-null. RCU updates could result in the hsk field of
+	 * this object being NULL, in which case scans will skip this entry.
+	 */
+	struct homa_sock_link *slink;
 
 	/**
 	 * @current_bucket: The index of the bucket in socktab->buckets
@@ -177,8 +211,8 @@ struct homa_sock {
 	 */
 	int ip_header_length;
 
-	/** @socktab_links: Links this socket into a homa_socktab bucket. */
-	struct hlist_node socktab_links;
+	/** @slink: Links this socket into a homa_socktab bucket. */
+	struct homa_sock_link *slink;
 
 	/**
 	 * @error_msg: Static string giving human-readable information about
@@ -305,6 +339,7 @@ int                homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 void               homa_sock_destroy(struct sock *sk);
 struct homa_sock  *homa_sock_find(struct homa_net *hnet, u16 port);
 int                homa_sock_init(struct homa_sock *hsk);
+int                homa_sock_link(struct homa_sock *hsk, int port);
 void               homa_sock_shutdown(struct homa_sock *hsk);
 void               homa_sock_unlink(struct homa_sock *hsk);
 int                homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking);

@@ -90,7 +90,7 @@ TEST_F(homa_sock, homa_socktab_start_scan)
 
 	homa_destroy(&self->homa);
 	homa_init(&self->homa);
-	mock_sock_init(&self->hsk, self->hnet, HOMA_MIN_DEFAULT_PORT+100);
+	mock_sock_init(&self->hsk, self->hnet, HOMA_MIN_DEFAULT_PORT + 100);
 	EXPECT_EQ(&self->hsk, homa_socktab_start_scan(self->homa.socktab,
 			&scan));
 	EXPECT_EQ(100, scan.current_bucket);
@@ -149,6 +149,29 @@ TEST_F(homa_sock, homa_socktab_next__iteration_basics)
 	unit_sock_destroy(&hsk2);
 	unit_sock_destroy(&hsk3);
 	unit_sock_destroy(&hsk4);
+}
+TEST_F(homa_sock, homa_socktab_next__skip_if_hsk_null_in_slink)
+{
+	struct homa_socktab_scan scan;
+	struct homa_sock hsk1, *hsk;
+
+	homa_destroy(&self->homa);
+	homa_init(&self->homa);
+	mock_sock_init(&hsk1, self->hnet, 34000);
+	EXPECT_EQ(&hsk1, hsk1.slink->hsk);
+
+	/* First scan: pointer is NULL. */
+	hsk1.slink->hsk = NULL;
+	hsk = homa_socktab_start_scan(self->homa.socktab, &scan);
+	EXPECT_EQ(NULL, hsk);
+	homa_socktab_end_scan(&scan);
+
+	/* Second scan: pointer not NULL. */
+	hsk1.slink->hsk = &hsk1;
+	hsk = homa_socktab_start_scan(self->homa.socktab, &scan);
+	EXPECT_EQ(&hsk1, hsk);
+	homa_socktab_end_scan(&scan);
+	unit_sock_destroy(&hsk1);
 }
 TEST_F(homa_sock, homa_socktab_next__skip_if_refcount_zero)
 {
@@ -260,7 +283,47 @@ TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 }
 #endif /* See strip.py */
 
-TEST_F(homa_sock, homa_sock_unlink__remove_from_map)
+TEST_F(homa_sock, homa_sock_link__basics)
+{
+	struct homa_sock hsk;
+	struct homa_sock_link *slink;
+
+	/* Create initial linking. */
+	mock_sock_init(&hsk, self->hnet, 10);
+	slink = hsk.slink;
+	ASSERT_NE(NULL, slink);
+	EXPECT_EQ(&hsk.slink->links, self->homa.socktab->buckets[10].first);
+	EXPECT_EQ(&hsk, hsk.slink->hsk);
+
+	/* Change port number for socket, which requires new link. */
+	EXPECT_EQ(0, -homa_sock_link(&hsk, 12));
+	EXPECT_NE(slink, hsk.slink);
+	EXPECT_EQ(NULL, self->homa.socktab->buckets[10].first);
+	EXPECT_NE(NULL, self->homa.socktab->buckets[12].first);
+	EXPECT_EQ(12, hsk.port);
+	EXPECT_EQ(12, hsk.inet.inet_num);
+
+	homa_sock_destroy(&hsk.sock);
+}
+TEST_F(homa_sock, homa_sock_link__malloc_error)
+{
+	struct homa_sock hsk;
+	struct homa_sock_link *slink;
+
+	mock_sock_init(&hsk, self->hnet, 10);
+	slink = hsk.slink;
+
+	mock_kmalloc_errors = 1;
+	EXPECT_EQ(ENOMEM, -homa_sock_link(&hsk, 12));
+	EXPECT_EQ(slink, hsk.slink);
+	EXPECT_NE(NULL, self->homa.socktab->buckets[10].first);
+	EXPECT_EQ(NULL, self->homa.socktab->buckets[12].first);
+	EXPECT_EQ(10, hsk.port);
+
+	homa_sock_destroy(&hsk.sock);
+}
+
+TEST_F(homa_sock, homa_sock_unlink)
 {
 	struct homa_sock hsk2, hsk3;
 	int client2, client3;
@@ -384,6 +447,19 @@ TEST_F(homa_sock, homa_sock_bind__socket_shutdown)
 	unit_sock_destroy(&self->hsk);
 	EXPECT_EQ(ESHUTDOWN, -homa_sock_bind(self->hnet, &self->hsk, 100));
 	EXPECT_STREQ("socket has been shut down", self->hsk.error_msg);
+}
+TEST_F(homa_sock, homa_sock_bind__error_in_homa_sock_link)
+{
+	struct homa_sock hsk;
+
+	mock_sock_init(&hsk, self->hnet, 10);
+	hsk.is_server = false;
+	mock_kmalloc_errors = 1;
+	EXPECT_EQ(ENOMEM, -homa_sock_bind(hsk.hnet, &hsk, 12));
+	EXPECT_EQ(10, hsk.port);
+	EXPECT_EQ(0, hsk.is_server);
+
+	homa_sock_destroy(&hsk.sock);
 }
 
 TEST_F(homa_sock, homa_sock_find__basics)
