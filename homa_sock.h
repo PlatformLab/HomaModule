@@ -8,6 +8,7 @@
 /* Forward declarations. */
 struct homa;
 struct homa_pool;
+struct homa_sock;
 
 /* Number of hash buckets in a homa_socktab. Must be a power of 2. */
 #define HOMA_SOCKTAB_BUCKET_BITS 10
@@ -29,8 +30,15 @@ struct homa_socktab {
 	spinlock_t write_lock;
 
 	/**
+	 * @next_sequence: Next sequence number to assign for a
+	 * homa_sock_link.
+	 */
+	u64 next_sequence;
+
+	/**
 	 * @buckets: Heads of chains for hash table buckets. Chains
-	 * consist of homa_sock_link objects.
+	 * consist of homa_sock_link objects, in decreasing order of
+	 * sequence number.
 	 */
 	struct hlist_head buckets[HOMA_SOCKTAB_BUCKETS];
 };
@@ -45,11 +53,14 @@ struct homa_socktab {
  * of these objects is managed with RCU.
  */
 struct homa_sock_link {
-	/**
-	 * @hsk: The socket associated with this link, or NULL if there
-	 * is no association.
-	 */
+	/** @hsk: The socket associated with this link. */
 	struct homa_sock *hsk;
+
+	/**
+	 * @sequence: Unique sequence number for this struct among all structs
+	 * in a socktab (smaller means older).
+	 */
+	u64 sequence;
 
 	/**
 	 * @links: Links this object into the chain for a bucket in a
@@ -79,17 +90,30 @@ struct homa_socktab_scan {
 	struct homa_sock *hsk;
 
 	/**
-	 * @slink: Identifies our current position in the scan; only valid
-	 * if hsk is non-null. RCU updates could result in the hsk field of
-	 * this object being NULL, in which case scans will skip this entry.
-	 */
-	struct homa_sock_link *slink;
-
-	/**
 	 * @current_bucket: The index of the bucket in socktab->buckets
-	 * currently being scanned (-1 if @hsk == NULL).
+	 * currently being scanned.
 	 */
 	int current_bucket;
+
+	/**
+	 * @avail: The first @avail entries in @links are valid and
+	 * available for homa_sock_next to return.
+	 */
+	int avail;
+
+	/**
+	 * @links: Used to collect a bunch of sockets by scanning hash table
+	 * bucket chains. Sockets are then returned from here by
+	 * homa_socktab_next. We own a reference for each of these sockets.
+	 */
+#define HOMA_MAX_SCANNED_SOCKS 5
+	struct homa_sock *socks[HOMA_MAX_SCANNED_SOCKS];
+
+	/**
+	 * @sequence: All homa_sock_links with @sequence numbers >= this
+	 * have already been scanned from @current_bucket.
+	 */
+	u64 sequence;
 };
 
 /**
@@ -337,6 +361,7 @@ void               homa_sock_lock_slow(struct homa_sock *hsk);
 int                homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 				  u16 port);
 void               homa_sock_destroy(struct sock *sk);
+void               homa_socktab_fill_scan(struct homa_socktab_scan *scan);
 struct homa_sock  *homa_sock_find(struct homa_net *hnet, u16 port);
 int                homa_sock_init(struct homa_sock *hsk);
 int                homa_sock_link(struct homa_sock *hsk, int port);

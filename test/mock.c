@@ -2448,11 +2448,13 @@ int mock_skb_count(void)
 
 void mock_sock_hold(struct sock *sk)
 {
+	atomic_inc(&sk->sk_refcnt.refs);
 	mock_sock_holds++;
 }
 
 void mock_sock_put(struct sock *sk)
 {
+	atomic_dec(&sk->sk_refcnt.refs);
 	if (mock_sock_holds == 0)
 		FAIL(" sock_put invoked when there were no active sock_holds");
 	mock_sock_holds--;
