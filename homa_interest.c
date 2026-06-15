@@ -74,8 +74,8 @@ int homa_interest_init_private(struct homa_interest *interest,
  * or for an error to occur.
  * @interest:     Interest to wait for; must previously have been initialized
  *                and linked to a socket or RPC. On return, the interest
- *                will have been unlinked if its ready flag is set; otherwise
- *                it may still be linked.
+ *                will have been unlinked if it is shared and its ready flag
+ *                is set; otherwise it may still be linked.
  *
  * Return: 0 for success (the ready flag is set in the interest), or -EINTR
  * if the thread received an interrupt. When this function returns, the
