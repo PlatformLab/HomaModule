@@ -167,6 +167,16 @@ TEST_F(homa_interest, homa_interest_wait__already_ready)
 
 	list_del_init(&interest.links);
 }
+TEST_F(homa_interest, homa_interest_wait__poll_interrupted_by_signal)
+{
+	struct homa_interest interest;
+
+	homa_interest_init_shared(&interest, &self->hsk);
+	mock_signal_pending = 1;
+
+	EXPECT_EQ(EINTR, -homa_interest_wait(&interest));
+	EXPECT_EQ(0, interest.blocked);
+}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_interest, homa_interest_wait__call_schedule)
 {

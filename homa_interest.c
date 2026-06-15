@@ -105,6 +105,11 @@ int homa_interest_wait(struct homa_interest *interest)
 		if (atomic_read_acquire(&interest->state) & HOMA_INTEREST_READY)
 			goto done;
 
+		if (signal_pending(current)) {
+			wait_err = -ERESTARTSYS;
+			goto check_err;
+		}
+
 		/* See if we can cleanup dead RPCs while waiting. */
 		if (homa_rpc_reap(hsk, false) != 0)
 			continue;
@@ -127,6 +132,8 @@ int homa_interest_wait(struct homa_interest *interest)
 						      atomic_read_acquire(&interest->state) &
 						      HOMA_INTEREST_READY);
 	IF_NO_STRIP(blocked_time = homa_clock() - block_start);
+
+check_err:
 	if (wait_err == -ERESTARTSYS) {
 		int ready;
 
