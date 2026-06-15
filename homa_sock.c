@@ -587,15 +587,28 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 	/* Note: we can't use sock_wait_for_wmem because that function
 	 * is not available to modules (as of August 2025 it's static).
 	 */
-
 	if (nonblocking)
 		timeo = 0;
 	set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
 	tt_record2("homa_sock_wait_wmem waiting on port %d, wmem %d",
 		   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
+
+	/* Must wakeup if either memory becomes available or HOMA_SOCK_NOSPACE
+	 * gets cleared. The wmem_avl check is needed to handle a race where
+	 * memory gets freed just before HOMA_SOCK_NOSPACE is set above. The
+	 * HOMA_SOCK_NOSPACE check is needed to handle a race where multiple
+	 * threads wakeup and one thread consumes enough memory that the
+	 * wmem_avl check fails for the other. This approach means that we may
+	 * exceed the memory limit if multiple threads wake up at once, but
+	 * it prevents thread starvation that could occur if the second
+	 * thread were to go back to sleep.
+	 */
 	result = wait_event_interruptible_timeout(*sk_sleep(&hsk->sock),
 						  homa_sock_wmem_avl(hsk) ||
-						  hsk->shutdown, timeo);
+						  hsk->shutdown ||
+						  !test_bit(HOMA_SOCK_NOSPACE,
+							    &hsk->flags),
+						  timeo);
 	tt_record4("homa_sock_wait_wmem woke up on port %d with result %d, wmem %d, signal pending %d",
 		   hsk->port, result, refcount_read(&hsk->sock.sk_wmem_alloc),
 		   signal_pending(current));

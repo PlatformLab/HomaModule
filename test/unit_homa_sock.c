@@ -34,6 +34,13 @@ static void shutdown_hook(char *id)
 	homa_sock_shutdown(hook_hsk);
 }
 
+static void nospace_hook(char *id)
+{
+	if (strcmp(id, "prepare_to_wait") != 0)
+		return;
+	clear_bit(HOMA_SOCK_NOSPACE, &hook_hsk->flags);
+}
+
 static void init_scan(struct homa_socktab_scan *scan,
 		      struct homa_socktab *socktab)
 {
@@ -688,6 +695,15 @@ TEST_F(homa_sock, homa_sock_wait_wmem__socket_shutdown)
 
 	EXPECT_EQ(ESHUTDOWN, -homa_sock_wait_wmem(&self->hsk, 0));
 	EXPECT_EQ(1, self->hsk.shutdown);
+	homa_sock_destroy(&self->hsk.sock);
+}
+TEST_F(homa_sock, homa_sock_wait_wmem__SOCK_NOSPACE_off)
+{
+	self->hsk.sock.sk_sndbuf = 0;
+	unit_hook_register(nospace_hook);
+	hook_hsk = &self->hsk;
+
+	EXPECT_EQ(0, -homa_sock_wait_wmem(&self->hsk, 0));
 	homa_sock_destroy(&self->hsk.sock);
 }
 TEST_F(homa_sock, homa_sock_wait_wmem__interrupted_by_signal)
