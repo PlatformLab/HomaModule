@@ -10732,16 +10732,18 @@ class AnalyzeRxsnapshot:
         cur_prio:          Priority of most recent grant before t, or -1 if
                            none.
 
-        pre_xmit2:         Offset just after highest byte sent in a data
-                           packet with 'xmit2' < target time
-        post_xmit2:        Lowest offset contained in a data packet with
-                           'xmit2' >= target time
+        pre_xmit:          Offset just after highest byte sent in a data
+                           packet with 'xmit' < target time
+        post_xmit:         Lowest offset contained in a data packet with
+                           'xmit' >= target time
+        pre_nic and post_nic:
+                           Same, except measured with 'nic' instead of 'xmit'
         pre_gro and post_gro:
-                           Same, except measured with 'gro' instead of 'xmit2'
+                           Same, except measured with 'gro' instead of 'xmit'
         pre_softirq and post_softirq:
-                           Same, except measured with 'softirq' instead of 'xmit2'
+                           Same, except measured with 'softirq' instead of 'xmit'
         pre_copied and post_copied:
-                           Same, except measured with 'copied' instead of 'xmit2'
+                           Same, except measured with 'copied' instead of 'xmit'
 
         The following offsets record things that happened either before
         or after the target time.
@@ -10764,7 +10766,8 @@ class AnalyzeRxsnapshot:
         global packets, grants, rpcs, options, traces, max_unsched
 
         live_rpcs = defaultdict(lambda : {'pkts': [], 'grants': [],
-                'pre_xmit2': 0, 'post_xmit2': 1e20,
+                'pre_xmit': 0, 'post_xmit': 1e20,
+                'pre_nic': 0, 'post_nic': 1e20,
                 'pre_gro': 0, 'post_gro': 1e20,
                 'pre_softirq': 0, 'post_softirq': 1e20,
                 'pre_copied': 0, 'post_copied': 1e20,
@@ -10813,7 +10816,7 @@ class AnalyzeRxsnapshot:
 
             offset = pkt['offset']
             end_offset = offset + pkt['length']
-            for type in ['xmit2', 'gro', 'softirq', 'copied']:
+            for type in ['xmit', 'nic', 'gro', 'softirq', 'copied']:
                 if (type in pkt):
                     pkt_time = pkt[type]
                     if pkt_time < t:
@@ -10854,9 +10857,9 @@ class AnalyzeRxsnapshot:
             if not check_live(id, node, t, receive):
                 continue
             if 'sent' in tx_rpc:
-                live_rpcs[id]['pre_xmit2'] = tx_rpc['sent']
+                live_rpcs[id]['pre_xmit'] = tx_rpc['sent']
             else:
-                live_rpcs[id]['pre_xmit2'] = 0
+                live_rpcs[id]['pre_xmit'] = 0
 
         # Deduce missing fields (or improve estimates) in RPCs where possible
         for id, live_rpc in live_rpcs.items():
@@ -10871,7 +10874,7 @@ class AnalyzeRxsnapshot:
                 rcvd = rx_rpc['in_length'] - rx_rpc['remaining']
                 if live_rpc['post_copied'] > 1e19:
                     live_rpc['post_copied'] = rcvd
-            for type in ['copied', 'softirq', 'gro', 'xmit2']:
+            for type in ['copied', 'softirq', 'gro', 'nic', 'xmit']:
                 pre_field = 'pre_' + type
                 post_field = 'post_' + type
                 pre = live_rpc[pre_field]
@@ -10896,10 +10899,10 @@ class AnalyzeRxsnapshot:
                 live_rpc['unsched'] = unsched
             if 'granted' in rx_rpc and live_rpc['post_grant_softirq'] >= 1e19:
                 live_rpc['post_grant_softirq'] = rx_rpc['granted']
-            if (unsched > 0 and live_rpc['pre_xmit2'] > unsched and
-                    live_rpc['pre_xmit2'] > live_rpc['pre_grant_softirq']):
+            if (unsched > 0 and live_rpc['pre_xmit'] > unsched and
+                    live_rpc['pre_xmit'] > live_rpc['pre_grant_softirq']):
                 # We sent unscheduled packets: they must have been granted.
-                live_rpc['pre_grant_softirq'] = live_rpc['pre_xmit2']
+                live_rpc['pre_grant_softirq'] = live_rpc['pre_xmit']
             for type in ['softirq', 'gro', 'xmit']:
                 pre_field = 'pre_grant_' + type
                 post_field = 'post_grant_' + type
@@ -10924,7 +10927,7 @@ class AnalyzeRxsnapshot:
             if live_rpc['pre_grant_softirq']:
                 live_rpc['sort_grant_softirq'] = live_rpc['pre_grant_softirq']
             else:
-                live_rpc['sort_grant_softirq'] = live_rpc['pre_xmit2']
+                live_rpc['sort_grant_softirq'] = live_rpc['pre_xmit']
             if live_rpc['pre_grant_gro']:
                 live_rpc['sort_grant_gro'] = live_rpc['pre_grant_gro']
             else:
@@ -10936,12 +10939,14 @@ class AnalyzeRxsnapshot:
 
             # Count lost packets in the RPC.
             for pkt in live_rpc['pkts']:
-                if (('xmit2' in pkt) and (not 'gro' in pkt)
-                        and (pkt['xmit2'] >= traces[node]['first_time'])
-                        and ((options.time - pkt['xmit2']) > 200)
-                        and (options.time < traces[node]['last_time'])):
+                if (('nic' in pkt) and (not 'gro' in pkt)
+                        and ('rx_node' in pkt)
+                        and (pkt['nic'] >= traces[pkt['rx_node']]['first_time'])
+                        and ((options.time - pkt['nic']) > 200)
+                        and (options.time < traces[pkt['rx_node']]['last_time'])):
                     live_rpc['lost'] += 1
                     print('Lost packet: %s' % (pkt))
+                    print('Node %s, first_time %.1f' % (node, traces[node]['first_time']))
         return live_rpcs
 
     def get_sorted_ids(live_rpcs):
@@ -10971,7 +10976,9 @@ class AnalyzeRxsnapshot:
         sorted_ids = sorted(sorted_ids,
                 key = lambda id : sort_key(live_rpcs, id, 'pre_gro'))
         sorted_ids = sorted(sorted_ids,
-                key = lambda id : sort_key(live_rpcs, id, 'pre_xmit2'))
+                key = lambda id : sort_key(live_rpcs, id, 'pre_nic'))
+        sorted_ids = sorted(sorted_ids,
+                key = lambda id : sort_key(live_rpcs, id, 'pre_xmit'))
         sorted_ids = sorted(sorted_ids,
                 key = lambda id : sort_key(live_rpcs, id, 'sort_grant_softirq'))
         sorted_ids = sorted(sorted_ids,
@@ -11054,7 +11061,8 @@ class AnalyzeRxsnapshot:
                 'by SoftIRQ')
         print('Xmit:      Offset just after last byte that has been '
                 'passed to ip*xmit')
-        print('           or requeued by homa_qdisc after deferral')
+        print('Nic:       Offset just after last byte that has been queued '
+                'in the NIC')
         print('Gro:       Offset just after last data byte that has been '
                 'processed by GRO')
         print('SoftIrq:   Offset just after last data byte that has been '
@@ -11064,11 +11072,10 @@ class AnalyzeRxsnapshot:
         print('Incoming:  Gxmit - SoftIrq')
         print('Lost:      Packets that appear to have been dropped in the network')
         print('Prio:      Priority in most recent grant, if any')
-        print('        Id  Peer           Start  Length      Rem   GXmit    ',
+        print('')
+        print('Id          Peer           Start  Length      Rem   GXmit    ',
                 end='')
-        print('GGro   GSoft    Xmit     Gro SoftIrq  Copied Incoming Lost Prio')
-        print('-------------------------------------------------------------', end='')
-        print('---------------------------------------------------------------')
+        print('GGro   GSoft    Xmit     Nic     Gro SoftIrq  Copied Incoming Lost Prio')
 
         for id in sorted_ids:
             rx_rpc = rpcs[id^1]
@@ -11100,13 +11107,13 @@ class AnalyzeRxsnapshot:
                     remaining,
                     str(live_rpc['pre_grant_xmit'])
                     if live_rpc['pre_grant_xmit'] > live_rpc['unsched'] else ''), end='')
-            print('%7s %7s %7d %7d %7d %7d  %7s %4d %s' % (
+            print('%7s %7s %7d %7d %7d %7d %7d  %7s %4d %s' % (
                     str(live_rpc['pre_grant_gro'])
                     if live_rpc['pre_grant_gro'] > live_rpc['unsched'] else '',
                     str(live_rpc['pre_grant_softirq'])
                     if live_rpc['pre_grant_softirq'] > live_rpc['unsched']
                     else '',
-                    live_rpc['pre_xmit2'],
+                    live_rpc['pre_xmit'], live_rpc['pre_nic'],
                     live_rpc['pre_gro'], live_rpc['pre_softirq'],
                     live_rpc['pre_copied'], incoming, live_rpc['lost'],
                     prio))
@@ -11121,14 +11128,17 @@ class AnalyzeRxsnapshot:
         # (e.g. because of rounding up to packet boundary)
         excess = 0
 
-        total_incoming = 0
+        # Bytes that have been passed to ip*xmit but not yet processed
+        # by SoftIRQ
+        total_live = 0
 
         # Collect information about priorities used for incoming data.
         for id, live_rpc in live_rpcs.items():
             rpc_unsched = live_rpc['unsched']
             granted_at_t = live_rpc['pre_grant_xmit']
 
-            # Envelope of all offsets in transit at the reference time.
+            # Envelope of all offsets in transit at the reference time (passed
+            # to ip*xmit but not processed by SoftIRQ).
             min_start = None
             max_end = 0
 
@@ -11137,7 +11147,7 @@ class AnalyzeRxsnapshot:
                 if state == None or state == 'recvd':
                     continue
                 start = pkt['offset']
-                if min_start == None:
+                if min_start == None or start < min_start:
                     min_start = start
                 end = start + pkt['length']
                 if end > max_end:
@@ -11153,7 +11163,7 @@ class AnalyzeRxsnapshot:
                     prio_bytes[prio] += end - start
 
             if min_start != None:
-                total_incoming += granted_at_t - min_start
+                total_live += max_end - min_start
                 if max_end > granted_at_t:
                     excess += max_end - granted_at_t
                 if min_start < rpc_unsched:
@@ -11165,7 +11175,8 @@ class AnalyzeRxsnapshot:
             # There may be additional bytes that were granted, but for
             # which there were no live packets. Scan the grant packets
             # to collect priority info for those bytes.
-            if max_end < granted_at_t:
+            if live_rpc['pre_xmit'] < granted_at_t:
+                max_end = live_rpc['pre_xmit']
                 for grant in live_rpc['grants']:
                     offset = grant['offset']
                     if offset <= max_end:
@@ -11177,21 +11188,29 @@ class AnalyzeRxsnapshot:
                         break
                     max_end = offset
 
-        print('\nTotal incoming bytes across all RPCs:   %8d' % (total_incoming))
+            # There may also be unscheduled bytes for which we have no
+            # packet records.
+            if granted_at_t == 0 and live_rpc['pre_xmit'] > max_end:
+                num_bytes = live_rpc['pre_xmit'] - max_end
+                unsched += num_bytes
+                total_live += num_bytes
+                excess += num_bytes
+
+        print('\nTotal xmitted bytes across all RPCs:   %8d' % (total_live))
         prio_sum = 0
         for prio in sorted(prio_bytes.keys()):
-            if total_incoming > 0:
-                percent = 100*prio_bytes[prio]/total_incoming
+            if total_live > 0:
+                percent = 100*prio_bytes[prio]/total_live
             else:
                 percent = 0
-            print('Incoming bytes at P%d:                   %8d (%4.1f%%)' % (prio,
+            print('Xmitted bytes at P%d:                   %8d (%4.1f%%)' % (prio,
                     prio_bytes[prio], percent))
             prio_sum += prio_bytes[prio]
-        if prio_sum != total_incoming:
-            print('Incoming bytes with unknown priorities: %8d' %
-                    (total_incoming - prio_sum))
-        print('Unscheduled incoming bytes:             %8d' % (unsched))
-        print('Bytes transmitted beyond grants:        %8d' % (excess))
+        if prio_sum != total_live:
+            print('Xmitted bytes with unknown priorities: %8d' %
+                    (total_live - prio_sum))
+        print('Unscheduled bytes xmitted:             %8d' % (unsched))
+        print('Bytes xmitted beyond grants:           %8d' % (excess))
 
         print('\nFields in the tables below:')
         print('Offset:    Starting offset of packet data within its message')
@@ -11273,7 +11292,7 @@ class AnalyzeRxsnapshot:
                 for pkt in stack_pkts:
                     print('%6d %7s   %-10s  %4s %7s %8s %7s %8s %7s %8s %5s %4s' % (
                             pkt['offset'], print_field_if(pkt, 'xmit', '%7.1f'),
-                            print_field_if(pkt, 'xmit2', '(%.1f)',
+                            print_field_if(pkt, 'xmit', '(%.1f)',
                                      lambda t : t - options.time ),
                             print_field_if(pkt, 'tx_core', '%d'),
                             print_field_if(pkt, 'nic', '%.1f'),
@@ -11296,7 +11315,7 @@ class AnalyzeRxsnapshot:
                 for pkt in net_pkts:
                     print('%6d %7s   %-10s  %4s %7s %8s %7s %8s %7s %8s %5s %4s' % (
                             pkt['offset'], print_field_if(pkt, 'xmit', '%7.1f'),
-                            print_field_if(pkt, 'xmit2', '(%.1f)',
+                            print_field_if(pkt, 'xmit', '(%.1f)',
                                      lambda t : t - options.time ),
                             print_field_if(pkt, 'tx_core', '%d'),
                             print_field_if(pkt, 'nic', '%.1f'),
@@ -13676,13 +13695,13 @@ class AnalyzeTxsnapshot:
             return length - live_rpcs[id][field]
 
         sorted_ids = sorted(live_rpcs.keys(),
-                key = lambda id : live_rpcs[id]['pre_xmit2'],
+                key = lambda id : live_rpcs[id]['pre_xmit'],
                 reverse = True)
         sorted_ids = sorted(sorted_ids,
                 key = lambda id : rpcs[id]['sendmsg']
                         if (id in rpcs) and ('sendmsg' in rpcs[id]) else 0)
         sorted_ids = sorted(sorted_ids,
-                key = lambda id : sort_key(live_rpcs, id, 'pre_xmit2'))
+                key = lambda id : sort_key(live_rpcs, id, 'pre_xmit'))
         return sorted_ids
 
     def output(self):
@@ -13726,7 +13745,8 @@ class AnalyzeTxsnapshot:
                 'by SoftIRQ')
         print('Xmit:      Offset just after last data byte that has been '
                 'passed to ip*xmit')
-        print('           or requeued by homa_qdisc after deferral')
+        print('Nic:       Offset just after last data byte that has been '
+                'queued in the NIC')
         print('Gro:       Offset just after last data byte that has been '
                 'processed by GRO')
         print('SoftIrq:   Offset just after last data byte that has been '
@@ -13735,19 +13755,17 @@ class AnalyzeTxsnapshot:
                 'copied to user space')
         print('Incoming:  Gxmit - SoftIrq')
         print('Lost:      Packets that appear to have been dropped in the network')
-        print('        Id Peer        Length  Window   TxRem   GXmit    ',
+        print('')
+        print('Id         Peer        Length  Window   TxRem   GXmit    ',
                 end='')
-        print('GGro   GSoft    Xmit     Gro SoftIrq  Copied Incoming Lost')
-        print('---------------------------------------------------------',
-                end='')
-        print('----------------------------------------------------------')
+        print('GGro   GSoft    Xmit     Nic     Gro SoftIrq  Copied Incoming Lost')
 
         for id in sorted_ids:
             tx_rpc = rpcs[id]
             live_rpc = live_rpcs[id]
             incoming = (live_rpc['pre_grant_xmit'] - live_rpc['pre_softirq']
                     if live_rpc['pre_grant_xmit'] > 0 else 0)
-            window = live_rpc['pre_grant_softirq'] - live_rpc['pre_xmit2']
+            window = live_rpc['pre_grant_softirq'] - live_rpc['pre_xmit']
             if window > 0:
                 window = str(window)
             else:
@@ -13755,16 +13773,16 @@ class AnalyzeTxsnapshot:
             print('%10d %-10s %7s %7s %7s %7s ' % (id, get_rpc_node(id^1),
                     tx_rpc['out_length'] if tx_rpc['out_length'] != None else "",
                     window,
-                    tx_rpc['out_length'] - live_rpc['pre_xmit2']
+                    tx_rpc['out_length'] - live_rpc['pre_xmit']
                     if tx_rpc['out_length'] != None else "",
                     str(live_rpc['pre_grant_xmit'])
                     if live_rpc['pre_grant_xmit'] > 0 else ""), end='')
-            print('%7s %7s %7d %7d %7d %7d  %7d %4d' % (
+            print('%7s %7s %7d %7d %7d %7d %7d  %7d %4d' % (
                     str(live_rpc['pre_grant_gro'])
                     if live_rpc['pre_grant_gro'] > 0 else "",
                     str(live_rpc['pre_grant_softirq'])
                     if live_rpc['pre_grant_softirq'] > 0 else "",
-                    live_rpc['pre_xmit2'],
+                    live_rpc['pre_xmit'], live_rpc['pre_nic'],
                     live_rpc['pre_gro'], live_rpc['pre_softirq'],
                     live_rpc['pre_copied'], incoming, live_rpc['lost']))
 
