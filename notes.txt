@@ -38,6 +38,13 @@ Notes for Homa implementation in Linux:
     using ipv6_addr_v4mapped. Once this is done it should be possible to
     use either IPv4 or IPv6 addresses regardless of how the socket was
     created?
+  * Change wakeups so that there are no direct handoffs for shared interests.
+    Instead, just wake up a thread and let it remove the request from the
+    queue. This could potentially eliminate problems (noticed on xl170s)
+    where an RPC is handed off to a thread that is stalled because of
+    GRO or SoftIRQ activity. With the new approach, the thread would get
+    woken up but if it didn't actually retrieve the RPC then some other
+    thread could eventually get it.
 
 * Move interest cleanup code from homa_sock to a new function in
   homa_interest. Also move wakeup code from homa_rpc_handoff.
