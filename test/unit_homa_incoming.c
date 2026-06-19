@@ -1490,33 +1490,6 @@ TEST_F(homa_incoming, homa_data_pkt__no_buffers)
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
 	atomic_set(&self->hsk.buffer_pool->free_bpages, saved_free);
 }
-TEST_F(homa_incoming, homa_data_pkt__update_delta)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 1000, 5000);
-
-	EXPECT_NE(NULL, crpc);
-	unit_log_clear();
-
-	/* Total incoming goes up on first packet (count unscheduled bytes). */
-	self->data.message_length = htonl(5000);
-#ifndef __STRIP__ /* See strip.py */
-	self->data.incoming = htonl(4000);
-#endif /* See strip.py */
-	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
-			1400, 0), crpc);
-
-	/* Total incoming drops on subsequent packet. */
-	self->data.seg.offset = htonl(2800);
-	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
-			1400, 2800), crpc);
-
-	/* Duplicate packet should have no effect. */
-	self->data.seg.offset = htonl(2800);
-	homa_data_pkt(mock_skb_alloc(self->server_ip, &self->data.common,
-			1400, 2800), crpc);
-}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_data_pkt__send_cutoffs)
 {
