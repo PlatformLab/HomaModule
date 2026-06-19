@@ -13,7 +13,7 @@
 import sys
 
 # Ports to configure
-nodes = [5, 20, 32, 34, 35, 38]
+nodes = [38, 34, 11, 24, 6, 21, 13, 37, 8, 16, 39]
 ports = []
 prev_switch = -1
 for node in nodes:
