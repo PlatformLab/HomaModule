@@ -13186,7 +13186,7 @@ class AnalyzeTxintervals:
             f.write('%s over %d usec\n' % (node, options.interval))
             f.write('# intervals%s:\n' % (qid_msg))
             f.write('# Time:       End of the time interval\n')
-            f.write('# Gbps:       Rate of data passed to ip*xmit during '
+            f.write('# Gbps:       Rate of data passed to NIC during '
                     'the interval\n')
             f.write('# TxKB:       KB of data passed to ip*xmit during '
                     'the interval\n')
@@ -13200,7 +13200,7 @@ class AnalyzeTxintervals:
             f.write('#             transmitted as of the end of the interval\n')
             f.write('# Pkts:       Packets transmitted (forwarded by qdisc) '
                     'during the\n')
-            f.write('              interval\n')
+            f.write('#             interval\n')
             f.write('# QDisc:      KB of data that have been passed to ip*xmit '
                     'but not yet\n')
             f.write('#             passed to the NIC, as of the end of the '
@@ -13238,13 +13238,13 @@ class AnalyzeTxintervals:
             f.write('#             packet passed to NIC in this interval\n')
             f.write('# GXmit:      KB of grants that have been sent by peer '
                     'but not yet\n')
-            f.write('              received by GRO\n')
+            f.write('#             received by GRO\n')
             f.write('# GGro:       KB of grants that have been received by GRO '
                     'but not yet\n')
-            f.write('              received by SoftIRQ\n')
+            f.write('#             received by SoftIRQ\n')
             f.write('# GAvail:     KB of grants that have been received by '
                     'SoftIRQ but data hasn\'t\n')
-            f.write('              been transmitted yet\n')
+            f.write('#             been transmitted yet\n')
             f.write('# GNew:       KB of new grants received by SoftIRQ '
                     'during the interval\n')
 
@@ -13258,7 +13258,7 @@ class AnalyzeTxintervals:
                     interval['tx_bytes'] = 0
                     # print('Bogus interval: %s' % (interval))
                     # print('Trace: %s' % (traces[node]))
-                gbps = interval['tx_bytes'] * 8 / (options.interval * 1000)
+                gbps = interval['tx_nic_bytes'] * 8 / (options.interval * 1000)
                 total += gbps
                 f.write('%8.1f %6.1f %5.0f %5d  %5d  %5d' %
                         (interval['time'], gbps,
