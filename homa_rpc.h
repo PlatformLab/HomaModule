@@ -500,8 +500,9 @@ void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			 int port, int error);
 void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 void     homa_rpc_abort(struct homa_rpc *crpc, int error);
-void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
-			struct homa_ack *ack);
+void     homa_rpc_ack(struct homa_sock *hsk, struct homa_rpc *rpc,
+		      const struct in6_addr *saddr, int num_acks,
+		      struct homa_ack *acks);
 struct homa_rpc
 	*homa_rpc_alloc_client(struct homa_sock *hsk,
 			       const union sockaddr_in_union *dest);

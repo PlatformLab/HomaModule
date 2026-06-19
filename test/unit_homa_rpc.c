@@ -300,11 +300,58 @@ TEST_F(homa_rpc, homa_bucket_lock_slow)
 }
 #endif /* See strip.py */
 
-TEST_F(homa_rpc, homa_rpc_acked__basics)
+TEST_F(homa_rpc, homa_rpc_ack__multiple_acks)
+{
+	struct homa_rpc *srpc1, *srpc2;
+	struct homa_ack acks[2];
+
+	srpc1 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->client_port, self->server_id,
+			100, 3000);
+	ASSERT_NE(NULL, srpc1);
+	srpc2 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->client_port, self->server_id + 2,
+			100, 3000);
+	ASSERT_NE(NULL, srpc2);
+
+	acks[0].server_port = htons(self->hsk.port);
+	acks[0].client_id = cpu_to_be64(self->client_id);
+	acks[1].server_port = htons(self->hsk.port);
+	acks[1].client_id = cpu_to_be64(self->client_id + 2);
+	homa_rpc_ack(&self->hsk, NULL, self->client_ip, 2, acks);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(2, unit_list_length(&self->hsk.dead_rpcs));
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc1));
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc2));
+}
+TEST_F(homa_rpc, homa_rpc_ack__release_rpc_lock)
 {
 	struct homa_rpc *srpc;
 	struct homa_sock hsk;
-	struct homa_ack ack = {};
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->client_port, self->server_id,
+			100, 3000);
+	ASSERT_NE(NULL, srpc);
+	mock_total_spin_locks = 0;
+
+	/* First request doesn't specify an RPC to unlock. */
+	homa_rpc_ack(&self->hsk, NULL, self->client_ip, 0, NULL);
+	EXPECT_EQ(0, mock_total_spin_locks);
+
+	/* Second request specifies an RPC. */
+	homa_rpc_lock(srpc);
+	homa_rpc_ack(&self->hsk, NULL, self->client_ip, 0, NULL);
+	EXPECT_EQ(1, mock_total_spin_locks);
+	homa_rpc_unlock(srpc);
+
+	unit_sock_destroy(&hsk);
+}
+TEST_F(homa_rpc, homa_rpc_ack__lookup_socket)
+{
+	struct homa_rpc *srpc;
+	struct homa_sock hsk;
+	struct homa_ack ack;
 
 	mock_sock_init(&hsk, self->hnet, self->server_port);
 	srpc = unit_server_rpc(&hsk, UNIT_OUTGOING, self->client_ip,
@@ -313,65 +360,48 @@ TEST_F(homa_rpc, homa_rpc_acked__basics)
 	ASSERT_NE(NULL, srpc);
 	ack.server_port = htons(self->server_port);
 	ack.client_id = cpu_to_be64(self->client_id);
-	homa_rpc_acked(&hsk, self->client_ip, &ack);
+	homa_rpc_ack(&self->hsk, NULL, self->client_ip, 1, &ack);
 	EXPECT_EQ(0, unit_list_length(&hsk.active_rpcs));
-	EXPECT_EQ(1, unit_list_length(&hsk.dead_rpcs));
 	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));
 	unit_sock_destroy(&hsk);
 }
-TEST_F(homa_rpc, homa_rpc_acked__lookup_socket)
+TEST_F(homa_rpc, homa_rpc_ack__cant_find_socket)
 {
-	struct homa_ack ack = {};
+	struct homa_ack acks[3];
 	struct homa_rpc *srpc;
-	struct homa_sock hsk;
 
-	mock_sock_init(&hsk, self->hnet, self->server_port);
-	srpc = unit_server_rpc(&hsk, UNIT_OUTGOING, self->client_ip,
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			100, 3000);
 	ASSERT_NE(NULL, srpc);
-	ack.server_port = htons(self->server_port);
-	ack.client_id = cpu_to_be64(self->client_id);
-	homa_rpc_acked(&self->hsk, self->client_ip, &ack);
-	EXPECT_EQ(0, unit_list_length(&hsk.active_rpcs));
+
+	acks[0].server_port = htons(self->hsk.port + 100);
+	acks[0].client_id = 0;
+	acks[1].server_port = htons(self->hsk.port + 200);
+	acks[1].client_id = 0;
+	acks[2].server_port = htons(self->hsk.port);
+	acks[2].client_id = cpu_to_be64(srpc->id & ~1);
+	homa_rpc_ack(&self->hsk, NULL, self->client_ip, 3, acks);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));
-	unit_sock_destroy(&hsk);
 }
-TEST_F(homa_rpc, homa_rpc_acked__no_such_socket)
+TEST_F(homa_rpc, homa_rpc_ack__cant_find_rpc)
 {
-	struct homa_ack ack = {};
+	struct homa_ack acks[2];
 	struct homa_rpc *srpc;
-	struct homa_sock hsk;
 
-	mock_sock_init(&hsk, self->hnet, self->server_port);
-	srpc = unit_server_rpc(&hsk, UNIT_OUTGOING, self->client_ip,
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			100, 3000);
 	ASSERT_NE(NULL, srpc);
-	ack.server_port = htons(self->server_port+1);
-	ack.client_id = cpu_to_be64(self->client_id);
-	homa_rpc_acked(&hsk, self->client_ip, &ack);
-	EXPECT_EQ(1, unit_list_length(&hsk.active_rpcs));
-	EXPECT_STREQ("OUTGOING", homa_symbol_for_state(srpc));
-	unit_sock_destroy(&hsk);
-}
-TEST_F(homa_rpc, homa_rpc_acked__no_such_rpc)
-{
-	struct homa_ack ack = {};
-	struct homa_rpc *srpc;
-	struct homa_sock hsk;
 
-	mock_sock_init(&hsk, self->hnet, self->server_port);
-	srpc = unit_server_rpc(&hsk, UNIT_OUTGOING, self->client_ip,
-			self->server_ip, self->client_port, self->server_id,
-			100, 3000);
-	ASSERT_NE(NULL, srpc);
-	ack.server_port = htons(self->server_port);
-	ack.client_id = cpu_to_be64(self->client_id+10);
-	homa_rpc_acked(&hsk, self->client_ip, &ack);
-	EXPECT_EQ(1, unit_list_length(&hsk.active_rpcs));
-	EXPECT_STREQ("OUTGOING", homa_symbol_for_state(srpc));
-	unit_sock_destroy(&hsk);
+	acks[0].server_port = htons(self->hsk.port);
+	acks[0].client_id = cpu_to_be64(4444);
+	acks[1].server_port = htons(self->hsk.port);
+	acks[1].client_id = cpu_to_be64(srpc->id & ~1);
+	homa_rpc_ack(&self->hsk, NULL, self->client_ip, 2, acks);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));
 }
 
 TEST_F(homa_rpc, homa_rpc_end__basics)

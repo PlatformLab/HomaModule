@@ -764,9 +764,7 @@ handle_ack:
 	if (ack.client_id) {
 		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 
-		homa_rpc_unlock(rpc);
-		homa_rpc_acked(rpc->hsk, &saddr, &ack);
-		homa_rpc_lock(rpc);
+		homa_rpc_ack(rpc->hsk, rpc, &saddr, 1, &ack);
 	}
 	if (unlikely(discard)) {
 		kfree_skb(skb);
@@ -1044,7 +1042,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 {
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct homa_ack_hdr *h = (struct homa_ack_hdr *)skb->data;
-	int i, count;
+	int count;
 
 	if (rpc) {
 		tt_record1("homa_ack_pkt freeing rpc id %d", rpc->id);
@@ -1054,20 +1052,8 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	count = ntohs(h->num_acks);
 	if (count > HOMA_MAX_ACKS_PER_PKT)
 		count = HOMA_MAX_ACKS_PER_PKT;
-	if (count > 0) {
-		if (rpc) {
-			/* Must temporarily release rpc's lock because
-			 * homa_rpc_acked needs to acquire RPC locks.
-			 */
-			homa_rpc_unlock(rpc);
-			for (i = 0; i < count; i++)
-				homa_rpc_acked(hsk, &saddr, &h->acks[i]);
-			homa_rpc_lock(rpc);
-		} else {
-			for (i = 0; i < count; i++)
-				homa_rpc_acked(hsk, &saddr, &h->acks[i]);
-		}
-	}
+	if (count > 0)
+		homa_rpc_ack(hsk, rpc, &saddr, count, h->acks);
 	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
 		   homa_local_id(h->common.sender_id), tt_addr(saddr), count);
 	consume_skb(skb);

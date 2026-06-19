@@ -218,40 +218,57 @@ error:
 }
 
 /**
- * homa_rpc_acked() - This function is invoked when an ack is received
- * for an RPC; if the RPC still exists, is freed.
- * @hsk:     Socket on which the ack was received. May or may not correspond
- *           to the RPC, but can sometimes be used to avoid a socket lookup.
- * @saddr:   Source address from which the act was received (the client
- *           node for the RPC)
- * @ack:     Information about an RPC from @saddr that may now be deleted
- *           safely.
+ * homa_rpc_ack() - Handle one or more acknowledgments for RPCs.
+ * @hsk:      Socket on which the ack(s) were received. Can sometimes be used
+ *            to avoid a socket lookup.
+ * @rpc:      RPC for which caller holds lock (NULL if none). If non-NULL,
+ *            the lock will be released and reacquired here. The RPC may
+ *           be dead on return.
+ * @saddr:    Source address from which the ack was received (the client
+ *            node for the RPC)
+ * @num_acks: Number of acknowlegments in @acks
+ * @acks:     Information about one or more RPCs from @saddr that may now be
+ *            deleted safely.
  */
-void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
-		    struct homa_ack *ack)
+void homa_rpc_ack(struct homa_sock *hsk, struct homa_rpc *rpc,
+		  const struct in6_addr *saddr, int num_acks,
+		  struct homa_ack *acks)
 {
-	u16 server_port = ntohs(ack->server_port);
-	u64 id = homa_local_id(ack->client_id);
-	struct homa_sock *hsk2 = hsk;
-	struct homa_rpc *rpc;
+	struct homa_sock *hsk2;
+	struct homa_rpc *rpc2;
+	u16 server_port;
+	u64 id;
+	int i;
 
-	UNIT_LOG("; ", "ack %llu", id);
-	if (hsk->port != server_port) {
-		/* Without RCU, sockets other than hsk can be deleted
-		 * out from under us.
-		 */
-		hsk2 = homa_sock_find(hsk->hnet, server_port);
-		if (!hsk2)
-			return;
+	if (rpc)
+		homa_rpc_unlock(rpc);
+	for (i = 0; i < num_acks; i++) {
+		struct homa_ack *ack = &acks[i];
+
+		server_port = ntohs(ack->server_port);
+		id = homa_local_id(ack->client_id);
+		UNIT_LOG("; ", "ack %llu", id);
+		if (hsk->port != server_port) {
+			/* Without RCU, sockets other than hsk can be deleted
+			 * out from under us.
+			 */
+			hsk2 = homa_sock_find(hsk->hnet, server_port);
+			if (!hsk2)
+				continue;
+		} else {
+			hsk2 = hsk;
+		}
+		rpc2 = homa_rpc_find_server(hsk2, saddr, id);
+		if (rpc2) {
+			tt_record1("homa_rpc_acked freeing id %d", rpc2->id);
+			homa_rpc_end(rpc2);
+			homa_rpc_unlock(rpc2); /* Locked by homa_rpc_find_server. */
+		}
+		if (hsk2 != hsk)
+			sock_put(&hsk2->sock);
 	}
-	rpc = homa_rpc_find_server(hsk2, saddr, id);
-	if (rpc) {
-		tt_record1("homa_rpc_acked freeing id %d", rpc->id);
-		homa_rpc_end(rpc);
-		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
-	}
-	if (hsk->port != server_port)
-		sock_put(&hsk2->sock);
+	if (rpc)
+		homa_rpc_lock(rpc);
 }
 
 /**
