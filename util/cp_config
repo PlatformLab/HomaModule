@@ -18,7 +18,8 @@ parser = get_parser(description=
 parser.add_argument('-c', '--config', dest='config',
         choices=['balance', 'buffers', 'busy_usecs', 'client_threads',
                 'dctcp_buffers', 'defer_min_bytes', 'fifo', 'gbps',
-                'gen2', 'gen3', 'grant_policy', 'gro_busy_usecs', 'load',
+                'gen2', 'gen3', 'grant_policy', 'gro_busy_usecs',
+                'homa_vs_tcp', 'load',
                 'max_gro', 'max_gso', 'max_incoming', 'mtu', 'nic_backlog',
                 'nic_queue', 'poll', 'ports', 'prios', 'receivers', 'repeat',
                 'tcp_buffers', 'throttle', 'time', 'unsched_bytes',
@@ -33,6 +34,7 @@ if options.workload != "":
 
 plot_max_y = 1000
 specs = []
+group_plots_by_spec = False
 if options.config == 'balance':
     # Vary the load balancing policy
     specs.append({'exp_name': 'gen2default',
@@ -164,6 +166,19 @@ elif options.config == 'gro':
             'sysctl': ['.net.homa.gro_policy', 82],
             'rss': 'xl170_default'
             })
+elif options.config == 'homa_vs_tcp':
+    specs.append({'exp_name': 'tcp',
+            'label': 'TCP',
+            'colors': [tcp_color2, tcp_color],
+            'options': ['protocol', 'tcp'],
+            'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic'],
+            'no_qdisc': True
+    })
+    specs.append({'exp_name': 'homa',
+            'label': 'Homa',
+            'colors': [homa_color2, homa_color]
+    })
+    group_plots_by_spec = True
 elif options.config == 'load':
     # Vary the network utilization.
     for gbps in [30, 40, 50, 60, 70]:
@@ -338,17 +353,24 @@ if not options.plot_only:
                     log("Setting buffer limit to %.1f MB" % (mb))
                     switch.set_buffer_limit(mb)
                 if 'mtu' in spec:
+                    log("Setting mtu to %d" % spec['mtu'])
                     do_ssh(["config", "mtu", str(spec['mtu'])], options.nodes)
                 if 'lb' in spec:
                     do_ssh(["config", "lb", spec['lb']], options.nodes)
+                if 'no_qdisc' in spec:
+                    log("Disabling homa_qdisc")
+                    do_ssh(["config", "reset_qdisc"], options.nodes)
                 start_servers(exp_name, o.servers, o)
                 run_experiment(exp_name, o.clients, o)
+                for name, value in old_values.items():
+                    print("Restoring %s to %s" % (name, value))
+                    set_sysctl_parameter(name, value, options.nodes)
+                if 'no_qdisc' in spec:
+                        log("Re-enabling homa_qdisc")
+                        do_ssh(["config", "qdisc"], options.nodes)
     except Exception as e:
         log(traceback.format_exc())
 
-    for name, value in old_values.items():
-        print("Restoring %s to %s" % (name, value))
-        set_sysctl_parameter(name, value, options.nodes)
     log("Stopping nodes")
     stop_nodes()
     scan_logs()
@@ -368,10 +390,18 @@ for workload, bw, seconds in load_info:
             specs[0]['exp_name'], workload), y_label=" Slowdown")
     for spec in specs:
         exp_name = "%s_%s" % (spec['exp_name'], workload)
-        plot_slowdown(ax, exp_name, "p99", spec['label'] + ' P99')
-    for spec in specs:
-        exp_name = "%s_%s" % (spec['exp_name'], workload)
-        plot_slowdown(ax, exp_name, "p50", spec['label'] + ' P50')
+        color = spec['colors'][1] if 'colors' in spec else None
+        plot_slowdown(ax, exp_name, "p99", spec['label'] + ' P99', color=color)
+        if group_plots_by_spec:
+            color = spec['colors'][0] if 'colors' in spec else None
+            plot_slowdown(ax, exp_name, "p50", spec['label'] + ' P50',
+                    color=color)
+    if not group_plots_by_spec:
+        for spec in specs:
+            exp_name = "%s_%s" % (spec['exp_name'], workload)
+            color = spec['colors'][0] if 'colors' in spec else None
+            plot_slowdown(ax, exp_name, "p50", spec['label'] + ' P50',
+                    color=color)
     if workload == "w5":
         ax.legend(loc="upper right", prop={'size': 9})
     else:
@@ -388,10 +418,18 @@ for workload, bw, seconds in load_info:
             specs[0]['exp_name'], workload), y_label=r'RTT (µsec)')
     for spec in specs:
         exp_name = "%s_%s" % (spec['exp_name'], workload)
-        plot_histogram(ax, exp_name, "p99", spec['label'] + ' P99')
-    for spec in specs:
-        exp_name = "%s_%s" % (spec['exp_name'], workload)
-        plot_histogram(ax, exp_name, "p50", spec['label'] + ' P50')
+        color = spec['colors'][1] if 'colors' in spec else None
+        plot_histogram(ax, exp_name, "p99", spec['label'] + ' P99', color=color)
+        if group_plots_by_spec:
+            color = spec['colors'][0] if 'colors' in spec else None
+            plot_histogram(ax, exp_name, "p50", spec['label'] + ' P50',
+                    color=color)
+    if not group_plots_by_spec:
+        for spec in specs:
+            exp_name = "%s_%s" % (spec['exp_name'], workload)
+            color = spec['colors'][0] if 'colors' in spec else None
+            plot_histogram(ax, exp_name, "p50", spec['label'] + ' P50',
+                    color=color)
     ax.legend(loc="upper left", prop={'size': 9})
     plt.tight_layout()
     plt.savefig("%s/reports/%s_%s_rtt.pdf" %
@@ -405,8 +443,9 @@ for workload, bw, seconds in load_info:
             "Cumulative Fraction of Short Messages")
     for spec in specs:
         exp_name = "%s_%s" % (spec['exp_name'], workload)
+        color = spec['colors'][0] if 'colors' in spec else None
         x, y = get_short_cdf(exp_name)
-        plt.plot(x, y, label=spec['label'])
+        plt.plot(x, y, label=spec['label'], color=color)
 
     plt.legend(loc="upper right", prop={'size': 9})
     plt.savefig("%s/reports/%s_%s_cdfs.pdf" %
