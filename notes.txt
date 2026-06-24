@@ -15,6 +15,8 @@ Notes for Homa implementation in Linux:
   life of the RPC, but don't save skb's once packets have been
   transmitted.
 
+* Homa's throughput on W3 seems to be worse than TCP on c6620 cluster.
+
 * Eliminate homa_skb_get, use skb_copy_bits instead.
 
 * Bug with homa_qdisc: if a TSO packet gets segmented in software, the

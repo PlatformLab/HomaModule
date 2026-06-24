@@ -157,17 +157,19 @@ void homa_request_retrans(struct homa_rpc *rpc)
  * homa_add_packet() - Add an incoming packet to the contents of a
  * partially received message.
  * @rpc:   Add the packet to the msgin for this RPC.
- * @skb:   The new packet. This function takes ownership of the packet
- *         (the packet will either be freed or added to rpc->msgin.packets).
+ * @skb:   The new packet. If the packet is linked into rpc then an additional
+ *         reference will be taken on it.
+ * Return: 0 if the packet was successfully linked into rpc, otherwise the
+ *         reason why the packet was not linked in.
  */
-void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
+enum skb_drop_reason homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
 	struct homa_gap *gap, *dummy, *gap2;
 	u32 start = ntohl(h->seg.offset);
 	u32 length = homa_data_len(skb);
-	enum skb_drop_reason reason;
+	enum skb_drop_reason reason = 0;
 	u32 end = start + length;
 
 	if (start >= rpc->msgin.length ||
@@ -175,7 +177,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		tt_record3("Packet extended past message end; id %d, offset %d, length %d",
 			   rpc->id, start, length);
 		reason = SKB_DROP_REASON_PKT_TOO_BIG;
-		goto discard;
+		goto ignore;
 	}
 
 	if (start == rpc->msgin.recv_end) {
@@ -191,7 +193,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			tt_record2("Couldn't allocate gap for id %d (start %d): no memory",
 				   rpc->id, start);
 			reason = SKB_DROP_REASON_NOMEM;
-			goto discard;
+			goto ignore;
 		}
 		tt_record3("Created new gap for id %d: start %d, end %d",
 			   rpc->id, rpc->msgin.recv_end, start);
@@ -211,13 +213,13 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				tt_record4("Packet overlaps gap start: id %d, start %d, end %d, gap_start %d",
 					   rpc->id, start, end, gap->start);
 				reason = SKB_DROP_REASON_DUP_FRAG;
-				goto discard;
+				goto ignore;
 			}
 			if (end > gap->end) {
 				tt_record4("Packet overlaps gap end: id %d, start %d, end %d, gap_end %d",
 					   rpc->id, start, end, gap->start);
 				reason = SKB_DROP_REASON_DUP_FRAG;
-				goto discard;
+				goto ignore;
 			}
 			tt_record4("Increasing start for gap for id %d, old start %d, new %d, end %d",
 				   rpc->id, gap->start, end, gap->end);
@@ -239,7 +241,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				tt_record4("Packet overlaps gap end: id %d, start %d, end %d, gap_end %d",
 					   rpc->id, start, end, gap->start);
 				reason = SKB_DROP_REASON_DUP_FRAG;
-				goto discard;
+				goto ignore;
 			}
 			tt_record4("Decreasing end for gap for id %d, old end %d, new %d, start %d",
 				   rpc->id, gap->end, start, gap->start);
@@ -253,7 +255,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			tt_record2("Couldn't allocate gap for split for id %d (start %d): no memory",
 				   rpc->id, end);
 			reason = SKB_DROP_REASON_NOMEM;
-			goto discard;
+			goto ignore;
 		}
 		tt_record4("Splitting gap for id %d; old gap start %d, end %d, pkt_start %d",
 			   rpc->id, gap->start, gap->end, start);
@@ -264,20 +266,20 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	/* Packet doesn't overlap any gap, so it is a duplicate. */
 	reason = SKB_DROP_REASON_DUP_FRAG;
 
-discard:
+ignore:
 #ifndef __STRIP__ /* See strip.py */
 	if (h->retransmit)
 		INC_METRIC(resent_discards, 1);
 	else
 		INC_METRIC(packet_discards, 1);
 #endif /* See strip.py */
-	tt_record4("homa_add_packet discarding packet for id %d, offset %d, length %d, retransmit %d",
+	tt_record4("homa_add_packet rejecting packet for id %d, offset %d, length %d, retransmit %d",
 		   rpc->id, start, length, h->retransmit);
-	kfree_skb_reason(skb, reason);
-	return;
+	return reason;
 
 keep:
 	__skb_queue_tail(&rpc->msgin.packets, skb);
+	skb_get(skb);
 	rpc->msgin.bytes_remaining -= length;
 #ifndef __STRIP__ /* See strip.py */
 	if (h->retransmit)
@@ -291,6 +293,7 @@ keep:
 		INC_METRIC(server_requests_done,
 			   rpc->msgin.bytes_remaining == 0);
 	}
+	return 0;
 #endif /* See strip.py */
 }
 
@@ -657,20 +660,14 @@ discard:
 void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
+	enum skb_drop_reason drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
         IF_NO_STRIP(struct homa *homa = rpc->hsk->homa);
-	struct homa_ack ack;
-	bool discard = true;
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 		   homa_local_id(h->common.sender_id),
 		   tt_addr(rpc->peer->addr), ntohl(h->seg.offset),
 		   ntohl(h->message_length));
-
-	/* Make a copy of the ack so we can handle it later, even if skb
-	 * has been freed.
-	 */
-	ack = h->ack;
 
 	if (rpc->state != RPC_INCOMING && homa_is_client(rpc->id)) {
 		if (unlikely(rpc->state != RPC_OUTGOING))
@@ -683,11 +680,13 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 #endif /* See strip.py */
 #ifndef __STRIP__ /* See strip.py */
 		if (homa_message_in_init(rpc, ntohl(h->message_length),
-					 ntohl(h->incoming)) != 0)
+					 ntohl(h->incoming)) != 0) {
 #else /* See strip.py */
-		if (homa_message_in_init(rpc, ntohl(h->message_length)) != 0)
+		if (homa_message_in_init(rpc, ntohl(h->message_length)) != 0) {
 #endif /* See strip.py */
+			drop_reason = SKB_DROP_REASON_NOMEM;
 			goto handle_ack;
+		}
 	} else if (rpc->state != RPC_INCOMING) {
 		/* Must be server; note that homa_rpc_alloc_server already
 		 * initialized msgin and allocated buffers.
@@ -711,6 +710,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			   rpc->id, ntohl(h->seg.offset), homa_data_len(skb));
 #endif /* See strip.py */
 		INC_METRIC(dropped_data_no_bufs, homa_data_len(skb));
+		drop_reason = SKB_DROP_REASON_NOMEM;
 		goto handle_ack;
 	}
 
@@ -739,37 +739,29 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	}
 #endif /* See strip.py */
 
-	homa_add_packet(rpc, skb);
-
-	/* Note: skb is no longer valid: homa_add_packet may have freed it. */
+	drop_reason = homa_add_packet(rpc, skb);
 
 	if (skb_queue_len(&rpc->msgin.packets) != 0 &&
 	    !test_bit(RPC_PKTS_READY, &rpc->flags)) {
 		set_bit(RPC_PKTS_READY, &rpc->flags);
 		homa_rpc_handoff(rpc);
 	}
-	discard = false;
 
 handle_ack:
-	/* The reason for handling acks here is a bit subtle. It used to
-	 * be done at the beginning of this function, but that resulted
-	 * in extraneous handoffs (we have to release the RPC lock to
-	 * handle acks, but that could allow some other thread to receive
-	 * a previous handoff made by homa_rpc_alloc_server, even though
-	 * we hadn't yet added the packet to the RPC; if this happens
+	/* It's important to handle acks *after* calling homa_add_packet.
+	 * Otherwise we can end up with extraneous handoffs: we have to release
+	 * the RPC lock to handle acks, but that could allow some other thread
+	 * to receive a previous handoff made by homa_rpc_alloc_server, even
+	 * though the packet hasn't been added to the RPC. If this happens
 	 * the call to homa_rpc_handoff above will have to make an additional
-	 * handoff). Doing it here is a bit awkward because the skb may not
-	 * still be around, so we have to save a copy of the ack.
+	 * handoff.
 	 */
-	if (ack.client_id) {
+	if (h->ack.client_id) {
 		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 
-		homa_rpc_ack(rpc->hsk, rpc, &saddr, 1, &ack);
+		homa_rpc_ack(rpc->hsk, rpc, &saddr, 1, &h->ack);
 	}
-	if (unlikely(discard)) {
-		kfree_skb(skb);
-		UNIT_LOG("; ", "homa_data_pkt discarded packet");
-	}
+	kfree_skb_reason(skb, drop_reason);
 }
 
 #ifndef __STRIP__ /* See strip.py */

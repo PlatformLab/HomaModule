@@ -304,6 +304,11 @@ bool mock_check_bpool_leaks = true;
 struct homa_sock *mock_socks[MOCK_MAX_SOCKS];
 int mock_num_socks;
 
+/* Keeps track of the reasons given for freeing skbs. */
+#define MAX_DROP_REASONS 10
+enum skb_drop_reason mock_drop_reasons[MAX_DROP_REASONS];
+int mock_num_drop_reasons;
+
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
 struct net_offload tcp_offload;
@@ -1509,6 +1514,10 @@ int sk_set_peek_off(struct sock *sk, int val)
 void sk_skb_reason_drop(struct sock *sk, struct sk_buff *skb,
 		enum skb_drop_reason reason)
 {
+	if (mock_num_drop_reasons < MAX_DROP_REASONS) {
+		mock_drop_reasons[mock_num_drop_reasons] = reason;
+		mock_num_drop_reasons++;
+	}
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	kfree_skb(skb);
 #else
@@ -2627,6 +2636,9 @@ void mock_teardown(void)
 	mock_netif_schedule_calls = 0;
 	mock_check_bpool_leaks = true;
 	mock_num_socks = 0;
+	mock_num_drop_reasons = 0;
+	for (i = 0; i < MAX_DROP_REASONS; i++)
+		mock_drop_reasons[i] = -1;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));

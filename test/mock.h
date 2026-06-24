@@ -162,6 +162,8 @@ extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
 extern struct net_device
 		   mock_devices[];
+extern enum skb_drop_reason
+		   mock_drop_reasons[];
 extern int         mock_dst_check_errors;
 extern int         mock_ethtool_ksettings_errors;
 extern bool        mock_exit_thread;
@@ -175,6 +177,7 @@ extern int         mock_kmalloc_errors;
 extern int         mock_kthread_create_errors;
 extern int         mock_link_mbps;
 extern int         mock_netif_schedule_calls;
+extern int         mock_num_drop_reasons;
 extern int         mock_prepare_to_wait_errors;
 extern int         mock_register_protosw_errors;
 extern int         mock_register_qdisc_errors;
