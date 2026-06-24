@@ -180,6 +180,11 @@ int mock_sock_holds;
  */
 int mock_rpc_holds;
 
+/* The number of times local_bh_disable() has been invoked, minus the
+ * number of times local_bh_enable has been invoked.
+ */
+static int mock_local_bh_disables;
+
 /* The number of times preempt_disable() has been invoked, minus the
  * number of times preempt_enable has been invoked.
  */
@@ -1991,6 +1996,18 @@ struct homa_net *mock_hnet(int index, struct homa *homa)
 	return hnet;
 }
 
+void mock_local_bh_disable(void)
+{
+	mock_local_bh_disables++;
+}
+
+void mock_local_bh_enable(void)
+{
+	if (mock_local_bh_disables == 0)
+		FAIL(" lcoal_bh_enable invoked without local_bh_disable");
+	mock_local_bh_disables--;
+}
+
 /**
  * mock_net_for_hnet() - Return the struct net associated with a struct
  * homa_net, or NULL if the struct net can't be identified.
@@ -2685,6 +2702,11 @@ void mock_teardown(void)
 		FAIL(" %d homa_rpc_holds still active after test",
 				mock_rpc_holds);
 	mock_rpc_holds = 0;
+
+	if (mock_local_bh_disables != 0)
+		FAIL(" %d local_bh_disables still active after test",
+				mock_local_bh_disables);
+	mock_local_bh_disables = 0;
 
 	if (mock_preempt_disables != 0)
 		FAIL(" %d preempt_disables still active after test",

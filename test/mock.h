@@ -66,6 +66,12 @@
 
 #define kthread_complete_and_exit(...)
 
+#undef local_bh_disable
+#define local_bh_disable() mock_local_bh_disable()
+
+#undef local_bh_enable
+#define local_bh_enable() mock_local_bh_enable()
+
 #undef local_irq_save
 #define local_irq_save(flags) (flags) = 0
 
@@ -233,6 +239,8 @@ void        mock_get_page(struct page *page);
 struct homa_net
 	   *mock_hnet(int index, struct homa *homa);
 void       *mock_kmalloc(size_t size, gfp_t flags);
+void        mock_local_bh_disable(void);
+void        mock_local_bh_enable(void);
 struct net *mock_net_for_hnet(struct homa_net *hnet);
 void       *mock_net_generic(const struct net *net, unsigned int id);
 int         mock_page_refs(struct page *page);

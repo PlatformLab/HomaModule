@@ -182,7 +182,10 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 	skb_frag_t *frag;
 	char *result;
 
-	preempt_disable();
+	/* Asssure atomicity with respect to SoftIRQ invocations or
+	 * task preemption.
+	 */
+	local_bh_disable();
 
 	/* Can we just extend the skb's last fragment? */
 	skb_core = &per_cpu(homa_skb_core, smp_processor_id());
@@ -228,7 +231,7 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 	skb_len_add(skb, actual_size);
 
 done:
-	preempt_enable();
+	local_bh_enable();
 	return result;
 }
 
