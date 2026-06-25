@@ -406,7 +406,8 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			if (port && rpc->dport != port)
 				continue;
 			homa_rpc_lock(rpc);
-			homa_rpc_abort(rpc, error);
+			if (rpc->state != RPC_DEAD)
+				homa_rpc_abort(rpc, error);
 			homa_rpc_unlock(rpc);
 		}
 		rcu_read_unlock();
