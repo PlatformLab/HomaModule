@@ -246,6 +246,18 @@ TEST_F(homa_incoming, homa_message_in_init__update_server_rpc_metrics)
 }
 #endif /* See strip.py */
 
+TEST_F(homa_incoming, homa_gap_alloc)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_RCVD_ONE_PKT,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 10000, 100);
+
+	homa_gap_alloc(&srpc->msgin.gaps, 1000, 2000);
+	homa_gap_alloc(&srpc->msgin.gaps, 4000, 6000);
+	EXPECT_EQ(2, unit_list_length(&srpc->msgin.gaps));
+	IF_NO_STRIP(EXPECT_EQ(2, homa_metrics_per_cpu()->gaps_created));
+}
+
 TEST_F(homa_incoming, homa_request_retrans__request_gaps)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_RCVD_ONE_PKT,

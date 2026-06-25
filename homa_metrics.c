@@ -222,6 +222,8 @@ char *homa_metrics_print(void)
 		  "Incoming request messages\n");
 		M("responses_received", m->responses_received,
 		  "Incoming response messages\n");
+		M("gaps_created", m->gaps_created,
+		  "Number of homa_gap objects created\n");
 		M("wait_none", m->wait_none,
 		  "Messages received without blocking or polling\n");
 		M("wait_fast", m->wait_fast,

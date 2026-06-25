@@ -97,6 +97,7 @@ struct homa_gap *homa_gap_alloc(struct list_head *next, int start, int end)
 	gap->end = end;
 	gap->time = homa_clock();
 	list_add_tail(&gap->links, next);
+	INC_METRIC(gaps_created, 1);
 	return gap;
 }
 

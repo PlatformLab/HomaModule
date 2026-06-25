@@ -215,6 +215,12 @@ struct homa_metrics {
 	 */
 	u64 responses_received;
 
+	/*
+	 * @gapcs_created: total number of homa_gaps created because of
+	 * out-of-order arrival of packets in a message.
+	 */
+	u64 gaps_created;
+
 	/**
 	 * @wait_none: total number of times that an incoming message was
 	 * already waiting when recvmsg was invoked.
