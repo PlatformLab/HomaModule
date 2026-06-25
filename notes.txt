@@ -9,6 +9,16 @@ Notes for Homa implementation in Linux:
   dst and may be socket-specific, and the lower level contains stuff that must
   be shared, such as priorities.
 
+* Need to do cgroup accounting (using __GRP_ACCOUNT or GFP_KERNEL_ACCOUNT)
+  for memory allocations made on behalf of applications. Places are affected:
+  homa_rpc_alloc_client
+  homa_rpc_alloc_server
+  homa_gap_alloc
+  homa_ioc_info
+  homa_pool_alloc?
+  homa_sock_init
+  tx sk_buffs (homa_skb.c)
+
 * Linux doesn't seem to like packets getting passed to ip*xmit with
   reference counts > 1. Maybe change Homa to collect packet data in
   memory pages, separate from skb's? Save the memory pages for the
