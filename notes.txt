@@ -19,6 +19,20 @@ Notes for Homa implementation in Linux:
   homa_sock_init
   tx sk_buffs (homa_skb.c)
 
+* homa_skb_info is not necessarily retained once a tx packet is passed to
+  ip*xmit: calls to pskb_expand_heador or skb_unshare may copy data, but
+  they only copy known live data, which will not include homa_skb_info.
+  Problem areas:
+  * If a TSO packet gets segmented in software, the homa_skb_info is not
+    replicated in the segments, which causes crashes (e.g.,
+    homq_qdisc_defer_homa ends up with a NULL value for rpc).
+  * homa_rpc_reap references homa_get_skb_info(skb)->next_skb.
+  One possible solution is to embed a token in the actual data of the
+  packet (extra header field), which can be used to look up extra metadata.
+  Or, maybe put the extra metadata in the first frag, just before the "real"
+  packet data? However, this won't help in the case of packet fragmentation,
+  where the data areas change.
+
 * Linux doesn't seem to like packets getting passed to ip*xmit with
   reference counts > 1. Maybe change Homa to collect packet data in
   memory pages, separate from skb's? Save the memory pages for the
@@ -28,10 +42,6 @@ Notes for Homa implementation in Linux:
 * Homa's throughput on W3 seems to be worse than TCP on c6620 cluster.
 
 * Eliminate homa_skb_get, use skb_copy_bits instead.
-
-* Bug with homa_qdisc: if a TSO packet gets segmented in software, the
-  homa_skb_info is not replicated in the segments, which causes crashes
-  (e.g., homq_qdisc_defer_homa ends up with a NULL value for rpc).
 
 * Significant new functionality:
   * Run Homa SoftIRQ on the GRO core? This would eliminate the latency and
