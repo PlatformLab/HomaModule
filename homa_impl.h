@@ -333,6 +333,13 @@ struct homa {
 	 * sysctl.
 	 */
 	int verbose;
+
+	/**
+	 * @gso_force_software: A non-zero value will cause Homa to perform
+	 * segmentation in software using GSO; zero means ask the NIC to
+	 * perform TSO. Set externally via sysctl.
+	 */
+	int gso_force_software;
 #endif /* See strip.py */
 
 	/**
@@ -341,13 +348,6 @@ struct homa {
 	 * externally via sysctl to lower the limit already enforced by Linux.
 	 */
 	int max_gso_size;
-
-	/**
-	 * @gso_force_software: A non-zero value will cause Homa to perform
-	 * segmentation in software using GSO; zero means ask the NIC to
-	 * perform TSO. Set externally via sysctl.
-	 */
-	int gso_force_software;
 
 	/**
 	 * @wmem_max: Limit on the value of sk_sndbuf for any socket. Set

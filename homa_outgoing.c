@@ -208,14 +208,17 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	if (segs > 1) {
 		skb_shinfo(skb)->gso_segs = segs;
 		skb_shinfo(skb)->gso_size = gso_size;
+		skb_shinfo(skb)->gso_type = (hsk->inet.sk.sk_family ==
+					     AF_INET6) ? SKB_GSO_TCPV6 :
+					    SKB_GSO_TCPV4;
 
+#ifndef __STRIP__ /* See strip.py */
 		/* It's unclear what gso_type should be used to force software
 		 * GSO; the value below seems to work...
 		 */
-		skb_shinfo(skb)->gso_type =
-		    hsk->homa->gso_force_software ? 0xd :
-		    (hsk->inet.sk.sk_family == AF_INET6) ? SKB_GSO_TCPV6 :
-		    SKB_GSO_TCPV4;
+		if (hsk->homa->gso_force_software)
+			skb_shinfo(skb)->gso_type = 0xd;
+#endif /* See strip.py */
 	}
 	return skb;
 
