@@ -726,6 +726,8 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
  * requests. It retransmits the packet(s) containing a given range of bytes
  * from a message.
  * @rpc:      RPC for which data should be resent. Must be locked by caller.
+ *            The RPC lock is released temporarily during this function, so
+ *            the RPC may be dead on return.
  * @start:    Offset within @rpc->msgout of the first byte to retransmit.
  * @end:      Offset within @rpc->msgout of the byte just after the last one
  *            to retransmit.
@@ -738,7 +740,9 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
  * homa_resend_data() - This function is invoked as part of handling RESEND
  * requests. It retransmits the packet(s) containing a given range of bytes
  * from a message.
- * @rpc:      RPC for which data should be resent.
+ * @rpc:      RPC for which data should be resent. The RPC lock is released
+ * 	      temporarily during this function, so the RPC may be dead on
+ *            return.
  * @start:    Offset within @rpc->msgout of the first byte to retransmit.
  * @end:      Offset within @rpc->msgout of the byte just after the last one
  *            to retransmit.
@@ -836,6 +840,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			skb_get(new_skb);
 			tt_record3("retransmitting offset %d, length %d, id %d",
 				   offset, seg_length, rpc->id);
+			homa_rpc_unlock(rpc);
 #ifndef __STRIP__ /* See strip.py */
 			homa_pacer_check_nic_q(rpc->hsk->homa->pacer, new_skb,
 					       true);
@@ -844,6 +849,9 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			__homa_xmit_data(new_skb, rpc);
 #endif /* See strip.py */
 			INC_METRIC(resent_packets, 1);
+			homa_rpc_lock(rpc);
+			if (rpc->state == RPC_DEAD)
+				return;
 		}
 	}
 

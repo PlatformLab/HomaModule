@@ -58,6 +58,19 @@ static void handoff_hook(char *id)
 	}
 }
 
+static struct homa_rpc *hook_rpc;
+
+/* The following hook function ends an RPC when it is locked. */
+static void lock_end_hook(char *id)
+{
+	if (strcmp(id, "spin_lock") != 0)
+		return;
+	if (hook_rpc) {
+		homa_rpc_end(hook_rpc);
+		hook_rpc = NULL;
+	}
+}
+
 #ifndef __STRIP__ /* See strip.py */
 static void reset_msgin(struct homa_rpc *rpc)
 {
@@ -1911,6 +1924,34 @@ TEST_F(homa_incoming, homa_resend_pkt__update_granted_and_xmit)
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &h.common, 0, 0));
 	EXPECT_EQ(3400, crpc->msgout.granted);
 	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
+}
+TEST_F(homa_incoming, homa_resend_pkt__rpc_ends_so_dont_update_granted)
+{
+	struct homa_resend_hdr h = {{.sport = htons(self->server_port),
+			.dport = htons(self->hsk.port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.type = RESEND},
+			.offset = htonl(3000),
+			.length = htonl(200)};
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 100);
+
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.granted = 3000;
+	homa_rpc_lock(crpc);
+	XMIT_DATA(crpc, false);
+	unit_log_clear();
+	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
+	unit_hook_register(lock_end_hook);
+	hook_rpc = crpc;
+	crpc->msgout.granted = 1400;
+
+	homa_resend_pkt(mock_skb_alloc(self->server_ip, &h.common, 0, 0),
+			crpc, crpc->hsk);
+	EXPECT_EQ(1400, crpc->msgout.granted);
+	EXPECT_EQ(RPC_DEAD, crpc->state);
+	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_resend_pkt__clip_granted_to_message_length)
 {

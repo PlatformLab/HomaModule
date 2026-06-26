@@ -846,9 +846,15 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	if (length == -1)
 		end = tx_end;
 
+	/* Don't retransmit data that we haven't transmitted for the first
+	 * time: we're not ready to send that data yet (we'll send a BUSY
+	 * packet below if needed).
+	 */
 #ifndef __STRIP__ /* See strip.py */
 	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end,
 			 h->priority);
+	if (rpc->state == RPC_DEAD)
+		goto done;
 
 	if (end > rpc->msgout.granted) {
 		/* It appears that a grant packet was lost; assume that
@@ -862,6 +868,8 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	}
 #else /* See strip.py */
 	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end);
+	if (rpc->state == RPC_DEAD)
+		goto done;
 #endif /* See strip.py */
 
 	if (offset >= tx_end) {

@@ -37,8 +37,8 @@ static void unlock_hook(char *id)
 	}
 }
 
-/* The following hook function frees an RPC when it is locked. */
-static void lock_free_hook(char *id)
+/* The following hook function ends an RPC when it is locked. */
+static void lock_end_hook(char *id)
 {
 	if (strcmp(id, "spin_lock") != 0)
 		return;
@@ -1040,7 +1040,7 @@ TEST_F(homa_outgoing, homa_xmit_data__rpc_freed)
 
 	unit_log_clear();
 	homa_rpc_lock(crpc);
-	unit_hook_register(lock_free_hook);
+	unit_hook_register(lock_end_hook);
 	hook_rpc = crpc;
 	XMIT_DATA(crpc, false);
 	homa_rpc_unlock(crpc);
@@ -1183,6 +1183,7 @@ TEST_F(homa_outgoing, homa_resend_data__basics)
 	/* Helps to detect errors in computing seg_offset. */
 	skb_push(crpc->msgout.packets, 8);
 
+	homa_rpc_lock(crpc);
 	homa_resend_data(crpc, 7000, 10000, 2);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1234, message_length 16000, offset 7000, data_length 1400, incoming 10000, RETRANSMIT; "
@@ -1228,6 +1229,7 @@ TEST_F(homa_outgoing, homa_resend_data__basics)
 	mock_xmit_log_verbose = 0;
 	homa_resend_data(crpc, 16000, 17000, 7);
 	EXPECT_STREQ("", unit_log_get());
+	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_outgoing, homa_resend_data__packet_doesnt_use_gso)
 {
@@ -1236,8 +1238,10 @@ TEST_F(homa_outgoing, homa_resend_data__packet_doesnt_use_gso)
 			self->server_port, self->client_id, 1000, 2000);
 
 	unit_log_clear();
+	homa_rpc_lock(crpc);
 	homa_resend_data(crpc, 500, 1500, 2);
 	EXPECT_STREQ("xmit DATA retrans 1000@0", unit_log_get());
+	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_outgoing, homa_resend_data__cant_allocate_skb)
 {
@@ -1266,8 +1270,10 @@ TEST_F(homa_outgoing, homa_resend_data__set_incoming)
 	unit_log_clear();
 	mock_xmit_log_verbose = 1;
 	EXPECT_EQ(10000, crpc->msgout.granted);
+	homa_rpc_lock(crpc);
 	homa_resend_data(crpc, 8400, 8800, 2);
 	EXPECT_SUBSTR("incoming 8800", unit_log_get());
+	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_outgoing, homa_resend_data__error_copying_data)
 {
@@ -1297,6 +1303,7 @@ TEST_F(homa_outgoing, homa_resend_data__update_to_free_and_set_homa_info)
 			self->server_ip, self->server_port, self->client_id,
 			16000, 1000);
 	unit_log_clear();
+	homa_rpc_lock(crpc);
 	homa_resend_data(crpc, 8400, 8800, 2);
 	skb = crpc->msgout.to_free;
 	ASSERT_NE(NULL, skb);
@@ -1309,6 +1316,24 @@ TEST_F(homa_outgoing, homa_resend_data__update_to_free_and_set_homa_info)
 	EXPECT_EQ(crpc, homa_info->rpc);
 	EXPECT_EQ(1, refcount_read(&skb->users));
 	IF_NO_STRIP(EXPECT_EQ(6, crpc->msgout.num_skbs));
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_resend_data__rpc_ended)
+{
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 16000, 1000);
+
+	unit_log_clear();
+	homa_rpc_lock(crpc);
+	unit_hook_register(lock_end_hook);
+	hook_rpc = crpc;
+	homa_resend_data(crpc, 2000, 10000, 2);
+	EXPECT_STREQ("xmit DATA retrans 1400@1400; homa_rpc_end invoked",
+		     unit_log_get());
+	homa_rpc_unlock(crpc);
 }
 
 TEST_F(homa_outgoing, homa_rpc_tx_end)
