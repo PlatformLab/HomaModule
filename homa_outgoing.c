@@ -288,6 +288,11 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	if (gso_size > rpc->hsk->homa->max_gso_size)
 		gso_size = rpc->hsk->homa->max_gso_size;
 	dst_release(dst);
+	if (max_seg_data <= 0) {
+		rpc->hsk->error_msg = "device MTU too small to support Homa packets";
+		err = -EINVAL;
+		goto error;
+	}
 
 #ifndef __STRIP__ /* See strip.py */
 	/* Round gso_size down to an even # of mtus; calculation depends

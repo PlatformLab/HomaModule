@@ -433,6 +433,21 @@ TEST_F(homa_outgoing, homa_message_out_fill__message_too_long)
 	EXPECT_EQ(0, crpc->msgout.skb_memory);
 	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
 }
+TEST_F(homa_outgoing, homa_message_out_fill__mtu_unusable)
+{
+	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
+			&self->server_addr);
+
+	ASSERT_FALSE(crpc == NULL);
+	mock_mtu = self->hsk.ip_header_length + sizeof(struct homa_data_hdr);
+	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
+			unit_iov_iter((void *) 1000, 100), 0));
+	EXPECT_STREQ("device MTU too small to support Homa packets",
+		     self->hsk.error_msg);
+	homa_rpc_unlock(crpc);
+	EXPECT_EQ(0, crpc->msgout.skb_memory);
+	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
+}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)
 {
