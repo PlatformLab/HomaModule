@@ -44,7 +44,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
  * part of a data packet after the initial header, when GSO is being used
  * but TCP hijacking is not. As result, homa_seg_hdrs must be interleaved
  * with the data to provide the correct offset for each segment.
- * @rpc:            RPC whose output message is being created. Must be
+ * @rpc:            RPC whose output message is being created. Not generally
  *                  locked by caller.
  * @skb:            The packet being filled. The initial homa_data_hdr was
  *                  created and initialized by the caller and the
@@ -59,7 +59,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
  * part of a data packet after the initial header, when GSO is being used.
  * homa_seg_hdrs must be interleaved with the data to provide the correct
  * offset for each segment.
- * @rpc:            RPC whose output message is being created. Must be
+ * @rpc:            RPC whose output message is being created. Not generally
  *                  locked by caller.
  * @skb:            The packet being filled. The initial homa_data_hdr was
  *                  created and initialized by the caller and the
@@ -71,7 +71,6 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 #endif /* See strip.py */
 int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 			       struct iov_iter *iter)
-	__must_hold(rpc->bucket->lock)
 {
 	struct homa_skb_info *homa_info = homa_get_skb_info(skb);
 	int seg_length = homa_info->seg_length;
@@ -112,7 +111,7 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
  * outgoing Homa data packet. The resulting packet will be a GSO packet
  * that will eventually be segmented by the NIC.
  * @rpc:          RPC that packet will belong to (msgout must have been
- *                initialized). Must be locked by caller.
+ *                initialized). Not normally locked by caller.
  * @iter:         Describes location(s) of (remaining) message data in user
  *                space.
  * @offset:       Offset in the message of the first byte of data in this
@@ -129,7 +128,6 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 				       struct iov_iter *iter, int offset,
 				       int length, int max_seg_data)
-	__must_hold(rpc->bucket->lock)
 {
 	struct homa_sock *hsk = rpc->hsk;
 	struct homa_skb_info *homa_info;
