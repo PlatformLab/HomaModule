@@ -496,6 +496,28 @@ struct homa_rpc {
 	u64 start_time;
 };
 
+/**
+ * @struct homa_rpc_skbs: Used during reaping to collect information
+ * about skbs that are ready to be freed (skbs present here have been
+ * removed from the rpc).
+ */
+struct homa_rpc_skbs {
+	/** @num_skbs: Number of entries currently used in skbs. */
+	int num_skbs;
+
+	/**
+	 * @tx_skbs: Number of (initial) entries in @skbs that contain
+	 * transmit buffers; entries after this contain receive buffers.
+	 */
+	int tx_skbs;
+
+	/**
+	 * @skbs: sk_buffs that need to be freed.
+	 */
+#define HOMA_MAX_REAP_SKBS 10
+	struct sk_buff *skbs[HOMA_MAX_REAP_SKBS];
+};
+
 void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			 int port, int error);
 void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
@@ -510,6 +532,8 @@ struct homa_rpc
 	*homa_rpc_alloc_server(struct homa_sock *hsk,
 			       const struct in6_addr *source,
 			       struct homa_data_hdr *h);
+bool     homa_rpc_collect_skbs(struct homa_rpc *rpc,
+			       struct homa_rpc_skbs *skbs, int max_skbs);
 void     homa_rpc_end(struct homa_rpc *rpc);
 struct homa_rpc
 	*homa_rpc_find_client(struct homa_sock *hsk, u64 id);

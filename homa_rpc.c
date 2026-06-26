@@ -483,30 +483,29 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 	 * be desirable to remove packet freeing out of homa_copy_to_user.
 	 */
 #ifdef __UNIT_TEST__
-#define BATCH_MAX 3
+#define BATCH_MAX_RPCS 3
 #else /* __UNIT_TEST__ */
-#define BATCH_MAX 10
+#define BATCH_MAX_RPCS 10
 #endif /* __UNIT_TEST__ */
-	struct homa_rpc *rpcs[BATCH_MAX];
-	struct sk_buff *skbs[BATCH_MAX];
-	int num_skbs, num_rpcs;
+	struct homa_rpc *rpcs[BATCH_MAX_RPCS];
+	struct homa_rpc_skbs skbs;
 	bool checked_all_rpcs;
 	struct homa_rpc *rpc;
 	struct homa_rpc *tmp;
 	int i, batch_size;
 	int skbs_to_reap;
-	int rx_frees;
+	int num_rpcs;
 
 	INC_METRIC(reaper_calls, 1);
 	INC_METRIC(reaper_dead_skbs, hsk->dead_skbs);
 
 	/* Each iteration through the following loop will reap
-	 * BATCH_MAX skbs.
+	 * up to HOMA_MAX_REAP_SKBS skbs.
 	 */
 	skbs_to_reap = hsk->homa->reap_limit;
 	checked_all_rpcs = list_empty(&hsk->dead_rpcs);
 	while (!checked_all_rpcs) {
-		batch_size = BATCH_MAX;
+		batch_size = HOMA_MAX_REAP_SKBS;
 		if (!reap_all) {
 			if (skbs_to_reap <= 0)
 				break;
@@ -514,9 +513,9 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 				batch_size = skbs_to_reap;
 			skbs_to_reap -= batch_size;
 		}
-		num_skbs = 0;
 		num_rpcs = 0;
-		rx_frees = 0;
+		skbs.num_skbs = 0;
+		skbs.tx_skbs = 0;
 
 		homa_sock_lock(hsk);
 		if (atomic_read(&hsk->protect_count)) {
@@ -550,77 +549,22 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 				continue;
 			}
 
-			/* For Tx sk_buffs, collect them here but defer
-			 * freeing until after releasing the socket lock.
-			 */
-			if (rpc->msgout.length >= 0) {
-				while (1) {
-					struct sk_buff *skb;
-
-					skb = rpc->msgout.to_free;
-					if (!skb) {
-						skb = rpc->msgout.packets;
-						if (!skb)
-							break;
-						rpc->msgout.to_free = skb;
-						rpc->msgout.packets = NULL;
-					}
-
-#ifndef __STRIP__ /* See strip.py */
-					/* This tests whether skb is still in a
-					 * transmit queue somewhere; if so,
-					 * can't reap the RPC since homa_qdisc
-					 * may try to access the RPC via the
-					 * skb's homa_skb_info.
-					 */
-#else /* See strip.py */
-					/* Don't reap RPC if anyone besides
-					 * us has a reference to the skb.
-					 */
-#endif /* See strip.py */
-					if (refcount_read(&skb->users) > 1) {
-#ifndef __STRIP__ /* See strip.py */
-						homa_qdisc_flush_rpc(rpc);
-#endif /* See strip.py */
-						INC_METRIC(reaper_active_skbs,
-							   1);
-						goto next_rpc;
-					}
-					skbs[num_skbs] = skb;
-					rpc->msgout.to_free =
-						homa_get_skb_info(skb)->next_skb;
-					num_skbs++;
-					rpc->msgout.num_skbs--;
-					if (num_skbs >= batch_size)
-						goto release;
-				}
+			if (!homa_rpc_collect_skbs(rpc, &skbs, batch_size)) {
+				if (skbs.num_skbs >= batch_size)
+					goto release;
+				continue;
 			}
 
-			/* In the normal case rx sk_buffs will already have been
-			 * freed before we got here. Thus it's OK to free
-			 * immediately in rare situations where there are
-			 * buffers left.
-			 */
-			if (rpc->msgin.length >= 0 &&
-			    !skb_queue_empty_lockless(&rpc->msgin.packets)) {
-				rx_frees += skb_queue_len(&rpc->msgin.packets);
-				__skb_queue_purge_reason(&rpc->msgin.packets,
-							 SKB_CONSUMED);
-			}
-
-			/* If we get here, it means all packets have been
-			 *  removed from the RPC.
+			/* All packets have been removed from the RPC, so the
+			 * RPC can be freed.
 			 */
 			rpcs[num_rpcs] = rpc;
 			num_rpcs++;
 			list_del(&rpc->dead_links);
 			WARN_ON(refcount_sub_and_test(rpc->msgout.skb_memory,
 						      &hsk->sock.sk_wmem_alloc));
-			if (num_rpcs >= batch_size)
+			if (num_rpcs >= BATCH_MAX_RPCS)
 				goto release;
-
-next_rpc:
-			continue;
 		}
 		checked_all_rpcs = true;
 
@@ -628,9 +572,11 @@ next_rpc:
 		 * lock while doing this.
 		 */
 release:
-		hsk->dead_skbs -= num_skbs + rx_frees;
+		hsk->dead_skbs -= skbs.num_skbs;
 		homa_sock_unlock(hsk);
-		homa_skb_free_many_tx(hsk->homa, skbs, num_skbs);
+		homa_skb_free_many_tx(hsk->homa, skbs.skbs, skbs.tx_skbs);
+		for (i = skbs.tx_skbs; i < skbs.num_skbs; i++)
+			consume_skb(skbs.skbs[i]);
 		for (i = 0; i < num_rpcs; i++) {
 			IF_NO_STRIP(int tx_left);
 
@@ -676,11 +622,81 @@ release:
 		}
 		homa_sock_wakeup_wmem(hsk);
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
-			   num_skbs + rx_frees, num_rpcs, hsk->dead_skbs,
-			   hsk->port);
+			   skbs.num_skbs, num_rpcs, hsk->dead_skbs, hsk->port);
 	}
 	homa_pool_check_waiting(hsk->buffer_pool);
 	return !checked_all_rpcs;
+}
+
+/**
+ * homa_rpc_collect_skbs() - Utility function called by homa_rpc_reap to
+ * extract sk_buffs from an RPC.
+ * @rpc:       RPC from which to collect RPCs.
+ * @skbs:      skbs from @rpc will be added to this struct, up until either
+ *             all skbs have been removed from @rpc or the struct is full.
+ *             This struct is assumed to be initialized by the caller (it
+ *             may already hold some skbs).
+ * @max_skbs:  This function will return if @skbs->num_skbs reaches this
+ *             value. Must be <= HOMA_MAX_RPC_SKBS.
+ * Return:     A return value of true means that all of the skbs in rpc
+ *             have now been collected; false means some could not be
+ *             collected (either @skbs was full or there are still outstanding
+ *             references for some skbs).
+ */
+bool homa_rpc_collect_skbs(struct homa_rpc *rpc, struct homa_rpc_skbs *skbs,
+			   int max_skbs)
+{
+	struct sk_buff *skb;
+
+	/* Collect transmit skbs. */
+	while (1) {
+		skb = rpc->msgout.to_free;
+		if (!skb) {
+			skb = rpc->msgout.packets;
+			if (!skb)
+				break;
+			rpc->msgout.to_free = skb;
+			rpc->msgout.packets = NULL;
+		}
+
+#ifndef __STRIP__ /* See strip.py */
+		/* This tests whether skb is still in a transmit queue
+		 * somewhere; if so, can't reap the RPC since homa_qdisc
+		 * may try to access the RPC via the skb's
+		 * homa_skb_info.
+		 */
+#else /* See strip.py */
+		/* Don't reap RPC if anyone besides us has a reference
+		 * to the skb.
+		 */
+#endif /* See strip.py */
+		if (refcount_read(&skb->users) > 1) {
+#ifndef __STRIP__ /* See strip.py */
+			homa_qdisc_flush_rpc(rpc);
+#endif /* See strip.py */
+			INC_METRIC(reaper_active_skbs, 1);
+			return false;
+		}
+		skbs->skbs[skbs->num_skbs] = skb;
+		rpc->msgout.to_free = homa_get_skb_info(skb)->next_skb;
+		skbs->num_skbs++;
+		skbs->tx_skbs = skbs->num_skbs;
+		rpc->msgout.num_skbs--;
+		if (skbs->num_skbs >= max_skbs)
+			return false;
+	}
+
+	/* Collect any receive skbs that haven't already been freed. */
+	if (rpc->msgin.length >= 0) {
+		for (skb = __skb_dequeue(&rpc->msgin.packets); skb;
+		     skb = __skb_dequeue(&rpc->msgin.packets)) {
+			skbs->skbs[skbs->num_skbs] = skb;
+			skbs->num_skbs++;
+			if (skbs->num_skbs >= max_skbs)
+				return false;
+		}
+	}
+	return true;
 }
 
 /**
