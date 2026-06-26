@@ -624,7 +624,8 @@ release:
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
 			   skbs.num_skbs, num_rpcs, hsk->dead_skbs, hsk->port);
 	}
-	homa_pool_check_waiting(hsk->buffer_pool);
+	if (hsk->buffer_pool)
+		homa_pool_check_waiting(hsk->buffer_pool);
 	return !checked_all_rpcs;
 }
 

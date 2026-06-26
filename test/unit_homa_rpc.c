@@ -1096,6 +1096,25 @@ TEST_F(homa_rpc, homa_rpc_reap__call_homa_sock_wakeup_wmem)
 	homa_rpc_reap(&self->hsk, false);
 	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 }
+TEST_F(homa_rpc, homa_rpc_reap__null_buffer_pool)
+{
+	struct homa_rpc *crpc;
+	struct homa_pool *saved_pool;
+
+	self->homa.unsched_bytes = 100000;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 5000, 2000);
+
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_end(crpc);
+	saved_pool = self->hsk.buffer_pool;
+	self->hsk.buffer_pool = NULL;
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
+	EXPECT_STREQ("", dead_rpcs(&self->hsk));
+	EXPECT_EQ(0, self->hsk.dead_skbs);
+	self->hsk.buffer_pool = saved_pool;
+}
 
 TEST_F(homa_rpc, homa_rpc_collect_skbs__basics)
 {
