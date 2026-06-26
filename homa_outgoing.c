@@ -157,19 +157,17 @@ struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 	 * network packet by GSO).
 	 */
 	h = (struct homa_data_hdr *)skb_put(skb, sizeof(struct homa_data_hdr));
+	memset(h, 0, sizeof(*h));
 	h->common.sport = htons(hsk->port);
 	h->common.dport = htons(rpc->dport);
 	h->common.sequence = htonl(offset);
 	h->common.type = DATA;
 	homa_set_doff(skb, sizeof(struct homa_data_hdr));
-	h->common.checksum = 0;
 	h->common.sender_id = cpu_to_be64(rpc->id);
 	h->message_length = htonl(rpc->msgout.length);
 	IF_NO_STRIP(h->incoming = htonl(rpc->msgout.unscheduled));
-	h->ack.client_id = 0;
 	homa_peer_get_acks(rpc->peer, 1, &h->ack);
 	IF_NO_STRIP(h->cutoff_version = rpc->peer->cutoff_version);
-	h->retransmit = 0;
 #ifndef __STRIP__ /* See strip.py */
 	h->seg.offset = htonl(-1);
 #else /* See strip.py */
