@@ -722,13 +722,10 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_set_hijack)
 {
 	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
+	struct in6_addr addr;
 
-	// Make sure the test uses IPv6.
-	mock_ipv6 = true;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, self->client_port);
-
-	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &addr,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 	unit_log_clear();
@@ -744,13 +741,10 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 {
 	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
+	struct in6_addr addr;
 
-	// Make sure the test uses IPv6.
-	mock_ipv6 = true;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, self->client_port);
-
-	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &addr,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 	unit_log_clear();
@@ -1101,14 +1095,12 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv6_call_homa_hijack_set_hdr)
 	struct homa_common_hdr *h;
 	struct homa_rpc *crpc;
 	struct sk_buff *skb;
+	struct in6_addr addr;
 
-	// Make sure the test uses IPv6.
-	mock_ipv6 = true;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, self->client_port);
+	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
 
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			self->server_ip, self->server_port, self->client_id,
+			&addr, self->server_port, self->client_id,
 			100, 1000);
 	unit_log_clear();
 	skb = crpc->msgout.packets;
@@ -1121,14 +1113,12 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv6_call_homa_hijack_set_hdr)
 TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
 {
 	struct homa_rpc *crpc;
+	struct in6_addr addr;
 
-	// Make sure the test uses IPv6.
-	mock_ipv6 = true;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, self->client_port);
+	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
 
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			self->server_ip, self->server_port, self->client_id,
+			&addr, self->server_port, self->client_id,
 			100, 1000);
 	unit_log_clear();
 	mock_ip6_xmit_errors = 1;
