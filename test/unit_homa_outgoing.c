@@ -1336,44 +1336,54 @@ TEST_F(homa_outgoing, homa_resend_data__rpc_ended)
 	homa_rpc_unlock(crpc);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, homa_rpc_tx_end)
 {
-	struct homa_rpc *crpc;
-	struct sk_buff *skbs[5];
+	struct homa_qdisc_dev *qdev;
+	struct homa_skb_info *info;
+	struct homa_data_hdr h;
+	struct homa_rpc *srpc;
 	struct sk_buff *skb;
-	int i;
+	int offset, length;
 
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-		               self->server_ip, self->server_port,
-			       self->client_id, 6000, 1000);
-	ASSERT_EQ(5, crpc->msgout.num_skbs);
+	qdev = homa_qdisc_qdev_get(self->dev);
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->client_port, 1111,
+			       10000, 10000);
 
-	/* First call: no packets passed to IP stack. */
-	crpc->msgout.next_xmit_offset = 0;
-	EXPECT_EQ(0, homa_rpc_tx_end(crpc));
+	EXPECT_EQ(0, homa_rpc_tx_end(srpc));
 
-	for (skb = crpc->msgout.packets, i = 0; skb != NULL;
-	     skb = homa_get_skb_info(skb)->next_skb, i++) {
-		skbs[i] = skb;
-		skb_get(skb);
-		EXPECT_EQ(2, refcount_read(&skbs[i]->users));
-	}
-	EXPECT_EQ(5, i);
+	homa_rpc_lock(srpc);
+	srpc->msgout.granted = 5000;
+	homa_xmit_data(srpc, true);
+	EXPECT_EQ(5600, homa_rpc_tx_end(srpc));
 
-	/* Second call: all packets passed to IP, but no packets complete. */
-	crpc->msgout.next_xmit_offset = 6000;
-	EXPECT_EQ(0, homa_rpc_tx_end(crpc));
+	h.common = (struct homa_common_hdr){
+		.sport = htons(srpc->hsk->port),
+		.dport = htons(srpc->dport),
+		.type = DATA,
+		.sender_id = cpu_to_be64(srpc->id)
+	};
+	offset = 3000;
+	length = 1000;
+	h.message_length = htonl(srpc->msgout.length);
+	h.seg.offset = htonl(offset);
+	skb = mock_skb_alloc(self->client_ip, &h.common,
+			     length + sizeof(struct homa_skb_info), 0);
+	info = homa_get_skb_info(skb);
+	info->rpc = srpc;
+	info->data_bytes = length;
+	info->offset = offset;
+	info->dont_defer = 0;
+	qdisc_skb_cb(skb)->pkt_len = length + 100;
 
-	/* Third call: packets 0 and 3 transmitted. */
-	kfree_skb(skbs[0]);
-	kfree_skb(skbs[3]);
-	EXPECT_EQ(1400, homa_rpc_tx_end(crpc));
-	EXPECT_EQ(skbs[1], crpc->msgout.first_not_tx);
+	homa_qdisc_defer_homa(qdev, skb);
+	EXPECT_EQ(3000, homa_rpc_tx_end(srpc));
 
-	/* Fourth call: all packets transmitted. */
-	kfree_skb(skbs[1]);
-	kfree_skb(skbs[2]);
-	kfree_skb(skbs[4]);
-	EXPECT_EQ(6000, homa_rpc_tx_end(crpc));
-	EXPECT_EQ(NULL, crpc->msgout.first_not_tx);
+	homa_qdisc_xmit_deferred_homa(qdev);
+	EXPECT_EQ(5600, homa_rpc_tx_end(srpc));
+	homa_rpc_unlock(srpc);
+
+        homa_qdisc_qdev_put(qdev);
 }
+#endif /* See strip.py */

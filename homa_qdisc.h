@@ -447,4 +447,22 @@ static inline bool homa_qdisc_precedes(struct homa_rpc *rpc1,
 	return rpc1 < rpc2;
 }
 
+/**
+ * homa_qdisc_deferred_offset() - If there are any deferred packets
+ * for @rpc, return the smallest offset of any packet for that RPC that
+ * has been deferred but not subsequently transmitted. If there are no
+ * deferred packets, return -1.
+ * @rpc:     RPC to check.
+ * Return:   See above.
+ */
+static inline int homa_qdisc_deferred_offset(struct homa_rpc *rpc)
+{
+	/* This doesn't synchronize, but the worst that can happen is
+	 * to return a slightly out-of-date result.
+	 */
+	if (skb_queue_len(&rpc->qrpc.packets) > 0)
+		return rpc->msgout.length - rpc->qrpc.tx_left;
+	return -1;
+}
+
 #endif /* _HOMA_QDISC_H */

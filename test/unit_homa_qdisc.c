@@ -2462,7 +2462,10 @@ TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__update_all_qdevs)
 	kfree(qdisc2);
 }
 
-/* Inline functions in homa_qdisc.h: */
+/*-----------------------------------------------------
+ * Inline functions in homa_qdisc.h
+ *-----------------------------------------------------
+ */
 
 TEST_F(homa_qdisc, homa_qdisc_precedes__bytes_left)
 {
@@ -2529,4 +2532,26 @@ TEST_F(homa_qdisc, homa_qdisc_precedes__rpc_struct_address)
 	else
 		result = homa_qdisc_precedes(srpc3, srpc1);
 	EXPECT_EQ(1, result);
+}
+
+TEST_F(homa_qdisc, homa_qdisc_deferred_offset)
+{
+	struct homa_rpc *srpc;
+	struct homa_qdisc_dev *qdev;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->client_port,
+			       self->server_id, 10000, 10000);
+
+	EXPECT_EQ(-1, homa_qdisc_deferred_offset(srpc));
+
+	homa_qdisc_defer_homa(qdev,
+			      new_test_skb(srpc, &self->addr, 5000, 1500));
+	EXPECT_EQ(5000, homa_qdisc_deferred_offset(srpc));
+
+	homa_qdisc_xmit_deferred_homa(qdev);
+	EXPECT_EQ(-1, homa_qdisc_deferred_offset(srpc));
+
+        homa_qdisc_qdev_put(qdev);
 }

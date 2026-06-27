@@ -67,14 +67,6 @@ struct homa_message_out {
 	int next_xmit_offset;
 
 	/**
-	 * @first_not_tx: All packets in @packets preceding this one have
-	 * been confirmed to have been transmitted by the NIC (the driver
-	 * has released its reference). NULL means all packets are known to
-	 * have been transmitted. Used by homa_rpc_tx_end.
-	 */
-	struct sk_buff *first_not_tx;
-
-	/**
 	 * @to_free: Singly-linked list of packets that must be freed by
 	 * homa_rpc_reap. Initially holds retransmitted packets, but
 	 * eventually includes the packets in @packets. homa_rpc_reap uses

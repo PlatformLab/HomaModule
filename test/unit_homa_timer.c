@@ -63,15 +63,13 @@ TEST_F(homa_timer, homa_timer_check_rpc__request_ack)
 
 	/* First call: do nothing (response not fully transmitted). */
 	homa_rpc_lock(srpc);
+	homa_timer_check_rpc(srpc);
+	EXPECT_EQ(0, srpc->done_timer_ticks);
 #ifndef __STRIP__ /* See strip.py */
 	homa_xmit_data(srpc, false);
 #else /* See strip.py */
 	homa_xmit_data(srpc);
 #endif /* See strip.py */
-	skb_get(srpc->msgout.packets);
-	homa_timer_check_rpc(srpc);
-	EXPECT_EQ(0, srpc->done_timer_ticks);
-	kfree_skb(srpc->msgout.packets);
 
 	/* Second call: set done_timer_ticks. */
 	unit_log_clear();
