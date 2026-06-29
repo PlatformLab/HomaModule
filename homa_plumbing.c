@@ -1471,6 +1471,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		memcpy(control.bpage_offsets, rpc->msgin.bpage_offsets,
 		       sizeof(rpc->msgin.bpage_offsets));
 	}
+	memset(msg->msg_name, 0, msg->msg_namelen);
 	if (sk->sk_family == AF_INET6) {
 		struct sockaddr_in6 *in6 = msg->msg_name;
 
