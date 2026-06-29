@@ -166,13 +166,12 @@ void homa_destroy(struct homa *homa)
 }
 
 /**
- * homa_net_init() - Initialize a new struct homa_net as a per-net subsystem.
- * @hnet:    Struct to initialzie.
- * @net:     The network namespace the struct will be associated with.
+ * homa_net_init() - Initialize a new struct homa_net.
+ * @hnet:    Struct to initialize.
  * @homa:    The main Homa data structure to use for the net.
  * Return:  0 on success, otherwise a negative errno.
  */
-int homa_net_init(struct homa_net *hnet, struct net *net, struct homa *homa)
+int homa_net_init(struct homa_net *hnet, struct homa *homa)
 {
 	memset(hnet, 0, sizeof(*hnet));
 	hnet->homa = homa;

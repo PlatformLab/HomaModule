@@ -725,8 +725,7 @@ void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			   struct homa_rpc *rpc);
 void     homa_net_destroy(struct homa_net *hnet);
 void     homa_net_exit(struct net *net);
-int      homa_net_init(struct homa_net *hnet, struct net *net,
-		       struct homa *homa);
+int      homa_net_init(struct homa_net *hnet, struct homa *homa);
 int      homa_net_start(struct net *net);
 __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait);

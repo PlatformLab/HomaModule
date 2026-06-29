@@ -733,7 +733,7 @@ module_exit(homa_unload);
 int homa_net_start(struct net *net)
 {
 	pr_notice("Homa attaching to net namespace\n");
-	return homa_net_init(homa_net(net), net, &homa_data);
+	return homa_net_init(homa_net(net), &homa_data);
 }
 
 /**

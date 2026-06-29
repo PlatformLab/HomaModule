@@ -1998,7 +1998,7 @@ struct homa_net *mock_hnet(int index, struct homa *homa)
 	if (!hnet) {
 		hnet = malloc(sizeof(*hnet));
 		mock_hnets[index] = hnet;
-		homa_net_init(hnet, &mock_nets[index], homa);
+		homa_net_init(hnet, homa);
 		if (index == 0)
 			mock_dev(0, homa);
 	}
