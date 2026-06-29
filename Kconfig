@@ -5,7 +5,6 @@
 
 config HOMA
 	tristate "The Homa transport protocol"
-	depends on INET
 	depends on IPV6
 
 	help
