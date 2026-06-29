@@ -763,13 +763,13 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 			hsk->error_msg = "ipv6 address too short";
 			return -EINVAL;
 		}
-		port = ntohs(addr_in->in4.sin_port);
+		port = ntohs(addr_in->in6.sin6_port);
 	} else if (addr_in->in4.sin_family == AF_INET) {
 		if (addr_len < sizeof(struct sockaddr_in)) {
 			hsk->error_msg = "ipv4 address too short";
 			return -EINVAL;
 		}
-		port = ntohs(addr_in->in6.sin6_port);
+		port = ntohs(addr_in->in4.sin_port);
 	}
 	return homa_sock_bind(hsk->hnet, hsk, port);
 }
