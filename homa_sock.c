@@ -373,6 +373,11 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 * about locking.
 	 */
 	hsk->shutdown = true;
+
+	/* This protects against RPC deletions during the RCU scan of
+	 * active_rpcs below.
+	 */
+	atomic_inc(&hsk->protect_count);
 	homa_sock_unlock(hsk);
 
 	socktab = hsk->homa->socktab;
@@ -388,6 +393,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	}
 	wake_up_interruptible_poll(sk_sleep(&hsk->sock), EPOLLOUT);
 	rcu_read_unlock();
+	homa_unprotect_rpcs(hsk);
 
 	homa_sock_lock(hsk);
 	while (!list_empty(&hsk->interests))
