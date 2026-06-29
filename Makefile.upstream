@@ -2,7 +2,7 @@
 #
 # Makefile for the Linux implementation of the Homa transport protocol.
 
-obj-$(CONFIG_HOMA) := homa.o
+obj-$(CONFIG_HOMA) += homa.o
 homa-y:=        homa_incoming.o \
 		homa_interest.o \
 		homa_outgoing.o \
