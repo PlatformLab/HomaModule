@@ -799,6 +799,7 @@ struct homa_rpc *homa_rpc_find_server(struct homa_sock *hsk,
  * @info:  Structure in which to store the information.
  */
 void homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_gap *gap;
 
