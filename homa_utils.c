@@ -114,6 +114,10 @@ int homa_init(struct homa *homa)
 	homa->gro_busy_usecs = 5;
 #endif /* See strip.py */
 	homa->bpage_lease_usecs = 10000;
+#ifdef __STRIP__ /* See strip.py */
+	homa->bpage_lease_cycles =
+			homa_usecs_to_cycles(homa->bpage_lease_usecs);
+#endif /* See strip.py */
 #ifndef __STRIP__ /* See strip.py */
 	homa_incoming_sysctl_changed(homa);
 #endif /* See strip.py */
