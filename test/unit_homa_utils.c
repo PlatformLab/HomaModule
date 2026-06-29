@@ -65,7 +65,6 @@ TEST_F(homa_utils, homa_init__pacer_alloc_failure)
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.pacer);
-	homa_destroy(&homa2);
 }
 TEST_F(homa_utils, homa_init__grant_alloc_failure)
 {
@@ -75,7 +74,6 @@ TEST_F(homa_utils, homa_init__grant_alloc_failure)
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.grant);
-	homa_destroy(&homa2);
 }
 #endif /* See strip.py */
 TEST_F(homa_utils, homa_init__peertab_alloc_failure)
@@ -90,7 +88,6 @@ TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.peertab);
-	homa_destroy(&homa2);
 }
 TEST_F(homa_utils, homa_init__cant_allocate_port_map)
 {
@@ -104,7 +101,6 @@ TEST_F(homa_utils, homa_init__cant_allocate_port_map)
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.socktab);
-	homa_destroy(&homa2);
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_utils, homa_init__homa_skb_init_failure)
@@ -115,7 +111,6 @@ TEST_F(homa_utils, homa_init__homa_skb_init_failure)
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_SUBSTR("Couldn't initialize skb management (errno 12)",
 		      mock_printk_output);
-	homa_destroy(&homa2);
 }
 #endif /* See strip.py */
 

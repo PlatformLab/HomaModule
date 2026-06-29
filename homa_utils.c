@@ -21,9 +21,7 @@
  * homa_init() - Constructor for homa objects.
  * @homa:   Object to initialize.
  *
- * Return:  0 on success, or a negative errno if there was an error. Even
- *          if an error occurs, it is safe (and necessary) to call
- *          homa_destroy at some point.
+ * Return:  0 on success, or a negative errno if there was an error.
  */
 int homa_init(struct homa *homa)
 {
@@ -40,37 +38,39 @@ int homa_init(struct homa *homa)
 	if (IS_ERR(homa->qshared)) {
 		err = PTR_ERR(homa->qshared);
 		homa->qshared = NULL;
-		return err;
+		goto error;
 	}
 	homa->pacer = homa_pacer_alloc(homa);
 	if (IS_ERR(homa->pacer)) {
 		err = PTR_ERR(homa->pacer);
 		homa->pacer = NULL;
-		return err;
+		goto error;
 	}
 	homa->grant = homa_grant_alloc(homa);
 	if (IS_ERR(homa->grant)) {
 		err = PTR_ERR(homa->grant);
 		homa->grant = NULL;
-		return err;
+		goto error;
 	}
 #endif /* See strip.py */
 	homa->peertab = homa_peer_alloc_peertab();
 	if (IS_ERR(homa->peertab)) {
 		err = PTR_ERR(homa->peertab);
 		homa->peertab = NULL;
-		return err;
+		goto error;
 	}
 	homa->socktab = kmalloc(sizeof(*homa->socktab), GFP_KERNEL);
-	if (!homa->socktab)
-		return -ENOMEM;
+	if (!homa->socktab) {
+		err = -ENOMEM;
+		goto error;
+	}
 	homa_socktab_init(homa->socktab);
 #ifndef __STRIP__ /* See strip.py */
 	err = homa_skb_init(homa);
 	if (err) {
 		pr_err("Couldn't initialize skb management (errno %d)\n",
 		       -err);
-		return err;
+		goto error;
 	}
 #endif /* See strip.py */
 
@@ -118,6 +118,10 @@ int homa_init(struct homa *homa)
 	homa_incoming_sysctl_changed(homa);
 #endif /* See strip.py */
 	return 0;
+
+error:
+	homa_destroy(homa);
+	return err;
 }
 
 /**
