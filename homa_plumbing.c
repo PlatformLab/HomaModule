@@ -553,6 +553,14 @@ int __init homa_load(void)
 		goto error;
 	init_homa = true;
 
+	status = register_pernet_subsys(&homa_net_ops);
+	if (status != 0) {
+		pr_err("Homa got error from register_pernet_subsys: %d\n",
+		       status);
+		goto error;
+	}
+	init_net_ops = true;
+
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		pr_err("proto_register failed for homa_prot: %d\n", status);
@@ -624,14 +632,6 @@ int __init homa_load(void)
 	init_qdisc = true;
 #endif /* See strip.py */
 
-	status = register_pernet_subsys(&homa_net_ops);
-	if (status != 0) {
-		pr_err("Homa got error from register_pernet_subsys: %d\n",
-		       status);
-		goto error;
-	}
-	init_net_ops = true;
-
 	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
 	if (IS_ERR(timer_kthread)) {
 		status = PTR_ERR(timer_kthread);
@@ -666,8 +666,6 @@ error:
 	if (init_metrics)
 		homa_metrics_end();
 #endif /* See strip.py */
-	if (init_net_ops)
-		unregister_pernet_subsys(&homa_net_ops);
 	if (init_homa)
 		homa_destroy(homa);
 	if (init_protocol)
@@ -682,6 +680,8 @@ error:
 		proto_unregister(&homa_prot);
 	if (init_proto6)
 		proto_unregister(&homav6_prot);
+	if (init_net_ops)
+		unregister_pernet_subsys(&homa_net_ops);
 	return status;
 }
 
@@ -709,13 +709,13 @@ void __exit homa_unload(void)
 	unregister_net_sysctl_table(homa_ctl_header);
 	homa_metrics_end();
 #endif /* See strip.py */
-	unregister_pernet_subsys(&homa_net_ops);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
 	inet6_unregister_protosw(&homav6_protosw);
 	proto_unregister(&homa_prot);
 	proto_unregister(&homav6_prot);
+	unregister_pernet_subsys(&homa_net_ops);
 	homa_destroy(homa);
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_destroy();
