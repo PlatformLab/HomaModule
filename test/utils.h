@@ -40,7 +40,6 @@ struct homa_rpc
 int          unit_count_peers(struct homa *homa);
 struct in6_addr
 	     unit_get_in_addr(char *s);
-void         unit_homa_destroy(struct homa *homa);
 struct iov_iter
 	    *unit_iov_iter(void *buffer, size_t length);
 int          unit_list_length(struct list_head *head);

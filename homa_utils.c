@@ -127,11 +127,6 @@ int homa_init(struct homa *homa)
  */
 void homa_destroy(struct homa *homa)
 {
-#ifdef __UNIT_TEST__
-#include "utils.h"
-	unit_homa_destroy(homa);
-#endif /* __UNIT_TEST__ */
-
 	/* The order of the following cleanups matters! */
 	if (homa->socktab) {
 		homa_socktab_destroy(homa->socktab, NULL);

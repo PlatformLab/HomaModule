@@ -486,16 +486,6 @@ char *unit_ack_string(struct homa_ack *ack)
 }
 
 /**
- * unit_homa_destroy() - When unit tests are run, this function is invoked
- * by homa_destroy. It checks for various errors and reports them.
- * @homa:       Homa shared data that is about to be deleted.
- */
-void unit_homa_destroy(struct homa *homa)
-{
-	/* Currently nothing to check. */
-}
-
-/**
  * unit_sock_destroy() - Invoked by unit tests to cleanup and destroy
  * a socket.
  * @hsk:    Socket to destroy.
