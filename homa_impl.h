@@ -780,7 +780,7 @@ void     homa_xmit_data(struct homa_rpc *rpc, bool force);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			  int priority);
 #else /* See strip.py */
-int      homa_message_in_init(struct homa_rpc *rpc, int unsched);
+int      homa_message_in_init(struct homa_rpc *rpc, int length);
 void     homa_resend_data(struct homa_rpc *rpc, int start, int end);
 void     homa_xmit_data(struct homa_rpc *rpc);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc);

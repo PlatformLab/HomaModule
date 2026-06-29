@@ -44,7 +44,7 @@ int homa_message_in_init(struct homa_rpc *rpc, int length)
 {
 	int err;
 
-	if (length > HOMA_MAX_MESSAGE_LENGTH)
+	if (((unsigned int)length) > HOMA_MAX_MESSAGE_LENGTH)
 		return -EINVAL;
 
 	rpc->msgin.length = length;
