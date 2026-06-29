@@ -450,13 +450,9 @@ static struct ctl_table_header *homa_ctl_header;
 
 /* Thread that runs timer code to detect lost packets and crashed peers. */
 static struct task_struct *timer_kthread;
-static DECLARE_COMPLETION(timer_thread_done);
 
 /* Used to wakeup timer_kthread at regular intervals. */
 static struct hrtimer hrtimer;
-
-/* Nonzero is an indication to the timer thread that it should exit. */
-static int timer_thread_exit;
 
 /**
  * homa_load() - invoked when this module is loaded into the Linux kernel
@@ -651,11 +647,8 @@ int __init homa_load(void)
 	return 0;
 
 error:
-	if (timer_kthread) {
-		timer_thread_exit = 1;
-		wake_up_process(timer_kthread);
-		wait_for_completion(&timer_thread_done);
-	}
+	if (timer_kthread)
+		kthread_stop(timer_kthread);
 #ifndef __STRIP__ /* See strip.py */
 	if (init_qdisc)
 		homa_qdisc_unregister();
@@ -697,11 +690,8 @@ void __exit homa_unload(void)
 #ifndef __STRIP__ /* See strip.py */
 	homa_hijack_end();
 #endif /* See strip.py */
-	if (timer_kthread) {
-		timer_thread_exit = 1;
-		wake_up_process(timer_kthread);
-		wait_for_completion(&timer_thread_done);
-	}
+	if (timer_kthread)
+		kthread_stop(timer_kthread);
 #ifndef __STRIP__ /* See strip.py */
 	homa_qdisc_unregister();
 	if (homa_offload_end() != 0)
@@ -2045,18 +2035,17 @@ int homa_timer_main(void *transport)
 	tick_interval = ns_to_ktime(nsec);
 	while (1) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
-		if (!timer_thread_exit) {
+		if (!kthread_should_stop()) {
 			hrtimer_start(&hrtimer, tick_interval,
 				      HRTIMER_MODE_REL);
 			schedule();
 		}
 		__set_current_state(TASK_RUNNING);
-		if (timer_thread_exit)
+		if (kthread_should_stop())
 			break;
 		homa_timer(homa);
 	}
 	hrtimer_cancel(&hrtimer);
-	kthread_complete_and_exit(&timer_thread_done, 0);
 	return 0;
 }
 
