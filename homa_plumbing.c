@@ -945,6 +945,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 			continue;
 		}
 		homa_rpc_get_info(rpc, &rinfo);
+		homa_rpc_unlock(rpc);
 		if (dst && bytes_avl >= sizeof(rinfo) && result == 0) {
 			if (copy_to_user((void __user *)dst, &rinfo,
 					 sizeof(rinfo))) {
@@ -954,7 +955,6 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 			dst += sizeof(rinfo);
 			bytes_avl -= sizeof(rinfo);
 		}
-		homa_rpc_unlock(rpc);
 		hinfo.num_rpcs++;
 	}
 	kfree(rpcs);
