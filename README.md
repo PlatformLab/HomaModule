@@ -23,48 +23,14 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
 - Please contact me if you have any problems using this repo; I'm happy to
   provide advice and support.
 
-- The head is known to work under Linux 6.17.8. In the past, Homa has
-  run under several earlier versions of Linux. There is a separate branch
-  for each of these
-  older versions, with names such as linux_4.15.18. Older branches
-  are generally out of date feature-wise: recent commits have
-  not been back-ported to them. Other versions of Linux have not been tested and
-  may require code changes (typically this is easy to do). If you get Homa
-  working on some other version, please submit a pull request with the
-  required code changes. The branches `rhel8` and `rhel9.5` are known to run
-  on the corresdponding versions of Red Hat Enterprise Linux and are
-  relatively up to date.
-
-- Related work that you may find useful:
-  - [Preliminary support for using Homa with gRPC](https://github.com/PlatformLab/grpc_homa)
-  - [A Go client that works with this module](https://github.com/dpeckett/go-homa)
-
-- To build the module, type `make all`; then type `sudo insmod homa.ko` to install
-  it, and `sudo rmmod homa` to remove an installed module. In practice, though,
-  you'll probably want to do several other things as part of installing Homa.
-  I have created a Python script that I use for installing Homa on clusters
-  managed by the CloudLab project; it's in `cloudlab/bin/config`. I normally
-  invoke it with no parameters to install and configure Homa on the current
-  machine.
-
-- The script `cloudlab/bin/install_homa` will copy relevant Homa files
-  across a cluster of machines and configure Homa on each node. It assumes
-  that nodes have names `nodeN` where N is a small integer, and it also
-  assumes that you have already run `make` both in the top-level directory and
-  in `util`.
+- To build and install Homa, see instructions in `INSTALL.md`.
 
 - A collection of man pages is available in the "man" subdirectory. The API for
   Homa is different from TCP sockets.
 
-- For best Homa performance, you should also make the following configuration
-  changes:
-  - Enable priority queues in your switches, selected by the 3
-    high-order bits of the DSCP field in IPv4 packet headers or the 4
-    high-order bits of the Traffic Class field in IPv6 headers.
-    You can use `sysctl` to configure Homa's use of
-    priorities (e.g., if you want it to use fewer than 8 levels). See the man
-    page `homa.7` for more info.
-  - Enable jumbo frames on your switches and on the Linux nodes.
+- Related work that you may find useful:
+  - [Preliminary support for using Homa with gRPC](https://github.com/PlatformLab/grpc_homa)
+  - [A Go client that works with this module](https://github.com/dpeckett/go-homa)
 
 - NIC support: Homa is known to work with the following NICs:
   - Mellanox ConnectX-4, ConnectX-5, and ConnectX-6
@@ -126,9 +92,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant changes
-- March 2026: backported Homa to Linux version 4.18.0, using the
-  `linux_4.18.0` branch. Future changes made to the `main` branch are
-  likely to be reflected in this branch also.
+- March 2026: backported Homa to Red Hat Enterprise Linux versions
+  8 and 9.5, using the branches `rhel8` and `rhel9.5`. Future changes made to
+  the `main` branch are likely to be reflected in these branches also.
 - January 2026: introduced new 'homa_qdisc' queuing discpline to improve
   performance when TCP and Homa run simultaneously. Results on c6620 CloudLab
   cluster (100 Gbps network):
