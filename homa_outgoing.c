@@ -285,6 +285,8 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	gso_size = dst->dev->gso_max_size;
 	if (gso_size > rpc->hsk->homa->max_gso_size)
 		gso_size = rpc->hsk->homa->max_gso_size;
+	if (gso_size < mtu)
+		gso_size = mtu;
 	dst_release(dst);
 	if (max_seg_data <= 0) {
 		rpc->hsk->error_msg = "device MTU too small to support Homa packets";

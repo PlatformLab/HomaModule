@@ -105,7 +105,7 @@ int homa_init(struct homa *homa)
 #ifndef __STRIP__ /* See strip.py */
 	homa->verbose = 0;
 #endif /* See strip.py */
-	homa->max_gso_size = 10000;
+	homa->max_gso_size = 0;
 	homa->wmem_max = 100000000;
 #ifndef __STRIP__ /* See strip.py */
 	homa->max_gro_skbs = 20;

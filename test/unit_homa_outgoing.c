@@ -96,6 +96,7 @@ FIXTURE_SETUP(homa_outgoing)
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.pacer->cycles_per_mbyte = 1000000;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
+	self->homa.max_gso_size = 10000;
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
 	self->homa.qshared->fifo_fraction = 0;
@@ -447,6 +448,20 @@ TEST_F(homa_outgoing, homa_message_out_fill__mtu_unusable)
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(0, crpc->msgout.skb_memory);
 	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
+}
+TEST_F(homa_outgoing, homa_message_out_fill__round_gso_size_up_to_mtu)
+{
+	struct homa_rpc *crpc;
+
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	ASSERT_FALSE(crpc == NULL);
+
+	mock_mtu += 3600;
+	self->homa.max_gso_size = 0;
+	ASSERT_EQ(0, -homa_message_out_fill(crpc,
+		  unit_iov_iter((void *) 1000, 10000), 0));
+	homa_rpc_unlock(crpc);
+	EXPECT_SUBSTR("max_seg_data 5000, max_gso_data 5000;", unit_log_get());
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)
