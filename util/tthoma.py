@@ -10553,11 +10553,10 @@ class AnalyzeRx:
             f.write('#             data packets have not been transmitted by '
                     'the peer\n')
             f.write('# IP:         KB of data that have been passed to ip*xmit '
-                    'on sender (or\n')
-            f.write('#             requeued by homa_qdisc after being '
-                    'deferred) but not yet\n')
-            f.write('#             transmitted by NIC; large numbers probably '
-                    'indicate qdisc backup\n')
+                    'on sender but\n')
+            f.write('#             not yet transmitted by NIC; large numbers '
+                    'probably indicate\n')
+            f.write('#             qdisc backup\n')
             f.write('# Net:        KB of data that have been passed to the '
                     'NIC but not\n')
             f.write('#             yet received by GRO\n')
