@@ -17,14 +17,14 @@ parser = get_parser(description=
         usage='%(prog)s [options]')
 parser.add_argument('-B', '--benchmark', dest='config', default='homa',
         choices=['balance', 'both', 'both_balance', 'both_pacer', 'both_qdisc',
-                'buffers', 'busy_usecs', 'client_threads',
+                'buffers', 'busy_usecs', 'client_threads', 'dctcp',
                 'dctcp_buffers', 'defer_min_bytes', 'fifo', 'gbps',
                 'gen2', 'gen3', 'grant_policy', 'gro_busy_usecs',
                 'homa', 'homa_vs_tcp', 'load',
                 'max_gro', 'max_gso', 'max_incoming', 'mtu', 'nic_backlog',
-                'nic_queue', 'poll', 'ports', 'prios', 'receivers', 'repeat',
-                'tcp_buffers', 'throttle', 'time', 'unsched_bytes',
-                'window'],
+                'nic_queue', 'nodes', 'pacer', 'poll', 'ports', 'prios',
+                'receivers', 'repeat', 'tcp', 'tcp_buffers', 'tcp_nodes',
+                'throttle', 'time', 'unsched_bytes', 'window'],
         help='Benchmark to run (default: homa)')
 
 options = parser.parse_args()
@@ -205,6 +205,14 @@ elif options.config == 'client_threads':
                 'options': ['client_ports', ports,
                             'port_receivers', receivers]
                 })
+elif options.config == 'dctcp':
+    # Basic test of TCP latency
+    specs.append({'exp_name': 'dctcp',
+            'label': 'DCTCP',
+            'options': ['protocol', 'tcp'],
+            'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp'],
+            'no_qdisc': True
+    })
 elif options.config == 'dctcp_buffers':
     # Use DCTCP, vary the amount of buffer space in the switch
     if not options.workload:
@@ -370,6 +378,18 @@ elif options.config == 'nic_queue':
                 'label': 'nic pending %d us' % (micros),
                 'sysctl': ['.net.homa.max_nic_queue_usecs', micros]
                 })
+elif options.config == 'nodes':
+    # Vary the numbers of nodes in the experiment
+    for nodes in [10, 20, 30, 40, 50]:
+        specs.append({'exp_name': 'nodes%d' % (nodes),
+                'label': '%d nodes' % (nodes),
+                'options': ['num_nodes', nodes]
+                })
+elif options.config == 'pacer':
+    # Run Homa with the old pacer instead of homa_qdisc
+    specs.append({'exp_name': 'homa',
+            'label': 'Homa',
+            'no_qdisc': True})
 elif options.config == 'poll':
     # Vary the polling interval
     for poll in [0, 20, 30, 40, 50]:
@@ -407,6 +427,14 @@ elif options.config == 'repeat':
         specs.append({'exp_name': 'run%d' % (i),
                 'label': 'Run %d' % (i)
                 })
+elif options.config == 'tcp':
+    # Basic test of TCP latency
+    specs.append({'exp_name': 'tcp',
+            'label': 'TCP',
+            'options': ['protocol', 'tcp'],
+            'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic'],
+            'no_qdisc': True
+    })
 elif options.config == 'tcp_buffers':
     # Use TCP, vary the amount of buffer space in the switch
     if not options.workload:
@@ -418,6 +446,16 @@ elif options.config == 'tcp_buffers':
                 'options': ['protocol', 'tcp'],
                 'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic'],
                 'switch_buffer': mb})
+elif options.config == 'tcp_nodes':
+    # Measure TCP with varying numbers of nodes.
+    for nodes in [49, 40, 30, 20, 10]:
+        specs.append({'exp_name': 'tcp%dnodes' % (nodes),
+                'label': '%d nodes' % (nodes),
+                'options': ['protocol', 'tcp',
+                            'num_nodes', nodes],
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic'],
+                'no_qdisc': True
+                })
 elif options.config == 'throttle':
     # Vary the cuttoff for short messages that bypass the throttle mechanism
     for cutoff in [100, 200, 500, 1000]:
@@ -473,11 +511,14 @@ if not options.plot_only:
             for i in range(0, len(spec['sysctl']), 2):
                 name = spec['sysctl'][i]
                 value = spec['sysctl'][i+1]
-                if name not in old_values:
-                    old_values[name] = get_sysctl_parameter(name,
-                            options.nodes[0])
-                log("Setting %s = %s" % (name, value))
-                set_sysctl_parameter(name, value, options.nodes)
+                if name in old_values:
+                    old_value = old_values[name]
+                else:
+                    old_value = get_sysctl_parameter(name, options.nodes[0])
+                if value != old_value:
+                    old_values[name] = old_value
+                    log("Setting %s = %s" % (name, value))
+                    set_sysctl_parameter(name, value, options.nodes)
         if 'options' in spec:
             for i in range(0, len(spec['options']), 2):
                 name = spec['options'][i]
@@ -498,6 +539,10 @@ if not options.plot_only:
             log("Disabling homa_qdisc")
             do_ssh(["config", "reset_qdisc"], options.nodes)
 
+        # Choose nodes again, in case options related to node choice were
+        # changed.
+        choose_nodes(o)
+
         try:
             if not "both_homa_frac" in spec:
                 o.name = exp_name
@@ -516,7 +561,8 @@ if not options.plot_only:
                 run_experiments(homa_options, tcp_options)
         except Exception as e:
             log(traceback.format_exc())
-        for name, value in old_values.items():
+        while old_values:
+            name, value = old_values.popitem()
             print("Restoring %s to %s" % (name, value))
             set_sysctl_parameter(name, value, options.nodes)
         if 'no_qdisc' in spec:
