@@ -8349,6 +8349,32 @@ class AnalyzeNictx:
         plt.tight_layout()
         plt.savefig("%s/nictx_qtrend.pdf" % (options.plot), bbox_inches='tight')
 
+        # Generate time-series plot showing total queuing in the NIC alone
+        x_min = get_first_time()
+        x_max = get_last_time()
+        nodes = get_sorted_nodes()
+        maxy = max(max(node_data[node]['qdisc']) for node in nodes)
+        fig, axes = plt.subplots(nrows=len(nodes), ncols=1, sharex=False,
+                figsize=[8, len(nodes)*2])
+        for i in range(len(nodes)):
+            node = nodes[i]
+            ax = axes[i]
+            ax.set_xlim(x_min, x_max)
+            ax.set_xlabel('Time (%s)' % (node))
+            ax.set_ylim(0, maxy)
+            ax.set_ylabel('Kbytes Queued')
+            ax.grid(which="major", axis="y")
+            ax.plot(node_data[node]['t'], node_data[node]['nic'],
+                    color=color_red, label='Nic')
+        legend_handles = [
+            matplotlib.lines.Line2D([], [], color=c, marker='o',
+                    linestyle='None', markersize=8, label=label)
+            for c, label in [[color_red, 'Nic']]
+        ]
+        fig.legend(handles=legend_handles)
+        plt.tight_layout()
+        plt.savefig("%s/nictx_qtrend2.pdf" % (options.plot), bbox_inches='tight')
+
         # Generate time-series plot showing length of the longest NIC queue
         # for each node
         x_min = get_first_time()
