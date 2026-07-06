@@ -1774,6 +1774,44 @@ TEST_F(homa_qdisc, homa_qdisc_flush_rpc__free_packets)
 	EXPECT_EQ(NULL, qdev->oldest_rpc);
         homa_qdisc_qdev_put(qdev);
 }
+TEST_F(homa_qdisc, homa_qdisc_flush_rpc__update_last_defer_and_metrics)
+{
+	struct homa_rpc *srpc1, *srpc2;
+	struct homa_qdisc_dev *qdev;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	srpc1 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id, 10000, 10000);
+	ASSERT_NE(NULL, srpc1);
+	srpc2 = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+				&self->server_ip, self->client_port,
+				self->server_id + 2, 10000, 10000);
+	ASSERT_NE(NULL, srpc2);
+
+	mock_clock= 5000;
+	homa_qdisc_defer_homa(qdev, new_test_skb(srpc1, &self->addr, 1000, 500));
+	homa_qdisc_defer_homa(qdev, new_test_skb(srpc2, &self->addr, 2000, 500));
+	EXPECT_STREQ("[id 1237, offsets 2000]; [id 1235, offsets 1000]",
+		     unit_log_deferred(qdev));
+	EXPECT_EQ(5000, qdev->last_defer);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->nic_backlog_cycles);
+
+	/* First flush leaves some deferred packets. */
+	mock_clock = 12000;
+        homa_qdisc_flush_rpc(srpc1);
+	EXPECT_EQ(5000, qdev->last_defer);
+	EXPECT_STREQ("[id 1237, offsets 2000]", unit_log_deferred(qdev));
+	EXPECT_EQ(0, homa_metrics_per_cpu()->nic_backlog_cycles);
+
+	/* Second flush eliminates all deferred packets.*/
+        homa_qdisc_flush_rpc(srpc2);
+	EXPECT_EQ(0, qdev->last_defer);
+	EXPECT_STREQ("", unit_log_deferred(qdev));
+	EXPECT_EQ(7000, homa_metrics_per_cpu()->nic_backlog_cycles);
+
+        homa_qdisc_qdev_put(qdev);
+}
 
 TEST_F(homa_qdisc, homa_qdisc_update_link_idle__nic_idle)
 {

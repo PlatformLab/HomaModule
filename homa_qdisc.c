@@ -1029,17 +1029,22 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 	if (!qdev)
 		return;
 
-	/* Remove the RPC from the table of deferred RPCs. */
 	spin_lock_bh(&qdev->defer_lock);
 	if (skb_queue_len(&rpc->qrpc.packets) > 0) {
+		/* Remove the RPC from the table of deferred RPCs. */
 		rb_erase_cached(&rpc->qrpc.rb_node, &qdev->deferred_rpcs);
 		if (rpc == qdev->oldest_rpc)
 			qdev->oldest_rpc = NULL;
-	}
 
-	/* Free all of the RPC's deferred packets. */
-	while (skb_queue_len(&rpc->qrpc.packets) > 0)
-		kfree_skb(skb_dequeue(&rpc->qrpc.packets));
+		/* Free all of the RPC's deferred packets. */
+		while (skb_queue_len(&rpc->qrpc.packets) > 0)
+			kfree_skb(skb_dequeue(&rpc->qrpc.packets));
+
+		if (!homa_qdisc_any_deferred(qdev)) {
+			INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
+			qdev->last_defer = 0;
+		}
+	}
 	spin_unlock_bh(&qdev->defer_lock);
 }
 
