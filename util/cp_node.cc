@@ -229,7 +229,7 @@ std::mutex cmd_lock;
  * @fd_locks: used to synchronize concurrent accesses to the same fd
  * (indexed by fd).
  */
-#define MAX_FDS 10000
+#define MAX_FDS 100000
 std::atomic_bool fd_locks[MAX_FDS];
 
 /**
