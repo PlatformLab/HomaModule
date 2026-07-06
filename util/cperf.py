@@ -46,6 +46,11 @@ homa_prios = {}
 # The range of nodes currently running cp_node servers.
 server_nodes = range(0,0)
 
+# If a server's id appears as a key in this dictionary it means that we
+# have started a log file on that server. Values have no meaning. Used to
+# delete old log files the first time a server is started on the node
+log_nodes = {}
+
 # Directory containing log files.
 log_dir = ''
 
@@ -88,7 +93,7 @@ default_defaults = {
     'protocol':            'homa',
     'port_receivers':      None,
     'port_threads':        None,
-    'seconds':             30,
+    'seconds':             20,
     'server_ports':        None,
     'tcp_client_ports':    None,
     'tcp_port_receivers':  None,
@@ -96,7 +101,7 @@ default_defaults = {
     'tcp_port_threads':    None,
     'unsched':             0,
     'unsched_boost':       0.0,
-    'workload':            ''
+    'workload':            'w4'
 }
 
 # These defaults are used for 25 Gbps networks.
@@ -507,7 +512,7 @@ def start_nodes(ids, options):
               running
     options:  Command-line options that may affect node configuration
     """
-    global active_nodes, homa_prios, verbose
+    global active_nodes, homa_prios, verbose, log_nodes
     started = []
     for id in ids:
         if not id in active_nodes:
@@ -539,6 +544,10 @@ def start_nodes(ids, options):
     log_level = "verbose" if verbose else "normal"
     command = "log --file node.log --level %s" % (log_level)
     for id in started:
+        if not id in log_nodes:
+            do_subprocess(["ssh", "-o", "StrictHostKeyChecking=no",
+                    "node%d" % id, "rm", "-f", "node.log"])
+            log_nodes[id] = 1
         active_nodes[id].stdin.write(command + "\n")
         active_nodes[id].stdin.flush()
     wait_output("% ", started, command)
@@ -547,7 +556,7 @@ def stop_nodes():
     """
     Exit all of the nodes that are currently active.
     """
-    global active_nodes, server_nodes
+    global active_nodes, server_nodes, homa_prios
     for id, popen in homa_prios.items():
         do_subprocess(["ssh", "-o", "StrictHostKeyChecking=no",
                 "node%d" % id, "sudo", "pkill", "homa_prio"])
@@ -555,6 +564,7 @@ def stop_nodes():
             popen.wait(5.0)
         except subprocess.TimeoutExpired:
             log("Timeout killing homa_prio on node%d" % (id))
+    homa_prios = {}
     for id, node in active_nodes.items():
         node.stdin.write("exit\n")
         try:
@@ -892,12 +902,17 @@ def run_experiments(*args):
     homa_clients = []
     homa_servers= []
     tcp_nodes = []
+
+    # Prefix to use for Homa metrics files
+    metrics_name = None
     for exp in args:
         if exp.protocol == "homa":
             homa_clients.extend(exp.clients)
             homa_nodes.extend(exp.clients)
             homa_servers.extend(exp.servers)
             homa_nodes.extend(exp.servers)
+            if not metrics_name:
+                metrics_name = exp.name
         elif exp.protocol == "tcp":
             tcp_nodes.extend(exp.clients)
             tcp_nodes.extend(exp.servers)
@@ -976,7 +991,7 @@ def run_experiments(*args):
     if tcp_nodes:
         log("Waiting for TCP to warm up...")
         time.sleep(10)
-    if homa_nodes:
+    if metrics_name:
         if stripped:
             vlog("Skipping metrics initialization (Homa is stripped)")
         else:
@@ -999,23 +1014,24 @@ def run_experiments(*args):
     log("Retrieving data")
     for exp in args:
         do_cmd("dump_times %s.rtts %s" % (exp.name, exp.name), exp.clients)
-    if homa_nodes:
+    if metrics_name:
         if stripped:
                 vlog("Skipping final read of metrics (Homa is stripped)")
         else:
             vlog("Recording final metrics from nodes %s" % (homa_nodes))
             for id in homa_nodes:
-                f = open("%s/node%d.metrics" % (exp.log_dir, id), 'w')
+                f = open("%s/%s-%d.metrics" % (exp.log_dir, metrics_name, id),
+                        'w')
                 subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
                 f.close()
-            shutil.copyfile("%s/node%d.metrics" %
-                    (exp.log_dir, homa_clients[0]),
-                    "%s/reports/node%d.metrics" %
-                    (exp.log_dir, homa_clients[0]))
-            shutil.copyfile("%s/node%d.metrics" %
-                    (exp.log_dir, homa_servers[0]),
-                    "%s/reports/node%d.metrics" %
-                    (exp.log_dir, homa_servers[0]))
+            shutil.copyfile("%s/%s-%d.metrics" %
+                    (exp.log_dir, metrics_name, homa_clients[0]),
+                    "%s/reports/%s-%d.metrics" %
+                    (exp.log_dir, metrics_name, homa_clients[0]))
+            shutil.copyfile("%s/%s-%d.metrics" %
+                    (exp.log_dir, metrics_name, homa_servers[0]),
+                    "%s/reports/%s-%d.metrics" %
+                    (exp.log_dir, metrics_name, homa_servers[0]))
     do_cmd("stop senders", all_nodes)
     do_cmd("stop clients", all_nodes)
     for exp in args:
