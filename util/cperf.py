@@ -380,24 +380,13 @@ def get_parser(description, usage, defaults = {}):
             % (defaults['workload']))
     return parser
 
-def init(options):
+def choose_nodes(options):
     """
-    Initialize various global state, such as the log file.
+    Select which nodes to use for clients and servers in the experiment.
+    options:   Contains command-line options that control the node
+               selection; fields related to nodes will be created or
+               replaced if they arleady exist.
     """
-    global log_dir, log_file, verbose, delete_rtts, link_mbps
-    global stripped
-    log_dir = options.log_dir
-    if not options.plot_only:
-        if os.path.exists(log_dir):
-            shutil.rmtree(log_dir)
-        os.makedirs(log_dir)
-        os.makedirs(log_dir + "/reports")
-    log_file = open("%s/reports/%s" % (log_dir, options.cperf_log), "a")
-    verbose = options.verbose
-    vlog("cperf starting at %s" % (date_time))
-    s = ""
-
-    # Figure out which nodes to use for the experiment
     skips = {}
     if options.skip:
         for spec in options.skip.split(","):
@@ -419,6 +408,25 @@ def init(options):
     options.nodes = nodes
     options.servers = options.nodes
     options.clients = options.nodes
+
+def init(options):
+    """
+    Initialize various global state, such as the log file.
+    """
+    global log_dir, log_file, verbose, delete_rtts, link_mbps
+    global stripped
+    log_dir = options.log_dir
+    if not options.plot_only:
+        if os.path.exists(log_dir):
+            shutil.rmtree(log_dir)
+        os.makedirs(log_dir)
+        os.makedirs(log_dir + "/reports")
+    log_file = open("%s/reports/%s" % (log_dir, options.cperf_log), "a")
+    verbose = options.verbose
+    vlog("cperf starting at %s" % (date_time))
+    s = ""
+
+    choose_nodes(options)
 
     # Log configuration information, including options here as well
     # as Homa's configuration parameters.
@@ -530,7 +538,7 @@ def start_nodes(ids, options):
         if options.protocol == "homa":
             if options.set_ids:
                 set_sysctl_parameter(".net.homa.next_id",
-                        str(100000000*(id+1)), [id])
+                        str(10000000*(id+1)), [id])
             if not options.no_homa_prio:
                 f = open("%s/homa_prio-%d.log" % (log_dir,id), "w")
                 homa_prios[id] = subprocess.Popen(["ssh", "-o",
