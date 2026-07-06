@@ -1,6 +1,9 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Fix redundancies between README.md and INSTALL.md; reread INSTALL.md.
+  Also, need note about homa_prio installation.
+
 * By sharing peers across sockets, Homa doesn't account for information
   in the flows such as sk_uid, sk_mark, tos, and sk_bound_dev_if, which
   could vary from socket to socket. This means a socket for one user could
