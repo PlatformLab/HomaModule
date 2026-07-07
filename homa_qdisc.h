@@ -162,7 +162,8 @@ struct homa_qdisc_dev {
 
 	/**
 	 * @last_defer: The most recent homa_clock() time when a packet was
-	 * deferred, or 0 if there are currently no deferred packets.
+	 * deferred, or 0 if there are currently no deferred packets. Must
+	 * hold defer_lock to modify.
 	 */
 	u64 last_defer;
 
@@ -416,8 +417,7 @@ static inline void homa_qdisc_rpc_init(struct homa_rpc_qdisc *qrpc)
  */
 static inline bool homa_qdisc_any_deferred(struct homa_qdisc_dev *qdev)
 {
-	return rb_first_cached(&qdev->deferred_rpcs) ||
-	       !list_empty(&qdev->deferred_qdiscs);
+	return READ_ONCE(qdev->last_defer) != 0;
 }
 
 /**

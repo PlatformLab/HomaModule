@@ -996,7 +996,7 @@ TEST_F(homa_qdisc, homa_qdisc_defer_tcp__update_metrics_and_wakeup)
 	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, 7000, 1500));
 	EXPECT_EQ(15000, q->qdev->last_defer);
 	EXPECT_EQ(10000, homa_metrics_per_cpu()->nic_backlog_cycles);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_STREQ("wake_up", unit_log_get());
 }
 
 TEST_F(homa_qdisc, homa_qdisc_defer_homa__basics)

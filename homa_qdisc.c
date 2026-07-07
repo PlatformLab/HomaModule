@@ -719,10 +719,9 @@ void homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb)
 		list_add_tail(&q->defer_links, &qdev->deferred_qdiscs);
 	if (qdev->last_defer)
 		INC_METRIC(nic_backlog_cycles, now - qdev->last_defer);
-	else
-		wake_up(&qdev->pacer_sleep);
 	qdev->last_defer = now;
 	spin_unlock_bh(&qdev->defer_lock);
+	wake_up_interruptible(&qdev->pacer_sleep);
 }
 
 /**
@@ -750,10 +749,9 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 	}
 	if (qdev->last_defer)
 		INC_METRIC(nic_backlog_cycles, now - qdev->last_defer);
-	else
-		wake_up(&qdev->pacer_sleep);
 	qdev->last_defer = now;
 	spin_unlock_bh(&qdev->defer_lock);
+	wake_up_interruptible(&qdev->pacer_sleep);
 }
 
 /**
@@ -831,7 +829,8 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 	skb = __skb_dequeue(&q->deferred_tcp);
 	if (skb_queue_empty(&q->deferred_tcp)) {
 		list_del_init(&q->defer_links);
-		if (!homa_qdisc_any_deferred(qdev)) {
+		if (!rb_first_cached(&qdev->deferred_rpcs) &&
+	            list_empty(&qdev->deferred_qdiscs)) {
 			INC_METRIC(nic_backlog_cycles,
 				   homa_clock() - qdev->last_defer);
 			qdev->last_defer = 0;
@@ -950,7 +949,8 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 		qdev->srpt_bytes -= qdisc_pkt_len(skb);
 	}
 
-	if (!homa_qdisc_any_deferred(qdev)) {
+	if (!rb_first_cached(&qdev->deferred_rpcs) &&
+	    list_empty(&qdev->deferred_qdiscs)) {
 		INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
 		qdev->last_defer = 0;
 	}
@@ -1040,7 +1040,8 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 		while (skb_queue_len(&rpc->qrpc.packets) > 0)
 			kfree_skb(skb_dequeue(&rpc->qrpc.packets));
 
-		if (!homa_qdisc_any_deferred(qdev)) {
+		if (!rb_first_cached(&qdev->deferred_rpcs) &&
+	    	    list_empty(&qdev->deferred_qdiscs)) {
 			INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
 			qdev->last_defer = 0;
 		}
