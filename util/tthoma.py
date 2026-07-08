@@ -5428,6 +5428,7 @@ class AnalyzeIntervals:
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
         self.tx_qid = None
 
         # Node name -> list of <time, length> pairs, where time gives the
@@ -5553,6 +5554,7 @@ class AnalyzeIntervals:
         """
 
         global rpcs, packets, grants, max_unsched, traces, options, intervals
+        global tcp_packets
 
         # Node name -> list of <time, length> pairs, where time gives the
         # time when a packet was handed off to the NIC (or passed to ip*xmit)
@@ -5637,13 +5639,14 @@ class AnalyzeIntervals:
                             add_to_intervals(tx_node, nic_start, nic_end2,
                                     'tx_in_nic_qx', tso_length)
 
-                if txmit != None:
-                    interval = get_interval(tx_node, txmit)
-                    interval['tx_pkts'] += 1
-                    interval['tx_bytes'] += tso_length
-                    if tnic != None:
-                        add_to_intervals(tx_node, txmit, tnic,
-                            'tx_qdisc', tso_length)
+                if txmit != None or tnic != None:
+                    t1 = txmit if txmit != None else traces[tx_node]['first_time']
+                    t2 = tnic if tnic != None else traces[tx_node]['last_time']
+                    interval = get_interval(tx_node, t1)
+                    if txmit != None:
+                        interval['tx_pkts'] += 1
+                        interval['tx_bytes'] += tso_length
+                    add_to_intervals(tx_node, t1, t2, 'tx_qdisc', tso_length)
 
                 if tnic != None:
                     node_xmits[tx_node].append([tnic,
@@ -7990,14 +7993,14 @@ class AnalyzeNictx:
         type_counts = defaultdict(lambda: 0)
         for pkt in itertools.chain(packets.values(), tcp_packets.values(),
                 grants.values()):
-            if not pkt['tx_node'] or not 'tx_qid' in pkt:
+            if not pkt['tx_node']:
                 continue
             if pkt['type'] == 'grant':
                 length = 0
             elif not 'tso_length' in pkt:
                 continue
             node = pkt['tx_node']
-            if 'nic' in pkt or 'free_tx_skb' in pkt:
+            if 'xmit' in pkt or 'nic' in pkt or 'free_tx_skb' in pkt:
                 node_pkts[node].append(pkt)
                 type_counts[pkt['type']] += 1
 
@@ -8041,8 +8044,12 @@ class AnalyzeNictx:
             for pkt in node_pkts[node]:
                 events.append([pkt['xmit'] if 'xmit' in pkt else first_time,
                         'xmit', pkt])
-                events.append([pkt['nic'] if 'nic' in pkt else first_time,
-                        'nic', pkt])
+                if 'nic' in pkt:
+                    events.append([pkt['nic'], 'nic', pkt])
+                elif 'free_tx_skb' in pkt:
+                    events.append([first_time, 'nic', pkt])
+                else:
+                    events.append([last_time, 'nic', pkt])
                 events.append([pkt['free_tx_skb'] if 'free_tx_skb' in pkt
                         else last_time, 'freed', pkt])
             events.sort(key=lambda t: t[0])
@@ -8103,7 +8110,7 @@ class AnalyzeNictx:
                     interval_end += options.interval
 
                 # Process event
-                qid = pkt['tx_qid']
+                qid = pkt['tx_qid'] if 'tx_qid' in pkt else None
                 if pkt['type'] == 'grant':
                     length = get_hdr_length(pkt)
                 else:
@@ -8111,16 +8118,18 @@ class AnalyzeNictx:
                 if event == 'xmit':
                     qdisc_bytes += length
                 elif event == 'nic':
-                    qid_packets[qid] += 1
-                    qid_bytes[qid] += length
+                    if qid != None:
+                        qid_packets[qid] += 1
+                        qid_bytes[qid] += length
                     nic_pkts += 1
                     nic_bytes += length
                     qdisc_bytes -= length
                     if 'nic' in pkt:
                         next[4] += length
                 elif event == 'freed':
-                    qid_packets[qid] -= 1
-                    qid_bytes[qid] -= length
+                    if qid != None:
+                        qid_packets[qid] -= 1
+                        qid_bytes[qid] -= length
                     nic_pkts -= 1
                     nic_bytes -= length
                     # if nic_bytes < 1000000:
