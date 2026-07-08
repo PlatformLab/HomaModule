@@ -8353,7 +8353,7 @@ class AnalyzeNictx:
         x_min = get_first_time()
         x_max = get_last_time()
         nodes = get_sorted_nodes()
-        maxy = max(max(node_data[node]['qdisc']) for node in nodes)
+        maxy = max(max(node_data[node]['nic']) for node in nodes)
         fig, axes = plt.subplots(nrows=len(nodes), ncols=1, sharex=False,
                 figsize=[8, len(nodes)*2])
         for i in range(len(nodes)):
@@ -11623,7 +11623,7 @@ class AnalyzeSync:
         # node -> rpc_id -> <times>. For each node number, contains a
         # dictionary mapping from RPC identifiers to a list of unadjusted
         # times when a busy or resend packet was transmitted for rpc_id.
-        # Rpc_id the id on the sender.
+        # Rpc_id is the id on the sender.
         self.ctl_tx = defaultdict(lambda: defaultdict(list))
 
         # rpc_id -> times. Times is a list of unadjusted times when resend or
@@ -11779,27 +11779,20 @@ class AnalyzeSync:
         for i in range(len(nodes)):
             self.node_id[nodes[i]] = i
 
-    def find_min_delays(self):
+    def find_delays(self):
         """
-        Return a list containing two elements:
-
-        min_delays: a two-level list. min_delays[src][dst] gives the
-        smallest observed delay for a packet to get from src to dst, as
-        measured with the node's unadjusted clocks (the delay in one direction
-        between two nodes may be negative due to clock misalignment). src
-        and dst are node indexes within the result of get_sorted_nodes().
-        An element may be None if there were no packets between the two nodes.
-
-        min_times: a two-level list like min_delays; each entry is a list
-        containing the transmit and receive times (unadjusted clocks) for
-        the packet that produced the entry in min_delays. This is computed
-        for debugging purposes and may not actually be used.
+        Returns a four-level list of delays. delays[src][dst] consists
+        of a list of all data points for packets transmitted from src to
+        dest, where src and dst are node indexes within the result of
+        get_sorted_nodes(). Each data point is a list of [delay, tx, rx], where
+        delay is the one-way delay from src to dst, as measured with the nodes'
+        unadjusted clocks (this may be negative due to clock misalignment). Tx
+        and rx are the times when the packet was sent and received,
+        measured with unadjusted clocks.
         """
 
         num_nodes = len(get_sorted_nodes())
-        min_delays = [[None for _ in range(num_nodes)]
-                for _ in range(num_nodes)]
-        min_times = [[None for _ in range(num_nodes)]
+        delays = [[[] for _ in range(num_nodes)]
                 for _ in range(num_nodes)]
 
         for key, tx_info in self.tx_pkts.items():
@@ -11812,10 +11805,7 @@ class AnalyzeSync:
             rx_time, rx_node = self.rx_pkts[key]
             rx_id = self.node_id[rx_node]
             delay = rx_time - tx_time
-            cur = min_delays[tx_id][rx_id]
-            if cur == None or delay < cur:
-                min_delays[tx_id][rx_id] = delay
-                min_times[tx_id][rx_id] = [tx_time, rx_time]
+            delays[tx_id][rx_id].append([delay, tx_time, rx_time])
 
         for key, tx_info in self.tcp_tx.items():
             if not key in self.tcp_rx:
@@ -11825,20 +11815,16 @@ class AnalyzeSync:
             rx_time, rx_node = self.tcp_rx[key]
             rx_id = self.node_id[rx_node]
             delay = rx_time - tx_time
-            cur = min_delays[tx_id][rx_id]
-            if cur == None or delay < cur:
-                min_delays[tx_id][rx_id] = delay
-                min_times[tx_id][rx_id] = [tx_time, rx_time]
+            delays[tx_id][rx_id].append([delay, tx_time, rx_time])
 
-        return min_delays, min_times
+        return delays
 
-    def find_min_delays_alt(self, min_delays, min_times):
+    def find_delays_alt(self, delays):
         """
-        Update the information in min_delays and min_times using resend
-        and busy packets. This is useful in situations where the cluster has
-        stalled so there aren't any data/grant packets.
-        min_delays:   As returned by find_min_delays.
-        min_times:    As returned by find_min_delays.
+        Add the information in delays using resend and busy packets. This is
+        useful in situations where the cluster has stalled so there aren't
+        any data/grant packets.
+        delays:       As returned by find_delays.
 
         Note: in January 2026 this method was transcribed from the old
         ttsync.py program. However, there was no trace data available at the
@@ -11871,13 +11857,10 @@ class AnalyzeSync:
             freeze_delay = recv_time - send_time
             ftx_nid = self.node_id[fsend_node]
             frx_nid = self.node_id[frecv_node]
-            if (min_delays[ftx_nid][frx_nid] == None or
-                    freeze_delay < min_delays[ftx_nid][frx_nid]):
-                min_delays[ftx_nid][frx_nid] = freeze_delay
-                min_times[ftx_nid][frx_nid] = [send_time, recv_time]
+            delays[ftx_nid][frx_nid].append([freeze_delay, send_time, recv_time])
 
             # Scan control packets in reverse direction from freeze.
-            min_delay = min_delays[frx_nid][ftx_nid]
+            min_reverse = 1e20
             for id, send_times in self.ctl_tx[frecv_node].items():
                 rx_id = id ^ 1
                 if (not rx_id in self.id_node or
@@ -11886,17 +11869,14 @@ class AnalyzeSync:
                 for send in send_times:
                     for recv in self.ctl_rx[rx_id]:
                         delay = recv - send
-                        if freeze_delay + delay > 0 and (min_delay == None
-                                or delay < min_delay):
-                            min_delay = delay
-                            min_delays[frx_nid][ftx_nid] = delay
-                            min_times[frx_nid][ftx_nid] = [send, recv]
+                        if freeze_delay + delay > 0:
+                            delays[frx_nid][ftx_nid].append([delay, send, recv])
+                            if delay < min_reverse:
+                                min_reverse = delay;
 
             # Scan control packets in same direction as freeze.
-            reverse_delay = min_delay
-            if reverse_delay == None:
+            if min_reverse == 1e20:
                 continue
-            min_delay = min_delays[ftx_nid][frx_nid]
             for id, send_times in self.ctl_tx[fsend_node].items():
                 rx_id = id ^ 1
                 if (not rx_id in self.id_node or
@@ -11905,17 +11885,16 @@ class AnalyzeSync:
                 for send in send_times:
                     for recv in self.ctl_rx[rx_id]:
                         delay = recv - send
-                        if reverse_delay + delay > 0 and (min_delay == None or
-                                delay < min_delay):
-                            min_delay = delay
-                            min_delays[ftx_nid][frx_nid] = delay
-                            min_times[ftx_nid][frx_nid] = [send, recv]
+                        if min_reverse + delay > 0:
+                            delays[ftx_nid][frx_nid].append([delay, send, recv])
 
-    def get_offsets(self, min_delays):
+    def get_offsets(self, delays):
         """
-        Compute clock offsets for each node. The min_delays parameter is
-        a two-level list as described for the min_delays result from
-        find_min_delays. The result is a list with three elements:
+        Compute clock offsets for each node. The delays parameter is
+        a four-level list as described for the delays result from
+        find_delays, except that the lists of data points for each node
+        pair must be in sorted order (minimum delay first). The result is a
+        list with three elements:
 
         min_offsets: a list with one element for each node in get_sorted_nodes(),
         containing the minimum valid clock offset for that node, or None if
@@ -11930,8 +11909,8 @@ class AnalyzeSync:
         value was modified during that iteration.
         """
 
-        min_offsets = [None for _ in range(len(min_delays))]
-        max_offsets = [None for _ in range(len(min_delays))]
+        min_offsets = [None for _ in range(len(delays))]
+        max_offsets = [None for _ in range(len(delays))]
         min_offsets[0] = 0
         max_offsets[0] = 0
         stats = []
@@ -11947,29 +11926,31 @@ class AnalyzeSync:
                     # Given the valid range of offsets for node i, update the
                     # valid range for node j to ensure that packets between
                     # them cannot arrive before they were sent.
-                    delay_from = min_delays[i][j]
-                    if min_offsets[i] != None and delay_from != None:
-                        min = min_offsets[i] - delay_from
-                        # print('  Min from %d to %d: min_offsets[%d] %.1f, delay %.1f, min %.1f, min_offsets[%d] %s'
-                        #         % (i, j, i, min_offsets[i], delay_from, min,
-                        #         j, min_offsets[j]))
-                        if min_offsets[j] == None or min_offsets[j] < min:
-                            num_updates += 1
-                            min_offsets[j] = min
-                            # print('  Updated min_offsets[%d] to %.1f' % (
-                            #         j, min))
+                    if delays[i][j]:
+                        delay_from = delays[i][j][0][0]
+                        if min_offsets[i] != None:
+                            min = min_offsets[i] - delay_from
+                            # print('  Min from %d to %d: min_offsets[%d] %.1f, delay %.1f, min %.1f, min_offsets[%d] %s'
+                            #         % (i, j, i, min_offsets[i], delay_from, min,
+                            #         j, min_offsets[j]))
+                            if min_offsets[j] == None or min_offsets[j] < min:
+                                num_updates += 1
+                                min_offsets[j] = min
+                                # print('  Updated min_offsets[%d] to %.1f' % (
+                                #         j, min))
 
-                    delay_to = min_delays[j][i]
-                    if max_offsets[i] != None and delay_to != None:
-                        max = max_offsets[i] + delay_to
-                        # print('  Max from %d to %d: max_offsets[%d] %.1f, delay %.1f, max %.1f, max_offsets[%d] %s'
-                        #         % (i, j, i, max_offsets[i], delay_to, max,
-                        #         j, max_offsets[j]))
-                        if max_offsets[j] == None or max_offsets[j] > max:
-                            num_updates += 1
-                            max_offsets[j] = max
-                            # print('  Updated max_offsets[%d] to %.1f' % (
-                            #         j, max))
+                    if delays[j][i]:
+                        delay_to = delays[j][i][0][0]
+                        if max_offsets[i] != None:
+                            max = max_offsets[i] + delay_to
+                            # print('  Max from %d to %d: max_offsets[%d] %.1f, delay %.1f, max %.1f, max_offsets[%d] %s'
+                            #         % (i, j, i, max_offsets[i], delay_to, max,
+                            #         j, max_offsets[j]))
+                            if max_offsets[j] == None or max_offsets[j] > max:
+                                num_updates += 1
+                                max_offsets[j] = max
+                                # print('  Updated max_offsets[%d] to %.1f' % (
+                                #         j, max))
             stats.append(num_updates)
             if num_updates == 0:
                 break
@@ -12024,27 +12005,33 @@ class AnalyzeSync:
                     self.node_pkts[node]['tcp_tx'],
                     self.node_pkts[node]['tcp_rx']))
 
-        min_delays, min_times = self.find_min_delays()
-        self.find_min_delays_alt(min_delays, min_times)
-        errors = 0
-        for i in range(len(min_delays)):
-            for j in range(i+1, len(min_delays)):
-                if min_delays[i][j] == None or min_delays[j][i] == None:
-                    continue
-                rtt = min_delays[i][j] + min_delays[j][i]
-                if rtt > 0:
-                    continue
-                errors += 1
-                print('Negative RTT %.1f: %s (%.3f) -> %s (%.3f), '
-                        '%s (%.3f) -> %s (%.3f)' % (rtt,
-                        nodes[i], min_times[i][j][0],
-                        nodes[j], min_times[i][j][1],
-                        nodes[j], min_times[j][i][0],
-                        nodes[i], min_times[j][i][1]), file=sys.stderr)
-        if errors:
-            raise Exception('Aborting because of negative RTTs')
+        delays = self.find_delays()
+        self.find_delays_alt(delays)
 
-        min_offsets, max_offsets, stats = self.get_offsets(min_delays)
+        # Sort the data points to in increasing order of delay.
+        for i in range(len(delays)):
+            for j in range(len(delays)):
+                delays[i][j].sort()
+
+        # Remove minima that lead to negative RTTs, so that we know no
+        # negative RTTs will result from using the first point in each
+        # list.
+        for i in range(len(delays)):
+            for j in range(len(delays)):
+                forward = delays[i][j]
+                reverse = delays[j][i]
+                while forward and reverse and forward[0][0] + reverse[0][0] < 0:
+                    print('Ignoring negative RTT %.1f: %s (%.3f) -> %s (%.3f), '
+                            '%s (%.3f) -> %s (%.3f)' % (
+                            forward[0][0] + reverse[0][0],
+                            nodes[i], forward[0][1],
+                            nodes[j], forward[0][2],
+                            nodes[j], reverse[0][1],
+                            nodes[i], reverse[0][2]), file=sys.stderr)
+                    forward.pop(0)
+                    reverse.pop(0)
+
+        min_offsets, max_offsets, stats = self.get_offsets(delays)
 
         print('\nMin/max updates made in each round of the offset '
                 'calculation:')
@@ -12660,7 +12647,7 @@ class AnalyzeTcpdelay:
                 if delay >= min_delay and delay <= max_delay:
                     self.get_pkt_delays(pkt, p99)
 
-            print('\nAcks:')
+            print('\nP98-P99 Acks')
             print('Xmit     %s' % print_pcts(p99['nic']))
             print('Qdisc    %s' % print_pcts(p99['qdisc']))
             print('Gro      %s' % print_pcts(p99['gro']))
