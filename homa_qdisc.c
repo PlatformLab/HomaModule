@@ -154,15 +154,15 @@ static struct Qdisc_ops homa_qdisc_ops __read_mostly = {
  */
 static inline bool is_homa_pkt(struct sk_buff *skb)
 {
-	int protocol;
+	int eth_prot, protocol;
 
-	/* If the network header hasn't been created yet, assume it's a
-	 * Homa packet (Homa never generates any non-Homa packets).
-	 */
-	if (skb->network_header == 0)
-		return true;
-	protocol = (skb_is_ipv6(skb)) ? ipv6_hdr(skb)->nexthdr :
-					ip_hdr(skb)->protocol;
+	eth_prot = ntohs(skb_protocol(skb, true));
+	if (eth_prot == ETH_P_IP)
+		protocol = ip_hdr(skb)->protocol;
+	else if (eth_prot == ETH_P_IPV6)
+		protocol = ipv6_hdr(skb)->nexthdr;
+	else
+		return false;
 	return protocol == IPPROTO_HOMA ||
 		(protocol == IPPROTO_TCP && homa_skb_hijacked(skb));
 }

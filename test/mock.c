@@ -1529,6 +1529,11 @@ __wsum skb_checksum(const struct sk_buff *skb, int offset, int len, __wsum csum)
 	return 0;
 }
 
+int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
+{
+	return -EFAULT;
+}
+
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		struct iov_iter *iter, int size)
 {
