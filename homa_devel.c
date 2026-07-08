@@ -115,7 +115,7 @@ char *homa_print_ipv6_addr(const struct in6_addr *addr)
 	} else {
 		const char *inet_ntop(int af, const void *src, char *dst,
 				      size_t size);
-		inet_ntop(AF_INET6, addr, buffer + 1, BUF_SIZE);
+		inet_ntop(AF_INET6, addr, buffer + 1, BUF_SIZE - 2);
 		buffer[0] = '[';
 		strcat(buffer, "]");
 	}
