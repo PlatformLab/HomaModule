@@ -128,7 +128,7 @@ elif options.config == 'both':
     curves = [
         ["tcp_pacer_%s" % workload, "TCP P99", tcp_color, "p99"],
         ["tcp_qdisc_%s" % workload, "TCP P99 qdisc", homa_color, "p99"],
-        ["tcp_pacer_%s" % workload, "TCP P50", tcp_color, "p50"],
+        ["tcp_pacer_%s" % workload, "TCP P50", tcp_color2, "p50"],
         ["tcp_qdisc_%s" % workload, "TCP P50 qdisc", homa_color2, "p50"]
     ]
     plots.append(["rtt", "%s/reports/tcp_%s_rtt.pdf" %
