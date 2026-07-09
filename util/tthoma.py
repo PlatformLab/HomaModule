@@ -2724,6 +2724,7 @@ class AnalyzeActivity:
         dispatcher.interest('AnalyzePackets')
         dispatcher.interest('AnalyzeGrants')
         dispatcher.interest('AnalyzeIntervals')
+        dispatcher.interest('AnalyzeTcppackets')
 
     def analyze(self):
         global rpcs, packets, traces
@@ -2857,7 +2858,7 @@ class AnalyzeActivity:
             node_stats['homa_grants'] += 1
 
         for pkt in tcp_packets.values():
-            if pkt['tx_node']:
+            if not pkt['tx_node']:
                 continue
             node_stats = nodes[pkt['tx_node']]
             if not 'tso_length' in pkt:
@@ -5430,16 +5431,7 @@ class AnalyzeIntervals:
         dispatcher.interest('AnalyzePackets')
         dispatcher.interest('AnalyzeTcppackets')
         self.tx_qid = None
-
-        # Node name -> list of <time, length> pairs, where time gives the
-        # time when a packet was handed off to the NIC and length gives
-        # the total length of the packet in bytes.
-        self.tcp_xmits = defaultdict(list)
         return
-
-    def tt_tcp_xmit(self, trace, t, core, source, dest, data_bytes,
-                    seq_ack):
-        self.tcp_xmits[trace['node']].append([t, data_bytes])
 
     def restrict_qid(self, qid):
         """
@@ -5560,8 +5552,6 @@ class AnalyzeIntervals:
         # time when a packet was handed off to the NIC (or passed to ip*xmit)
         # and length gives the total length of the packet in bytes.
         node_xmits = defaultdict(list)
-        for node, xmits in self.tcp_xmits.items():
-            node_xmits[node].extend(xmits)
 
         # Total number of bytes a grant packet occupies on the wire, including
         # headers, inter-packet gap, etc.
@@ -8023,10 +8013,11 @@ class AnalyzeNictx:
         # node -> dict containing data series for plotting:
         # t:       list of time values for the other data series
         # qdisc:   for each t, kbytes queued in qdiscs or NIC at t
+        # tcp:     for each t, TCP kbytes queued in qdiscs or NIC at t
         # nic:     for each t, kbytes queued in the NIC at t
         # maxq:    for each t, kbytes queued in the longest NIC queue at t
-        node_data = defaultdict(lambda: {'t': [], 'qdisc': [], 'nic': [],
-                'maxq': []})
+        node_data = defaultdict(lambda: {'t': [], 'qdisc': [], 'tcp': [],
+                'nic': [], 'maxq': []})
 
         # Process the packets in each node separately in order to populate
         # intervals and node_data.
@@ -8072,6 +8063,9 @@ class AnalyzeNictx:
             # yet been queued in the NIC (they are queued in the qdisc system).
             qdisc_bytes = 0
 
+            # Same as qdisc_bytes except only includes TCP bytes.
+            tcp_bytes = 0
+
             # The next tuple that will be added to intervals.
             next = [0, 0, 0, 0, 0, 0]
 
@@ -8101,6 +8095,7 @@ class AnalyzeNictx:
                             intervals.append(next)
                         data['t'].append(interval_end)
                         data['qdisc'].append((qdisc_bytes + nic_bytes) * 1e-3)
+                        data['tcp'].append((tcp_bytes + nic_bytes) * 1e-3)
                         data['nic'].append(nic_bytes * 1e-3)
                         data['maxq'].append(max(qid_bytes.values()) * 1e-3)
                     active_queues = sum(n > 0 for n in qid_packets.values())
@@ -8117,6 +8112,8 @@ class AnalyzeNictx:
                     length = pkt['tso_length'] + get_hdr_length(pkt)
                 if event == 'xmit':
                     qdisc_bytes += length
+                    if pkt['type'] == 'tcp':
+                        tcp_bytes += length
                 elif event == 'nic':
                     if qid != None:
                         qid_packets[qid] += 1
@@ -8124,6 +8121,8 @@ class AnalyzeNictx:
                     nic_pkts += 1
                     nic_bytes += length
                     qdisc_bytes -= length
+                    if pkt['type'] == 'tcp':
+                        tcp_bytes -= length
                     if 'nic' in pkt:
                         next[4] += length
                 elif event == 'freed':
@@ -8336,24 +8335,32 @@ class AnalyzeNictx:
         maxy = max(max(node_data[node]['qdisc']) for node in nodes)
         fig, axes = plt.subplots(nrows=len(nodes), ncols=1, sharex=False,
                 figsize=[8, len(nodes)*2])
+        show_tcp = len(tcp_packets) >= 0.01 * len(packets)
         for i in range(len(nodes)):
             node = nodes[i]
             ax = axes[i]
             ax.set_xlim(x_min, x_max)
-            ax.set_xlabel('Time (%s)' % (node))
+            ax.set_xlabel('Time (μsecs, %s)' % (node))
             ax.set_ylim(0, maxy)
             ax.set_ylabel('Kbytes Queued')
             ax.grid(which="major", axis="y")
             ax.plot(node_data[node]['t'], node_data[node]['qdisc'],
                     color=color_blue, label='Nic + Qdisc')
+            if show_tcp:
+                ax.plot(node_data[node]['t'], node_data[node]['tcp'],
+                        color=color_green, label='Nic + TCP Qdisc')
             ax.plot(node_data[node]['t'], node_data[node]['nic'],
                     color=color_red, label='Nic')
-        legend_handles = [
-            matplotlib.lines.Line2D([], [], color=c, marker='o',
-                    linestyle='None', markersize=8, label=label)
-            for c, label in [[color_blue, 'Nic + Qdisc'],
-                    [color_red, 'Nic']]
-        ]
+        legend_handles = [matplotlib.lines.Line2D([], [], color=color_blue,
+                marker='o', linestyle='None', markersize=8,
+                label='Nic + Qdisc')]
+        if show_tcp:
+            legend_handles.append(matplotlib.lines.Line2D([], [],
+                    color=color_green, marker='o', linestyle='None',
+                    markersize=8, label='Nic + TCP Qdisc'))
+        legend_handles.append(matplotlib.lines.Line2D([], [],
+                color=color_red, marker='o', linestyle='None',
+                markersize=8, label='Nic'))
         fig.legend(handles=legend_handles)
         plt.tight_layout()
         plt.savefig("%s/nictx_qtrend.pdf" % (options.plot), bbox_inches='tight')
@@ -8369,7 +8376,7 @@ class AnalyzeNictx:
             node = nodes[i]
             ax = axes[i]
             ax.set_xlim(x_min, x_max)
-            ax.set_xlabel('Time (%s)' % (node))
+            ax.set_xlabel('Time (μsecs, %s)' % (node))
             ax.set_ylim(0, maxy)
             ax.set_ylabel('Kbytes Queued')
             ax.grid(which="major", axis="y")
@@ -8396,7 +8403,7 @@ class AnalyzeNictx:
             node = nodes[i]
             ax = axes[i]
             ax.set_xlim(x_min, x_max)
-            ax.set_xlabel('Time (%s)' % (node))
+            ax.set_xlabel('Time (μsecs, %s)' % (node))
             ax.set_ylim(0, maxy)
             ax.set_ylabel('Longest NIC Queue (KB)')
             ax.grid(which="major", axis="y")
@@ -13231,7 +13238,8 @@ class AnalyzeTxintervals:
                     'of the interval,\n')
             f.write('#             measured in usecs to xmit (assumes the NIC '
                     'can transmit at\n')
-            f.write('#             link speed)\n')
+            f.write('#             %.1f Gbps (--gbps option))\n' %
+                    (options.gbps))
             f.write('# InNic:      KB of data that have been queued for the '
                     'NIC but whose packets\n')
             f.write('#             have not yet been returned after '
