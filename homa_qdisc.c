@@ -1188,13 +1188,35 @@ int homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 
 		if (atomic_read(&qdev->total_nic_queue) >
 		    qdev->max_nic_queue_bytes) {
+			int delta;
+
 			/* The NIC appears to be congested; refresh our
 			 * info about queue lengths and check again.
 			 */
+			if (qdev->congest_start == 0)
+				qdev->congest_start = now;
 			homa_qdisc_refresh_from_dql(qdev);
 			if (atomic_read(&qdev->total_nic_queue) >
 		    	    qdev->max_nic_queue_bytes)
 				goto done;
+			delta = homa_clock() - qdev->congest_start;
+			INC_METRIC(nic_congest_cycles, delta);
+			tt_record1("homa_qdisc_pacer stalled for %d cycles because of total_nic_queue limit",
+				   delta);
+			qdev->congest_start = 0;
+		}
+
+		/* See if the pacer stalled to the point where the NIC queue
+		 * underflowed and bandwidth was lost. Note: this will not
+		 * detect long lags in transmitting the first deferred packet
+		 * after the pacer has been completely caught up.
+		 */
+		if (idle_time < now && qdev->unfinished) {
+			INC_METRIC(pacer_bubble_cycles, now - idle_time);
+			tt_record3("homa_qdisc_pacer bubble: %d cycles, homa_pending %d, tcp_pending %d",
+				now - idle_time,
+				rb_first_cached(&qdev->deferred_rpcs) != NULL,
+				!list_empty(&qdev->deferred_qdiscs));
 		}
 
 		/* Decide whether to transmit a Homa or TCP packet. If
@@ -1230,6 +1252,7 @@ int homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 		INC_METRIC(pacer_xmit_cycles, homa_clock() - now);
 	}
 done:
+	qdev->unfinished = homa_qdisc_any_deferred(qdev);
 	spin_unlock_bh(&qdev->pacer_mutex);
 	return result;
 }
@@ -1249,6 +1272,7 @@ void homa_qdisc_pacer_check(struct homa *homa)
 	int max_cycles;
 	int xmit_bytes;
 
+	INC_METRIC(pacer_checks, 1);
 	max_cycles = homa->qshared->max_nic_est_backlog_cycles;
 	rcu_read_lock();
 	list_for_each_entry_rcu(qdev, &homa->qshared->qdevs, links) {
@@ -1263,6 +1287,7 @@ void homa_qdisc_pacer_check(struct homa *homa)
 		if (now + (max_cycles >> 1) <
 		    atomic64_read(&qdev->link_idle_time))
 			continue;
+		INC_METRIC(pacer_helps, 1);
 		xmit_bytes = homa_qdisc_pacer(qdev);
 		tt_record1("homa_qdisc_pacer_check transmitted %d bytes",
 			   xmit_bytes);

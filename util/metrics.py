@@ -509,7 +509,7 @@ if elapsed_secs != 0:
         print("%-30s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
     for symbol in ["timer_reap_cycles", "data_pkt_reap_cycles",
-            "grant_lock_cycles"]:
+            "grant_lock_cycles", "pacer_bubble_cycles", "nic_congest_cycles"]:
         delta = deltas[symbol]
         if delta == 0 or time_delta == 0:
             continue

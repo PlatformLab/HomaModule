@@ -442,6 +442,33 @@ struct homa_metrics {
 	u64 pacer_tcp_bytes;
 
 	/**
+	 * @pacer_bubble_cycles: total (estimated) lost transmission time on
+	 * the NIC uplink because the pacer failed to queue a packet before
+	 * the NIC became idle.
+	 */
+	u64 pacer_bubble_cycles;
+
+	/**
+	 * @nic_congest_cycles: total time when the pacer could not transmit
+	 * because the amount of data in the NIC's possession exceeded
+	 * max_nic_queue_usecs.
+	 */
+	u64 nic_congest_cycles;
+
+	/**
+	 * @pacer_help_checks: total number of times that homa_qdisc_pacer_check
+	 * was invoked.
+	 */
+	u64 pacer_checks;
+
+	/**
+	 * @pacer_helps: total number of times that homa_qdisc_pacer_check
+	 * actually called homa_qdisc_pacer because the pacer appeared to
+	 * be running behind.
+	 */
+	u64 pacer_helps;
+
+	/**
 	 * @pacer_help_bytes: bytes that the pacer transmitted via calls to
 	 * homa_qdisc_pacer_check (presumably because the pacer thread
 	 * wasn't keeping up). Includes both TCP and Homa packets as well as

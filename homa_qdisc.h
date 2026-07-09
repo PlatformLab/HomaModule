@@ -168,6 +168,13 @@ struct homa_qdisc_dev {
 	u64 last_defer;
 
 	/**
+	 * @unfinished: True means that the last time homa_qdisc_pacer
+	 * returned there were still deferred packets waiting to be
+	 * transmitted.
+	 */
+	bool unfinished;
+
+	/**
 	 * @homa_credit: When there are both Homa and TCP deferred packets,
 	 * this is used to balance output between them according to the
 	 * homa_share sysctl value. Positive means that Homa packets should
@@ -209,6 +216,12 @@ struct homa_qdisc_dev {
 	 * Manipulated locklessly with atomic_xchg.
 	 */
 	atomic_t total_nic_queue;
+
+	/**
+	 * @congest_start: Time when total_nic_queue was found to be
+	 * excessive, or 0 if it is not currently believed to be excessive.
+	 */
+	u64 congest_start;
 
 	/**
 	 * @pacer_kthread: Kernel thread that eventually transmits packets

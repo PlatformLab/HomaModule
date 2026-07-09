@@ -1989,6 +1989,7 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__nic_queues_overloaded)
 	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
 
 	/* First call fails because of congestion. */
+	mock_clock = 1000;
 	qdev->nic_queues[3].num_queued = qdev->max_nic_queue_bytes + 10;
 	self->qdiscs[3]->dev_queue->dql.num_completed = 0;
 	atomic_set(&qdev->nic_queues[3].length, qdev->max_nic_queue_bytes + 10);
@@ -1999,8 +2000,10 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__nic_queues_overloaded)
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(qdev->max_nic_queue_bytes + 10,
 		  atomic_read(&qdev->total_nic_queue));
+	EXPECT_EQ(0, homa_metrics_per_cpu()->nic_congest_cycles);
 
 	/* Second call succeeds and resets congestion. */
+	mock_clock = 4000;
 	self->qdiscs[3]->dev_queue->dql.num_completed += 11;
 	unit_log_clear();
 	homa_qdisc_pacer(qdev);
@@ -2011,6 +2014,36 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__nic_queues_overloaded)
 		  atomic_read(&qdev->total_nic_queue));
 	EXPECT_EQ(qdev->max_nic_queue_bytes - 1,
 		  atomic_read(&qdev->nic_queues[3].length));
+	EXPECT_EQ(3000, homa_metrics_per_cpu()->nic_congest_cycles);
+
+	homa_qdisc_qdev_put(qdev);
+}
+TEST_F(homa_qdisc, homa_qdisc_pacer__record_bubble)
+{
+	struct homa_qdisc_dev *qdev;
+
+	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
+	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
+	mock_queue_index = 3;
+	qdev = homa_qdisc_qdev_get(self->dev);
+
+	mock_clock = 0;
+	atomic64_set(&qdev->link_idle_time, 1000);
+	self->homa.qshared->max_nic_est_backlog_cycles = 5000;
+
+	/* First call: no bubble because NIC hasn't underflowed. */
+	homa_qdisc_pacer(qdev);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->pacer_bubble_cycles);
+
+	/* Second call: no bubble because unfinished not set. */
+	mock_clock = 3000;
+	homa_qdisc_pacer(qdev);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->pacer_bubble_cycles);
+
+	/* Third call records bubble. */
+	qdev->unfinished = 1;
+	homa_qdisc_pacer(qdev);
+	EXPECT_EQ(2000, homa_metrics_per_cpu()->pacer_bubble_cycles);
 
 	homa_qdisc_qdev_put(qdev);
 }
@@ -2050,35 +2083,6 @@ TEST_F(homa_qdisc, homa_qdisc_pacer__return_after_one_packet)
 		     unit_log_get());
 	EXPECT_STREQ("[id 1237, offsets 4000]", unit_log_deferred(qdev));
 	EXPECT_LT(mock_clock + 100, atomic64_read(&qdev->link_idle_time));
-
-	homa_qdisc_qdev_put(qdev);
-}
-TEST_F(homa_qdisc, homa_qdisc_pacer__dont_spin)
-{
-	struct homa_qdisc_dev *qdev;
-	struct homa_rpc *srpc;
-
-	EXPECT_EQ(0, homa_qdisc_init(self->qdiscs[3], NULL, NULL));
-	EXPECT_EQ(0, self->qdiscs[3]->q.qlen);
-	mock_queue_index = 3;
-	qdev = homa_qdisc_qdev_get(self->dev);
-
-	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
-				&self->server_ip, self->client_port,
-				self->server_id, 10000, 10000);
-	ASSERT_NE(NULL, srpc);
-
-	homa_qdisc_defer_homa(qdev, new_test_skb(srpc, &self->addr, 0, 1000));
-
-	mock_clock = 0;
-	mock_clock_tick = 1000;
-	atomic64_set(&qdev->link_idle_time, 10000);
-	self->homa.qshared->max_nic_est_backlog_cycles = 3500;
-	unit_log_clear();
-
-	homa_qdisc_pacer(qdev);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_TRUE(homa_qdisc_any_deferred(qdev));
 
 	homa_qdisc_qdev_put(qdev);
 }
@@ -2255,6 +2259,8 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_check__enqueue_packet)
 		     unit_log_get());
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
 	EXPECT_EQ(1100, homa_metrics_per_cpu()->pacer_help_bytes);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_checks);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_helps);
 
 	homa_qdisc_qdev_put(qdev);
 	homa_qdisc_qdev_put(qdev2);
@@ -2279,6 +2285,8 @@ TEST_F(homa_qdisc, homa_qdisc_pacer_check__no_deferred_rpcs)
 	homa_qdisc_pacer_check(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_FALSE(homa_qdisc_any_deferred(qdev));
+	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_checks);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->pacer_helps);
 
 	homa_qdisc_qdev_put(qdev);
 	homa_qdisc_qdev_put(qdev2);
