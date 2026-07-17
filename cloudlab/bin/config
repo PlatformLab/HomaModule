@@ -521,7 +521,7 @@ def config_ipv6(num_hosts, vlan):
     if "inet6 fd00::" in exec_cmd(["ifconfig", vlan], check=True).stdout:
         print("IPv6 already configured")
     else:
-        print("Configuring IPv6:")
+        print("Configuring IPv6")
         exec_cmd(["sudo", "ifconfig", vlan, "add", "fd00::%d/64" % (
                 get_node_num() + 1)], check=True)
         exec_cmd(["sudo", "route", "-6", "add", "fd00::/16", vlan],
@@ -610,7 +610,7 @@ def config_mtu(size):
 def config_nic():
     """
     Configure the NIC for best performance (turn off interrupt delaying
-    mechanisms).
+    mechanisms and flow steering).
     """
     interface = get_interfaces()[0]
 
@@ -631,6 +631,17 @@ def config_nic():
         print("Increasing tx ring size for Intel NIC")
         exec_cmd(["sudo", "ethtool", "-G", interface, "tx", "1024"],
                 check=True)
+
+    # As of 7/2026, RPS doesn't scale well with ICE NICs and drivers:
+    # with 20 nodes and thousands of open sockets per node, it can take
+    # 250 usecs to configure RPS for a flow. This happens at SoftIRQ
+    # level, so it blocks packet processing and causes large increases
+    # in tail latency. I don't yet know whether this is a problem for
+    # other NIC/driver combinations, but measurements suggest that there
+    # is no advantage to RPS anyway.
+    print("Disabling flow steering")
+    exec_cmd(["sudo", "ethtool", "-K", interface, "ntuple", "off"],
+            check=False)
 
 def config_power():
     """
@@ -688,14 +699,14 @@ def config_qdisc():
 def config_reset_qdisc():
     """
     Reset the qdisc configuration by replacing any homa qdiscs with
-    fq_codel ones (this assumes that fq_codel is the default).
+    fq ones.
     """
 
     nic = get_interfaces()[0]
     config = get_qdisc_config()
     root = config['root_handle']
 
-    print('Removing Homa qdisc, restoring fq_codel')
+    print('Removing Homa qdisc, restoring fq')
     for child in config['children']:
         if child['type'] != 'homa':
             continue
@@ -704,7 +715,7 @@ def config_reset_qdisc():
                 '%x:' % (64 + child['queue'])], check=True)
         exec_cmd(['sudo', 'tc', 'qdisc', 'replace', 'dev', nic,
                 'parent', '%s%x' % (root, child['queue']), 'handle',
-                '%x:' % (64 + child['queue']), 'fq_codel'], check=True)
+                '%x:' % (64 + child['queue']), 'fq'], check=True)
 
 def config_reset_switch_all_ports():
     """
@@ -728,7 +739,7 @@ def config_reset_switch_ports():
 
 def config_rps():
     """
-    Enable RPS (Receive Packet Steering) and RFS (Receive Flow Steering).
+    Enable RPS (Receive Packet Steering).
     """
 
     interface = get_interfaces()[0]
@@ -746,7 +757,7 @@ def config_rps():
         exec_cmd(["sudo", "bash", "-c", "echo %s > %s" % (mask, file)],
                 check=True)
         cpus += 1
-    print("Configured RPS and RFS: %d rps_flow_cnt files and %d rps_cpus files"
+    print("Configured RPS: %d rps_flow_cnt files and %d rps_cpus files"
             % (flow_cnt, cpus))
 
 def config_switch_buffer_limit(mbytes):
@@ -810,7 +821,7 @@ def print_help():
     print("                           of the NIC tx queues")
     print("    reset_qdisc            Uninstall Homa's queuing discipline for any")
     print("                           NIC queues where it is installed, and install")
-    print("                           fq_codel in its place")
+    print("                           fq in its place")
     print("    reset_switch_all_ports Issue commands to TOR switch to restore original")
     print("                           port settings for all ports on the switch")
     print("                           (even those not used by current experiment)")
