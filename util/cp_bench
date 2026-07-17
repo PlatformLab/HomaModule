@@ -24,7 +24,7 @@ parser.add_argument('-B', '--benchmark', dest='config', default='homa',
                 'max_gro', 'max_gso', 'max_incoming', 'mtu', 'nic_backlog',
                 'nic_queue', 'nodes', 'pacer', 'poll', 'ports', 'prios',
                 'receivers', 'repeat', 'tcp', 'tcp_buffers', 'tcp_nodes',
-                'throttle', 'time', 'unsched_bytes', 'window'],
+                'tcp_qdisc', 'throttle', 'time', 'unsched_bytes', 'window'],
         help='Benchmark to run (default: homa)')
 
 options = parser.parse_args()
@@ -456,6 +456,13 @@ elif options.config == 'tcp_nodes':
                 'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic'],
                 'no_qdisc': True
                 })
+elif options.config == 'tcp_qdisc':
+    # Basic test of TCP latency
+    specs.append({'exp_name': 'tcp_qdisc',
+            'label': 'TCP',
+            'options': ['protocol', 'tcp'],
+            'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic']
+    })
 elif options.config == 'throttle':
     # Vary the cuttoff for short messages that bypass the throttle mechanism
     for cutoff in [100, 200, 500, 1000]:
