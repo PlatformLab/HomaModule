@@ -7882,8 +7882,7 @@ class AnalyzeNicsnapshot:
         total_bytes = 0
         total_pkts = 0
 
-        qids = sorted(id_pkts.keys() | id_queued_interval.keys() |
-                id_freed_interval.keys())
+        qids = sorted(id_pkts.keys())
         for qid in qids:
             pkts = id_pkts[qid]
             oldest_queued = None
