@@ -533,53 +533,6 @@ void homa_skb_cache_pages(struct homa *homa, struct page **pages, int count)
 }
 
 /**
- * homa_skb_get() - Copy out part of the contents of a packet.
- * @skb:       sk_buff from which to copy data.
- * @dest:      Where to copy the data.
- * @offset:    Offset within skb of first byte to copy, measured
- *             relative to the transport header.
- * @length:    Total number of bytes to copy; will copy fewer bytes than
- *             this if the packet doesn't contain @length bytes at @offset.
- */
-void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
-{
-	int chunk_size, frags_left, frag_offset, head_len;
-	struct skb_shared_info *shinfo = skb_shinfo(skb);
-	char *dst = dest;
-	skb_frag_t *frag;
-
-	/* Copy bytes from the linear part of the skb, if any. */
-	head_len = skb_tail_pointer(skb) - skb_transport_header(skb);
-	if (offset < head_len) {
-		chunk_size = length;
-		if (chunk_size > (head_len - offset))
-			chunk_size = head_len - offset;
-		memcpy(dst, skb_transport_header(skb) + offset, chunk_size);
-		offset += chunk_size;
-		length -= chunk_size;
-		dst += chunk_size;
-	}
-
-	frag_offset = head_len;
-	for (frags_left = shinfo->nr_frags, frag = &shinfo->frags[0];
-			(frags_left > 0) && (length > 0);
-			frags_left--,
-			frag_offset += skb_frag_size(frag), frag++) {
-		if (offset >= (frag_offset + skb_frag_size(frag)))
-			continue;
-		chunk_size = skb_frag_size(frag) - (offset - frag_offset);
-		if (chunk_size > length)
-			chunk_size = length;
-		memcpy(dst, page_address(skb_frag_page(frag)) + frag->offset
-				+ (offset - frag_offset),
-				chunk_size);
-		offset += chunk_size;
-		length -= chunk_size;
-		dst += chunk_size;
-	}
-}
-
-/**
  * homa_skb_release_pages() - This function is invoked occasionally; it's
  * job is to gradually release pages from the sk_buff page pools back to
  * Linux, based on sysctl parameters such as skb_page_frees_per_sec.

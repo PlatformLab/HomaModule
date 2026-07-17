@@ -113,8 +113,6 @@ void    *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb,
 void     homa_skb_free_tx(struct homa *homa, struct sk_buff *skb);
 void     homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs,
 			       int count);
-void     homa_skb_get(struct sk_buff *skb, void *dest, int offset,
-		      int length);
 int      homa_skb_init(struct homa *homa);
 bool     homa_skb_page_alloc(struct homa *homa,
 			     struct homa_skb_core *core);

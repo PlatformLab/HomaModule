@@ -244,7 +244,7 @@ TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__include_acks)
 	skb = homa_tx_data_pkt_alloc(crpc, iter, 0, 500, 2000);
 	ASSERT_NE(NULL, skb);
 
-	homa_skb_get(skb, &h, 0, sizeof(h));
+	skb_copy_bits(skb, 0, &h, sizeof(h));
 	EXPECT_STREQ("server_port 200, client_id 1000",
 			unit_ack_string(&h.ack));
 	kfree_skb(skb);

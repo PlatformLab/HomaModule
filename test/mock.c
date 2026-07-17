@@ -1529,9 +1529,43 @@ __wsum skb_checksum(const struct sk_buff *skb, int offset, int len, __wsum csum)
 	return 0;
 }
 
-int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
+int skb_copy_bits(const struct sk_buff *skb, int offset, void *dest, int length)
 {
-	return -EFAULT;
+	int chunk_size, frags_left, frag_offset, head_len;
+	struct skb_shared_info *shinfo = skb_shinfo(skb);
+	char *dst = dest;
+	skb_frag_t *frag;
+
+	/* Copy bytes from the linear part of the skb, if any. */
+	head_len = skb_tail_pointer(skb) - skb_transport_header(skb);
+	if (offset < head_len) {
+		chunk_size = length;
+		if (chunk_size > (head_len - offset))
+			chunk_size = head_len - offset;
+		memcpy(dst, skb_transport_header(skb) + offset, chunk_size);
+		offset += chunk_size;
+		length -= chunk_size;
+		dst += chunk_size;
+	}
+
+	frag_offset = head_len;
+	for (frags_left = shinfo->nr_frags, frag = &shinfo->frags[0];
+			(frags_left > 0) && (length > 0);
+			frags_left--,
+			frag_offset += skb_frag_size(frag), frag++) {
+		if (offset >= (frag_offset + skb_frag_size(frag)))
+			continue;
+		chunk_size = skb_frag_size(frag) - (offset - frag_offset);
+		if (chunk_size > length)
+			chunk_size = length;
+		memcpy(dst, page_address(skb_frag_page(frag)) + frag->offset
+				+ (offset - frag_offset),
+				chunk_size);
+		offset += chunk_size;
+		length -= chunk_size;
+		dst += chunk_size;
+	}
+	return 0;
 }
 
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,

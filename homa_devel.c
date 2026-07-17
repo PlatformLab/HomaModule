@@ -147,7 +147,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		return buffer;
 	}
 
-	homa_skb_get(skb, &header, 0, sizeof(header));
+	skb_copy_bits(skb, 0, &header, min(sizeof(header), skb->len));
 	common = (struct homa_common_hdr *)header;
 	saddr = skb_canonical_ipv6_saddr(skb);
 	used = homa_snprintf(buffer, buf_len, used,
@@ -201,7 +201,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 			if (homa_info->seg_length < skb_shinfo(skb)->gso_size) {
 				struct homa_seg_hdr seg;
 
-				homa_skb_get(skb, &seg, pos, sizeof(seg));
+				skb_copy_bits(skb, pos, &seg, sizeof(seg));
 				offset = ntohl(seg.offset);
 			} else {
 				offset += seg_length;
@@ -306,7 +306,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 	char header[HOMA_MAX_HEADER];
 
 	common = (struct homa_common_hdr *)header;
-	homa_skb_get(skb, header, 0, HOMA_MAX_HEADER);
+	skb_copy_bits(skb, 0, header, min(HOMA_MAX_HEADER, skb->len));
 	switch (common->type) {
 	case DATA: {
 		struct homa_data_hdr *h = (struct homa_data_hdr *)header;
@@ -330,7 +330,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 			if (homa_info->seg_length < skb_shinfo(skb)->gso_size) {
 				struct homa_seg_hdr seg;
 
-				homa_skb_get(skb, &seg, pos, sizeof(seg));
+				skb_copy_bits(skb, pos, &seg, sizeof(seg));
 				offset = ntohl(seg.offset);
 			} else {
 				offset += seg_length;

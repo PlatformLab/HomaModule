@@ -457,7 +457,7 @@ TEST_F(homa_skb, homa_skb_append_from_skb__header_only)
 	EXPECT_EQ(0, homa_skb_append_from_skb(&self->homa, dst_skb, src_skb,
 			20, 60));
 	memset(data, 0, sizeof(data));
-	homa_skb_get(dst_skb, data, 0, 60);
+	skb_copy_bits(dst_skb, 0, data, 60);
 	EXPECT_EQ(1000020, data[0]);
 	EXPECT_EQ(1000076, data[14]);
 
@@ -489,7 +489,7 @@ TEST_F(homa_skb, homa_skb_append_from_skb__header_and_first_frag)
 	EXPECT_EQ(0, homa_skb_append_from_skb(&self->homa, dst_skb, src_skb,
 			80, 100));
 	memset(data, 0, sizeof(data));
-	homa_skb_get(dst_skb, data, 0, 100);
+	skb_copy_bits(dst_skb, 0, data, 100);
 	EXPECT_EQ(1000080, data[0]);
 	EXPECT_EQ(1000176, data[24]);
 	EXPECT_EQ(2, dst_shinfo->nr_frags);
@@ -509,7 +509,7 @@ TEST_F(homa_skb, homa_skb_append_from_skb__multiple_frags)
 	EXPECT_EQ(0, homa_skb_append_from_skb(&self->homa, dst_skb, src_skb,
 			320, 600));
 	memset(data, 0, sizeof(data));
-	homa_skb_get(dst_skb, data, 0, 600);
+	skb_copy_bits(dst_skb, 0, data, 600);
 	EXPECT_EQ(1000320, data[0]);
 	EXPECT_EQ(1000916, data[149]);
 	EXPECT_EQ(2, dst_shinfo->nr_frags);
@@ -624,48 +624,6 @@ TEST_F(homa_skb, homa_skb_cache_pages__pool_size_exceeded)
 	EXPECT_EQ(4, self->homa.page_pools[0]->avail);
 	put_page(pages[4]);
 	put_page(pages[5]);
-}
-
-TEST_F(homa_skb, homa_skb_get)
-{
-	struct sk_buff *skb = test_skb(&self->homa);
-	int32_t data[500];
-
-	/* Data is entirely in the head. */
-	memset(data, 0, sizeof(data));
-	homa_skb_get(skb, data, 20, 40);
-	EXPECT_EQ(1000020, data[0]);
-	EXPECT_EQ(1000056, data[9]);
-	EXPECT_EQ(0, data[10]);
-
-	/* Data spans head and first frag. */
-	memset(data, 0, sizeof(data));
-	homa_skb_get(skb, data, 80, 60);
-	EXPECT_EQ(1000080, data[0]);
-	EXPECT_EQ(1000096, data[4]);
-	EXPECT_EQ(1000100, data[5]);
-	EXPECT_EQ(1000136, data[14]);
-	EXPECT_EQ(0, data[15]);
-
-	/* Data spans 3 frags. */
-	memset(data, 0, sizeof(data));
-	homa_skb_get(skb, data, 280, 500);
-	EXPECT_EQ(1000280, data[0]);
-	EXPECT_EQ(1000296, data[4]);
-	EXPECT_EQ(1000300, data[5]);
-	EXPECT_EQ(1000596, data[79]);
-	EXPECT_EQ(1000600, data[80]);
-	EXPECT_EQ(1000776, data[124]);
-	EXPECT_EQ(0, data[125]);
-
-	/* Data extends past end of skb. */
-	memset(data, 0, sizeof(data));
-	homa_skb_get(skb, data, 960, 100);
-	EXPECT_EQ(1000960, data[0]);
-	EXPECT_EQ(1000996, data[9]);
-	EXPECT_EQ(0, data[10]);
-
-	kfree_skb(skb);
 }
 
 TEST_F(homa_skb, homa_skb_release_pages__basics)
