@@ -1,6 +1,12 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Finish exploring how to provide pacer helpers when TCP is running wihout
+  Homa: is it possible to trigger everything from callbacks without a
+  thread?
+
+* Recheck TCP performance at 50 nodes (e.g. without packet steering).
+
 * Fix redundancies between README.md and INSTALL.md; reread INSTALL.md.
   Also, need note about homa_prio installation.
 
@@ -43,8 +49,6 @@ Notes for Homa implementation in Linux:
   transmitted.
 
 * Homa's throughput on W3 seems to be worse than TCP on c6620 cluster.
-
-* Eliminate homa_skb_get, use skb_copy_bits instead.
 
 * Significant new functionality:
   * Run Homa SoftIRQ on the GRO core? This would eliminate the latency and
