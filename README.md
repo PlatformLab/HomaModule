@@ -37,23 +37,6 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   - Intel E810 series (ice)
   Please let me know if you find other NICs that work (or don't work).
 
-- TSO support: in order to get best peformance Homa needs to take advantage
-  of TSO support provided by NICs for TCP. This can happen in either of two
-  ways. Some NICs, such as those from Mellanox/NVIDIA, will perform TSO
-  even on packets with IP protocols other than TCP. Homa uses a header format
-  that matches TCP's headers closely enough that TSO will work "out of the box".
-  For other NICs, such as the Intel E810 series, the NIC refuses to perform
-  TCP if the IP protocol is not TCP. For these NICs Homa has a "TCP hijacking"
-  mode where it encapsulates its packets as TCP frames, with an IP protocol
-  of TCP. Then, on the receiver side, Homa intercepts the incoming "TCP"
-  packets and steals them back before they can be processed by TCP. To
-  enable TCP hijacking, use `sysctl` to set the `hijack_tcp` parameter to 1
-  on all nodes.
-
-- If you don't use TCP hijacking and your NICs don't support TSO for non-TCP
-  protocols, then you must make sure that the `max_gso_size` parameter is
-  no larger than the MTU (otherwise large outgoing packets will be dropped).
-
 - The subdirectory "test" contains unit tests, which you can run by typing
   "make" in that subdirectory.
 
@@ -68,19 +51,20 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
     information. Or, run `cp_node client --workload 500000` on the client:
     this will send continuous 500 KB messages for a simple througput test.
     Type `cp_node --help` to learn about other ways you can use this program.
-  - The `cp_vs_tcp` script uses `cp_node` to run cluster-wide tests comparing
-    Homa with TCP (and/or DCTCP); it was used to generate the data for
-    Figures 3 and 4 in the Homa ATC paper. Here is an example command:
+  - The `cp_bench` script uses `cp_node` to run any of a variety of
+    benchmarks; it was used to generate the data for Figures 3 and 4 in
+    the Homa ATC paper. Here is an example command:
     ```
-    cp_vs_tcp -n 10 -w w4 -b 20
+    cp_bench -n 10 -w w4 -b 20 -B homa_vs_tcp
     ```
-    When invoked on node0, this will run a benchmark using the W4 workload
+    The `-B` option selects one of several benchmarks; `homa_vs_tcp`
+    will run both Homa and TCP on the same workload and generate graphs
+    comparing them.
+    When invoked on node0, this will run the W4 workload
     from the ATC paper,
     running on 10 nodes and generating 20 Gbps of offered load (80%
-    network load on a 25 Gbps network). Type `cp_vs_tcp --help` for
+    network load on a 25 Gbps network). Type `cp_bench --help` for
     information on all available options.
-  - Other `cp_` scripts can be used for different benchmarks.
-    See `util/README.md` for more information.
 
  - Some additional tools you might find useful:
    - Homa collects various metrics about its behavior, such as the size
@@ -103,8 +87,8 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
     improves.
   - Homa_qdisc improves performance for both Homa and TCP, whether
     running stand-alone or together.
-  - homa_qdisc improves Homa short message P99 3x when running together
-    with TCP, but P99 is still slower than Homa standalone.
+  - homa_qdisc improves Homa's performance when running with TCP to almost
+    what is is when running without TCP.
   - TCP performance improves when running together with Homa, with or
     without homa_qdisc.
 - November 2025: upgraded to Linux 6.17.8.

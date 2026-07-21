@@ -31,10 +31,25 @@ feel free to contact me (John Ousterhout, ouster@cs.stanford.edu).
    sudo insmod homa.ko
    ```
    Once installed, you can uninstall it with:
-   ```
+   ``
    sudo rmmod homa
    ```
-   (Note: you cannot remove Homa if there are any Homa sockets open)
+   (Note: you cannot uninstall Homa if there are any Homa sockets open)
+
+1. Start `homa_prio`. This is a daemon program that adjusts Homa's use
+   of priorities based on workload information that it reads from Homa.
+   `homa_prio` is located in the `util` subdirectory; `cd` to that
+   directory and type
+   ```
+   make -j10
+   ```
+   This will build `homa_prio` and several other programs. Then start
+   `homa_prio` with the following command:
+   ```
+   sudo homa_prio
+   ```
+   You can use Homa without running `homa_prio` but it will not make
+   optimal use of priorities, which will impact performance.
 
 1. At this point you should be able to write programs that send and receive
    Homa messages (type `make` in the `man` directory to generate the manual
@@ -71,17 +86,29 @@ feel free to contact me (John Ousterhout, ouster@cs.stanford.edu).
    sudo ethtool -G <interface> tx 1024
    ```
 
-1. Make sure that RPS (Receive Packet Steering) and RFS (Receive Flow
-   Steering) are enabled. See the function `config_rps` in the
-   script `cloudlab/bin/config` for details on how to do this.
+1. Make sure that RPS (Receive Packet Steering) is enabled. See the function
+   `config_rps` in the script `cloudlab/bin/config` for details on how to
+   do this.
+
+1. Disable Receive Flow Steering (RFS) with the following command:
+   ```
+   sudo ethtool -K <interface> ntuple off
+   ```
+   In my experience, RFS doesn't improve performance when running datacenter
+   workloads on high-speed networks with lots of sockets open, and setting
+   up flow steering can be quite expensive. I have measured situations with
+   Intel E810 -C where it takes 250 microseconds or more to setup
+   steering for a flow, which causes high tail latency for short packets.
+   It's possible that these problems are isolated to the particular NICs
+   I was using, but I think it's safest to disable flow steering.
 
 1. Activate Homa's queuing discipline. Homa has its own queuing discipline,
-   which serves two purposes. First, it paces output packets
-   from Homa in order to eliminate queue buildup in the NIC. This is
+   which serves two purposes. First, it paces outgoing Homa packets
+   to prevent queue buildup in the NIC. This is
    essential to Homa's SRPT (Shortest Remaining Processing Time) scheduling
    policy, which favors shorter messages. Without the queuing discipline,
    small messages can get stuck in long NIC queues, which will impact
-   their tail latency. Second, the queuing discipline manages outgoing packets
+   their tail latency. Second, the queuing discipline also manages outgoing packets
    from other protcols such as TCP, ensuring that the protocols don't
    interfere with each other. Without the queuing discipline, if TCP and
    Homa are used concurrently on a node, TCP will interfere with Homa's
@@ -115,19 +142,13 @@ feel free to contact me (John Ousterhout, ouster@cs.stanford.edu).
    reduces IP stack overhead. Virtually all NICs support segmentation offload
    for TCP (TSO).  Unfortunately, many NICs will not perform segmentation
    if the packet transport protocol is unknown, which is the case for
-   Homa. You have four options:
+   Homa. You have three options:
    * If your NICs were made by Mellanox or NVIDIA, they will segment Homa
      packets by default. All you need to do is set Homa's `max_gso_size`
      configuration parameter to a large number on each node:
      ```
      sudo sysctl .net.homa.max_gso_size=100000
      ```
-   * If your NICs were made by Intel, they will not segment Homa packets
-     by default. However, I have been told that DDP (Dynamic Device
-     Personalization) can be used to configure Intel NICs so that
-     they will segment Homa packets. I don't have any experience with DDP
-     so I can't tell you exactly how to do this. NICs by other manufacturers
-     may also have customization capabilities.
    * Enable TCP hijacking. Homa has a mode called "TCP hijacking" in which
      it generates output packets that look like TCP packets and are transmitted
      using the TCP IP protocol. Since the packets look just like TCP
@@ -149,8 +170,14 @@ feel free to contact me (John Ousterhout, ouster@cs.stanford.edu).
      through the IP stack. This is not as efficient as TSO in the NIC, but it
      is still more efficient than passing every MTU-sized packet individually
      through the network stack. Homa has support for GSO, but unfortunately
-     this support is temporarily broken due. If you need GSO before I get
-     around to fixing it, contact me and I will prioritize the fix.
+     this support is temporarily broken due to other recent changes. If you
+     need GSO before I get around to fixing it, contact me and I will
+     prioritize the fix.
+
+1. If you are running on Intel CPUs, set the power-saving mode to "performance":
+   ```
+   sudo cpupower frequency-set -g performance
+   ```
 
 1. You may also find the script `cloudlab/bin/install_homa` useful.
    It will copy relevant Homa files across a cluster of machines and configure

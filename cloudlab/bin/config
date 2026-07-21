@@ -650,7 +650,7 @@ def config_power():
     if "intel" in get_cpu_type().lower():
         # For Intel processors, it's best to leave C-states enabled. This
         # can cause CPUs to sleep in power-saving mode, but if C-states
-        # are disabled, then so is Turbo mode, and that will hurt  peak peformance.
+        # are disabled, then so is Turbo mode, and that will hurt peak peformance.
         print("Configuring power settings for Intel CPUs")
         try:
             exec_cmd(["sudo", "cpupower", "frequency-set", "-g",

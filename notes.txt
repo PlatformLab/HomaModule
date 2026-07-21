@@ -1,14 +1,30 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* New approach to managing tx skbs:
+  * Manage packet data separately from skbs; create skbs just in time, as
+    needed.
+  * The resend mechanism should almost entirely go away: just generate
+    new skbs from the packet data.
+  * Keep page caches similar to those in homa_skb.c. Pull into separate
+    module (homa_tx_pages?). Call the pool's homa_tx_pool.
+  * Info in homa_rpc_message_out:
+    * Geometry information for message
+    * Number of frags in message
+    * Pointer to array of skb_frags (dynamically allocated if num_frags > 1)
+  * Rename skb_page_frees_per_sec -> tx_page_frees_per_sec
+  * Fields to remove from homa_message_out:
+    num_skbs
+    skb_memory?
+    packets
+    next_xmit
+    to_free
+
 * Finish exploring how to provide pacer helpers when TCP is running wihout
   Homa: is it possible to trigger everything from callbacks without a
   thread?
 
 * Recheck TCP performance at 50 nodes (e.g. without packet steering).
-
-* Fix redundancies between README.md and INSTALL.md; reread INSTALL.md.
-  Also, need note about homa_prio installation.
 
 * By sharing peers across sockets, Homa doesn't account for information
   in the flows such as sk_uid, sk_mark, tos, and sk_bound_dev_if, which
