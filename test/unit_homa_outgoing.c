@@ -13,24 +13,11 @@
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_hijack.h"
 #include "homa_qdisc.h"
-#include "homa_skb.h"
-#else /* See strip.py */
-#include "homa_stub.h"
 #endif /* See strip.py */
 
-/* The following hook function frees hook_rpc. */
-static struct homa_rpc *hook_rpc;
-static void unlock_hook(char *id)
-{
-	if (strcmp(id, "unlock") != 0)
-		return;
-	if (hook_rpc) {
-		homa_rpc_end(hook_rpc);
-		hook_rpc = NULL;
-	}
-}
 
 /* The following hook function ends an RPC when it is locked. */
+static struct homa_rpc *hook_rpc;
 static void lock_end_hook(char *id)
 {
 	if (strcmp(id, "spin_lock") != 0)
@@ -41,23 +28,53 @@ static void lock_end_hook(char *id)
 	}
 }
 
-#ifdef __STRIP__ /* See strip.py */
-static void mock_resend_data(struct homa_rpc *rpc, int start, int end,
-		      int priority)
-{
-	homa_resend_data(rpc, start, end);
-}
-#define homa_resend_data(rpc, start, end, priority) \
-		mock_resend_data(rpc, start, end, priority);
-#endif /* See strip.py */
-
-/* Compute the expected "truesize" value for a Homa packet, given
- * the number of bytes of message data in the packet.
+/* Log info about all of the segments in an array of fragments, and
+ * return a pointer to the new contents of the log. This assumes that
+ * the first segment has no homa_seg_hdr in the frags.
  */
-static int true_size(int msg_bytes)
+static const char *log_frags(skb_frag_t *frags, int num_frags,
+			     int data_per_seg, bool initial_hdr)
 {
-	return SKB_TRUESIZE(msg_bytes + HOMA_SKB_EXTRA +
-		sizeof(struct homa_skb_info) + sizeof(struct homa_data_hdr));
+	int offset, data_left, cur_frag_index;
+	struct homa_seg_hdr *seg;
+	skb_frag_t *frag;
+	bool first_seg;
+
+	offset = 0;
+	cur_frag_index = 0;
+	frag = frags;
+	first_seg = true;
+	while (cur_frag_index < num_frags) {
+		if (initial_hdr || !first_seg) {
+			seg = (struct homa_seg_hdr *)(unit_frag_first_byte(frag) +
+						      offset);
+			unit_log_printf("; ", "offset %d", ntohl(seg->offset));
+			offset += sizeof(*seg);
+		} else {
+			first_seg = false;
+
+		}
+
+		data_left = data_per_seg;
+		while (data_left > 0 && cur_frag_index < num_frags) {
+			int chunk_size;
+
+			chunk_size = min(skb_frag_size(frag) - offset,
+					 data_left);
+			unit_log_printf(", ", "data in frag %d:",
+					cur_frag_index);
+			unit_log_data(" ", unit_frag_first_byte(frag) + offset,
+				      chunk_size);
+			data_left -= chunk_size;
+			offset += chunk_size;
+			if (offset >= skb_frag_size(frag)) {
+				frag++;
+				cur_frag_index++;
+				offset = 0;
+			}
+		}
+	}
+	return unit_log_get();
 }
 
 FIXTURE(homa_outgoing) {
@@ -108,6 +125,62 @@ FIXTURE_TEARDOWN(homa_outgoing)
 }
 
 #ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_message_out_init__unscheduled)
+{
+	struct homa_rpc *crpc;
+
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+
+	/* First call: unsched < length. */
+	self->homa.unsched_bytes = 5000;
+	homa_message_out_init(crpc, 10000);
+	EXPECT_EQ(5000, crpc->msgout.unscheduled);
+
+	/* Second call: unsched > length. */
+	homa_message_out_init(crpc, 2000);
+	EXPECT_EQ(2000, crpc->msgout.unscheduled);
+
+	homa_rpc_unlock(crpc);
+}
+#endif /* See strip.py */
+TEST_F(homa_outgoing, homa_message_out_init__max_gso_segs)
+{
+	struct homa_rpc *crpc;
+
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+
+	/* First call: limited by dev->gso_max_segs. */
+	mock_devices[0].gso_max_segs = 2;
+	self->homa.max_gso_size = 100000;
+	mock_devices[0].gso_max_size = 100000;
+	homa_message_out_init(crpc, 10000);
+	EXPECT_EQ(2, crpc->msgout.max_gso_segs);
+
+	/* Second call: limited by homa->max_gso_size. */
+	mock_devices[0].gso_max_segs = 10;
+	self->homa.max_gso_size = 5000;
+	mock_devices[0].gso_max_size = 100000;
+	homa_message_out_init(crpc, 10000);
+	EXPECT_EQ(3, crpc->msgout.max_gso_segs);
+
+	/* Third call: limited by dev->gso_max_size. */
+	mock_devices[0].gso_max_segs = 10;
+	self->homa.max_gso_size = 100000;
+	mock_devices[0].gso_max_size = 6900;
+	homa_message_out_init(crpc, 10000);
+	EXPECT_EQ(4, crpc->msgout.max_gso_segs);
+
+	/* Fourth call: ensure at least one segment. */
+	mock_devices[0].gso_max_segs = 10;
+	self->homa.max_gso_size = 100000;
+	mock_devices[0].gso_max_size = 1000;
+	homa_message_out_init(crpc, 10000);
+	EXPECT_EQ(1, crpc->msgout.max_gso_segs);
+
+	homa_rpc_unlock(crpc);
+}
+
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, set_priority__priority_mapping)
 {
 	struct homa_grant_hdr h;
@@ -126,512 +199,736 @@ TEST_F(homa_outgoing, set_priority__priority_mapping)
 }
 #endif /* See strip.py */
 
-TEST_F(homa_outgoing, homa_fill_data_interleaved)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
-	char buffer[1000];
-
-	homa_rpc_unlock(crpc);
-	homa_message_out_init(crpc, 10000);
-
-	unit_log_clear();
-	struct sk_buff *skb = homa_tx_data_pkt_alloc(crpc, iter, 10000, 5000,
-			1500);
-	EXPECT_STREQ("_copy_from_iter 1500 bytes at 1000; "
-			"_copy_from_iter 1500 bytes at 2500; "
-			"_copy_from_iter 1500 bytes at 4000; "
-			"_copy_from_iter 500 bytes at 5500", unit_log_get());
-
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, incoming 10000, extra segs 1500@11500 1500@13000 500@14500",
-			homa_print_packet(skb, buffer, sizeof(buffer)));
-#else /* See strip.py */
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, extra segs 1500@11500 1500@13000 500@14500",
-			homa_print_packet(skb, buffer, sizeof(buffer)));
-#endif /* See strip.py */
-	EXPECT_EQ(5000 + sizeof(struct homa_data_hdr)
-			+ 3*sizeof(struct homa_seg_hdr), skb->len);
-	kfree_skb(skb);
-}
-TEST_F(homa_outgoing, homa_fill_data_interleaved__error_copying_data)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
-	struct sk_buff *skb;
-
-	homa_rpc_unlock(crpc);
-	homa_message_out_init(crpc, 10000);
-
-	unit_log_clear();
-	mock_copy_data_errors = 1;
-	skb = homa_tx_data_pkt_alloc(crpc, iter, 10000, 5000, 1500);
-	EXPECT_EQ(EFAULT, -PTR_ERR(skb));
-}
-
-TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__one_segment)
-{
-	struct iov_iter *iter = unit_iov_iter((void *) 1000, 5000);
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct sk_buff *skb;
-	char buffer[1000];
-
-	homa_rpc_unlock(crpc);
-	homa_message_out_init(crpc, 500);
-
-	unit_log_clear();
-	skb = homa_tx_data_pkt_alloc(crpc, iter, 5000, 500, 2000);
-	EXPECT_STREQ("_copy_from_iter 500 bytes at 1000", unit_log_get());
-
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 500, offset 5000, data_length 500, incoming 500",
-			homa_print_packet(skb, buffer, sizeof(buffer)));
-#else /* See strip.py */
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 500, offset 5000, data_length 500",
-			homa_print_packet(skb, buffer, sizeof(buffer)));
-#endif /* See strip.py */
-
-	EXPECT_EQ(0, skb_shinfo(skb)->gso_segs);
-	kfree_skb(skb);
-}
-TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__cant_allocate_skb)
-{
-	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct sk_buff *skb;
-
-	homa_rpc_unlock(crpc);
-	homa_message_out_init(crpc, 500);
-
-	unit_log_clear();
-	mock_alloc_skb_errors = 1;
-	skb = homa_tx_data_pkt_alloc(crpc, iter, 0, 500, 2000);
-	EXPECT_TRUE(IS_ERR(skb));
-	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
-	EXPECT_STREQ("couldn't allocate sk_buff for outgoing message",
-		     self->hsk.error_msg);
-}
-TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__include_acks)
-{
-	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct homa_data_hdr h;
-	struct sk_buff *skb;
-
-	ASSERT_NE(NULL, crpc);
-	homa_rpc_unlock(crpc);
-
-	crpc->peer->acks[0] = (struct homa_ack) {
-		.server_port = htons(200),
-		.client_id = cpu_to_be64(1000)};
-	crpc->peer->num_acks = 1;
-
-	homa_message_out_init(crpc, 500);
-	skb = homa_tx_data_pkt_alloc(crpc, iter, 0, 500, 2000);
-	ASSERT_NE(NULL, skb);
-
-	skb_copy_bits(skb, 0, &h, sizeof(h));
-	EXPECT_STREQ("server_port 200, client_id 1000",
-			unit_ack_string(&h.ack));
-	kfree_skb(skb);
-}
-TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__multiple_segments_homa_fill_data_interleaved)
-{
-	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct sk_buff *skb;
-	char buffer[1000];
-
-	homa_rpc_unlock(crpc);
-	homa_message_out_init(crpc, 10000);
-
-	unit_log_clear();
-	skb = homa_tx_data_pkt_alloc(crpc, iter, 10000, 5000, 1500);
-	EXPECT_STREQ("_copy_from_iter 1500 bytes at 1000; "
-			"_copy_from_iter 1500 bytes at 2500; "
-			"_copy_from_iter 1500 bytes at 4000; "
-			"_copy_from_iter 500 bytes at 5500", unit_log_get());
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, incoming 10000, extra segs 1500@11500 1500@13000 500@14500",
-			homa_print_packet(skb, buffer, sizeof(buffer)));
-#else /* See strip.py */
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, extra segs 1500@11500 1500@13000 500@14500",
-			homa_print_packet(skb, buffer, sizeof(buffer)));
-#endif /* See strip.py */
-
-	EXPECT_EQ(4*(sizeof(struct homa_data_hdr) + crpc->hsk->ip_header_length
-			+ HOMA_ETH_OVERHEAD) + 5000,
-			homa_get_skb_info(skb)->wire_bytes);
-	EXPECT_EQ(5000, homa_get_skb_info(skb)->data_bytes);
-	kfree_skb(skb);
-}
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__error_in_homa_fill_data_interleaved)
-{
-	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-
-	homa_rpc_unlock(crpc);
-	homa_message_out_init(crpc, 10000);
-
-	unit_log_clear();
-	mock_alloc_page_errors = -1;
-	struct sk_buff *skb = homa_tx_data_pkt_alloc(crpc, iter, 10000, 5000,
-			1500);
-	EXPECT_TRUE(IS_ERR(skb));
-	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
-}
-TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__multiple_segments_tcp_hijacking)
-{
-	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
-	struct homa_rpc *crpc;
-	struct homa_sock hsk;
-	struct sk_buff *skb;
-	char buffer[1000];
-
-	self->homa.hijack_tcp = 1;
-	mock_sock_init(&hsk, self->hnet, self->client_port+1);
-	crpc = homa_rpc_alloc_client(&hsk, &self->server_addr);
-	homa_rpc_unlock(crpc);
-	homa_message_out_init(crpc, 10000);
-
-	unit_log_clear();
-	skb = homa_tx_data_pkt_alloc(crpc, iter, 10000, 5000, 1500);
-	EXPECT_STREQ("_copy_from_iter 5000 bytes at 1000", unit_log_get());
-
-	EXPECT_STREQ("DATA from 0.0.0.0:40001, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, incoming 10000, extra segs 1500@11500 1500@13000 500@14500",
-			homa_print_packet(skb, buffer, sizeof(buffer)));
-	kfree_skb(skb);
-	unit_sock_destroy(&hsk);
-}
-TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__error_copying_data_hijacking_path)
-{
-	struct iov_iter *iter = unit_iov_iter((void *) 1000, 5000);
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct sk_buff *skb;
-
-	homa_rpc_unlock(crpc);
-	homa_message_out_init(crpc, 500);
-
-	unit_log_clear();
-	mock_copy_data_errors = 1;
-	skb = homa_tx_data_pkt_alloc(crpc, iter, 5000, 500, 2000);
-	EXPECT_TRUE(IS_ERR(skb));
-	EXPECT_EQ(EFAULT, -PTR_ERR(skb));
-}
-#endif /* See strip.py */
-TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__gso_information)
-{
-	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct sk_buff *skb;
-
-	homa_rpc_unlock(crpc);
-	homa_message_out_init(crpc, 10000);
-
-	unit_log_clear();
-	skb = homa_tx_data_pkt_alloc(crpc, iter, 10000, 5000, 1500);
-
-	EXPECT_EQ(4, skb_shinfo(skb)->gso_segs);
-	EXPECT_EQ(1500 + sizeof(struct homa_seg_hdr),
-		  skb_shinfo(skb)->gso_size);
-	EXPECT_EQ(SKB_GSO_TCPV6, skb_shinfo(skb)->gso_type);
-	kfree_skb(skb);
-}
-TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__gso_force_software)
-{
-	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct sk_buff *skb;
-
-	homa_rpc_unlock(crpc);
-	homa_message_out_init(crpc, 10000);
-	self->homa.gso_force_software = 1;
-
-	unit_log_clear();
-	skb = homa_tx_data_pkt_alloc(crpc, iter, 10000, 5000, 1500);
-	EXPECT_EQ(13, skb_shinfo(skb)->gso_type);
-	kfree_skb(skb);
-}
-
-TEST_F(homa_outgoing, homa_message_out_fill__basics)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-
-        mock_set_ipv6(&self->hsk);
-
-	ASSERT_FALSE(crpc == NULL);
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 3000), 0));
-	homa_rpc_unlock(crpc);
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(3000, crpc->msgout.granted);
-#endif /* See strip.py */
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_SUBSTR("mtu 1496, max_seg_data 1400, max_gso_data 1400; "
-			"_copy_from_iter 1400 bytes at 1000; "
-			"_copy_from_iter 1400 bytes at 2400; "
-			"_copy_from_iter 200 bytes at 3800", unit_log_get());
-	unit_log_clear();
-	unit_log_message_out_packets(&crpc->msgout, 1);
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 3000, offset 0, data_length 1400, incoming 3000; "
-		     "DATA from 0.0.0.0:40000, dport 99, id 2, message_length 3000, offset 1400, data_length 1400, incoming 3000; "
-		     "DATA from 0.0.0.0:40000, dport 99, id 2, message_length 3000, offset 2800, data_length 200, incoming 3000",
-		     unit_log_get());
-#else /* See strip.py */
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 3000, offset 0, data_length 1400; "
-		     "DATA from 0.0.0.0:40000, dport 99, id 2, message_length 3000, offset 1400, data_length 1400; "
-		     "DATA from 0.0.0.0:40000, dport 99, id 2, message_length 3000, offset 2800, data_length 200",
-		     unit_log_get());
-#endif /* See strip.py */
-	EXPECT_EQ(3, crpc->msgout.num_skbs);
-	EXPECT_EQ(3000, crpc->msgout.copied_from_user);
-}
-TEST_F(homa_outgoing, homa_message_out_fill__zero_length_message)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-
-	ASSERT_FALSE(crpc == NULL);
-	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 0), 0));
-	EXPECT_STREQ("message has length zero", self->hsk.error_msg);
-	homa_rpc_unlock(crpc);
-}
-TEST_F(homa_outgoing, homa_message_out_fill__message_too_long)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-
-	ASSERT_FALSE(crpc == NULL);
-	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, HOMA_MAX_MESSAGE_LENGTH+1),
-			0));
-	EXPECT_STREQ("message length exceeded HOMA_MAX_MESSAGE_LENGTH",
-		     self->hsk.error_msg);
-	homa_rpc_unlock(crpc);
-	EXPECT_EQ(0, crpc->msgout.skb_memory);
-	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
-}
-TEST_F(homa_outgoing, homa_message_out_fill__mtu_unusable)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-
-	ASSERT_FALSE(crpc == NULL);
-	mock_mtu = self->hsk.ip_header_length + sizeof(struct homa_data_hdr);
-	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 100), 0));
-	EXPECT_STREQ("device MTU too small to support Homa packets",
-		     self->hsk.error_msg);
-	homa_rpc_unlock(crpc);
-	EXPECT_EQ(0, crpc->msgout.skb_memory);
-	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
-}
-TEST_F(homa_outgoing, homa_message_out_fill__round_gso_size_up_to_mtu)
+TEST_F(homa_outgoing, homa_tx_copy_from_user__basics)
 {
 	struct homa_rpc *crpc;
+	struct iov_iter *iter;
+	u8 data[9000];
 
 	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
-	ASSERT_FALSE(crpc == NULL);
+	unit_fill_data(data, sizeof(data), 5000);
+	iter = unit_iov_iter(data, sizeof(data));
+	mock_no_high_order_pages = true;
 
-	mock_mtu += 3600;
-	self->homa.max_gso_size = 0;
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-		  unit_iov_iter((void *) 1000, 10000), 0));
-	homa_rpc_unlock(crpc);
-	EXPECT_SUBSTR("max_seg_data 5000, max_gso_data 5000;", unit_log_get());
-}
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)
-{
-	struct homa_rpc *crpc1, *crpc2;
-
-	crpc1 = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
-	ASSERT_FALSE(crpc1 == NULL);
-	homa_rpc_unlock(crpc1);
-
-	crpc2 = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
-	ASSERT_FALSE(crpc2 == NULL);
-	homa_rpc_unlock(crpc2);
-
-        mock_set_ipv6(&self->hsk);
-	self->hsk.sock.sk_protocol = IPPROTO_TCP;
-
-	/* First try: not quite enough space for 3 packets in GSO. */
-	self->dev->gso_max_size = mock_mtu - 1 +
-			2 * UNIT_TEST_DATA_PER_PACKET;
-	homa_rpc_lock(crpc1);
-	ASSERT_EQ(0, -homa_message_out_fill(crpc1,
-			unit_iov_iter((void *) 1000, 10000), 0));
-	homa_rpc_unlock(crpc1);
-	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 2800", unit_log_get());
-
-	/* Second try: just barely enough space for 3 packets in GSO. */
-	self->dev->gso_max_size += 1;
+	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, false));
+	EXPECT_EQ(3, crpc->msgout.num_frags);
+	EXPECT_EQ(0, skb_frag_off(&crpc->msgout.frags[0]));
+	EXPECT_EQ(PAGE_SIZE, skb_frag_size(&crpc->msgout.frags[0]));
 	unit_log_clear();
-	homa_rpc_lock(crpc2);
-	ASSERT_EQ(0, -homa_message_out_fill(crpc2,
-			unit_iov_iter((void *) 1000, 10000), 0));
-	homa_rpc_unlock(crpc2);
-	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 4200", unit_log_get());
-}
-#endif /* See strip.py */
-TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_no_hijacking)
-{
-	struct homa_rpc *crpc1, *crpc2;
-
-	crpc1 = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
-	ASSERT_FALSE(crpc1 == NULL);
-        mock_set_ipv6(&self->hsk);
-
-	/* First try: not quite enough space for 3 packets in GSO. */
-	self->dev->gso_max_size = mock_mtu - 1 +
-			2 * (UNIT_TEST_DATA_PER_PACKET +
-			     sizeof(struct homa_seg_hdr));
-	ASSERT_EQ(0, -homa_message_out_fill(crpc1,
-			unit_iov_iter((void *) 1000, 10000), 0));
-	homa_rpc_unlock(crpc1);
-	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 2800", unit_log_get());
-
-	/* Second try: just barely enough space for 3 packets in GSO. */
-	crpc2 = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
-	ASSERT_FALSE(crpc2 == NULL);
-	self->dev->gso_max_size += 1;
-	unit_log_clear();
-	ASSERT_EQ(0, -homa_message_out_fill(crpc2,
-			unit_iov_iter((void *) 1000, 10000), 0));
-	homa_rpc_unlock(crpc2);
-	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 4200", unit_log_get());
-}
-TEST_F(homa_outgoing, homa_message_out_fill__gso_limit_less_than_mtu)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-
-	ASSERT_FALSE(crpc == NULL);
-	unit_log_clear();
-	self->dev->gso_max_size = 10000;
-	self->homa.max_gso_size = 1000;
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 5000), 0));
-	homa_rpc_unlock(crpc);
-	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 1400;", unit_log_get());
-}
-TEST_F(homa_outgoing, homa_message_out_fill__multiple_segs_per_skbuff)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-
-	ASSERT_FALSE(crpc == NULL);
-	self->dev->gso_max_size = 5000;
-	unit_log_clear();
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 10000), 0));
-	homa_rpc_unlock(crpc);
-	EXPECT_SUBSTR("_copy_from_iter 1400 bytes at 1000; "
-			"_copy_from_iter 1400 bytes at 2400; "
-			"_copy_from_iter 1400 bytes at 3800; "
-			"_copy_from_iter 1400 bytes at 5200; "
-			"_copy_from_iter 1400 bytes at 6600; "
-			"_copy_from_iter 1400 bytes at 8000; "
-			"_copy_from_iter 1400 bytes at 9400; "
-			"_copy_from_iter 200 bytes at 10800",
-			unit_log_get());
-	unit_log_clear();
-	unit_log_filled_skbs(crpc->msgout.packets, 0);
-	EXPECT_STREQ("DATA 1400@0 1400@1400 1400@2800; "
-			"DATA 1400@4200 1400@5600 1400@7000; "
-			"DATA 1400@8400 200@9800",
-			unit_log_get());
-	EXPECT_EQ(4200, homa_get_skb_info(crpc->msgout.packets)->data_bytes);
-}
-TEST_F(homa_outgoing, homa_message_out_fill__error_in_homa_tx_data_packet_alloc)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-
-	ASSERT_FALSE(crpc == NULL);
-        mock_set_ipv6(&self->hsk);
-	mock_copy_data_errors = 2;
-
-	EXPECT_EQ(EFAULT, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 3000), 0));
-	EXPECT_STREQ("couldn't copy message body into packet buffers",
-		     self->hsk.error_msg);
-	homa_rpc_unlock(crpc);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(1, crpc->msgout.num_skbs);
-	EXPECT_EQ(true_size(1400), crpc->msgout.skb_memory);
-	EXPECT_EQ(true_size(1400) + 1,
+	EXPECT_STREQ("offset 0, data in frag 0: 5000-6399; "
+		     "offset 1400, data in frag 0: 6400-7799; "
+		     "offset 2800, data in frag 0: 7800-9083, "
+		     "data in frag 1: 9084-9199; "
+		     "offset 4200, data in frag 1: 9200-10599; "
+		     "offset 5600, data in frag 1: 10600-11999; "
+		     "offset 7000, data in frag 1: 12000-13167, "
+		     "data in frag 2: 13168-13399; "
+		     "offset 8400, data in frag 2: 13400-13999",
+		     log_frags(crpc->msgout.frags, crpc->msgout.num_frags,
+			       crpc->msgout.max_seg_data, true));
+	EXPECT_EQ(9000 + 7 * sizeof(struct homa_seg_hdr),
+		  crpc->msgout.frag_bytes);
+	EXPECT_EQ(9000 + 7 * sizeof(struct homa_seg_hdr) + 1,
 		  refcount_read(&self->hsk.sock.sk_wmem_alloc));
+	IF_NO_STRIP(EXPECT_EQ(9000, homa_metrics_per_cpu()->sent_msg_bytes));
+	homa_rpc_unlock(crpc);
 }
-TEST_F(homa_outgoing, homa_message_out_fill__rpc_freed_during_copy)
+TEST_F(homa_outgoing, homa_tx_copy_from_user__cant_allocate_frags)
 {
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
+	struct homa_rpc *crpc;
+	struct iov_iter *iter;
 
-	ASSERT_FALSE(crpc == NULL);
-	unit_hook_register(unlock_hook);
-	hook_rpc = crpc;
-	ASSERT_EQ(EINVAL, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 3000), 0));
-	EXPECT_STREQ("rpc deleted while creating outgoing message", self->hsk.error_msg);
-	EXPECT_EQ(0, crpc->msgout.num_skbs);
-	EXPECT_EQ(RPC_DEAD, crpc->state);
-	EXPECT_EQ(0, crpc->msgout.skb_memory);
-	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	iter = unit_iov_iter(NULL, 1000);
+	mock_alloc_page_errors = 0xff;
+
+	EXPECT_EQ(-ENOMEM, homa_tx_copy_from_user(crpc, iter, false));
+	EXPECT_EQ(0, crpc->msgout.num_frags);
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_copy_from_user__homa_copy_to_frags_fails)
+{
+	struct homa_rpc *crpc;
+	struct iov_iter *iter;
+
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	iter = unit_iov_iter(NULL, 1000);
+	mock_copy_to_frags_errors = 1;
+
+	EXPECT_EQ(EINVAL, -homa_tx_copy_from_user(crpc, iter, false));
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_copy_from_user__homa_copy_iter_to_frags_fails)
+{
+	struct homa_rpc *crpc;
+	struct iov_iter *iter;
+
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	iter = unit_iov_iter(NULL, 9000);
+	mock_copy_data_errors = 1;
+
+	EXPECT_EQ(EFAULT, -homa_tx_copy_from_user(crpc, iter, false));
 	homa_rpc_unlock(crpc);
 }
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, homa_message_out_fill__xmit_packets)
+TEST_F(homa_outgoing, homa_tx_copy_from_user__call_homa_xmit_data_while_copying)
 {
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
+	struct homa_rpc *crpc;
+	struct iov_iter *iter;
+	u8 data[10000];
 
-	ASSERT_FALSE(crpc == NULL);
-	self->homa.unsched_bytes = 2800;
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 5000), 1));
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	iter = unit_iov_iter(data, sizeof(data));
+	unit_log_clear();
+	self->homa.unsched_bytes = 5000;
+	mock_copy_from_iter_no_log = true;
+
+	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, true));
+	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400; "
+		     "xmit DATA 1400@2800; xmit DATA 1400@4200; "
+		     "homa_tx_copy_to_user done",
+		     unit_log_get());
 	homa_rpc_unlock(crpc);
-	EXPECT_SUBSTR(" _copy_from_iter 1400 bytes at 1000; "
-		     "xmit DATA 1400@0; "
-		     "_copy_from_iter 1400 bytes at 2400; "
-		     "xmit DATA 1400@1400; "
-		     "_copy_from_iter 1400 bytes at 3800; "
-		     "_copy_from_iter 800 bytes at 5200", unit_log_get());
 }
 #endif /* See strip.py */
-TEST_F(homa_outgoing, homa_message_out_fill__packet_memory_accounting)
+TEST_F(homa_outgoing, homa_tx_copy_from_user__call_homa_xmit_data_at_end)
 {
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
+	struct homa_rpc *crpc;
+	struct iov_iter *iter;
+	u8 data[500];
 
-        mock_set_ipv6(&self->hsk);
-
-	ASSERT_FALSE(crpc == NULL);
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 3000), 0));
-	homa_rpc_unlock(crpc);
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	iter = unit_iov_iter(data, sizeof(data));
 	unit_log_clear();
-	EXPECT_EQ(3, crpc->msgout.num_skbs);
-	EXPECT_EQ(2 * true_size(1400) + true_size(200),
-		  crpc->msgout.skb_memory);
-	EXPECT_EQ(2 * true_size(1400) + true_size(200) + 1,
-		  refcount_read(&self->hsk.sock.sk_wmem_alloc));
+	mock_copy_from_iter_no_log = true;
+
+	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, true));
+	EXPECT_STREQ("homa_tx_copy_to_user done; xmit DATA 500@0",
+		     unit_log_get());
+	homa_rpc_unlock(crpc);
 }
+TEST_F(homa_outgoing, homa_tx_copy_from_user__xmit_false)
+{
+	struct homa_rpc *crpc;
+	struct iov_iter *iter;
+	u8 data[1500];
+
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	iter = unit_iov_iter(data, sizeof(data));
+	unit_log_clear();
+	mock_copy_from_iter_no_log = true;
+
+	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, false));
+	EXPECT_STREQ("homa_tx_copy_to_user done", unit_log_get());
+	IF_NO_STRIP(EXPECT_EQ(1500, homa_metrics_per_cpu()->sent_msg_bytes));
+	homa_rpc_unlock(crpc);
+}
+
+TEST_F(homa_outgoing, homa_tx_skb_alloc__basics)
+{
+	struct homa_data_hdr *h;
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	char buffer[1000];
+	u32 end;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 2500, 100);
+	ASSERT_NE(NULL, crpc);
+
+	end = 1550;
+	skb = homa_tx_skb_alloc(crpc, 1520, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	EXPECT_EQ(2500, end);
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1234, "
+		     "message_length 2500, offset 1400, data_length 1100"
+		     IF_NO_STRIP(", incoming 2500"),
+		     homa_print_packet(skb, buffer, sizeof(buffer)));
+	unit_log_clear();
+	EXPECT_STREQ("data in frag 0: 1400-2499",
+		     log_frags(skb_shinfo(skb)->frags,
+		     	       skb_shinfo(skb)->nr_frags,
+			       crpc->msgout.max_seg_data, false));
+	h = (struct homa_data_hdr *)skb_transport_header(skb);
+	EXPECT_EQ(1400, ntohl(h->seg.offset));
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__invalid_offset)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 100, 100);
+	ASSERT_NE(NULL, crpc);
+
+	end = 10000;
+	skb = homa_tx_skb_alloc(crpc, 100, &end);
+	EXPECT_EQ(EINVAL, -PTR_ERR(skb));
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__round_end_down_to_msg_length)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	char buffer[1000];
+	u32 end;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 100, 100);
+	ASSERT_NE(NULL, crpc);
+
+	end = 1000;
+	skb = homa_tx_skb_alloc(crpc, 20, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	EXPECT_EQ(100, end);
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1234, "
+		     "message_length 100, offset 0, data_length 100"
+		     IF_NO_STRIP(", incoming 100"),
+		     homa_print_packet(skb, buffer, sizeof(buffer)));
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__find_starting_point)
+{
+	struct skb_shared_info *shinfo;
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 20000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 1;
+
+	end = 10001;
+	skb = homa_tx_skb_alloc(crpc, 10000, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	shinfo = skb_shinfo(skb);
+	EXPECT_EQ(11200, end);
+	EXPECT_EQ(1, shinfo->nr_frags);
+	EXPECT_EQ(1640, skb_frag_off(&shinfo->frags[0]));
+	EXPECT_EQ(1400, skb_frag_size(&shinfo->frags[0]));
+	unit_log_clear();
+	unit_log_data("; ", unit_frag_first_byte(&shinfo->frags[0]),
+		       skb_frag_size(&shinfo->frags[0]));
+	EXPECT_STREQ("9800-11199", unit_log_get());
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__compute_num_segs)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 6000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 10;
+
+	/* First call fills 2 segments. */
+	end = 4200;
+	skb = homa_tx_skb_alloc(crpc, 1500, &end);
+	if (IS_ERR(skb))
+		ASSERT_EQ(0, -PTR_ERR(skb));
+	EXPECT_EQ(4200, end);
+	kfree_skb(skb);
+
+	/* Second call overflows into a third segment*/
+	end = 4201;
+	skb = homa_tx_skb_alloc(crpc, 1500, &end);
+	if (IS_ERR(skb))
+		ASSERT_EQ(0, -PTR_ERR(skb));
+	EXPECT_EQ(5600, end);
+	kfree_skb(skb);
+}
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_tx_skb_alloc__allocation_metrics)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 6000, 100);
+	ASSERT_NE(NULL, crpc);
+	mock_clock_tick = 300;
+	homa_metrics_per_cpu()->skb_allocs = 0;
+
+	/* First call fills 2 segments. */
+	end = 1001;
+	skb = homa_tx_skb_alloc(crpc, 1000, &end);
+	if (IS_ERR(skb))
+		ASSERT_EQ(0, -PTR_ERR(skb));
+	kfree_skb(skb);
+
+	EXPECT_EQ(1, homa_metrics_per_cpu()->skb_allocs);
+	EXPECT_EQ(300, homa_metrics_per_cpu()->skb_alloc_cycles);
+}
+#endif /* See strip.py */
+TEST_F(homa_outgoing, homa_tx_skb_alloc__set_retransmit)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	char buffer[1000];
+	u32 end;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 10000, 100);
+	ASSERT_NE(NULL, crpc);
+
+	/* First call is a retransmit. */
+	crpc->msgout.next_xmit_offset = 5000;
+	end = 3001;
+	skb = homa_tx_skb_alloc(crpc, 3000, &end);
+	if (IS_ERR(skb))
+		ASSERT_EQ(0, -PTR_ERR(skb));
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1234, "
+		     "message_length 10000, offset 2800, data_length 1400, "
+		     IF_NO_STRIP("incoming 10000, ") "RETRANSMIT",
+		     homa_print_packet(skb, buffer, sizeof(buffer)));
+	kfree_skb(skb);
+
+	/* Second call is not a retransmit. */
+	crpc->msgout.next_xmit_offset = 5000;
+	end = 7001;
+	skb = homa_tx_skb_alloc(crpc, 7000, &end);
+	if (IS_ERR(skb))
+		ASSERT_EQ(0, -PTR_ERR(skb));
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1234, "
+		     "message_length 10000, offset 7000, data_length 1400"
+		     IF_NO_STRIP(", incoming 10000"),
+		     homa_print_packet(skb, buffer, sizeof(buffer)));
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__fill_in_skb_frags)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 20000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 10;
+
+	end = 15000;
+	skb = homa_tx_skb_alloc(crpc, 5000, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	unit_log_clear();
+	EXPECT_STREQ("data in frag 0: 4200-5599; "
+		     "offset 5600, data in frag 0: 5600-6999; "
+		     "offset 7000, data in frag 0: 7000-8167, "
+		     "data in frag 1: 8168-8399; "
+		     "offset 8400, data in frag 1: 8400-9799; "
+		     "offset 9800, data in frag 1: 9800-11199; "
+		     "offset 11200, data in frag 1: 11200-12251, "
+		     "data in frag 2: 12252-12599; "
+		     "offset 12600, data in frag 2: 12600-13999; "
+		     "offset 14000, data in frag 2: 14000-15399",
+		     log_frags(skb_shinfo(skb)->frags,
+		     	       skb_shinfo(skb)->nr_frags,
+			       crpc->msgout.max_seg_data, false));
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__not_enough_frags_in_skb)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 20000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 10;
+	mock_max_skb_frags = 2;
+
+	end = 18000;
+	skb = homa_tx_skb_alloc(crpc, 4000, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	unit_log_clear();
+	EXPECT_STREQ("data in frag 0: 2800-4083, "
+		     "data in frag 1: 4084-4199; "
+		     "offset 4200, data in frag 1: 4200-5599; "
+		     "offset 5600, data in frag 1: 5600-6999",
+		     log_frags(skb_shinfo(skb)->frags,
+		     	       skb_shinfo(skb)->nr_frags,
+			       crpc->msgout.max_seg_data, false));
+	EXPECT_EQ(7000, end);
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__not_enough_frags_in_skb_must_drop_frag)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	/* Allow 7000 bytes of data per segment. */
+	mock_mtu += 7000 - 1400;
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 20000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 10;
+	mock_max_skb_frags = 3;
+
+	end = 14000;
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	unit_log_clear();
+	EXPECT_STREQ("data in frag 0: 0-4091, "
+		     "data in frag 1: 4092-6999",
+		     log_frags(skb_shinfo(skb)->frags,
+		     	       skb_shinfo(skb)->nr_frags,
+			       crpc->msgout.max_seg_data, false));
+	EXPECT_EQ(7000, end);
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__not_enough_space_for_one_segment)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	/* Allow 7000 bytes of data per segment. */
+	mock_mtu += 7000 - 1400;
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 20000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 10;
+	mock_max_skb_frags = 1;
+
+	end = 14000;
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	EXPECT_TRUE(IS_ERR(skb));
+	EXPECT_EQ(EINVAL, -PTR_ERR(skb));
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__message_ends_mid_fragment)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 2000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 1;
+
+	end = 3000;
+	skb = homa_tx_skb_alloc(crpc, 1500, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	unit_log_clear();
+	EXPECT_STREQ("data in frag 0: 1400-1999",
+		     log_frags(skb_shinfo(skb)->frags,
+		     	       skb_shinfo(skb)->nr_frags,
+			       crpc->msgout.max_seg_data, false));
+	EXPECT_EQ(2000, end);
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__shinfo_gso_fields)
+{
+	struct skb_shared_info *shinfo;
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 5000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 3;
+
+	/* First packet has only one segment. */
+	end = 1501;
+	skb = homa_tx_skb_alloc(crpc, 1500, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	unit_log_clear();
+	EXPECT_STREQ("data in frag 0: 1400-2799",
+		     log_frags(skb_shinfo(skb)->frags,
+		     	       skb_shinfo(skb)->nr_frags,
+			       crpc->msgout.max_seg_data, false));
+	EXPECT_EQ(2800, end);
+	shinfo = skb_shinfo(skb);
+	EXPECT_EQ(0, shinfo->gso_segs);
+	EXPECT_EQ(0, shinfo->gso_size);
+	EXPECT_EQ(0, shinfo->gso_type);
+	kfree_skb(skb);
+
+	/* Second packet has multiple segments. */
+	end = 3000;
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	unit_log_clear();
+	EXPECT_STREQ("data in frag 0: 0-1399; "
+		     "offset 1400, data in frag 0: 1400-2799; "
+		     "offset 2800, data in frag 0: 2800-4083, "
+		     "data in frag 1: 4084-4199",
+		     log_frags(skb_shinfo(skb)->frags,
+		     	       skb_shinfo(skb)->nr_frags,
+			       crpc->msgout.max_seg_data, false));
+	EXPECT_EQ(4200, end);
+	shinfo = skb_shinfo(skb);
+	EXPECT_EQ(3, shinfo->gso_segs);
+	EXPECT_EQ(1400 + sizeof(struct homa_seg_hdr), shinfo->gso_size);
+	EXPECT_EQ(SKB_GSO_TCPV6, shinfo->gso_type);
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__homa_info_fields)
+{
+	struct homa_skb_info *homa_info;
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 5000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 3;
+
+	end = 5000;
+	skb = homa_tx_skb_alloc(crpc, 1500, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	EXPECT_EQ(5000, end);
+	homa_info = homa_get_skb_info(skb);
+	EXPECT_EQ(3600 + 3 * (sizeof(struct homa_data_hdr) +
+			      self->hsk.ip_header_length + HOMA_ETH_OVERHEAD),
+		  homa_info->wire_bytes);
+	EXPECT_EQ(3600, homa_info->data_bytes);
+	EXPECT_EQ(1400, homa_info->seg_length);
+	EXPECT_EQ(crpc, homa_info->rpc);
+	EXPECT_EQ(0, homa_info->dont_defer);
+	kfree_skb(skb);
+}
+
+TEST_F(homa_outgoing, homa_tx_skb_send__basics)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 5000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 1;
+	unit_log_clear();
+
+	homa_rpc_lock(crpc);
+	end = 2000;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
+	EXPECT_STREQ("xmit DATA 1400@1400", unit_log_get());
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_skb_send__update_next_xmit_offset)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 10000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 1;
+	unit_log_clear();
+	homa_rpc_lock(crpc);
+
+	/* First call updates next_xmit_offset. */
+	end = 4100;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 4000, &end));
+	EXPECT_STREQ("xmit DATA 1400@2800", unit_log_get());
+	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
+	EXPECT_EQ(4200, end);
+
+	/* Second call doesn't update next_xmit_offset. */
+	unit_log_clear();
+	end = 2100;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 2000, &end));
+	EXPECT_STREQ("xmit DATA retrans 1400@1400", unit_log_get());
+	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
+	EXPECT_EQ(2800, end);
+
+	homa_rpc_unlock(crpc);
+}
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_tx_skb_send__priorities)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 20000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 1;
+	crpc->msgout.unscheduled = 10000;
+	crpc->msgout.sched_priority = 2;
+	crpc->msgout.retrans_priority = 3;
+	crpc->msgout.next_xmit_offset = 1500;
+	mock_xmit_log_verbose = 1;
+
+	/* First packet uses retransmit priority.*/
+	homa_rpc_lock(crpc);
+	end = 100;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 0, &end));
+	EXPECT_STREQ("3", mock_xmit_prios);
+
+	/* Second packet uses unscheduled priority.*/
+	mock_clear_xmit_prios();
+	end = 2000;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
+	EXPECT_STREQ("6", mock_xmit_prios);
+
+	/* Second packet uses scheduled priority.*/
+	mock_clear_xmit_prios();
+	end = 15010;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 15000, &end));
+	EXPECT_STREQ("2", mock_xmit_prios);
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_skb_send__metrics)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 5000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 1;
+	unit_log_clear();
+
+	homa_rpc_lock(crpc);
+	end = 2000;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
+	EXPECT_EQ(1, homa_metrics_per_cpu()->packets_sent[0]);
+	EXPECT_EQ(1456, homa_metrics_per_cpu()->priority_bytes[6]);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->priority_packets[6]);
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_skb_send__ipv4_call_homa_hijack_set_hdr)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 5000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 1;
+	mock_xmit_log_hijack = 1;
+	unit_log_clear();
+
+	homa_rpc_lock(crpc);
+	end = 2000;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
+	EXPECT_STREQ("xmit DATA 1400@1400; hijack checksum 444, flags 0x6",
+		     unit_log_get());
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_skb_send__ipv4_transmit_error)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 5000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 1;
+	mock_ip_queue_xmit_errors = 1;
+	unit_log_clear();
+
+	homa_rpc_lock(crpc);
+	end = 2000;
+	EXPECT_EQ(ENETDOWN, -homa_tx_skb_send(crpc, 1500, &end));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors));
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_skb_send__ipv6_call_homa_hijack_set_hdr)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+	struct in6_addr addr;
+
+	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       &addr, self->server_port,
+			       self->client_id, 5000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 1;
+	mock_xmit_log_hijack = 1;
+	unit_log_clear();
+
+	homa_rpc_lock(crpc);
+	end = 2000;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
+	EXPECT_STREQ("xmit DATA 1400@1400; hijack checksum 666, flags 0x6",
+		     unit_log_get());
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_skb_send__ipv6_transmit_error)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+	struct in6_addr addr;
+
+	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       &addr, self->server_port,
+			       self->client_id, 5000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 1;
+	mock_ip6_xmit_errors = 1;
+	unit_log_clear();
+
+	homa_rpc_lock(crpc);
+	end = 2000;
+	EXPECT_EQ(ENETDOWN, -homa_tx_skb_send(crpc, 1500, &end));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors));
+	homa_rpc_unlock(crpc);
+}
+#endif /* See strip.py */
 
 TEST_F(homa_outgoing, homa_xmit_control__server_request)
 {
@@ -742,7 +1039,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 	mock_ip6_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors));
 }
 TEST_F(homa_outgoing, __homa_xmit_control__ipv4_set_hijack)
 {
@@ -787,7 +1084,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 	mock_ip_queue_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors));
 }
 
 TEST_F(homa_outgoing, homa_xmit_unknown__basics)
@@ -827,39 +1124,32 @@ TEST_F(homa_outgoing, homa_xmit_data__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 6000, 1000);
-
-#ifndef __STRIP__ /* See strip.py */
-	crpc->msgout.sched_priority = 2;
-	crpc->msgout.unscheduled = 2000;
-	crpc->msgout.granted = 5000;
-	homa_peer_set_cutoffs(crpc->peer, INT_MAX, 0, 0, 0, 0, INT_MAX,
-			7000, 0);
-#else /* See strip.py */
-	unit_reset_tx(crpc);
-#endif /* See strip.py */
+			self->server_port, self->client_id, 4000, 1000);
 
 	unit_log_clear();
-	mock_clear_xmit_prios();
 	homa_rpc_lock(crpc);
 	homa_xmit_data(crpc);
 	homa_rpc_unlock(crpc);
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit DATA 1400@0; "
-			"xmit DATA 1400@1400; "
-			"xmit DATA 1400@2800; "
-			"xmit DATA 1400@4200", unit_log_get());
-	EXPECT_STREQ("6 6 2 2", mock_xmit_prios);
-	EXPECT_EQ(5600, crpc->msgout.next_xmit_offset);
+		     "xmit DATA 1400@1400; "
+		     "xmit DATA 1200@2800", unit_log_get());
+	EXPECT_EQ(4000, crpc->msgout.next_xmit_offset);
+}
+TEST_F(homa_outgoing, homa_xmit_data__rpc_ended)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 6000, 1000);
+
 	unit_log_clear();
-#else /* See strip.py */
-	EXPECT_STREQ("xmit DATA 1400@0; "
-			"xmit DATA 1400@1400; "
-			"xmit DATA 1400@2800; "
-			"xmit DATA 1400@4200; "
-			"xmit DATA 400@5600", unit_log_get());
-	EXPECT_EQ(6000, crpc->msgout.next_xmit_offset);
-#endif /* See strip.py */
+	homa_rpc_lock(crpc);
+	unit_hook_register(lock_end_hook);
+	hook_rpc = crpc;
+	homa_xmit_data(crpc);
+	homa_rpc_unlock(crpc);
+	EXPECT_STREQ("xmit DATA 1400@0; homa_rpc_end invoked",
+			unit_log_get());
+	EXPECT_EQ(1400, crpc->msgout.next_xmit_offset);
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, homa_xmit_data__stop_because_no_more_granted)
@@ -874,7 +1164,46 @@ TEST_F(homa_outgoing, homa_xmit_data__stop_because_no_more_granted)
 	homa_xmit_data(crpc);
 	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
+}
+#endif /* See strip.py */
+TEST_F(homa_outgoing, homa_xmit_data__stop_because_not_enough_data_copied_from_user_space)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 6000, 1000);
+	crpc->msgout.copied_from_user = 2799;
 	unit_log_clear();
+	homa_rpc_lock(crpc);
+
+	/* First call can't quite transmit the second packet. */
+	homa_xmit_data(crpc);
+	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
+
+	/* Second call transmits the second packet. */
+	unit_log_clear();
+	crpc->msgout.copied_from_user = 2800;
+	homa_xmit_data(crpc);
+	EXPECT_STREQ("xmit DATA 1400@1400", unit_log_get());
+
+	homa_rpc_unlock(crpc);
+}
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_xmit_data__stop_after_unscheduled)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 6000, 1000);
+	crpc->msgout.unscheduled = 1300;
+	crpc->msgout.max_gso_segs = 2;
+	crpc->msgout.max_gso_data = 2800;
+
+	unit_log_clear();
+	homa_rpc_lock(crpc);
+	homa_xmit_data(crpc);
+	homa_rpc_unlock(crpc);
+	EXPECT_STREQ("xmit DATA 1400@0; "
+		     "xmit DATA 1400@1400 1400@2800; "
+		     "xmit DATA 1400@4200 400@5600", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_xmit_data__metrics_for_client_rpc)
 {
@@ -915,318 +1244,42 @@ TEST_F(homa_outgoing, homa_xmit_data__metrics_for_server_rpc)
 	homa_rpc_unlock(srpc);
 }
 #endif /* See strip.py */
-TEST_F(homa_outgoing, homa_xmit_data__rpc_freed)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 6000, 1000);
-
-#ifndef __STRIP__ /* See strip.py */
-	crpc->msgout.unscheduled = 2000;
-	crpc->msgout.granted = 5000;
-#else /* See strip.py */
-	unit_reset_tx(crpc);
-#endif /* See strip.py */
-
-	unit_log_clear();
-	homa_rpc_lock(crpc);
-	unit_hook_register(lock_end_hook);
-	hook_rpc = crpc;
-	homa_xmit_data(crpc);
-	homa_rpc_unlock(crpc);
-	EXPECT_STREQ("xmit DATA 1400@0; homa_rpc_end invoked",
-			unit_log_get());
-	EXPECT_EQ(1400, crpc->msgout.next_xmit_offset);
-}
-
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 1000, 1000);
-
-	crpc->peer->cutoff_version = htons(123);
-	mock_xmit_log_verbose = 1;
-	unit_log_clear();
-	skb_get(crpc->msgout.packets);
-	__homa_xmit_data(crpc->msgout.packets, crpc, 4);
-	EXPECT_SUBSTR("cutoff_version 123", unit_log_get());
-}
-#endif /* See strip.py */
-TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 1000, 1000);
-	struct dst_entry *dst;
-	int old_refcount;
-
-#ifdef __STRIP__ /* See strip.py */
-	unit_reset_tx(crpc);
-#endif /* See strip.py */
-	unit_log_clear();
-	dst = crpc->peer->dst;
-	old_refcount = atomic_read(&dst->__rcuref.refcnt);
-
-	skb_get(crpc->msgout.packets);
-#ifndef __STRIP__ /* See strip.py */
-	__homa_xmit_data(crpc->msgout.packets, crpc, 6);
-#else /* See strip.py */
-	__homa_xmit_data(crpc->msgout.packets, crpc);
-#endif /* See strip.py */
-	EXPECT_STREQ("xmit DATA 1000@0", unit_log_get());
-	EXPECT_EQ(dst, skb_dst(crpc->msgout.packets));
-	EXPECT_EQ(old_refcount+1, atomic_read(&dst->__rcuref.refcnt));
-}
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, __homa_xmit_data__ipv6_call_homa_hijack_set_hdr)
-{
-	struct homa_common_hdr *h;
-	struct homa_rpc *crpc;
-	struct sk_buff *skb;
-	struct in6_addr addr;
-
-	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
-
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			&addr, self->server_port, self->client_id,
-			100, 1000);
-	unit_log_clear();
-	skb = crpc->msgout.packets;
-	skb_get(skb);
-	__homa_xmit_data(skb, crpc, 5);
-	h = (struct homa_common_hdr *)skb_transport_header(skb);
-	EXPECT_EQ(1, homa_skb_hijacked(skb));
-	EXPECT_EQ(666, h->checksum);
-}
-TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
-{
-	struct homa_rpc *crpc;
-	struct in6_addr addr;
-
-	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
-
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			&addr, self->server_port, self->client_id,
-			100, 1000);
-	unit_log_clear();
-	mock_ip6_xmit_errors = 1;
-	skb_get(crpc->msgout.packets);
-	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors);
-}
-TEST_F(homa_outgoing, __homa_xmit_data__ipv4_call_homa_hijack_set_hdr)
-{
-	struct homa_common_hdr *h;
-	struct homa_rpc *crpc;
-	struct sk_buff *skb;
-
-	// Make sure the test uses IPv4.
-	mock_ipv6 = false;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, self->client_port);
-
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			self->server_ip, self->server_port, self->client_id,
-			1000, 1000);
-	unit_log_clear();
-	skb = crpc->msgout.packets;
-	skb_get(skb);
-	__homa_xmit_data(skb, crpc, 5);
-	h = (struct homa_common_hdr *)skb_transport_header(skb);
-	EXPECT_EQ(1, homa_skb_hijacked(skb));
-	EXPECT_EQ(444, h->checksum);
-}
-TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)
-{
-	struct homa_rpc *crpc;
-
-	// Make sure the test uses IPv4.
-	mock_ipv6 = false;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, self->client_port);
-
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			self->server_ip, self->server_port, self->client_id,
-			1000, 1000);
-	unit_log_clear();
-	mock_ip_queue_xmit_errors = 1;
-	skb_get(crpc->msgout.packets);
-	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors);
-}
-#endif /* See strip.py */
 
 TEST_F(homa_outgoing, homa_resend_data__basics)
 {
 	struct homa_rpc *crpc;
 
-	self->dev->gso_max_size = 5000;
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			16000, 1000);
 	unit_log_clear();
-	mock_clear_xmit_prios();
-	mock_xmit_log_verbose = 1;
-
-	/* Helps to detect errors in computing seg_offset. */
-	skb_push(crpc->msgout.packets, 8);
 
 	homa_rpc_lock(crpc);
-	homa_resend_data(crpc, 7000, 10000, 2);
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1234, message_length 16000, offset 7000, data_length 1400, incoming 10000, RETRANSMIT; "
-			"xmit DATA from 0.0.0.0:40000, dport 99, id 1234, message_length 16000, offset 8400, data_length 1400, incoming 10000, RETRANSMIT; "
-			"xmit DATA from 0.0.0.0:40000, dport 99, id 1234, message_length 16000, offset 9800, data_length 200, incoming 10000, RETRANSMIT",
-			unit_log_get());
-#else /* See strip.py */
-	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1234, message_length 16000, offset 7000, data_length 1400, RETRANSMIT; "
-			"xmit DATA from 0.0.0.0:40000, dport 99, id 1234, message_length 16000, offset 8400, data_length 1400, RETRANSMIT; "
-			"xmit DATA from 0.0.0.0:40000, dport 99, id 1234, message_length 16000, offset 9800, data_length 1400, RETRANSMIT",
-			unit_log_get());
-#endif /* See strip.py */
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("2 2 2", mock_xmit_prios);
-#endif /* See strip.py */
-
-	unit_log_clear();
-	mock_clear_xmit_prios();
-	mock_xmit_log_verbose = 0;
-	homa_resend_data(crpc, 1500, 1500, 3);
-	EXPECT_STREQ("", unit_log_get());
-
-	unit_log_clear();
-	mock_clear_xmit_prios();
-	mock_xmit_log_verbose = 0;
-	homa_resend_data(crpc, 2800, 4200, 3);
-	EXPECT_STREQ("xmit DATA retrans 1400@2800", unit_log_get());
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("3", mock_xmit_prios);
-#endif /* See strip.py */
-
-	unit_log_clear();
-	mock_clear_xmit_prios();
-	mock_xmit_log_verbose = 0;
-	homa_resend_data(crpc, 4199, 4201, 7);
-	EXPECT_STREQ("xmit DATA retrans 1400@2800; "
-			"xmit DATA retrans 1400@4200", unit_log_get());
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("7 7", mock_xmit_prios);
-#endif /* See strip.py */
-
-	unit_log_clear();
-	mock_xmit_log_verbose = 0;
-	homa_resend_data(crpc, 16000, 17000, 7);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(0, -homa_resend_data(crpc, 7100, 10000));
+	EXPECT_STREQ("xmit DATA 1400@7000; "
+		     "xmit DATA 1400@8400; "
+		     "xmit DATA 1400@9800", unit_log_get());
+	IF_NO_STRIP(EXPECT_EQ(3, homa_metrics_per_cpu()->resent_packets));
 	homa_rpc_unlock(crpc);
 }
-TEST_F(homa_outgoing, homa_resend_data__packet_doesnt_use_gso)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 1000, 2000);
-
-	unit_log_clear();
-	homa_rpc_lock(crpc);
-	homa_resend_data(crpc, 500, 1500, 2);
-	EXPECT_STREQ("xmit DATA retrans 1000@0", unit_log_get());
-	homa_rpc_unlock(crpc);
-}
-TEST_F(homa_outgoing, homa_resend_data__cant_allocate_skb)
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_resend_data__error)
 {
 	struct homa_rpc *crpc;
 
-	self->dev->gso_max_size = 5000;
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			self->server_ip, self->server_port, self->client_id,
-			16000, 1000);
-
-	unit_log_clear();
-	mock_clear_xmit_prios();
-	mock_alloc_skb_errors = 1;
-	homa_resend_data(crpc, 7000, 10000, 2);
-	EXPECT_STREQ("skb allocation error", unit_log_get());
-}
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, homa_resend_data__set_incoming)
-{
-	struct homa_rpc *crpc;
-
-	self->dev->gso_max_size = 5000;
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			16000, 1000);
 	unit_log_clear();
-	mock_xmit_log_verbose = 1;
-	EXPECT_EQ(10000, crpc->msgout.granted);
+	mock_ip_queue_xmit_errors = 2;
+
 	homa_rpc_lock(crpc);
-	homa_resend_data(crpc, 8400, 8800, 2);
-	EXPECT_SUBSTR("incoming 8800", unit_log_get());
-	homa_rpc_unlock(crpc);
-}
-TEST_F(homa_outgoing, homa_resend_data__error_copying_data)
-{
-	struct homa_rpc *crpc;
-
-	self->dev->gso_max_size = 5000;
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			self->server_ip, self->server_port, self->client_id,
-			16000, 1000);
-	unit_log_clear();
-	mock_clear_xmit_prios();
-	mock_max_skb_frags = 0;
-	homa_resend_data(crpc, 7000, 10000, 2);
-	EXPECT_STREQ("homa_resend_data got error 22 while copying data",
-			unit_log_get());
-}
-#endif /* See strip.py */
-TEST_F(homa_outgoing, homa_resend_data__update_to_free_and_set_homa_info)
-{
-	struct homa_skb_info *homa_info;
-	struct homa_rpc *crpc;
-	struct sk_buff *skb;
-
-	mock_set_ipv6(&self->hsk);
-	self->dev->gso_max_size = 5000;
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			self->server_ip, self->server_port, self->client_id,
-			16000, 1000);
-	unit_log_clear();
-	homa_rpc_lock(crpc);
-	homa_resend_data(crpc, 8400, 8800, 2);
-	skb = crpc->msgout.to_free;
-	ASSERT_NE(NULL, skb);
-	homa_info = homa_get_skb_info(skb);
-	EXPECT_EQ(NULL, homa_info->next_skb);
-	EXPECT_EQ(1538, homa_info->wire_bytes);
-	EXPECT_EQ(1400, homa_info->data_bytes);
-	EXPECT_EQ(1400, homa_info->seg_length);
-	EXPECT_EQ(8400, homa_info->offset);
-	EXPECT_EQ(crpc, homa_info->rpc);
-	EXPECT_EQ(1, refcount_read(&skb->users));
-	IF_NO_STRIP(EXPECT_EQ(6, crpc->msgout.num_skbs));
-	homa_rpc_unlock(crpc);
-}
-TEST_F(homa_outgoing, homa_resend_data__rpc_ended)
-{
-	struct homa_rpc *crpc;
-
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			       self->server_ip, self->server_port,
-			       self->client_id, 16000, 1000);
-
-	unit_log_clear();
-	homa_rpc_lock(crpc);
-	unit_hook_register(lock_end_hook);
-	hook_rpc = crpc;
-	homa_resend_data(crpc, 2000, 10000, 2);
-	EXPECT_STREQ("xmit DATA retrans 1400@1400; homa_rpc_end invoked",
-		     unit_log_get());
+	EXPECT_EQ(ENETDOWN, -homa_resend_data(crpc, 7100, 10000));
+	EXPECT_STREQ("xmit DATA 1400@7000", unit_log_get());
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->resent_packets));
 	homa_rpc_unlock(crpc);
 }
 
-#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, homa_rpc_tx_end)
 {
 	struct homa_qdisc_dev *qdev;

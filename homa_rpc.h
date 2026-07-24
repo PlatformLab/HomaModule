@@ -27,59 +27,60 @@ struct homa_message_out {
 	 */
 	int length;
 
-	/** @num_skbs: Total number of buffers currently in @to_free. */
-	int num_skbs;
+	/**
+	 * @frags: Array of fragments that hold the tx message in a ready-
+	 * to-transmit form, consisting of segments, each with a
+	 * homa_seg_hdr followed by the data for that segment. These
+	 * fragments will be incorporated into skb's to transmit the message.
+	 * If this doesn't point to @frag below then it is dynamically
+	 * allocated and must be freed.
+	 */
+	skb_frag_t *frags;
+
+	/** @num_frags: Number of fragments at @frags. */
+	int num_frags;
 
 	/**
-	 * @skb_memory: Total number of bytes of memory occupied by
-	 * the sk_buffs for this message.
+	 * @frag_bytes: Total amount of memory in all of @frags; this is
+	 * included in sk_wmem_alloc.
 	 */
-	int skb_memory;
+	int frag_bytes;
+
+	/**
+	 * @frag: @frags will point here if the message data all fits in a
+	 * single fragment (avoid alloc/free overhead).
+	 */
+	skb_frag_t frag;
+
+	/**
+	 * @max_seg_data: Maximum amount of message data to include in each
+	 * segment of tx packets.
+	 */
+	int max_seg_data;
+
+	/* Maximum number of segments that can be present in a single GSO
+	 * packet.
+	 */
+	int max_gso_segs;
+
+	/**
+	 * @max_gso_data: Maximum amount of message data in a GSO frame
+	 * (@max_seg_data * @max_gso_segs).
+	 */
+	int max_gso_data;
 
 	/**
 	 * @copied_from_user: Number of bytes of the message that have
-	 * been copied from user space into skbs in @packets.
+	 * been copied from user space into @frags.
 	 */
 	int copied_from_user;
 
 	/**
-	 * @packets: Singly-linked list of all packets in message, linked
-	 * using homa_skb_info->next_skb. The list is in order of offset in
-	 * the message (offset 0 first); each sk_buff can potentially contain
-	 * multiple data_segments, which will be split into separate packets
-	 * by GSO. This list grows gradually as data is copied in from user
-	 * space, so it may not be complete.
-	 */
-	struct sk_buff *packets;
-
-	/**
-	 * @next_xmit: Pointer to pointer to next packet to transmit (will
-	 * either refer to @packets or homa_skb_info->next_skb for some skb
-	 * in @packets).
-	 */
-	struct sk_buff **next_xmit;
-
-	/**
 	 * @next_xmit_offset: All bytes in the message, up to but not
 	 * including this one, have been passed to ip_queue_xmit or
-	 * ip6_xmit.
+	 * ip6_xmit at least once.
 	 */
 	int next_xmit_offset;
-
-	/**
-	 * @to_free: Singly-linked list of packets that must be freed by
-	 * homa_rpc_reap. Initially holds retransmitted packets, but
-	 * eventually includes the packets in @packets. homa_rpc_reap uses
-	 * this list to ensure that all tx packets have been freed by the
-	 * IP stack before it frees the homa_rpc (otherwise homa_qdisc might
-	 * try to access the RPC via a packet's homa_skb_info). Note: I
-	 * considered using skb->destructor to release a reference on the RPC,
-	 * but this does not appear to be reliable because (a) skb->destructor
-	 * may be overwritten and (b) it may be called before the skb has
-	 * cleared the tx pipeline (via skb_orphan?). Also, need to retain
-	 * @packets in case they are needed for retransmission.
-	 */
-	struct sk_buff *to_free;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
@@ -87,7 +88,9 @@ struct homa_message_out {
 	 * without waiting for grants.
 	 */
 	int unscheduled;
+#endif /* See strip.py */
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @granted: Total number of bytes we are currently permitted to
 	 * send, including unscheduled bytes; must wait for grants before
@@ -101,6 +104,12 @@ struct homa_message_out {
 	 * packets.
 	 */
 	u8 sched_priority;
+
+	/**
+	 * @retrans_priority: Priority level to use for retransmitted
+	 * packets.
+	 */
+	u8 retrans_priority;
 #endif /* See strip.py */
 
 	/**
@@ -169,7 +178,8 @@ struct homa_message_in {
 
 	/**
 	 * @num_bpages: The number of entries in @bpage_offsets used for this
-	 * message (0 means buffers not allocated yet).
+	 * message (0 means buffers not allocated yet or the buffers have
+	 * been handed off to the application).
 	 */
 	u32 num_bpages;
 
@@ -480,28 +490,6 @@ struct homa_rpc {
 	u64 start_time;
 };
 
-/**
- * @struct homa_rpc_skbs: Used during reaping to collect information
- * about skbs that are ready to be freed (skbs present here have been
- * removed from the rpc).
- */
-struct homa_rpc_skbs {
-	/** @num_skbs: Number of entries currently used in skbs. */
-	int num_skbs;
-
-	/**
-	 * @tx_skbs: Number of (initial) entries in @skbs that contain
-	 * transmit buffers; entries after this contain receive buffers.
-	 */
-	int tx_skbs;
-
-	/**
-	 * @skbs: sk_buffs that need to be freed.
-	 */
-#define HOMA_MAX_REAP_SKBS 10
-	struct sk_buff *skbs[HOMA_MAX_REAP_SKBS];
-};
-
 void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			 int port, int error);
 void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
@@ -516,8 +504,6 @@ struct homa_rpc
 	*homa_rpc_alloc_server(struct homa_sock *hsk,
 			       const struct in6_addr *source,
 			       struct homa_data_hdr *h);
-bool     homa_rpc_collect_skbs(struct homa_rpc *rpc,
-			       struct homa_rpc_skbs *skbs, int max_skbs);
 void     homa_rpc_end(struct homa_rpc *rpc);
 struct homa_rpc
 	*homa_rpc_find_client(struct homa_sock *hsk, u64 id);
@@ -525,7 +511,7 @@ struct homa_rpc
 	*homa_rpc_find_server(struct homa_sock *hsk,
 			      const struct in6_addr *saddr, u64 id);
 void     homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info);
-int      homa_rpc_reap(struct homa_sock *hsk, bool reap_all);
+int      homa_rpc_reap(struct homa_sock *hsk);
 
 /**
  * homa_rpc_lock() - Acquire the lock for an RPC.

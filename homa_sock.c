@@ -217,7 +217,6 @@ int homa_sock_init(struct homa_sock *hsk)
 	atomic_set(&hsk->protect_count, 0);
 	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
-	hsk->dead_skbs = 0;
 	INIT_LIST_HEAD(&hsk->waiting_for_bufs);
 	INIT_LIST_HEAD(&hsk->ready_rpcs);
 	INIT_LIST_HEAD(&hsk->interests);
@@ -419,13 +418,16 @@ void homa_sock_destroy(struct sock *sk)
 
 	tt_record1("Starting to destroy socket %d", hsk->port);
 	while (!list_empty(&hsk->dead_rpcs)) {
-		homa_rpc_reap(hsk, true);
 #ifndef __STRIP__ /* See strip.py */
-		i++;
-		if (i == 5) {
-			tt_record("Freezing because reap seems hung");
-			tt_freeze();
+		if (!homa_rpc_reap(hsk)) {
+			i++;
+			if (i == 5) {
+				tt_record("Freezing because reap seems hung");
+				tt_freeze();
+			}
 		}
+#else /* See strip.py */
+		homa_rpc_reap(hsk);
 #endif /* See strip.py */
 	}
 

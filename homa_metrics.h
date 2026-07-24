@@ -198,12 +198,16 @@ struct homa_metrics {
 	u64 skb_free_cycles;
 
 	/**
-	 * @skb_page_allocs: total number of calls to homa_skb_page_alloc.
+	 * @tx_page_allocs: total number of new page allocations performed
+	 * by homa_tx_pages.c.
 	 */
-	u64 skb_page_allocs;
+	u64 tx_page_allocs;
 
-	/** @skb_page_alloc_cycles: total time spent in homa_skb_page_alloc. */
-	u64 skb_page_alloc_cycles;
+	/**
+	 * @tx_page_alloc_cycles: total time spent by homa_tx_pages.c
+	 * performing page allocation.
+	 */
+	u64 tx_page_alloc_cycles;
 
 	/**
 	 * @requests_received: total number of request messages received.
@@ -375,10 +379,10 @@ struct homa_metrics {
 	u64 timer_reap_cycles;
 
 	/**
-	 * @data_pkt_reap_cycles: total time spent by homa_data_pkt to reap
+	 * @dispatch_pkt_reap_cycles: total time spent by homa_data_pkt to reap
 	 * dead RPCs.
 	 */
-	u64 data_pkt_reap_cycles;
+	u64 dispatch_pkt_reap_cycles;
 
 	/**
 	 * @idle_time_conflicts: total number of times that an update to
@@ -698,19 +702,6 @@ struct homa_metrics {
 	 * and was not disabled.
 	 */
 	u64 reaper_calls;
-
-	/**
-	 * @reaper_dead_skbs: incremented by hsk->dead_skbs each time that
-	 * reaper_calls is incremented.
-	 */
-	u64 reaper_dead_skbs;
-
-	/**
-	 * @reaper_active_skbs: total number of times homa_rpc_reap had to skip
-	 * an RPC because one of its tx skb's was still in the transmit
-	 * pipeline.
-	 */
-	u64 reaper_active_skbs;
 
 	/**
 	 * @ack_overflows: total number of times that homa_peer_add_ack

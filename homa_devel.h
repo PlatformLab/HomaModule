@@ -106,7 +106,7 @@ static inline void check_addr_valid(void *addr, char *info)
 }
 
 #ifndef __STRIP__ /* See strip.py */
-#define IF_NO_STRIP(code) code
+#define IF_NO_STRIP(...) __VA_ARGS__
 #else /* See strip.py */
 #define IF_NO_STRIP(...)
 #endif /* See strip.py */

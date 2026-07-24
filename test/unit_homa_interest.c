@@ -206,7 +206,8 @@ TEST_F(homa_interest, homa_interest_wait__call_homa_rpc_reap)
 			       self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
 	homa_rpc_end(crpc);
-	EXPECT_EQ(15, self->hsk.dead_skbs);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->reaper_calls));
 
 	homa_interest_init_shared(&interest, &self->hsk);
 
@@ -217,7 +218,8 @@ TEST_F(homa_interest, homa_interest_wait__call_homa_rpc_reap)
 	unit_log_clear();
 
 	EXPECT_EQ(0, homa_interest_wait(&interest));
-	EXPECT_EQ(5, self->hsk.dead_skbs);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.dead_rpcs));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls));
 	list_del_init(&interest.links);
 }
 TEST_F(homa_interest, homa_interest_wait__poll_then_block)

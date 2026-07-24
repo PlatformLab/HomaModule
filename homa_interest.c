@@ -111,7 +111,7 @@ int homa_interest_wait(struct homa_interest *interest)
 		}
 
 		/* See if we can cleanup dead RPCs while waiting. */
-		if (homa_rpc_reap(hsk, false) != 0)
+		if (homa_rpc_reap(hsk) != 0)
 			continue;
 
 #ifndef __STRIP__ /* See strip.py */

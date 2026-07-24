@@ -196,8 +196,8 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "dead_buffs_limit",
-		.data		= OFFSET(dead_buffs_limit),
+		.procname	= "dead_frags_limit",
+		.data		= OFFSET(dead_frags_limit),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -259,8 +259,8 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "max_dead_buffs",
-		.data		= OFFSET(max_dead_buffs),
+		.procname	= "max_dead_frags",
+		.data		= OFFSET(max_dead_frags),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -315,13 +315,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "reap_limit",
-		.data		= OFFSET(reap_limit),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "request_ack_ticks",
 		.data		= OFFSET(request_ack_ticks),
 		.maxlen		= sizeof(int),
@@ -343,20 +336,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "skb_page_frees_per_sec",
-		.data		= OFFSET(skb_page_frees_per_sec),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "skb_page_pool_min_kb",
-		.data		= OFFSET(skb_page_pool_min_kb),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "temp",
 		.data		= OFFSET(temp[0]),
 		.maxlen		= sizeof(((struct homa *)0)->temp),
@@ -373,6 +352,20 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "timeout_ticks",
 		.data		= OFFSET(timeout_ticks),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "tx_page_frees_per_sec",
+		.data		= OFFSET(tx_page_frees_per_sec),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "tx_page_pool_min_kb",
+		.data		= OFFSET(tx_page_pool_min_kb),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -1226,6 +1219,17 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		goto error;
 	}
 
+	if (unlikely(msg->msg_iter.count == 0)) {
+		hsk->error_msg = "message has length zero";
+		result = -EINVAL;
+		goto error;
+	}
+	if (unlikely(msg->msg_iter.count > HOMA_MAX_MESSAGE_LENGTH)) {
+		hsk->error_msg = "message length exceeded HOMA_MAX_MESSAGE_LENGTH";
+		result = -EINVAL;
+		goto error;
+	}
+
 	if (!args.id) {
 		/* This is a request message. */
 		rpc = homa_rpc_alloc_client(hsk, addr);
@@ -1244,7 +1248,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			   : tt_addr(addr->in6.sin6_addr),
 			   ntohs(addr->in6.sin6_port), rpc->id, length);
 		rpc->completion_cookie = args.completion_cookie;
-		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
+		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result)
 			goto error;
 		args.id = rpc->id;
@@ -1299,9 +1303,11 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		rpc->state = RPC_OUTGOING;
 
-		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
-		if (result && rpc->state != RPC_DEAD)
+		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
+		if (result && rpc->state != RPC_DEAD) {
+			hsk->error_msg = "error copying reponse message data from user space";
 			goto error;
+		}
 		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 #ifndef __STRIP__ /* See strip.py */
@@ -1506,11 +1512,12 @@ done:
 		homa_rpc_unlock(rpc);
 	}
 
-	if (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags)) {
+	while (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags)) {
 		/* There are tasks waiting for tx memory, so reap
 		 * immediately.
 		 */
-		homa_rpc_reap(hsk, true);
+		if (!homa_rpc_reap(hsk))
+			break;
 	}
 
 	if (unlikely(copy_to_user((__force void __user *)msg->msg_control,

@@ -214,10 +214,10 @@ char *homa_metrics_print(void)
 		  "Data sk_buffs freed in normal paths\n");
 		M("skb_free_cycles", m->skb_free_cycles,
 		  "Time spent freeing data sk_buffs\n");
-		M("skb_page_allocs", m->skb_page_allocs,
-		  "Pages allocated for sk_buff frags\n");
-		M("skb_page_alloc_cycles", m->skb_page_alloc_cycles,
-		  "Time spent allocating pages for sk_buff frags\n");
+		M("tx_page_allocs", m->tx_page_allocs,
+		  "Page allocations (pool underflows) made for tx packets\n");
+		M("tx_page_alloc_cycles", m->tx_page_alloc_cycles,
+		  "Time spent allocating pages for tx packets\n");
 		M("requests_received", m->requests_received,
 		  "Incoming request messages\n");
 		M("responses_received", m->responses_received,
@@ -285,7 +285,7 @@ char *homa_metrics_print(void)
 		  "Time spent in homa_timer\n");
 		M("timer_reap_cycles", m->timer_reap_cycles,
 		  "Time in homa_timer spent reaping RPCs\n");
-		M("data_pkt_reap_cycles", m->data_pkt_reap_cycles,
+		M("dispatch_pkt_reap_cycles", m->dispatch_pkt_reap_cycles,
 		  "Time in homa_data_pkt spent reaping RPCs\n");
 		M("idle_time_conflicts", m->idle_time_conflicts,
 		  "Cache conflicts when updating link_idle_time\n");
@@ -393,10 +393,6 @@ char *homa_metrics_print(void)
 		  "RPCs skipped by reaper because still in use\n");
 		M("reaper_calls", m->reaper_calls,
 		  "Reaper invocations that were not disabled\n");
-		M("reaper_dead_skbs", m->reaper_dead_skbs,
-		  "Sum of hsk->dead_skbs across all reaper calls\n");
-		M("reaper_active_skbs", m->reaper_active_skbs,
-		  "RPCs skipped by reaper because of active tx skbs\n");
 		M("ack_overflows", m->ack_overflows,
 		  "Explicit ACKs sent because peer->acks was full\n");
 		M("ignored_need_acks", m->ignored_need_acks,

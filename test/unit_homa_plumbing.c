@@ -862,7 +862,7 @@ TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_alloc_client)
 		     self->hsk.error_msg);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_message_out_fill)
+TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_tx_copy_from_user)
 {
 	self->sendmsg_hdr.msg_iter.count = HOMA_MAX_MESSAGE_LENGTH+1;
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
@@ -963,22 +963,22 @@ TEST_F(homa_plumbing, homa_sendmsg__response_wrong_state)
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_sendmsg__homa_message_out_fill_returns_error)
+TEST_F(homa_plumbing, homa_sendmsg__homa_tx_copy_from_user_returns_error)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 2000, 100);
 
 	self->sendmsg_args.id = self->server_id;
-	self->sendmsg_hdr.msg_iter.count = HOMA_MAX_MESSAGE_LENGTH + 1;
-	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+	mock_copy_data_errors = 2;
+	EXPECT_EQ(EFAULT, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_STREQ("message length exceeded HOMA_MAX_MESSAGE_LENGTH",
+	EXPECT_STREQ("error copying reponse message data from user space",
 		     self->hsk.error_msg);
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_sendmsg__rpc_freed_during_homa_message_out_fill)
+TEST_F(homa_plumbing, homa_sendmsg__rpc_freed_during_homa_tx_copy_from_user)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
@@ -990,7 +990,6 @@ TEST_F(homa_plumbing, homa_sendmsg__rpc_freed_during_homa_message_out_fill)
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_EQ(RPC_DEAD, srpc->state);
-	EXPECT_EQ(0, srpc->msgout.num_skbs);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_sendmsg__response_succeeds)
@@ -1326,7 +1325,7 @@ TEST_F(homa_plumbing, homa_recvmsg__reap_because_of_SOCK_NOSPACE)
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
-	EXPECT_EQ(0, self->hsk.dead_skbs);
+	EXPECT_EQ(0, self->hsk.dead_frags);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls));
 }
 TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_args)

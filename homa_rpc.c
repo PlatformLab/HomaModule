@@ -6,13 +6,11 @@
 #include "homa_interest.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
+#include "homa_tx_pool.h"
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_qdisc.h"
-#include "homa_skb.h"
-#else /* See strip.py */
-#include "homa_stub.h"
 #endif /* See strip.py */
 
 /**
@@ -318,12 +316,8 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	__list_del_entry(&rpc->ready_links);
 	homa_pool_unlink(rpc);
 	homa_interest_notify_private(rpc);
-//	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
-//			rpc->hsk->client_port,
-//			rpc->hsk->dead_skbs);
 
 	if (rpc->msgin.length >= 0) {
-		rpc->hsk->dead_skbs += skb_queue_len(&rpc->msgin.packets);
 		while (1) {
 			struct homa_gap *gap;
 
@@ -335,13 +329,13 @@ void homa_rpc_end(struct homa_rpc *rpc)
 			kfree(gap);
 		}
 	}
-	rpc->hsk->dead_skbs += rpc->msgout.num_skbs;
-	if (rpc->hsk->dead_skbs > rpc->hsk->homa->max_dead_buffs)
+	rpc->hsk->dead_frags += rpc->msgout.num_frags + 1;
+	if (rpc->hsk->dead_frags > rpc->hsk->homa->max_dead_frags)
 		/* This update isn't thread-safe; it's just a
 		 * statistic so it's OK if updates occasionally get
 		 * missed.
 		 */
-		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
+		rpc->hsk->homa->max_dead_frags = rpc->hsk->dead_frags;
 
 	homa_sock_unlock(rpc->hsk);
 }
@@ -414,43 +408,43 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 
 /**
  * homa_rpc_reap() - Invoked to release resources associated with dead
- * RPCs for a given socket.
+ * RPCs for a given socket. Each call will do a small amount of work; there
+ * may still be unreaped RPCs on return.
  * @hsk:      Homa socket that may contain dead RPCs. Must not be locked by the
  *            caller; this function will lock and release.
- * @reap_all: False means do a small chunk of work; there may still be
- *            unreaped RPCs on return. True means reap all dead RPCs for
- *            hsk.  Will busy-wait if reaping has been disabled for some RPCs.
  *
  * Return: A return value of 0 means that we ran out of work to do; calling
- *         again will do no work (there could be unreaped RPCs, but if so,
+ *         again may not do any work (there could be unreaped RPCs, but if so,
  *         they cannot currently be reaped).  A value greater than zero means
  *         there is still more reaping work to be done.
  */
-int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
+int homa_rpc_reap(struct homa_sock *hsk)
 {
 	/* RPC Reaping Strategy:
 	 *
 	 * (Note: there are references to this comment elsewhere in the
 	 * Homa code)
 	 *
-	 * Most of the cost of reaping comes from freeing sk_buffs; this can be
-	 * quite expensive for RPCs with long messages.
-	 *
-	 * The natural time to reap is when homa_rpc_end is invoked to
-	 * terminate an RPC, but this doesn't work for two reasons. First,
-	 * there may be outstanding references to the RPC; it cannot be reaped
-	 * until all of those references have been released. Second, reaping
-	 * is potentially expensive and RPC termination could occur in
+	 * This function is separate from homa_rpc_end for two reasons.
+	 * First, there may be outstanding references to an RPC when
+	 * homa_rpc_end is invoked; the storage for the RPC cannot be
+	 * freed until all of those references have been released.
+	 * Second, reaping an RPC is potentially expensive (if it owns a
+	 * lot of buffer memory) and homa_rpc_end could be invoked in
 	 * homa_softirq when there are short messages waiting to be processed.
-	 * Taking time to reap a long RPC could result in significant delays
-	 * for subsequent short RPCs.
+	 * Taking time to reap a long RPC could result in delays for
+	 * subsequent short RPCs. This second reason is less important
+	 * now than it used to be (in earlier versions of Homa skbs for both
+	 * inbound and outbound messages were retained until the RPC was
+	 * reaped, and freeing the skbs was relatively expensive; now no
+	 * skbs are retained; there are only pages of tx message memory to
+	 * return to homa_tx_pool).
 	 *
 	 * Thus Homa doesn't reap immediately in homa_rpc_end. Instead, dead
 	 * RPCs are queued up and reaping occurs in this function, which is
-	 * invoked later when it is less likely to impact latency. The
-	 * challenge is to do this so that (a) we don't allow large numbers of
-	 * dead RPCs to accumulate and (b) we minimize the impact of reaping
-	 * on latency.
+	 * invoked later. The challenge is to do this so that (a) we don't allow
+	 * large numbers of dead RPCs to accumulate and (b) we minimize the
+	 * impact of reaping on latency of unrelated messages.
 	 *
 	 * The primary place where homa_rpc_reap is invoked is when threads
 	 * are waiting for incoming messages. The thread has nothing else to
@@ -461,13 +455,13 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 	 *
 	 * Homa now reaps in two other places, if reaping while waiting for
 	 * messages isn't adequate:
-	 * 1. If too may dead skbs accumulate, then homa_timer will call
+	 * 1. If too many dead RPCs accumulate, then homa_timer will call
 	 *    homa_rpc_reap.
-	 * 2. If this timer thread cannot keep up with all the reaping to be
+	 * 2. If the timer thread cannot keep up with all the reaping to be
 	 *    done then as a last resort homa_dispatch_pkts will reap in small
 	 *    increments (a few sk_buffs or RPCs) for every incoming batch
-	 *    of packets . This is undesirable because it will impact Homa's
-	 *    performance.
+	 *    of packets. This is undesirable because it will impact Homa's
+	 *    latency.
 	 *
 	 * During the introduction of homa_pools for managing input
 	 * buffers, freeing of packets for incoming messages was moved to
@@ -476,224 +470,146 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 	 * fast networks (e.g. 100 Gbps) copying to user space is the
 	 * bottleneck for incoming messages, and packet freeing takes about
 	 * 20-25% of the total time in homa_copy_to_user. So, it may eventually
-	 * be desirable to remove packet freeing out of homa_copy_to_user.
+	 * be desirable to move packet freeing out of homa_copy_to_user.
 	 */
 #ifdef __UNIT_TEST__
 #define BATCH_MAX_RPCS 3
+#define BATCH_MAX_FRAGS 10
 #else /* __UNIT_TEST__ */
-#define BATCH_MAX_RPCS 10
+#define BATCH_MAX_RPCS 5
+#define BATCH_MAX_FRAGS 30
 #endif /* __UNIT_TEST__ */
 	struct homa_rpc *rpcs[BATCH_MAX_RPCS];
-	struct homa_rpc_skbs skbs;
-	bool checked_all_rpcs;
+	int checked_all_rpcs;
+	int total_dead_frags;
 	struct homa_rpc *rpc;
 	struct homa_rpc *tmp;
-	int i, batch_size;
-	int skbs_to_reap;
-	int num_rpcs;
+	int i, num_rpcs;
 
 	INC_METRIC(reaper_calls, 1);
-	INC_METRIC(reaper_dead_skbs, hsk->dead_skbs);
 
 	/* Each iteration through the following loop will reap
-	 * up to HOMA_MAX_REAP_SKBS skbs.
+	 * up to BATCH_MAX_RPCS RPCs.
 	 */
-	skbs_to_reap = hsk->homa->reap_limit;
 	checked_all_rpcs = list_empty(&hsk->dead_rpcs);
-	while (!checked_all_rpcs) {
-		batch_size = HOMA_MAX_REAP_SKBS;
-		if (!reap_all) {
-			if (skbs_to_reap <= 0)
-				break;
-			if (batch_size > skbs_to_reap)
-				batch_size = skbs_to_reap;
-			skbs_to_reap -= batch_size;
-		}
-		num_rpcs = 0;
-		skbs.num_skbs = 0;
-		skbs.tx_skbs = 0;
+	if (checked_all_rpcs)
+		return 0;
+	num_rpcs = 0;
+	total_dead_frags = 0;
 
-		homa_sock_lock(hsk);
-		if (atomic_read(&hsk->protect_count)) {
-			INC_METRIC(disabled_reaps, 1);
-			tt_record3("homa_rpc_reap returning for port %d: protect_count %d, dead_skbs %d",
-				   hsk->port, atomic_read(&hsk->protect_count),
-				   hsk->dead_skbs);
-			homa_sock_unlock(hsk);
-			return 0;
-		}
-
-		/* Collect buffers and freeable RPCs. */
-		list_for_each_entry_safe(rpc, tmp, &hsk->dead_rpcs,
-					 dead_links) {
-			int refs;
-
-			/* Make sure that all outstanding uses of the RPC have
-			 * completed. We can read the reference count safely
-			 * only when we're holding the lock. Note: it isn't
-			 * safe to block while locking the RPC here, since we
-			 * hold the socket lock.
-			 */
-			if (homa_rpc_try_lock(rpc)) {
-				refs = refcount_read(&rpc->refs);
-				homa_rpc_unlock(rpc);
-			} else {
-				refs = 2;
-			}
-			if (refs > 1) {
-				INC_METRIC(deferred_rpc_reaps, 1);
-				continue;
-			}
-
-			if (!homa_rpc_collect_skbs(rpc, &skbs, batch_size)) {
-				if (skbs.num_skbs >= batch_size)
-					goto release;
-				continue;
-			}
-
-			/* All packets have been removed from the RPC, so the
-			 * RPC can be freed.
-			 */
-			rpcs[num_rpcs] = rpc;
-			num_rpcs++;
-			list_del(&rpc->dead_links);
-			WARN_ON(refcount_sub_and_test(rpc->msgout.skb_memory,
-						      &hsk->sock.sk_wmem_alloc));
-			if (num_rpcs >= BATCH_MAX_RPCS)
-				goto release;
-		}
-		checked_all_rpcs = true;
-
-		/* Free all of the collected resources; release the socket
-		 * lock while doing this.
-		 */
-release:
-		hsk->dead_skbs -= skbs.num_skbs;
+	homa_sock_lock(hsk);
+	if (atomic_read(&hsk->protect_count)) {
+		INC_METRIC(disabled_reaps, 1);
+		tt_record3("homa_rpc_reap returning for port %d: protect_count %d, dead_frags %d",
+			   hsk->port, atomic_read(&hsk->protect_count),
+			   hsk->dead_frags);
 		homa_sock_unlock(hsk);
-		homa_skb_free_many_tx(hsk->homa, skbs.skbs, skbs.tx_skbs);
-		for (i = skbs.tx_skbs; i < skbs.num_skbs; i++)
-			consume_skb(skbs.skbs[i]);
-		for (i = 0; i < num_rpcs; i++) {
-			IF_NO_STRIP(int tx_left);
-
-			rpc = rpcs[i];
-
-			UNIT_LOG("; ", "reaped %llu", rpc->id);
-			if (rpc->peer) {
-				homa_peer_release(rpc->peer);
-				rpc->peer = NULL;
-			}
-			homa_pool_release(rpc);
-			tt_record2("homa_rpc_reap finished reaping id %d, port %d",
-				   rpc->id, rpc->hsk->port);
-#ifndef __STRIP__ /* See strip.py */
-
-			tx_left = rpc->msgout.length -
-				rpc->msgout.next_xmit_offset;
-			if (homa_is_client(rpc->id)) {
-				INC_METRIC(client_response_bytes_done,
-					   rpc->msgin.bytes_remaining);
-				INC_METRIC(client_responses_done,
-					   rpc->msgin.bytes_remaining != 0);
-				if (tx_left > 0) {
-					INC_METRIC(client_request_bytes_done,
-						   tx_left);
-					INC_METRIC(client_requests_done, 1);
-				}
-			} else {
-				INC_METRIC(server_request_bytes_done,
-					   rpc->msgin.bytes_remaining);
-				INC_METRIC(server_requests_done,
-					   rpc->msgin.bytes_remaining != 0);
-				if (tx_left > 0) {
-					INC_METRIC(server_response_bytes_done,
-						   tx_left);
-					INC_METRIC(server_responses_done, 1);
-				}
-			}
-#endif /* See strip.py */
-			rpc->state = 0;
-			rpc->magic = 0;
-			kfree(rpc);
-		}
-		homa_sock_wakeup_wmem(hsk);
-		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
-			   skbs.num_skbs, num_rpcs, hsk->dead_skbs, hsk->port);
+		return 0;
 	}
+
+	/* Collect freeable RPCs. */
+	list_for_each_entry_safe(rpc, tmp, &hsk->dead_rpcs, dead_links) {
+		int refs;
+
+		if (num_rpcs >= BATCH_MAX_RPCS ||
+			total_dead_frags >= BATCH_MAX_FRAGS)
+			goto release;
+
+		/* Make sure that all outstanding uses of the RPC have
+		 * completed. We can read the reference count safely
+		 * only when we're holding the lock. Note: it isn't
+		 * safe to block while locking the RPC here, since we
+		 * hold the socket lock.
+		 */
+		if (homa_rpc_try_lock(rpc)) {
+			refs = refcount_read(&rpc->refs);
+			homa_rpc_unlock(rpc);
+		} else {
+			refs = 2;
+		}
+		if (refs > 1) {
+			INC_METRIC(deferred_rpc_reaps, 1);
+			continue;
+		}
+
+		rpcs[num_rpcs] = rpc;
+		num_rpcs++;
+		list_del(&rpc->dead_links);
+		hsk->dead_frags -= (rpc->msgout.num_frags + 1);
+		total_dead_frags += rpc->msgout.num_frags;
+	}
+	checked_all_rpcs = true;
+
+	/* Free all of the collected resources; release the socket lock
+	 * while doing this.
+	 */
+release:
+	homa_sock_unlock(hsk);
+	for (i = 0; i < num_rpcs; i++) {
+		IF_NO_STRIP(int tx_left);
+
+		rpc = rpcs[i];
+		UNIT_LOG("; ", "reaped %llu", rpc->id);
+
+		/* Free any unconsumed input packets (there shouldn't
+		 * usually be any).
+		 */
+		if (rpc->msgin.length >= 0) {
+			struct sk_buff *skb;
+
+			for (skb = __skb_dequeue(&rpc->msgin.packets); skb;
+			     skb = __skb_dequeue(&rpc->msgin.packets))
+				consume_skb(skb);
+		}
+
+		if (rpc->peer) {
+			homa_peer_release(rpc->peer);
+			rpc->peer = NULL;
+		}
+		homa_pool_release(rpc);
+		homa_tx_pool_free(hsk->homa, rpc->msgout.num_frags,
+					rpc->msgout.frags);
+		WARN_ON(refcount_sub_and_test(rpc->msgout.frag_bytes,
+						&hsk->sock.sk_wmem_alloc));
+		if (rpc->msgout.frags != &rpc->msgout.frag)
+			kfree(rpc->msgout.frags);
+		tt_record2("homa_rpc_reap finished reaping id %d, port %d",
+				rpc->id, rpc->hsk->port);
+#ifndef __STRIP__ /* See strip.py */
+		tx_left = rpc->msgout.length -
+			rpc->msgout.next_xmit_offset;
+		if (homa_is_client(rpc->id)) {
+			INC_METRIC(client_response_bytes_done,
+					rpc->msgin.bytes_remaining);
+			INC_METRIC(client_responses_done,
+					rpc->msgin.bytes_remaining != 0);
+			if (tx_left > 0) {
+				INC_METRIC(client_request_bytes_done,
+						tx_left);
+				INC_METRIC(client_requests_done, 1);
+			}
+		} else {
+			INC_METRIC(server_request_bytes_done,
+					rpc->msgin.bytes_remaining);
+			INC_METRIC(server_requests_done,
+					rpc->msgin.bytes_remaining != 0);
+			if (tx_left > 0) {
+				INC_METRIC(server_response_bytes_done,
+						tx_left);
+				INC_METRIC(server_responses_done, 1);
+			}
+		}
+#endif /* See strip.py */
+		rpc->state = 0;
+		rpc->magic = 0;
+		kfree(rpc);
+	}
+	homa_sock_wakeup_wmem(hsk);
+	tt_record3("reaped %d rpcs; %d dead frags remain for port %d",
+			num_rpcs, hsk->dead_frags, hsk->port);
 	if (hsk->buffer_pool)
 		homa_pool_check_waiting(hsk->buffer_pool);
 	return !checked_all_rpcs;
-}
-
-/**
- * homa_rpc_collect_skbs() - Utility function called by homa_rpc_reap to
- * extract sk_buffs from an RPC.
- * @rpc:       RPC from which to collect RPCs.
- * @skbs:      skbs from @rpc will be added to this struct, up until either
- *             all skbs have been removed from @rpc or the struct is full.
- *             This struct is assumed to be initialized by the caller (it
- *             may already hold some skbs).
- * @max_skbs:  This function will return if @skbs->num_skbs reaches this
- *             value. Must be <= HOMA_MAX_RPC_SKBS.
- * Return:     A return value of true means that all of the skbs in rpc
- *             have now been collected; false means some could not be
- *             collected (either @skbs was full or there are still outstanding
- *             references for some skbs).
- */
-bool homa_rpc_collect_skbs(struct homa_rpc *rpc, struct homa_rpc_skbs *skbs,
-			   int max_skbs)
-{
-	struct sk_buff *skb;
-
-	/* Collect transmit skbs. */
-	while (1) {
-		skb = rpc->msgout.to_free;
-		if (!skb) {
-			skb = rpc->msgout.packets;
-			if (!skb)
-				break;
-			rpc->msgout.to_free = skb;
-			rpc->msgout.packets = NULL;
-		}
-
-#ifndef __STRIP__ /* See strip.py */
-		/* This tests whether skb is still in a transmit queue
-		 * somewhere; if so, can't reap the RPC since homa_qdisc
-		 * may try to access the RPC via the skb's
-		 * homa_skb_info.
-		 */
-#else /* See strip.py */
-		/* Don't reap RPC if anyone besides us has a reference
-		 * to the skb.
-		 */
-#endif /* See strip.py */
-		if (refcount_read(&skb->users) > 1) {
-#ifndef __STRIP__ /* See strip.py */
-			homa_qdisc_flush_rpc(rpc);
-#endif /* See strip.py */
-			INC_METRIC(reaper_active_skbs, 1);
-			return false;
-		}
-		skbs->skbs[skbs->num_skbs] = skb;
-		rpc->msgout.to_free = homa_get_skb_info(skb)->next_skb;
-		skbs->num_skbs++;
-		skbs->tx_skbs = skbs->num_skbs;
-		rpc->msgout.num_skbs--;
-		if (skbs->num_skbs >= max_skbs)
-			return false;
-	}
-
-	/* Collect any receive skbs that haven't already been freed. */
-	if (rpc->msgin.length >= 0) {
-		for (skb = __skb_dequeue(&rpc->msgin.packets); skb;
-		     skb = __skb_dequeue(&rpc->msgin.packets)) {
-			skbs->skbs[skbs->num_skbs] = skb;
-			skbs->num_skbs++;
-			if (skbs->num_skbs >= max_skbs)
-				return false;
-		}
-	}
-	return true;
 }
 
 /**

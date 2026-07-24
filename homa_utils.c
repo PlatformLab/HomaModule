@@ -7,13 +7,11 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+#include "homa_tx_pool.h"
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_qdisc.h"
-#include "homa_skb.h"
-#else /* See strip.py */
-#include "homa_stub.h"
 #endif /* See strip.py */
 
 /**
@@ -58,14 +56,12 @@ int homa_init(struct homa *homa)
 		goto error;
 	}
 	homa_socktab_init(homa->socktab);
-#ifndef __STRIP__ /* See strip.py */
-	err = homa_skb_init(homa);
+	err = homa_tx_pool_init(homa);
 	if (err) {
-		pr_err("Couldn't initialize skb management (errno %d)\n",
+		pr_err("Couldn't initialize homa_tx_pool (errno %d)\n",
 		       -err);
 		goto error;
 	}
-#endif /* See strip.py */
 
 	/* Wild guesses to initialize configuration values... */
 #ifndef __STRIP__ /* See strip.py */
@@ -93,12 +89,11 @@ int homa_init(struct homa *homa)
 	homa->timeout_ticks = 100;
 	homa->timeout_resends = 5;
 	homa->request_ack_ticks = 2;
-	homa->reap_limit = 10;
-	homa->dead_buffs_limit = 5000;
+	homa->dead_frags_limit = 100;
 #ifndef __STRIP__ /* See strip.py */
 	homa->verbose = 0;
 #endif /* See strip.py */
-	homa->max_gso_size = 0;
+	homa->max_gso_size = 1000;
 	homa->wmem_max = 100000000;
 #ifndef __STRIP__ /* See strip.py */
 	homa->max_gro_skbs = 20;
@@ -108,8 +103,7 @@ int homa_init(struct homa *homa)
 #endif /* See strip.py */
 	homa->bpage_lease_usecs = 10000;
 #ifdef __STRIP__ /* See strip.py */
-	homa->bpage_lease_cycles =
-			homa_usecs_to_cycles(homa->bpage_lease_usecs);
+	homa->bpage_lease_cycles = homa->bpage_lease_usecs  * 2500;
 #endif /* See strip.py */
 #ifndef __STRIP__ /* See strip.py */
 	homa_incoming_sysctl_changed(homa);
@@ -148,10 +142,7 @@ void homa_destroy(struct homa *homa)
 		homa_peer_free_peertab(homa->peertab);
 		homa->peertab = NULL;
 	}
-#ifndef __STRIP__ /* See strip.py */
-
-	homa_skb_cleanup(homa);
-#endif /* See strip.py */
+	homa_tx_pool_cleanup(homa);
 }
 
 /**

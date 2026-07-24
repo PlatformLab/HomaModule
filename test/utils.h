@@ -31,7 +31,13 @@ enum unit_rpc_state {
 	UNIT_IN_SERVICE     = 24,
 };
 
+static inline u8 *unit_frag_first_byte(skb_frag_t *frag)
+{
+	return (u8 *)page_address(skb_frag_page(frag)) + skb_frag_off(frag);
+}
+
 char        *unit_ack_string(struct homa_ack *ack);
+void         unit_alloc_frags(int num_frags, skb_frag_t *frags, ...);
 struct homa_rpc
 	    *unit_client_rpc(struct homa_sock *hsk,
 			     enum unit_rpc_state state, struct in6_addr *client_ip,
@@ -48,12 +54,9 @@ const char  *unit_log_deferred(struct homa_qdisc_dev *qdev);
 void         unit_log_filled_skbs(struct sk_buff *skb, int verbose);
 void         unit_log_frag_list(struct sk_buff *skb, int verbose);
 void         unit_log_hashed_rpcs(struct homa_sock *hsk);
-void         unit_log_message_out_packets(struct homa_message_out *message,
-				      int verbose);
 void         unit_log_skb_list(struct sk_buff_head *packets,
 			       int verbose);
 const char  *unit_print_gaps(struct homa_rpc *rpc);
-void         unit_reset_tx(struct homa_rpc *rpc);
 struct homa_rpc
 	    *unit_server_rpc(struct homa_sock *hsk,
 			     enum unit_rpc_state state,

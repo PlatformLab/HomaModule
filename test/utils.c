@@ -8,12 +8,15 @@
 #include "homa_grant.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
-#include "homa_qdisc.h"
 #include "ccutils.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "mock.h"
 #include "utils.h"
+
+#ifndef __STRIP__ /* See strip.py */
+#include "homa_qdisc.h"
+#endif /* See strip.py */
 
 /**
  * unit_client_rpc() - Create a homa_client_rpc and arrange for it to be
@@ -39,6 +42,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	union sockaddr_in_union server_addr;
 	int bytes_received, this_size;
 	struct homa_rpc *crpc;
+	u8 *tx_msg;
 
 	server_addr.in6.sin6_family = AF_INET6;
 	server_addr.in6.sin6_addr = *server_ip;
@@ -48,10 +52,14 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	crpc = homa_rpc_alloc_client(hsk, &server_addr);
 	if (IS_ERR(crpc))
 		return NULL;
-	if (homa_message_out_fill(crpc, unit_iov_iter(NULL, req_length), 0)) {
+	tx_msg = kmalloc(req_length, GFP_ATOMIC);
+	unit_fill_data(tx_msg, req_length, 0);
+	if (homa_tx_copy_from_user(crpc, unit_iov_iter(tx_msg, req_length),
+				   false) != 0) {
 		homa_rpc_end(crpc);
 		return NULL;
 	}
+	kfree(tx_msg);
 	homa_rpc_unlock(crpc);
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, saved_id);
@@ -235,33 +243,6 @@ const char *unit_log_grantables(struct homa *homa)
 #endif /* See strip.py */
 
 /**
- * unit_log_message_out_packets() - Append to the test log a human-readable
- * description of the packets associated with a homa_message_out.
- * @message:     Message containing the packets.
- * @verbose:     If non-zero, use homa_print_packet for each packet;
- *               otherwise use homa_print_packet_short.
- *
- * This function also checks to be sure that homa->num_grantable matches
- * the actual number of entries in the list, and generates additional
- * log output if it doesn't.
- */
-void unit_log_message_out_packets(struct homa_message_out *message, int verbose)
-{
-	struct sk_buff *skb;
-	char buffer[200];
-
-	for (skb = message->packets; skb != NULL;
-			skb = homa_get_skb_info(skb)->next_skb) {
-		if (verbose)
-			homa_print_packet(skb, buffer, sizeof(buffer));
-		else
-			homa_print_packet_short(skb, buffer, sizeof(buffer));
-		unit_log_printf("; ", "%s", buffer);
-	}
-}
-
-
-/**
  * unit_log_filled_skbs() - Append to the test log a human-readable description
  * of a list of packet buffers created by homa_fill_packets.
  * @skb:         First in list of sk_buffs to print; the list is linked
@@ -329,21 +310,6 @@ const char *unit_print_gaps(struct homa_rpc *rpc)
 }
 
 /**
- * unit_reset_tx() - Reset the state of an RPC so that it appears no packets
- * have been transmitted.
- */
-void unit_reset_tx(struct homa_rpc *rpc)
-{
-	struct sk_buff *skb;
-
-	for (skb = rpc->msgout.packets; skb != NULL;
-	     skb = homa_get_skb_info(skb)->next_skb)
-		skb_dst_drop(skb);
-	rpc->msgout.next_xmit = &rpc->msgout.packets;
-	rpc->msgout.next_xmit_offset = 0;
-}
-
-/**
  * unit_server_rpc() - Create a homa_server_rpc and arrange for it to be
  * in a given state.
  * @hsk:           Socket that will receive the incoming RPC.
@@ -406,8 +372,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	if (state == UNIT_IN_SERVICE)
 		return srpc;
 	homa_rpc_lock(srpc);
-	status = homa_message_out_fill(srpc, unit_iov_iter((void *) 2000,
-				       resp_length), 0);
+	status = homa_tx_copy_from_user(srpc, unit_iov_iter((void *) 2000,
+				        resp_length), false);
 	homa_rpc_unlock(srpc);
 	if (status != 0)
 		goto error;
@@ -528,3 +494,27 @@ const char *unit_log_deferred(struct homa_qdisc_dev *qdev)
 	return unit_log_get();
 }
 #endif /* See strip.py */
+
+/**
+ * unit_alloc_frags() - Fill in an array of fragments with allocated
+ * storage for use in unit tests.
+ * @num_frags:   Number of fragments to create.
+ * @frags:       Array of fragments to fill in. Each fragment will contain
+ *               part of one page.
+ * Following @frags are 2*@num_frags integer arguments, giving offset and
+ * length for each of the frags within its page.
+ */
+void unit_alloc_frags(int num_frags, skb_frag_t *frags, ...)
+{
+	int i, length, offset;
+	va_list args;
+
+	va_start(args, frags);
+	for (i = 0; i < num_frags; i++) {
+		offset = va_arg(args, int);
+		length = va_arg(args, int);
+		frags[i].netmem = page_to_netmem(alloc_page(GFP_KERNEL));
+		frags[i].offset = offset;
+		skb_frag_size_set(&frags[i], length);
+	}
+}

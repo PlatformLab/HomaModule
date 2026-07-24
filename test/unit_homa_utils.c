@@ -93,17 +93,19 @@ TEST_F(homa_utils, homa_init__cant_allocate_port_map)
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.socktab);
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_utils, homa_init__homa_skb_init_failure)
+TEST_F(homa_utils, homa_init__cant_initialize_tx_pool)
 {
 	struct homa homa2;
 
+#ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 0x40;
+#else /* See strip.py */
+	mock_kmalloc_errors = 8;
+#endif/* See strip.py */
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_SUBSTR("Couldn't initialize skb management (errno 12)",
+	EXPECT_SUBSTR("Couldn't initialize homa_tx_pool (errno 12)",
 		      mock_printk_output);
 }
-#endif /* See strip.py */
 
 TEST_F(homa_utils, homa_destroy)
 {

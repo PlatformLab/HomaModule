@@ -236,7 +236,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	h.common.dport = htons(self->hsk.port);
 	h.common.sender_id = cpu_to_be64(client_id);
 	h.common.type = GRANT;
-	h.offset = htonl(11000);
+	h.offset = htonl(12000);
 	h.priority = 3;
 
 	/* First attempt: HOMA_GRO_FAST_GRANTS not enabled. */
@@ -254,7 +254,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	result = homa_gro_receive(&self->empty_list, skb2);
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_grant_bypasses);
-	EXPECT_SUBSTR("xmit DATA 1400@10000", unit_log_get());
+	EXPECT_SUBSTR("xmit DATA 1400@11200", unit_log_get());
 
 	/* Third attempt: core is too busy for fast grants. */
 	cur_offload_core->last_gro = 600;

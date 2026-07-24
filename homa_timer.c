@@ -7,13 +7,9 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+#include "homa_tx_pool.h"
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
-#include "homa_skb.h"
-#endif /* See strip.py */
-
-#ifdef __STRIP__ /* See strip.py */
-#include "homa_stub.h"
 #endif /* See strip.py */
 
 /**
@@ -179,7 +175,7 @@ void homa_timer(struct homa *homa)
 	/* Scan all existing RPCs in all sockets. */
 	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
 			hsk; hsk = homa_socktab_next(&scan)) {
-		while (hsk->dead_skbs >= homa->dead_buffs_limit) {
+		while (hsk->dead_frags > homa->dead_frags_limit) {
 			/* If we get here, it means that Homa isn't keeping
 			 * up with RPC reaping, so we'll help out.  See
 			 * "RPC Reaping Strategy" in homa_rpc_reap code for
@@ -190,7 +186,7 @@ void homa_timer(struct homa *homa)
 #endif /* See strip.py */
 
 			tt_record("homa_timer calling homa_rpc_reap");
-			if (homa_rpc_reap(hsk, false) == 0)
+			if (homa_rpc_reap(hsk) == 0)
 				break;
 			INC_METRIC(timer_reap_cycles, homa_clock() - rpc_start);
 		}
@@ -242,7 +238,7 @@ void homa_timer(struct homa *homa)
 			   total_incoming_rpcs, sum_incoming, sum_incoming_rec,
 			   atomic_read(&homa->grant->total_incoming));
 #endif /* See strip.py */
-	homa_skb_release_pages(homa);
+	homa_tx_pool_gc(homa);
 	homa_peer_gc(homa->peertab);
 #ifndef __STRIP__ /* See strip.py */
 	homa_snapshot_rpcs();

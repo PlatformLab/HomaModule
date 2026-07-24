@@ -180,9 +180,6 @@ for symbol in symbols:
                 total_packets += delta
             if symbol == "softirq_calls":
                 gro_packets = delta
-        if (symbol == "reaper_dead_skbs") and ("reaper_calls" in deltas):
-            print("%-30s          %6.1f %sAvg. hsk->dead_skbs in reaper" % (
-                  "avg_dead_skbs", delta/deltas["reaper_calls"], pad))
         if symbol.endswith("_miss_cycles") and (time_delta != 0):
             prefix = symbol[:-12]
             if ((prefix + "_misses") in deltas) and (deltas[prefix + "_misses"] != 0):
@@ -487,10 +484,10 @@ if elapsed_secs != 0:
         print("Skb alloc time:           %4.2f usec/skb" % (
                 float(deltas["skb_alloc_cycles"]) / (cpu_khz / 1000.0) /
                 deltas["skb_allocs"]))
-    if deltas["skb_page_allocs"] != 0:
-        print("Skb page alloc time:     %5.2f usec/page" % (
-                float(deltas["skb_page_alloc_cycles"]) / (cpu_khz / 1000.0) /
-                deltas["skb_page_allocs"]))
+    if deltas["tx_page_allocs"] != 0:
+        print("tx_pool page alloc time:  %5.2f usec/page" % (
+                float(deltas["tx_page_alloc_cycles"]) / (cpu_khz / 1000.0) /
+                deltas["tx_page_allocs"]))
 
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")
@@ -508,7 +505,7 @@ if elapsed_secs != 0:
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
         print("%-30s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
-    for symbol in ["timer_reap_cycles", "data_pkt_reap_cycles",
+    for symbol in ["timer_reap_cycles", "dispatch_pkt_reap_cycles",
             "grant_lock_cycles", "pacer_bubble_cycles", "nic_congest_cycles"]:
         delta = deltas[symbol]
         if delta == 0 or time_delta == 0:

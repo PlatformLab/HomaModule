@@ -304,8 +304,15 @@ struct homa_sock {
 	 */
 	struct list_head dead_rpcs;
 
-	/** @dead_skbs: Total number of socket buffers in RPCs on dead_rpcs. */
-	int dead_skbs;
+	/**
+	 * @dead_frags: An estimate of the amount of memory tied up in
+	 * RPCs that are dead but have not yet been reaped. The sum of
+	 * rpc->msgout.num_frags + 1 for all of the dead RPCs (the 1 accounts
+	 * for the RPC itself). Used to detect when the reaper is lagging
+	 * behind. See "RPC Reaping Strategy" in homa_rpc_reap code for
+	 * deetails.
+	 */
+	u64 dead_frags;
 
 	/**
 	 * @waiting_for_bufs: Contains RPCs that are blocked because there

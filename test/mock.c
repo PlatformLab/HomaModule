@@ -7,9 +7,9 @@
 
 #include "homa_impl.h"
 #include "homa_pool.h"
+#include "homa_tx_pool.h"
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_qdisc.h"
-#include "homa_skb.h"
 #endif /* See strip.py */
 #include "ccutils.h"
 #include "utils.h"
@@ -37,6 +37,7 @@ int mock_alloc_page_errors;
 int mock_alloc_skb_errors;
 int mock_cmpxchg_errors;
 int mock_copy_data_errors;
+int mock_copy_to_frags_errors;
 int mock_copy_to_iter_errors;
 int mock_copy_to_user_errors;
 int mock_cpu_idle;
@@ -90,6 +91,11 @@ int mock_log_wakeups;
  */
 int mock_log_rcu_sched;
 
+/* True means copy_from_iter should not log anything; false means
+ * it will log info about what it has copied.
+ */
+bool mock_copy_from_iter_no_log;
+
 /* A zero value means that copy_to_user will actually copy bytes to
  * the destination address; if nonzero, then 0 bits determine which
  * copies actually occur (bit 0 for the first copy, etc., just like
@@ -102,6 +108,11 @@ int mock_bpage_size = 0x10000;
 
 /* HOMA_BPAGE_SHIFT will evaluate to this. */
 int mock_bpage_shift = 16;
+
+/* True means that mock_alloc_pages will refuse any allocation request
+ * for pages larger than PAGE_SIZE.
+ */
+bool mock_no_high_order_pages = false;
 
 /* Keeps track of all the spinlocks that have been locked but not unlocked.
  * Reset for each test.
@@ -226,7 +237,7 @@ bool mock_ipv6_default;
 char mock_xmit_prios[1000];
 int mock_xmit_prios_offset;
 
-/* Maximum packet size allowed by "network" (see homa_message_out_fill;
+/* Maximum packet size allowed by "network" (see homa_tx_copy_from_user);
  * chosen so that data packets will have UNIT_TEST_DATA_PER_PACKET bytes
  * of payload. The variable can be modified if useful in some tests.
  * Set by mock_sock_init.
@@ -234,7 +245,7 @@ int mock_xmit_prios_offset;
 int mock_mtu;
 
 /* Used instead of MAX_SKB_FRAGS when running some unit tests. */
-int mock_max_skb_frags = MAX_SKB_FRAGS;
+int mock_max_skb_frags = 10;
 
 /* Each bit gives the NUMA node (0 or 1) for a particular core.*/
 int mock_numa_mask = 5;
@@ -425,13 +436,22 @@ size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 	}
 	while (bytes_left > 0) {
 		struct iovec *iov = (struct iovec *) iter_iov(iter);
-		u64 int_base = (u64) iov->iov_base;
+		uintptr_t int_base = (uintptr_t)iov->iov_base;
 		size_t chunk_bytes = iov->iov_len;
 
 		if (chunk_bytes > bytes_left)
 			chunk_bytes = bytes_left;
-		unit_log_printf("; ", "_copy_from_iter %lu bytes at %llu",
-				chunk_bytes, int_base);
+		if (!mock_copy_from_iter_no_log)
+			unit_log_printf("; ",
+					"_copy_from_iter %lu bytes at %lu",
+					chunk_bytes, int_base);
+		/* Copy actual data unless it the iterator address is
+		 * obviously bogus (e.g. created by passing NULL to
+		 * unit_iov_iter).
+		 */
+		if (int_base > 1000000)
+			memcpy(addr, iov->iov_base, chunk_bytes);
+		addr = (u8 *)addr + chunk_bytes;
 		bytes_left -= chunk_bytes;
 		iter->count -= chunk_bytes;
 		iov->iov_base = (void *) (int_base + chunk_bytes);
@@ -1351,6 +1371,8 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 	UNIT_HOOK("spin_lock");
 	if (mock_check_error(&mock_trylock_errors))
 		return 0;
+	if (mock_is_locked(lock))
+		return 0;
 	mock_record_locked(lock);
 	mock_total_spin_locks++;
 	return 1;
@@ -1805,6 +1827,8 @@ struct page *mock_alloc_pages(gfp_t gfp, unsigned int order)
 {
 	struct page *page;
 
+	if (order > 0 && mock_no_high_order_pages)
+		return NULL;
 	if (mock_check_error(&mock_alloc_page_errors))
 		return NULL;
 	page = (struct page *)malloc(PAGE_SIZE << order);
@@ -1872,7 +1896,6 @@ void mock_clear_xmit_prios(void)
 	mock_xmit_prios[0] = 0;
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * mock_compound_order() - Replacement for compound_order function.
  */
@@ -1883,11 +1906,10 @@ unsigned int mock_compound_order(struct page *page)
 	if (mock_compound_order_mask & 1)
 		result = 0;
 	else
-		result = HOMA_SKB_PAGE_ORDER;
+		result = HOMA_TX_PAGE_ORDER;
 	mock_compound_order_mask >>= 1;
 	return result;
 }
-#endif /* See strip.py */
 
 void mock_cpu_relax(void)
 {
@@ -1937,8 +1959,8 @@ struct net_device *mock_dev(int index, struct homa *homa)
 	}
 	dev = &mock_devices[index];
 	if (!dev->ethtool_ops) {
-		dev->gso_max_segs = 1000;
 		dev->gso_max_size = mock_mtu;
+		dev->gso_max_segs = 1;
 		dev->_tx = &mock_net_queue;
 		dev->nd_net.net = &mock_nets[0];
 		dev->ethtool_ops = &mock_ethtool_ops;
@@ -2252,6 +2274,13 @@ void mock_record_locked(void *lock)
 		FAIL(" locking lock 0x%p when already locked", lock);
 	else
 		unit_hash_set(spinlocks_held, lock, "locked");
+}
+
+bool mock_is_locked(void *lock)
+{
+	if (!spinlocks_held)
+		spinlocks_held = unit_hash_new();
+	return unit_hash_get(spinlocks_held, lock) != NULL;
 }
 
 void mock_record_unlocked(void *lock)
@@ -2610,6 +2639,7 @@ void mock_teardown(void)
 	mock_alloc_skb_errors = 0;
 	mock_cmpxchg_errors = 0;
 	mock_copy_data_errors = 0;
+	mock_copy_to_frags_errors = 0;
 	mock_copy_to_iter_errors = 0;
 	mock_copy_to_user_errors = 0;
 	mock_cpu_idle = 0;
@@ -2636,9 +2666,11 @@ void mock_teardown(void)
 	mock_rht_init_errors = 0;
 	mock_rht_insert_errors = 0;
 	mock_wait_intr_irq_errors = 0;
+	mock_copy_from_iter_no_log = false;
 	mock_copy_to_user_dont_copy = 0;
 	mock_bpage_size = 0x10000;
 	mock_bpage_shift = 16;
+	mock_no_high_order_pages = false;
 	mock_xmit_prios_offset = 0;
 	mock_xmit_prios[0] = 0;
 	mock_log_rcu_sched = 0;
@@ -2652,7 +2684,7 @@ void mock_teardown(void)
 	mock_xmit_log_hijack = 0;
 	mock_log_wakeups = 0;
 	mock_mtu = 0;
-	mock_max_skb_frags = MAX_SKB_FRAGS;
+	mock_max_skb_frags = 10;
 	mock_numa_mask = 5;
 	mock_compound_order_mask = 0;
 	mock_page_nid_mask = 0;

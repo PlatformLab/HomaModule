@@ -1,24 +1,15 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* New approach to managing tx skbs:
-  * Manage packet data separately from skbs; create skbs just in time, as
-    needed.
-  * The resend mechanism should almost entirely go away: just generate
-    new skbs from the packet data.
-  * Keep page caches similar to those in homa_skb.c. Pull into separate
-    module (homa_tx_pages?). Call the pool's homa_tx_pool.
-  * Info in homa_rpc_message_out:
-    * Geometry information for message
-    * Number of frags in message
-    * Pointer to array of skb_frags (dynamically allocated if num_frags > 1)
-  * Rename skb_page_frees_per_sec -> tx_page_frees_per_sec
-  * Fields to remove from homa_message_out:
-    num_skbs
-    skb_memory?
-    packets
-    next_xmit
-    to_free
+* New approach to managing tx skbs:d
+  * Deal with homa_skb_info?
+  * Eliminate homa_info->wire_bytes?
+  * Stop using @common.sequence?
+  * Fix comments in homa_wire.h about data packet format? (and make TCP
+    hijacking use the same packet structure as non-hijacking?)
+  * Eliminate homa_info->seg_length? (redundant)
+  * Set hsk->error_msg on errors.
+  * Test with __STRIP__
 
 * Finish exploring how to provide pacer helpers when TCP is running wihout
   Homa: is it possible to trigger everything from callbacks without a
@@ -50,19 +41,14 @@ Notes for Homa implementation in Linux:
   Problem areas:
   * If a TSO packet gets segmented in software, the homa_skb_info is not
     replicated in the segments, which causes crashes (e.g.,
-    homq_qdisc_defer_homa ends up with a NULL value for rpc).
-  * homa_rpc_reap references homa_get_skb_info(skb)->next_skb.
+    homq_qdisc_defer_homa ends up with a NULL value for rpc; hmmm, homa_qdisc
+    shouldn't see packets after segmentation?).
   One possible solution is to embed a token in the actual data of the
   packet (extra header field), which can be used to look up extra metadata.
   Or, maybe put the extra metadata in the first frag, just before the "real"
   packet data? However, this won't help in the case of packet fragmentation,
   where the data areas change.
-
-* Linux doesn't seem to like packets getting passed to ip*xmit with
-  reference counts > 1. Maybe change Homa to collect packet data in
-  memory pages, separate from skb's? Save the memory pages for the
-  life of the RPC, but don't save skb's once packets have been
-  transmitted.
+  This problem may have been fixed by the implementation of homa_tx_pool.
 
 * Homa's throughput on W3 seems to be worse than TCP on c6620 cluster.
 

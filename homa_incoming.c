@@ -294,8 +294,8 @@ keep:
 		INC_METRIC(server_requests_done,
 			   rpc->msgin.bytes_remaining == 0);
 	}
-	return 0;
 #endif /* See strip.py */
+	return 0;
 }
 
 /**
@@ -636,16 +636,18 @@ discard:
 	 *    "convenient" times (see "RPC Reaping Strategy" in homa_rpc_reap
 	 *    code for details).
 	 */
-	if (hsk->dead_skbs > 0) {
-		int waiting_for_wmem = test_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+	if (hsk->dead_frags > 0) {
+		while (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags) ||
+		    hsk->dead_frags >= 2 * hsk->homa->dead_frags_limit) {
+			int more;
 
-		if (waiting_for_wmem ||
-		    hsk->dead_skbs >= 2 * hsk->homa->dead_buffs_limit) {
 			IF_NO_STRIP(u64 start = homa_clock());
 
 			tt_record("homa_dispatch_pkts calling homa_rpc_reap");
-			homa_rpc_reap(hsk, waiting_for_wmem);
-			INC_METRIC(data_pkt_reap_cycles, homa_clock() - start);
+			more = homa_rpc_reap(hsk);
+			INC_METRIC(dispatch_pkt_reap_cycles, homa_clock() - start);
+			if (!more)
+				break;
 		}
 	}
 	sock_put(&hsk->sock);
@@ -845,17 +847,17 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 
 	if (length == -1)
 		end = tx_end;
+	IF_NO_STRIP(rpc->msgout.retrans_priority = h->priority);
 
 	/* Don't retransmit data that we haven't transmitted for the first
 	 * time: we're not ready to send that data yet (we'll send a BUSY
 	 * packet below if needed).
 	 */
-#ifndef __STRIP__ /* See strip.py */
-	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end,
-			 h->priority);
+	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end);
 	if (rpc->state == RPC_DEAD)
 		goto done;
 
+#ifndef __STRIP__ /* See strip.py */
 	if (end > rpc->msgout.granted) {
 		/* It appears that a grant packet was lost; assume that
 		 * any data requested in the RESEND must have been
@@ -866,10 +868,6 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			rpc->msgout.granted = rpc->msgout.length;
 		homa_xmit_data(rpc);
 	}
-#else /* See strip.py */
-	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end);
-	if (rpc->state == RPC_DEAD)
-		goto done;
 #endif /* See strip.py */
 
 	if (offset >= tx_end) {
@@ -909,15 +907,10 @@ void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 				   rpc->id, tt_addr(rpc->peer->addr),
 				   rpc->dport, tx_end);
 #ifndef __STRIP__ /* See strip.py */
-			homa_freeze(rpc, RESTART_RPC,
-				    "Freezing because of RPC restart, id %d, peer 0x%x");
-			homa_resend_data(rpc, 0, tx_end,
-					 homa_unsched_priority(rpc->hsk->homa,
-							       rpc->peer,
-							       rpc->msgout.length));
-#else /* See strip.py */
-			homa_resend_data(rpc, 0, tx_end);
+			rpc->msgout.retrans_priority = homa_unsched_priority(
+				rpc->hsk->homa, rpc->peer, rpc->msgout.length);
 #endif /* See strip.py */
+			homa_resend_data(rpc, 0, tx_end);
 			goto done;
 		}
 #ifndef __STRIP__ /* See strip.py */
@@ -1200,7 +1193,7 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 			IF_NO_STRIP(avail_immediately = 0);
 
 			/* This is a good time to cleanup dead RPCS. */
-			homa_rpc_reap(hsk, false);
+			homa_rpc_reap(hsk);
 			goto done;
 		} else {
 			homa_interest_init_shared(&interest, hsk);

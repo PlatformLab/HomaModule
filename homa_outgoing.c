@@ -7,328 +7,99 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+#include "homa_tx_pool.h"
 #include "homa_wire.h"
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_hijack.h"
 #include "homa_qdisc.h"
-#include "homa_skb.h"
-#else /* See strip.py */
-#include "homa_stub.h"
 #endif /* See strip.py */
 
 /**
- * homa_message_out_init() - Initialize rpc->msgout.
+ * homa_message_out_init() - Initialize rpc->msgout. This function doesn't
+ * read data from user space or create sk_buffs, but it sets up information
+ * such as the message geometry.
  * @rpc:       RPC whose output message should be initialized. Must be
- *             locked by caller.
+ *             locked by caller. Fields in rpc->msgout should have been
+ *             zeroed by the caller.
  * @length:    Number of bytes that will eventually be in rpc->msgout.
  */
 void homa_message_out_init(struct homa_rpc *rpc, int length)
 	__must_hold(rpc->bucket->lock)
 {
+	struct dst_entry *dst;
+	u64 max_segs;
+	int mtu;
+
 	memset(&rpc->msgout, 0, sizeof(rpc->msgout));
 	rpc->msgout.length = length;
-	rpc->msgout.next_xmit = &rpc->msgout.packets;
 #ifndef __STRIP__ /* See strip.py */
 	rpc->msgout.unscheduled = rpc->hsk->homa->unsched_bytes;
 	if (rpc->msgout.unscheduled > length)
 		rpc->msgout.unscheduled = length;
+	rpc->msgout.granted = rpc->msgout.unscheduled;
 #endif /* See strip.py */
 	rpc->msgout.init_time = homa_clock();
-}
-
-#ifndef __STRIP__ /* See strip.py */
-/**
- * homa_fill_data_interleaved() - This function is invoked to fill in the
- * part of a data packet after the initial header, when GSO is being used
- * but TCP hijacking is not. As result, homa_seg_hdrs must be interleaved
- * with the data to provide the correct offset for each segment.
- * @rpc:            RPC whose output message is being created. Not generally
- *                  locked by caller.
- * @skb:            The packet being filled. The initial homa_data_hdr was
- *                  created and initialized by the caller and the
- *                  homa_skb_info has been filled in with the packet geometry.
- * @iter:           Describes location(s) of (remaining) message data in user
- *                  space.
- * Return:          Either a negative errno or 0 (for success).
- */
-#else /* See strip.py */
-/**
- * homa_fill_data_interleaved() - This function is invoked to fill in the
- * part of a data packet after the initial header, when GSO is being used.
- * homa_seg_hdrs must be interleaved with the data to provide the correct
- * offset for each segment.
- * @rpc:            RPC whose output message is being created. Not generally
- *                  locked by caller.
- * @skb:            The packet being filled. The initial homa_data_hdr was
- *                  created and initialized by the caller and the
- *                  homa_skb_info has been filled in with the packet geometry.
- * @iter:           Describes location(s) of (remaining) message data in user
- *                  space.
- * Return:          Either a negative errno or 0 (for success).
- */
-#endif /* See strip.py */
-int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
-			       struct iov_iter *iter)
-{
-	struct homa_skb_info *homa_info = homa_get_skb_info(skb);
-	int seg_length = homa_info->seg_length;
-	int bytes_left = homa_info->data_bytes;
-	int offset = homa_info->offset;
-	int err;
-
-	/* Each iteration of the following loop adds info for one packet,
-	 * which includes a homa_seg_hdr followed by the data for that
-	 * segment. The first homa_seg_hdr was already added by the caller.
-	 */
-	while (1) {
-		struct homa_seg_hdr seg;
-
-		if (bytes_left < seg_length)
-			seg_length = bytes_left;
-		err = homa_skb_append_from_iter(rpc->hsk->homa, skb, iter,
-						seg_length);
-		if (err != 0)
-			return err;
-		bytes_left -= seg_length;
-		offset += seg_length;
-
-		if (bytes_left == 0)
-			break;
-
-		seg.offset = htonl(offset);
-		err = homa_skb_append_to_frag(rpc->hsk->homa, skb, &seg,
-					      sizeof(seg));
-		if (err != 0)
-			return err;
-	}
-	return 0;
-}
-
-/**
- * homa_tx_data_pkt_alloc() - Allocate a new sk_buff and fill it with an
- * outgoing Homa data packet. The resulting packet will be a GSO packet
- * that will eventually be segmented by the NIC.
- * @rpc:          RPC that packet will belong to (msgout must have been
- *                initialized). Not normally locked by caller.
- * @iter:         Describes location(s) of (remaining) message data in user
- *                space.
- * @offset:       Offset in the message of the first byte of data in this
- *                packet.
- * @length:       How many bytes of data to include in the skb. Caller must
- *                ensure that this amount of data isn't too much for a
- *                well-formed GSO packet, and that iter has at least this
- *                much data.
- * @max_seg_data: Maximum number of bytes of message data that can go in
- *                a single segment of the GSO packet.
- * Return:        A pointer to the new packet, or a negative errno. Sets
- *                rpc->hsk->error_msg on errors.
- */
-struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
-				       struct iov_iter *iter, int offset,
-				       int length, int max_seg_data)
-{
-	struct homa_sock *hsk = rpc->hsk;
-	struct homa_skb_info *homa_info;
-	struct homa_data_hdr *h;
-	struct sk_buff *skb;
-	int err, gso_size;
-	u64 segs;
-
-	segs = length + max_seg_data - 1;
-	do_div(segs, max_seg_data);
-
-	/* Initialize the overall skb. */
-#ifndef __STRIP__ /* See strip.py */
-	skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr));
-#else /* See strip.py */
-	skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr) + length +
-			      (segs - 1) * sizeof(struct homa_seg_hdr));
-#endif /* See strip.py */
-	if (!skb) {
-		hsk->error_msg = "couldn't allocate sk_buff for outgoing message";
-		return ERR_PTR(-ENOMEM);
-	}
-
-	/* Fill in the Homa header (which will be replicated in every
-	 * network packet by GSO).
-	 */
-	h = (struct homa_data_hdr *)skb_put(skb, sizeof(struct homa_data_hdr));
-	memset(h, 0, sizeof(*h));
-	h->common.sport = htons(hsk->port);
-	h->common.dport = htons(rpc->dport);
-	h->common.sequence = htonl(offset);
-	h->common.type = DATA;
-	homa_set_doff(skb, sizeof(struct homa_data_hdr));
-	h->common.sender_id = cpu_to_be64(rpc->id);
-	h->message_length = htonl(rpc->msgout.length);
-	IF_NO_STRIP(h->incoming = htonl(rpc->msgout.unscheduled));
-	homa_peer_get_acks(rpc->peer, 1, &h->ack);
-	IF_NO_STRIP(h->cutoff_version = rpc->peer->cutoff_version);
-#ifndef __STRIP__ /* See strip.py */
-	h->seg.offset = htonl(-1);
-#else /* See strip.py */
-	h->seg.offset = htonl(offset);
-#endif /* See strip.py */
-
-	homa_info = homa_get_skb_info(skb);
-	homa_info->next_skb = NULL;
-	homa_info->wire_bytes = length + segs * (sizeof(struct homa_data_hdr)
-			+  hsk->ip_header_length + HOMA_ETH_OVERHEAD);
-	homa_info->data_bytes = length;
-	homa_info->seg_length = max_seg_data;
-	homa_info->offset = offset;
-	homa_info->rpc = rpc;
-	homa_info->dont_defer = false;
-
-#ifndef __STRIP__ /* See strip.py */
-	if (segs > 1 && !homa_sock_hijacked(hsk)) {
-#else /* See strip.py */
-	if (segs > 1) {
-#endif /* See strip.py */
-		homa_set_doff(skb, sizeof(struct homa_data_hdr)  -
-				sizeof(struct homa_seg_hdr));
-#ifndef __STRIP__ /* See strip.py */
-		h->seg.offset = htonl(offset);
-#endif /* See strip.py */
-		gso_size = max_seg_data + sizeof(struct homa_seg_hdr);
-		err = homa_fill_data_interleaved(rpc, skb, iter);
-	} else {
-		gso_size = max_seg_data;
-		err = homa_skb_append_from_iter(hsk->homa, skb, iter, length);
-	}
-	if (err) {
-		hsk->error_msg = "couldn't copy message body into packet buffers";
-		goto error;
-	}
-
-	if (segs > 1) {
-		skb_shinfo(skb)->gso_segs = segs;
-		skb_shinfo(skb)->gso_size = gso_size;
-		skb_shinfo(skb)->gso_type = (hsk->inet.sk.sk_family ==
-					     AF_INET6) ? SKB_GSO_TCPV6 :
-					    SKB_GSO_TCPV4;
-
-#ifndef __STRIP__ /* See strip.py */
-		/* It's unclear what gso_type should be used to force software
-		 * GSO; the value below seems to work...
-		 */
-		if (hsk->homa->gso_force_software)
-			skb_shinfo(skb)->gso_type = 0xd;
-#endif /* See strip.py */
-	}
-	return skb;
-
-error:
-	homa_skb_free_tx(hsk->homa, skb);
-	return ERR_PTR(err);
-}
-
-/**
- * homa_message_out_fill() - Initializes information for sending a message
- * for an RPC (either request or response); copies the message data from
- * user space and (possibly) begins transmitting the message.
- * @rpc:     RPC for which to send message; this function must not
- *           previously have been called for the RPC. Must be locked. The RPC
- *           will be unlocked while copying data, but will be locked again
- *           before returning.
- * @iter:    Describes location(s) of message data in user space.
- * @xmit:    Nonzero means this method should start transmitting packets;
- *           transmission will be overlapped with copying from user space.
- *           Zero means the caller will initiate transmission after this
- *           function returns.
- *
- * Return:   0 for success, or a negative errno for failure. It is possible
- *           for the RPC to be freed while this function is active. If that
- *           happens, copying will cease, -EINVAL will be returned, and
- *           rpc->state will be RPC_DEAD. Sets rpc->hsk->error_msg on errors.
- */
-int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
-	__must_hold(rpc->bucket->lock)
-{
-	/* Geometry information for packets:
-	 * mtu:              largest size for an on-the-wire packet (including
-	 *                   all headers through IP header, but not Ethernet
-	 *                   header).
-	 * max_seg_data:     largest amount of Homa message data that fits
-	 *                   in an on-the-wire packet (after segmentation).
-	 * max_gso_data:     largest amount of Homa message data that fits
-	 *                   in a GSO packet (before segmentation).
-	 */
-	int mtu, max_seg_data, max_gso_data;
-	struct sk_buff **last_link;
-	struct dst_entry *dst;
-	u64 segs_per_gso;
-	/* Bytes of the message that haven't yet been copied into skbs. */
-	int bytes_left;
-	int gso_size;
-	int err;
-
-	if (unlikely(iter->count == 0)) {
-		rpc->hsk->error_msg = "message has length zero";
-		err = -EINVAL;
-		goto error;
-	}
-	if (unlikely(iter->count > HOMA_MAX_MESSAGE_LENGTH)) {
-		rpc->hsk->error_msg = "message length exceeded HOMA_MAX_MESSAGE_LENGTH";
-		err = -EINVAL;
-		goto error;
-	}
-	homa_message_out_init(rpc, iter->count);
 
 	/* Compute the geometry of packets. */
 	dst = homa_get_dst(rpc->peer, rpc->hsk);
 	mtu = dst_mtu(dst);
-	max_seg_data = mtu - rpc->hsk->ip_header_length
-			- sizeof(struct homa_data_hdr);
-	gso_size = dst->dev->gso_max_size;
-	if (gso_size > rpc->hsk->homa->max_gso_size)
-		gso_size = rpc->hsk->homa->max_gso_size;
-	if (gso_size < mtu)
-		gso_size = mtu;
+	rpc->msgout.max_seg_data = mtu - rpc->hsk->ip_header_length -
+				   sizeof(struct homa_data_hdr);
+	max_segs = min_t(u32, rpc->hsk->homa->max_gso_size,
+			 dst->dev->gso_max_size) -
+		   (sizeof(struct homa_data_hdr) + HOMA_SKB_EXTRA);
+	do_div(max_segs, rpc->msgout.max_seg_data +
+			 sizeof(struct homa_seg_hdr));
+	if (max_segs > dst->dev->gso_max_segs)
+		max_segs = dst->dev->gso_max_segs;
+	if (max_segs < 1)
+		max_segs = 1;
+	rpc->msgout.max_gso_segs = max_segs;
+	rpc->msgout.max_gso_data = max_segs * rpc->msgout.max_seg_data;
 	dst_release(dst);
-	if (max_seg_data <= 0) {
-		rpc->hsk->error_msg = "device MTU too small to support Homa packets";
-		err = -EINVAL;
-		goto error;
-	}
+}
 
-#ifndef __STRIP__ /* See strip.py */
-	/* Round gso_size down to an even # of mtus; calculation depends
-	 * on whether we're doing TCP hijacking (need more space in TSO packet
-	 * if no hijacking).
+/**
+ * homa_tx_copy_from_user() - Copy outbound message data for an RPC from
+ * user space into kernel memory and (possibly) start transmitting packets.
+ * @rpc:      RPC whose tx message is to be copied.
+ * @iter:     Describes the location in user space of the message
+ *            data.
+ * @xmit:     True means this function should also start transmitting packets.
+ *            False means only copy data; don't transmit packets.
+ * Return:    Zero for success, otherwise a negative errno.
+ */
+int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
+			   bool xmit)
+	__must_hold(rpc->bucket->lock)
+{
+	struct homa_frag_filler filler;
+	int err, hdr_space;
+	u64 num_segs;
+	int offset;
+
+	homa_message_out_init(rpc, iter->count);
+
+	/* Allocate kernel memory to hold the message data (note that we
+	 * need to allocate extra space for homa_seg_hdrs).
 	 */
-	if (homa_sock_hijacked(rpc->hsk)) {
-		segs_per_gso = gso_size - rpc->hsk->ip_header_length
-				- sizeof(struct homa_data_hdr);
-		do_div(segs_per_gso, max_seg_data);
-	} else {
-		segs_per_gso = gso_size - rpc->hsk->ip_header_length -
-				sizeof(struct homa_data_hdr) +
-				sizeof(struct homa_seg_hdr);
-		do_div(segs_per_gso, max_seg_data +
-				sizeof(struct homa_seg_hdr));
-	}
-#else /* See strip.py */
-	/* Round gso_size down to an even # of mtus. */
-	segs_per_gso = gso_size - rpc->hsk->ip_header_length -
-			sizeof(struct homa_data_hdr) +
-			sizeof(struct homa_seg_hdr);
-	do_div(segs_per_gso, max_seg_data +
-			sizeof(struct homa_seg_hdr));
-#endif /* See strip.py */
-	if (segs_per_gso == 0)
-		segs_per_gso = 1;
-	max_gso_data = segs_per_gso * max_seg_data;
-	UNIT_LOG("; ", "mtu %d, max_seg_data %d, max_gso_data %d",
-		 mtu, max_seg_data, max_gso_data);
+	num_segs = rpc->msgout.length + rpc->msgout.max_seg_data - 1;
+	do_div(num_segs, rpc->msgout.max_seg_data);
+	hdr_space = num_segs * sizeof(struct homa_seg_hdr);
+	rpc->msgout.frags = &rpc->msgout.frag;
+	rpc->msgout.num_frags = 1;
+	err = homa_tx_pool_alloc(rpc->hsk->homa, rpc->msgout.length + hdr_space,
+				 &rpc->msgout.num_frags, &rpc->msgout.frags);
+	if (err != 0)
+		return err;
+	rpc->msgout.frag_bytes = rpc->msgout.length + hdr_space;
+	refcount_add(rpc->msgout.frag_bytes, &rpc->hsk->sock.sk_wmem_alloc);
 
-#ifndef __STRIP__ /* See strip.py */
-	rpc->msgout.granted = rpc->msgout.unscheduled;
-#endif /* See strip.py */
-	homa_skb_stash_pages(rpc->hsk->homa, rpc->msgout.length);
-
-	/* Each iteration of the loop below creates one GSO packet. */
+	/* Copy the data in from user space, preceding each segment of data
+	 * with its homa_seg_hdr.
+	 */
+	homa_rpc_unlock(rpc);
 #ifndef __STRIP__ /* See strip.py */
 	tt_record3("starting copy from user space for id %d, length %d, unscheduled %d",
 		   rpc->id, rpc->msgout.length, rpc->msgout.unscheduled);
@@ -336,80 +107,362 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	tt_record2("starting copy from user space for id %d, length %d",
 		   rpc->id, rpc->msgout.length);
 #endif /* See strip.py */
-	last_link = &rpc->msgout.packets;
-	for (bytes_left = rpc->msgout.length; bytes_left > 0; ) {
-		int skb_data_bytes, offset;
-		struct sk_buff *skb;
+	homa_frag_filler_init(&filler, rpc->msgout.num_frags,
+			      rpc->msgout.frags);
+	offset = 0;
+	while (offset < rpc->msgout.length) {
+		int seg_size = min(rpc->msgout.length - offset,
+				   rpc->msgout.max_seg_data);
+		struct homa_seg_hdr seg_hdr;
 
-		homa_rpc_unlock(rpc);
-		skb_data_bytes = max_gso_data;
-		offset = rpc->msgout.length - bytes_left;
-#ifndef __STRIP__ /* See strip.py */
-		if (offset < rpc->msgout.unscheduled &&
-		    (offset + skb_data_bytes) > rpc->msgout.unscheduled) {
-			/* Insert a packet boundary at the unscheduled limit,
-			 * so we don't transmit extra data.
-			 */
-			skb_data_bytes = rpc->msgout.unscheduled - offset;
-		}
-#endif /* See strip.py */
-		if (skb_data_bytes > bytes_left)
-			skb_data_bytes = bytes_left;
-		skb = homa_tx_data_pkt_alloc(rpc, iter, offset, skb_data_bytes,
-					     max_seg_data);
-		if (IS_ERR(skb)) {
-			err = PTR_ERR(skb);
-			homa_rpc_lock(rpc);
-			goto error;
-		}
-		bytes_left -= skb_data_bytes;
+		seg_hdr.offset = htonl(offset);
+		err = homa_copy_to_frags(&filler, &seg_hdr, sizeof(seg_hdr));
+		if (unlikely(err != 0))
+			goto done;
+		err = homa_copy_iter_to_frags(&filler, iter, seg_size);
+		if (unlikely(err != 0))
+			goto done;
+		offset += seg_size;
+		smp_store_release(&rpc->msgout.copied_from_user, offset);
 
-		homa_rpc_lock(rpc);
-		if (rpc->state == RPC_DEAD) {
-			/* RPC was freed while we were copying. */
-			rpc->hsk->error_msg = "rpc deleted while creating outgoing message";
-			err = -EINVAL;
-			homa_skb_free_tx(rpc->hsk->homa, skb);
-			goto error;
-		}
-		*last_link = skb;
-		last_link = &(homa_get_skb_info(skb)->next_skb);
-		*last_link = NULL;
-		rpc->msgout.num_skbs++;
-		rpc->msgout.skb_memory += skb->truesize;
-		rpc->msgout.copied_from_user = rpc->msgout.length - bytes_left;
 #ifndef __STRIP__ /* See strip.py */
-		/* The code below improves pipelining for long messages
-		 * by overlapping transmission with copying from user space.
-		 * This is a bit tricky because sending the packets takes
-		 * a significant amount time. On high-speed networks (e.g.
-		 * 100 Gbps and above), copying from user space is the
-		 * bottleneck, so transmitting the packets here will slow
-		 * that down. Thus, we only transmit the unscheduled packets
-		 * here, to fill the pipe. Packets after that can be
-		 * transmitted by SoftIRQ in response to incoming grants;
-		 * this allows us to use two cores: this core copying data
-		 * and the SoftIRQ core sending packets.
+		/* Transmit unscheduled data if requested. We only transmit
+		 * unscheduled data now, under the assumption that a
+		 * SoftIRQ thread will transmit the remaining data as grants
+		 * come in. That way we get parallelism between 2 threads:
+		 * this thread copies and the SoftIRQ thread transmits.
+		 * Parallelism is important on networks of 100 Gbps and more
+		 * because copying data is the bottleneck; we don't want to
+		 * use cycles in this thread sending packets. It is important
+		 * to send all the unscheduled data here in order to keep the
+		 * network busy until the first grant arrives.
 		 */
-		if (offset < rpc->msgout.unscheduled && xmit)
+		if (xmit && rpc->msgout.next_xmit_offset <
+			    rpc->msgout.unscheduled &&
+		    offset >= rpc->msgout.next_xmit_offset +
+		              rpc->msgout.max_gso_data) {
+			homa_rpc_lock(rpc);
 			homa_xmit_data(rpc);
+			homa_rpc_unlock(rpc);
+		}
 #endif /* See strip.py */
 	}
 	tt_record2("finished copy from user space for id %d, length %d",
 		   rpc->id, rpc->msgout.length);
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
-	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
-	if (xmit)
+
+done:
+	UNIT_LOG("; ", "homa_tx_copy_to_user done");
+	homa_rpc_lock(rpc);
 #ifndef __STRIP__ /* See strip.py */
-		homa_xmit_data(rpc);
-#else /* See strip.py */
-		homa_xmit_data(rpc);
+	/* Must make one more attempt to transmit data (e.g. the message is
+	 * entirely unscheduled, so no other thread helped out as described
+	 * above).
+	 */
 #endif /* See strip.py */
-	return 0;
+	if (xmit && err == 0)
+		homa_xmit_data(rpc);
+	return err;
+}
+
+/**
+ * __homa_skb_alloc() - Allocate a new (empty) sk_buff for use in transmitting
+ * data or control info.
+ * @length:       Number of bytes of data that the caller would like to
+ *                have available in the linear part of the sk_buff for
+ *                the Homa header and additional data beyond that. This
+ *                function will allocate additional space for IP and
+ *                Ethernet headers, as well as for the homa_skb_info.
+ * Return:        New sk_buff, or NULL if there was insufficient memory.
+ *                The sk_buff will be configured so that the next
+ *                skb_put will be for the transport (Homa) header. The
+ *                homa_skb_info is not initialized.
+ */
+struct sk_buff *__homa_skb_alloc(int length)
+{
+	struct sk_buff *skb;
+
+	IF_NO_STRIP(u64 start = homa_clock());
+
+	skb = alloc_skb(HOMA_SKB_EXTRA + sizeof(struct homa_skb_info) + length,
+			GFP_ATOMIC);
+	if (likely(skb)) {
+		skb_reserve(skb, HOMA_SKB_EXTRA);
+		skb_reset_transport_header(skb);
+	}
+	INC_METRIC(skb_allocs, 1);
+	INC_METRIC(skb_alloc_cycles, homa_clock() - start);
+	return skb;
+}
+
+/**
+ * homa_tx_skb_alloc() - Create an outgoing data packet for a Homa message.
+ * @rpc:      RPC for the message. Its @msgout must have been initialized
+ *            (e.g. the packet geometry will be determined by information
+ *            in @rpc->msgout).
+ * @offset:   Offset within the message of the first byte of data for
+ *            this packet.
+ * @end:      Offset within the message of the byte just after the last
+ *            one to include in this packet. The skb may actually end either
+ *            before or after this offset; this value is modified to hold
+ *            the actual end.
+ * Return:    A pointer to the sk_buff, or a negative errno for error.
+ */
+struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
+	__must_hold(rpc->bucket->lock)
+{
+	int msg_frags_left, bytes_left, bytes_to_skip, rem;
+	struct homa_sock *hsk = rpc->hsk;
+	struct homa_skb_info *homa_info;
+	skb_frag_t *msg_frag, *skb_frag;
+	struct skb_shared_info *shinfo;
+	u64 seg_index, num_segs;
+	struct homa_data_hdr *h;
+	struct sk_buff *skb;
+	int err;
+
+	if (offset >= rpc->msgout.length)
+		return ERR_PTR(-EINVAL);
+	if (*end > rpc->msgout.length)
+		*end = rpc->msgout.length;
+
+	/* Find the location within rpc->msgin.frags of the data for the
+	 * first segment to output (skipping its homa_seg_hdr, since that
+	 * will be in the linear part of the skb). Also, round offset down
+	 * to the start of its segment.
+	 */
+	seg_index = offset;
+	rem = do_div(seg_index, rpc->msgout.max_seg_data);
+	offset -= rem;
+	bytes_to_skip = seg_index * (rpc->msgout.max_seg_data +
+				     sizeof(struct homa_seg_hdr)) +
+			sizeof(struct homa_seg_hdr);
+	for (msg_frags_left = rpc->msgout.num_frags,
+	     msg_frag = rpc->msgout.frags; ; msg_frags_left--, msg_frag++) {
+		if (bytes_to_skip < skb_frag_size(msg_frag))
+			break;
+		bytes_to_skip -= skb_frag_size(msg_frag);
+	}
+
+	/* Compute how much data from rpc->msgout.frags to include in the
+	 * packet.
+	 */
+	num_segs = *end - offset + rpc->msgout.max_seg_data - 1;
+	do_div(num_segs, rpc->msgout.max_seg_data);
+	if (num_segs > rpc->msgout.max_gso_segs)
+		num_segs = rpc->msgout.max_gso_segs;
+	bytes_left = num_segs * (rpc->msgout.max_seg_data +
+				 sizeof(struct homa_seg_hdr)) -
+		     sizeof(struct homa_seg_hdr);
+
+	skb = __homa_skb_alloc(sizeof(struct homa_data_hdr));
+	if (unlikely(!skb))
+		return ERR_PTR(-ENOMEM);
+	skb_dst_set(skb, homa_get_dst(rpc->peer, hsk));
+	skb->ooo_okay = 1;
+	shinfo = skb_shinfo(skb);
+
+	/* Fill in the Homa header (which will be replicated in every
+	 * segment by GSO). The header in the linear portion contains the
+	 * homa_seg_hdr for the first fragment.
+	 */
+	h = (struct homa_data_hdr *)skb_put(skb, sizeof(struct homa_data_hdr));
+	memset(h, 0, sizeof(*h));
+	h->common.sport = htons(hsk->port);
+	h->common.dport = htons(rpc->dport);
+	h->common.sequence = htonl(offset);
+	h->common.type = DATA;
+	homa_set_doff(skb, sizeof(struct homa_data_hdr) -
+			   sizeof(struct homa_seg_hdr));
+	h->common.sender_id = cpu_to_be64(rpc->id);
+	h->message_length = htonl(rpc->msgout.length);
+	IF_NO_STRIP(h->incoming = htonl(rpc->msgout.unscheduled));
+	homa_peer_get_acks(rpc->peer, 1, &h->ack);
+	IF_NO_STRIP(h->cutoff_version = rpc->peer->cutoff_version);
+	if (offset < rpc->msgout.next_xmit_offset)
+		h->retransmit = 1;
+	h->seg.offset = ntohl(offset);
+
+	/* Virtually copy data from rpc->msgout.frags to the skb; each
+	 * iteration of the following loop copies one frag.
+	 */
+	while (bytes_left > 0 && shinfo->nr_frags < MAX_SKB_FRAGS &&
+	       msg_frags_left > 0) {
+		skb_frag_t *skb_frag = &shinfo->frags[shinfo->nr_frags];
+		struct page *page;
+		int frag_bytes;
+
+		frag_bytes = min(skb_frag_size(msg_frag) - bytes_to_skip,
+				 bytes_left);
+		page = skb_frag_page(msg_frag);
+		get_page(page);
+		skb_frag->netmem = page_to_netmem(page);
+		skb_frag->offset = msg_frag->offset + bytes_to_skip;
+		skb_frag_size_set(skb_frag, frag_bytes);
+		skb_len_add(skb, frag_bytes);
+
+		bytes_left -= frag_bytes;
+		bytes_to_skip = 0;
+		msg_frag++;
+		msg_frags_left--;
+		shinfo->nr_frags++;
+	}
+
+	if (bytes_left > 0 && msg_frags_left > 0 &&
+	    shinfo->nr_frags >= MAX_SKB_FRAGS) {
+		/* There wasn't enough fragment space in skb to store all the
+		 * desired segments. Round the skb back to the nearest segment
+		 * boundary.
+		 */
+		while (bytes_left > 0) {
+			bytes_left -= rpc->msgout.max_seg_data +
+				      sizeof(struct homa_seg_hdr);
+			num_segs--;
+		}
+		if (num_segs == 0) {
+			err = -EINVAL;
+			goto error;
+		}
+		while (bytes_left < 0) {
+			skb_frag = &shinfo->frags[shinfo->nr_frags - 1];
+			if (-bytes_left < skb_frag_size(skb_frag)) {
+				skb_frag_size_sub(skb_frag, -bytes_left);
+				skb_len_add(skb, bytes_left);
+				break;
+			}
+			bytes_left += skb_frag_size(skb_frag);
+			skb_len_add(skb, -skb_frag_size(skb_frag));
+			put_page(skb_frag_page(skb_frag));
+			shinfo->nr_frags--;
+		}
+	}
+	*end = min_t(u32, offset + num_segs * rpc->msgout.max_seg_data,
+		   rpc->msgout.length);
+
+	/* Fill in fields in shinfo. */
+	if (num_segs > 1) {
+		shinfo->gso_segs = num_segs;
+		shinfo->gso_size = rpc->msgout.max_seg_data +
+				   sizeof(struct homa_seg_hdr);
+		shinfo->gso_type = (hsk->inet.sk.sk_family ==
+				    AF_INET6) ? SKB_GSO_TCPV6 :
+				    SKB_GSO_TCPV4;
+	}
+
+	/* Initialize homa_skb_info for the packet. */
+	homa_info = homa_get_skb_info(skb);
+	memset(homa_info, 0, sizeof(*homa_info));
+	homa_info->wire_bytes = num_segs * (sizeof(struct homa_data_hdr) +
+					    hsk->ip_header_length +
+					    HOMA_ETH_OVERHEAD) +
+				*end - offset;
+	homa_info->data_bytes = *end - offset;
+	homa_info->seg_length = rpc->msgout.max_seg_data;
+	homa_info->offset = offset;
+	homa_info->rpc = rpc;
+	homa_info->dont_defer = false;
+	return skb;
 
 error:
-	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
+	kfree_skb_reason(skb, SKB_DROP_REASON_NOT_SPECIFIED);
+	return ERR_PTR(err);
+}
+
+/**
+ * homa_tx_skb_send() - Create and send one (GSO) data packet for an RPC. The
+ * dimensions of the packet transmitted may change from those specified
+ * in the argument depending on factors such as availability of GSO,
+ * MTU, etc.
+ * @rpc:         RPC for which to send the packet. This function releases
+ *               and then re-requires rpc's lock, so the RPC could be
+ *               dead when this function returns.
+ * @offset:      The packet must contain this offset.
+ * @end:         Offset of the message byte just after the last one
+ *               the caller would like included in the packet. Modified
+ *               to hold the offset just after the last byte actually
+ *               included in the packet.
+ * Return:       0 for success, otherwise a negative errno.
+ */
+int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
+	__must_hold(rpc->bucket->lock)
+{
+	struct sk_buff *skb;
+
+	IF_NO_STRIP(int err);
+
+	IF_NO_STRIP(int priority, skb_offset, data_bytes, queue);
+
+	skb = homa_tx_skb_alloc(rpc, offset, end);
+	if (IS_ERR(skb))
+		return PTR_ERR(skb);
+
+#ifndef __STRIP__ /* See strip.py */
+	if (offset < rpc->msgout.next_xmit_offset) {
+		tt_record3("retransmitting offset %d, length %d, id %d",
+			   offset, *end - offset, rpc->id);
+		priority = rpc->msgout.retrans_priority;
+	} else if (offset < rpc->msgout.unscheduled)
+		priority = homa_unsched_priority(rpc->hsk->homa, rpc->peer,
+						 rpc->msgout.length);
+	else
+		priority = rpc->msgout.sched_priority;
+	priority = rpc->hsk->homa->priority_map[priority];
+	skb_offset = homa_get_skb_info(skb)->offset;
+	data_bytes = homa_get_skb_info(skb)->data_bytes;
+	queue = skb->queue_mapping;
+#endif /* See strip.py */
+
+	/* Note: must update next_xmit_offset here, before releasing the
+	 * RPC lock below; otherwise some other thread might decide to
+	 * transmit the same bytes.
+	 */
+	if (*end > rpc->msgout.next_xmit_offset)
+		rpc->msgout.next_xmit_offset = *end;
+
+	INC_METRIC(packets_sent[0], 1);
+	INC_METRIC(priority_bytes[priority], skb->len);
+	INC_METRIC(priority_packets[priority], 1);
+	if (ipv6_addr_v4mapped(&rpc->peer->addr)) {
+		tt_record4("calling ip_queue_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",
+			   homa_get_skb_info(skb)->wire_bytes,
+			   tt_addr(rpc->peer->addr), rpc->id,
+			   homa_get_skb_info(skb)->offset);
+
+#ifndef __STRIP__ /* See strip.py */
+		homa_hijack_set_hdr(skb, rpc->peer, false);
+		rpc->hsk->inet.tos = priority << 5;
+		homa_rpc_unlock(rpc);
+		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
+#else /* See strip.py */
+		homa_rpc_unlock(rpc);
+		ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
+#endif /* See strip.py */
+	} else {
+		tt_record4("calling ip6_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",
+			   homa_get_skb_info(skb)->wire_bytes,
+			   tt_addr(rpc->peer->addr), rpc->id,
+			   homa_get_skb_info(skb)->offset);
+#ifndef __STRIP__ /* See strip.py */
+		homa_hijack_set_hdr(skb, rpc->peer, true);
+		homa_rpc_unlock(rpc);
+		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
+			       0, NULL, priority << 5, 0);
+#else /* See strip.py */
+		homa_rpc_unlock(rpc);
+		ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
+			 0, NULL, 0, 0);
+#endif /* See strip.py */
+	}
+	homa_rpc_lock(rpc);
+#ifndef __STRIP__ /* See strip.py */
+	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, qid %d",
+		   rpc->id, skb_offset, data_bytes, queue);
+	if (err)
+		INC_METRIC(data_xmit_errors, 1);
 	return err;
+#else /* See strip.py */
+	return 0;
+#endif /* See strip.py */
 }
 
 /**
@@ -463,7 +516,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 
 	IF_NO_STRIP(int priority);
 
-	skb = homa_skb_alloc_tx(HOMA_MAX_HEADER);
+	skb = __homa_skb_alloc(HOMA_MAX_HEADER);
 	if (unlikely(!skb))
 		return -ENOBUFS;
 	skb_dst_set(skb, homa_get_dst(peer, hsk));
@@ -557,139 +610,54 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 void homa_xmit_data(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
-	int length;
+	u32 xmit_offset, end;
 
-	IF_NO_STRIP(struct homa *homa = rpc->hsk->homa);
-	IF_NO_STRIP(struct netdev_queue *txq);
-
-	while (*rpc->msgout.next_xmit && rpc->state != RPC_DEAD) {
-		struct sk_buff *skb = *rpc->msgout.next_xmit;
-
-		IF_NO_STRIP(int priority);
-
+	while (rpc->state != RPC_DEAD) {
+		xmit_offset = rpc->msgout.next_xmit_offset;
 #ifndef __STRIP__ /* See strip.py */
-		if (rpc->msgout.next_xmit_offset >= rpc->msgout.granted) {
+		if (xmit_offset >= rpc->msgout.granted) {
 			tt_record3("homa_xmit_data stopping at offset %d for id %u: granted is %d",
-				   rpc->msgout.next_xmit_offset, rpc->id,
-				   rpc->msgout.granted);
+				   xmit_offset, rpc->id, rpc->msgout.granted);
 			break;
 		}
-
-		if (rpc->msgout.next_xmit_offset < rpc->msgout.unscheduled)
-			priority = homa_unsched_priority(homa, rpc->peer,
-							 rpc->msgout.length);
-		else
-			priority = rpc->msgout.sched_priority;
 #endif /* See strip.py */
-		rpc->msgout.next_xmit = &(homa_get_skb_info(skb)->next_skb);
-		length = homa_get_skb_info(skb)->data_bytes;
-		rpc->msgout.next_xmit_offset += length;
+
+		/* Don't transmit unless enough data has been copied from user
+		 * space for a maximum-size packet.
+		 */
+		if (xmit_offset + rpc->msgout.max_gso_data >
+		    rpc->msgout.copied_from_user &&
+		    rpc->msgout.copied_from_user < rpc->msgout.length)
+			break;
+
+#ifndef __STRIP__ /* See strip.py */
+		if (xmit_offset < rpc->msgout.unscheduled)
+			end = rpc->msgout.unscheduled;
+		else
+			end = rpc->msgout.length;
+#else /* See strip.py */
+		if (xmit_offset >= rpc->msgout.length)
+			break;
+		end = rpc->msgout.length;
+#endif /* See strip.py */
+		homa_tx_skb_send(rpc, xmit_offset, &end);
 #ifndef __STRIP__ /* See strip.py */
 		if (homa_is_client(rpc->id)) {
-			INC_METRIC(client_request_bytes_done, length);
+			INC_METRIC(client_request_bytes_done, end - xmit_offset);
 			INC_METRIC(client_requests_done,
 				   rpc->msgout.next_xmit_offset ==
 				   rpc->msgout.length);
 		} else {
-			INC_METRIC(server_response_bytes_done, length);
+			INC_METRIC(server_response_bytes_done,
+				   end - xmit_offset);
 			INC_METRIC(server_responses_done,
 				   rpc->msgout.next_xmit_offset ==
 				   rpc->msgout.length);
 		}
 #endif /* See strip.py */
-
-		homa_rpc_unlock(rpc);
-		skb_get(skb);
-#ifndef __STRIP__ /* See strip.py */
-		__homa_xmit_data(skb, rpc, priority);
-		txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
-		if (netif_tx_queue_stopped(txq))
-			tt_record4("homa_xmit_data found stopped txq for id %d, qid %d, num_queued %d, limit %d",
-				   rpc->id, skb->queue_mapping,
-				   txq->dql.num_queued, txq->dql.adj_limit);
-#else /* See strip.py */
-		__homa_xmit_data(skb, rpc);
-#endif /* See strip.py */
-		homa_rpc_lock(rpc);
 	}
 }
 
-#ifndef __STRIP__ /* See strip.py */
-/**
- * __homa_xmit_data() - Handles packet transmission stuff that is common
- * to homa_xmit_data and homa_resend_data.
- * @skb:      Packet to be sent. The packet will be freed after transmission
- *            (and also if errors prevented transmission).
- * @rpc:      Information about the RPC that the packet belongs to.
- * @priority: Priority level at which to transmit the packet.
- */
-void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
-#else /* See strip.py */
-/**
- * __homa_xmit_data() - Handles packet transmission stuff that is common
- * to homa_xmit_data and homa_resend_data.
- * @skb:      Packet to be sent. The packet will be freed after transmission
- *            (and also if errors prevented transmission).
- * @rpc:      Information about the RPC that the packet belongs to.
- */
-void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
-#endif /* See strip.py */
-{
-#ifndef __STRIP__ /* See strip.py */
-	int err;
-
-	/* Update info that may have changed since the message was initially
-	 * created.
-	 */
-	((struct homa_data_hdr *)skb_transport_header(skb))->cutoff_version =
-			rpc->peer->cutoff_version;
-#endif /* See strip.py */
-
-	skb_dst_set(skb, homa_get_dst(rpc->peer, rpc->hsk));
-
-	skb->ooo_okay = 1;
-	if (ipv6_addr_v4mapped(&rpc->peer->addr)) {
-		tt_record4("calling ip_queue_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",
-			   homa_get_skb_info(skb)->wire_bytes,
-			   tt_addr(rpc->peer->addr), rpc->id,
-			   homa_get_skb_info(skb)->offset);
-
-#ifndef __STRIP__ /* See strip.py */
-		homa_hijack_set_hdr(skb, rpc->peer, false);
-		rpc->hsk->inet.tos =
-				rpc->hsk->homa->priority_map[priority] << 5;
-		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
-#else /* See strip.py */
-		ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
-#endif /* See strip.py */
-	} else {
-		tt_record4("calling ip6_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",
-			   homa_get_skb_info(skb)->wire_bytes,
-			   tt_addr(rpc->peer->addr), rpc->id,
-			   homa_get_skb_info(skb)->offset);
-#ifndef __STRIP__ /* See strip.py */
-		homa_hijack_set_hdr(skb, rpc->peer, true);
-		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
-			       0, NULL,
-			       rpc->hsk->homa->priority_map[priority] << 5, 0);
-#else /* See strip.py */
-		ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
-			 0, NULL, 0, 0);
-#endif /* See strip.py */
-	}
-	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, qid %d",
-		   rpc->id, homa_get_skb_info(skb)->offset,
-		   homa_get_skb_info(skb)->data_bytes, skb->queue_mapping);
-#ifndef __STRIP__ /* See strip.py */
-	if (err)
-		INC_METRIC(data_xmit_errors, 1);
-#endif /* See strip.py */
-	INC_METRIC(packets_sent[0], 1);
-	INC_METRIC(priority_bytes[priority], skb->len);
-	INC_METRIC(priority_packets[priority], 1);
-}
-
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_resend_data() - This function is invoked as part of handling RESEND
  * requests. It retransmits the packet(s) containing a given range of bytes
@@ -700,130 +668,24 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
  * @start:    Offset within @rpc->msgout of the first byte to retransmit.
  * @end:      Offset within @rpc->msgout of the byte just after the last one
  *            to retransmit.
- * @priority: Priority level to use for the retransmitted data packets.
+ * Return:    0 for success, otherwise a negative errno.
  */
-void homa_resend_data(struct homa_rpc *rpc, int start, int end,
-		      int priority)
-#else /* See strip.py */
-/**
- * homa_resend_data() - This function is invoked as part of handling RESEND
- * requests. It retransmits the packet(s) containing a given range of bytes
- * from a message.
- * @rpc:      RPC for which data should be resent. The RPC lock is released
- * 	      temporarily during this function, so the RPC may be dead on
- *            return.
- * @start:    Offset within @rpc->msgout of the first byte to retransmit.
- * @end:      Offset within @rpc->msgout of the byte just after the last one
- *            to retransmit.
- */
-void homa_resend_data(struct homa_rpc *rpc, int start, int end)
-#endif /* See strip.py */
+int homa_resend_data(struct homa_rpc *rpc, int start, int end)
 	__must_hold(rpc->bucket->lock)
 {
-	struct homa_skb_info *homa_info;
-	struct sk_buff *skb;
+	u32 offset, pkt_end;
+	int err = 0;
 
-	if (end <= start)
-		return;
-
-	/* Each iteration of this loop checks one packet in the message
-	 * to see if it contains segments that need to be retransmitted.
-	 */
-	for (skb = rpc->msgout.packets; skb; skb = homa_info->next_skb) {
-		int seg_offset, offset, seg_length, data_left;
-		struct homa_data_hdr *h;
-
-		homa_info = homa_get_skb_info(skb);
-		offset = homa_info->offset;
-		if (offset >= end)
+	for (offset = start; offset < end; offset = pkt_end) {
+		pkt_end = end;
+		err = homa_tx_skb_send(rpc, offset, &pkt_end);
+		if (err != 0)
 			break;
-		if (start >= (offset + homa_info->data_bytes))
-			continue;
-
-		offset = homa_info->offset;
-		seg_offset = sizeof(struct homa_data_hdr);
-		data_left = homa_info->data_bytes;
-		if (skb_shinfo(skb)->gso_segs <= 1) {
-			seg_length = data_left;
-		} else {
-			seg_length = homa_info->seg_length;
-			h = (struct homa_data_hdr *)skb_transport_header(skb);
-		}
-		for ( ; data_left > 0; data_left -= seg_length,
-		     offset += seg_length,
-		     seg_offset += skb_shinfo(skb)->gso_size) {
-			struct homa_skb_info *new_homa_info;
-			struct sk_buff *new_skb;
-			int err;
-
-			if (seg_length > data_left)
-				seg_length = data_left;
-
-			if (end <= offset)
-				goto resend_done;
-			if ((offset + seg_length) <= start)
-				continue;
-
-			/* This segment must be retransmitted. */
-#ifndef __STRIP__ /* See strip.py */
-			new_skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr));
-#else /* See strip.py */
-			new_skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr) +
-						    seg_length);
-#endif /* See strip.py */
-			if (unlikely(!new_skb)) {
-				UNIT_LOG("; ", "skb allocation error");
-				goto resend_done;
-			}
-			h = __skb_put_data(new_skb, skb_transport_header(skb),
-					   sizeof(struct homa_data_hdr));
-			h->common.sequence = htonl(offset);
-			h->seg.offset = htonl(offset);
-			h->retransmit = 1;
-			IF_NO_STRIP(h->incoming = htonl(end));
-			err = homa_skb_append_from_skb(rpc->hsk->homa, new_skb,
-						       skb, seg_offset,
-						       seg_length);
-			if (err != 0) {
-				pr_err("%s got error %d from homa_skb_append_from_skb\n",
-				       __func__, err);
-				UNIT_LOG("; ", "%s got error %d while copying data",
-					 __func__, -err);
-				kfree_skb(new_skb);
-				goto resend_done;
-			}
-
-			new_homa_info = homa_get_skb_info(new_skb);
-			new_homa_info->next_skb = rpc->msgout.to_free;
-			new_homa_info->wire_bytes = rpc->hsk->ip_header_length
-					+ sizeof(struct homa_data_hdr)
-					+ seg_length + HOMA_ETH_OVERHEAD;
-			new_homa_info->data_bytes = seg_length;
-			new_homa_info->seg_length = seg_length;
-			new_homa_info->offset = offset;
-			new_homa_info->rpc = rpc;
-			new_homa_info->dont_defer = false;
-
-			rpc->msgout.to_free = new_skb;
-			rpc->msgout.num_skbs++;
-			skb_get(new_skb);
-			tt_record3("retransmitting offset %d, length %d, id %d",
-				   offset, seg_length, rpc->id);
-			homa_rpc_unlock(rpc);
-#ifndef __STRIP__ /* See strip.py */
-			__homa_xmit_data(new_skb, rpc, priority);
-#else /* See strip.py */
-			__homa_xmit_data(new_skb, rpc);
-#endif /* See strip.py */
-			INC_METRIC(resent_packets, 1);
-			homa_rpc_lock(rpc);
-			if (rpc->state == RPC_DEAD)
-				return;
-		}
+		INC_METRIC(resent_packets, 1);
+		if (rpc->state == RPC_DEAD)
+			break;
 	}
-
-resend_done:
-	return;
+	return err;
 }
 
 /**

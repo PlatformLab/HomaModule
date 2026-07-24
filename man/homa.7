@@ -532,19 +532,13 @@ avoid hot spots and achieve better load balancing.
 (Read-only) The current version for unscheduled cutoffs; incremented
 automatically when unsched_cutoffs is modified.
 .TP
-.IR dead_buffs_limit
-When an RPC completes, Homa doesn't immediately free up the resources it used,
-since this could delay the application (e.g. if there are lots of
-packet buffers to free). Instead, Homa defers RPC "reaping" to a time
-when it is less likely to impact application performance, and it performs
-the reaping in small chunks (see
-.IR reap_limit ).
-However, under high-load conditions this could result
-in an accumulation of dead RPCs. If the total number of packet buffers in
-dead RPCs reaches the value of this parameter, then Homa reaps more
-aggressively (which could impact application performance) until the number
-of dead packet buffers drops below
-.I dead_buffs_limit .
+.IR dead_frags_limit
+Used to control how aggressively Homa reaps dead RPCs. For details, see
+the comment in the code for
+.B homa->dead_frags_limit
+and read the "RPC Reaping Strategy" comment at the beginning of the
+.B homa_rpc_reap
+function.
 .TP
 .IR defer_min_bytes
 Messages shorter than this value will always be transmitted immediately,
@@ -787,13 +781,6 @@ contains the external priority level corresponding to internal level
 .IR i .
 Each value must be an integer less than 8.
 .TP
-.IR reap_limit
-Homa tries to perform cleanup of dead RPCs at times when it doesn't have
-other work to do, so that this cost doesn't impact applications. This
-integer value specifies how many packet buffers Homa will free in a single
-call to the reaper; larger values may make the reaper more efficient, but
-they can also result in a larger delay for applications.
-.TP
 .IR request_ack_ticks
 Servers maintain state for an RPC until the client has acknowledged receipt
 of the complete response message. Clients piggyback these acks on
@@ -844,9 +831,16 @@ into two different parameters:
 and
 .IR window .
 .TP
-.IR skb_page_frees_per_sec
-Homa maintains a pool of free pages on each NUMA node for use in
-outgoing sk_buffs, in order to eliminate the overhead of allocating
+.I timeout_resends
+An integer value specifying how long to wait before considering a peer
+to be dead. If this many resend requests have been issued to a peer without
+receiving any packets from the peer, then Homa will consider the peer
+dead and abort all RPCs involving that peer with
+.BR ETIMEDOUT .
+.TP
+.IR tx_page_frees_per_sec
+Homa maintains a pool of free pages on each NUMA node to hold outgoing
+message data, in order to minimize the overhead of allocating
 new pages from scratch. This option specifies the total rate (across all
 pools, not per-pool) at which pages should be released from pools back to
 Linux, in pages per second. The idea behind this parameter is to release
@@ -854,18 +848,11 @@ pages slowly enough that replenishing them won't add significant overhead if
 they are still needed, while also ensuring that pools don't retain a lot more
 pages than needed.
 .TP
-.IR skb_page_pool_min_kb
-When releasing pages from the sk_buff page pools back to Linux, Homa will
+.IR tx_page_pool_min_kb
+When releasing pages from the tx page pools back to Linux, Homa will
 not release pages from a pool if the amount of unused space in
 the pool has been less than this (specified in Kbytes) at any point
 in the recent past.
-.TP
-.I timeout_resends
-An integer value specifying how long to wait before considering a peer
-to be dead. If this many resend requests have been issued to a peer without
-receiving any packets from the peer, then Homa will consider the peer
-dead and abort all RPCs involving that peer with
-.BR ETIMEDOUT .
 .TP
 .IR unsched_bytes
 The number of bytes that may be transmitted from a new message without

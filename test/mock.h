@@ -64,6 +64,9 @@
 #undef kmalloc_array
 #define kmalloc_array(count, size, type) mock_kmalloc((count) * (size), type)
 
+#undef kmap_local_page
+#define kmap_local_page(page) ((void *)page)
+
 #define kthread_complete_and_exit(...)
 
 #undef local_bh_disable
@@ -74,6 +77,9 @@
 
 #undef local_irq_save
 #define local_irq_save(flags) (flags) = 0
+
+#undef MAX_SKB_FRAGS
+#define MAX_SKB_FRAGS mock_max_skb_frags
 
 #define net_generic(net, id) mock_net_generic(net, id)
 
@@ -114,6 +120,20 @@
 #define register_net_sysctl mock_register_net_sysctl
 
 #define signal_pending(...) mock_signal_pending
+
+/* Must redefine skb_frag_foreach_page because page pointers are different
+ * when unit testing (a page point points to an actual page, rather than
+ * a descriptor)
+ */
+#undef skb_frag_foreach_page
+#define skb_frag_foreach_page(f, f_off, f_len, p, p_off, p_len, copied)	\
+	for (p = skb_frag_page(f),                      \
+	     p_off = (f_off),                           \
+	     p_len = f_len,                             \
+	     copied = 0;                                \
+	     copied < f_len;                            \
+	     copied += p_len, p++, p_off = 0,           \
+	     p_len = f_len - copied)                    \
 
 #undef smp_processor_id
 #define smp_processor_id() mock_processor_id()
@@ -157,6 +177,8 @@ extern bool        mock_check_bpool_leaks;
 extern int         mock_cmpxchg_errors;
 extern int         mock_compound_order_mask;
 extern int         mock_copy_data_errors;
+extern bool        mock_copy_from_iter_no_log;
+extern int         mock_copy_to_frags_errors;
 extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
@@ -176,14 +198,6 @@ extern bool        mock_ipv6_default;
 extern int         mock_kmalloc_errors;
 extern int         mock_kthread_create_errors;
 extern int         mock_link_mbps;
-extern int         mock_netif_schedule_calls;
-extern int         mock_num_drop_reasons;
-extern int         mock_prepare_to_wait_errors;
-extern int         mock_register_protosw_errors;
-extern int         mock_register_qdisc_errors;
-extern int         mock_register_sysctl_errors;
-extern int         mock_wait_intr_irq_errors;
-extern char        mock_xmit_prios[];
 extern int         mock_log_wakeups;
 extern int         mock_log_rcu_sched;
 extern int         mock_max_grants;
@@ -192,13 +206,20 @@ extern __u16       mock_min_default_port;
 extern int         mock_mtu;
 extern struct netdev_queue
 		   mock_net_queue;
+extern int         mock_netif_schedule_calls;
 extern struct net  mock_nets[];
+extern bool        mock_no_high_order_pages;
+extern int         mock_num_drop_reasons;
 extern int         mock_numa_mask;
 extern int         mock_page_nid_mask;
 extern int         mock_peer_free_no_fail;
+extern int         mock_prepare_to_wait_errors;
 extern int         mock_prepare_to_wait_status;
 extern char        mock_printk_output[];
 extern int         mock_queue_index;
+extern int         mock_register_protosw_errors;
+extern int         mock_register_qdisc_errors;
+extern int         mock_register_sysctl_errors;
 extern int         mock_rht_init_errors;
 extern int         mock_rht_insert_errors;
 extern void      **mock_rht_walk_results;
@@ -212,8 +233,10 @@ extern int         mock_total_spin_locks;
 extern int         mock_trylock_errors;
 extern u64         mock_tt_cycles;
 extern int         mock_vmalloc_errors;
+extern int         mock_wait_intr_irq_errors;
 extern int         mock_xmit_log_verbose;
 extern int         mock_xmit_log_hijack;
+extern char        mock_xmit_prios[];
 
 extern struct task_struct *current_task;
 
@@ -241,6 +264,7 @@ unsigned int
 void        mock_get_page(struct page *page);
 struct homa_net
 	   *mock_hnet(int index, struct homa *homa);
+bool        mock_is_locked(void *lock);
 void       *mock_kmalloc(size_t size, gfp_t flags);
 void        mock_local_bh_disable(void);
 void        mock_local_bh_enable(void);

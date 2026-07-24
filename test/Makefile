@@ -51,6 +51,7 @@ TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_rpc.c \
 	      unit_homa_sock.c \
 	      unit_homa_timer.c \
+	      unit_homa_tx_pool.c \
 	      unit_homa_utils.c \
 	      unit_timetrace.c
 ifeq ($(__STRIP__),)
@@ -58,8 +59,7 @@ TEST_SRCS +=  unit_homa_grant.c \
 	      unit_homa_hijack.c \
 	      unit_homa_metrics.c \
 	      unit_homa_offload.c \
-	      unit_homa_qdisc.c \
-	      unit_homa_skb.c
+	      unit_homa_qdisc.c
 endif
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 
@@ -73,6 +73,7 @@ HOMA_SRCS :=  homa_devel.c \
 	      homa_rpc.c \
 	      homa_sock.c \
 	      homa_timer.c \
+	      homa_tx_pool.c \
 	      homa_utils.c \
 	      timetrace.c
 ifeq ($(__STRIP__),)
@@ -80,8 +81,7 @@ HOMA_SRCS +=  homa_grant.c \
 	      homa_hijack.c \
 	      homa_metrics.c \
 	      homa_offload.c \
-	      homa_qdisc.c \
-	      homa_skb.c
+	      homa_qdisc.c
 endif
 HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS)) rbtree.o rhashtable.o
 
