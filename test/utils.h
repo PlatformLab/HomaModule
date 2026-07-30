@@ -66,7 +66,6 @@ void         unit_teardown(void);
 
 #ifndef __STRIP__ /* See strip.py */
 const char  *unit_log_grantables(struct homa *homa);
-void         unit_log_throttled(struct homa *homa);
 #endif /* See strip.py */
 
 /* Kludge to avoid including arpa/inet.h, which causes definition

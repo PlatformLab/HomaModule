@@ -12,17 +12,10 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_hijack.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
 #include "homa_skb.h"
 #else /* See strip.py */
 #include "homa_stub.h"
-#endif /* See strip.py */
-
-#ifndef __STRIP__ /* See strip.py */
-#define XMIT_DATA(rpc, force) homa_xmit_data(rpc, force)
-#else /* See strip.py */
-#define XMIT_DATA(rpc, force) homa_xmit_data(rpc)
 #endif /* See strip.py */
 
 /* The following hook function frees hook_rpc. */
@@ -94,8 +87,6 @@ FIXTURE_SETUP(homa_outgoing)
 	self->dev = mock_dev(0, &self->homa);
 	mock_clock = 10000;
 #ifndef __STRIP__ /* See strip.py */
-	self->homa.pacer->cycles_per_mbyte = 1000000;
-	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.max_gso_size = 10000;
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
@@ -539,25 +530,6 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_limit_less_than_mtu)
 	homa_rpc_unlock(crpc);
 	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 1400;", unit_log_get());
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, homa_message_out_fill__disable_overlap_xmit_because_of_homa_qdisc)
-{
-	struct homa_qdisc_dev *qdev;
-	struct homa_rpc *crpc;
-
-	qdev = homa_qdisc_qdev_get(self->dev);
-	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
-
-	ASSERT_FALSE(crpc == NULL);
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 5000), 1));
-	homa_rpc_unlock(crpc);
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
-	homa_qdisc_qdev_put(qdev);
-}
-#endif /* See strip.py */
 TEST_F(homa_outgoing, homa_message_out_fill__multiple_segs_per_skbuff)
 {
 	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
@@ -870,7 +842,7 @@ TEST_F(homa_outgoing, homa_xmit_data__basics)
 	unit_log_clear();
 	mock_clear_xmit_prios();
 	homa_rpc_lock(crpc);
-	XMIT_DATA(crpc, false);
+	homa_xmit_data(crpc);
 	homa_rpc_unlock(crpc);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit DATA 1400@0; "
@@ -880,8 +852,6 @@ TEST_F(homa_outgoing, homa_xmit_data__basics)
 	EXPECT_STREQ("6 6 2 2", mock_xmit_prios);
 	EXPECT_EQ(5600, crpc->msgout.next_xmit_offset);
 	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
 #else /* See strip.py */
 	EXPECT_STREQ("xmit DATA 1400@0; "
 			"xmit DATA 1400@1400; "
@@ -901,105 +871,10 @@ TEST_F(homa_outgoing, homa_xmit_data__stop_because_no_more_granted)
 	unit_log_clear();
 	crpc->msgout.granted = 1000;
 	homa_rpc_lock(crpc);
-	XMIT_DATA(crpc, false);
+	homa_xmit_data(crpc);
 	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
 	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
-}
-TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 200, 1000);
-
-	unit_log_clear();
-	atomic64_set(&self->homa.pacer->link_idle_time, 11000);
-	self->homa.qshared->max_nic_est_backlog_cycles = 500;
-	self->homa.qshared->defer_min_bytes = 250;
-	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	homa_rpc_lock(crpc);
-	XMIT_DATA(crpc, false);
-	homa_rpc_unlock(crpc);
-	EXPECT_STREQ("xmit DATA 200@0", unit_log_get());
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
-}
-TEST_F(homa_outgoing, homa_xmit_data__force)
-{
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 6000, 1000);
-	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id+2, 5000, 1000);
-
-	/* First, get an RPC on the throttled list. */
-	atomic64_set(&self->homa.pacer->link_idle_time, 11000);
-	self->homa.qshared->max_nic_est_backlog_cycles = 3000;
-	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	homa_rpc_lock(crpc1);
-	XMIT_DATA(crpc1, false);
-	homa_rpc_unlock(crpc1);
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request id 1234, next_offset 2800", unit_log_get());
-
-	/* Now force transmission. */
-	unit_log_clear();
-	homa_rpc_lock(crpc2);
-	XMIT_DATA(crpc2, true);
-	homa_rpc_unlock(crpc2);
-	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request id 1234, next_offset 2800; "
-			"request id 1236, next_offset 1400", unit_log_get());
-}
-TEST_F(homa_outgoing, homa_xmit_data__dont_throttle_because_homa_qdisc_in_use)
-{
-	struct homa_qdisc_dev *qdev;
-	struct homa_rpc *crpc;
-
-	qdev = homa_qdisc_qdev_get(self->dev);
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			       self->server_ip, self->server_port,
-			       self->client_id, 2000, 1000);
-	unit_log_clear();
-	atomic64_set(&self->homa.pacer->link_idle_time, 1000000);
-	self->homa.qshared->max_nic_est_backlog_cycles = 0;
-	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-
-	homa_rpc_lock(crpc);
-	XMIT_DATA(crpc, false);
-	homa_rpc_unlock(crpc);
-	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 600@1400", unit_log_get());
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
-	homa_qdisc_qdev_put(qdev);
-}
-TEST_F(homa_outgoing, homa_xmit_data__throttle)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 6000, 1000);
-
-	unit_log_clear();
-	atomic64_set(&self->homa.pacer->link_idle_time, 11000);
-	self->homa.qshared->max_nic_est_backlog_cycles = 3000;
-	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-
-	homa_rpc_lock(crpc);
-	XMIT_DATA(crpc, false);
-	homa_rpc_unlock(crpc);
-	EXPECT_STREQ("xmit DATA 1400@0; "
-			"xmit DATA 1400@1400", unit_log_get());
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request id 1234, next_offset 2800", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_xmit_data__metrics_for_client_rpc)
 {
@@ -1009,12 +884,12 @@ TEST_F(homa_outgoing, homa_xmit_data__metrics_for_client_rpc)
 
 	crpc->msgout.granted = 4000;
 	homa_rpc_lock(crpc);
-	XMIT_DATA(crpc, false);
+	homa_xmit_data(crpc);
 	EXPECT_EQ(4200, homa_metrics_per_cpu()->client_request_bytes_done);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->client_requests_done);
 
 	crpc->msgout.granted = 6000;
-	XMIT_DATA(crpc, false);
+	homa_xmit_data(crpc);
 	EXPECT_EQ(6000, homa_metrics_per_cpu()->client_request_bytes_done);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->client_requests_done);
 	homa_rpc_unlock(crpc);
@@ -1029,12 +904,12 @@ TEST_F(homa_outgoing, homa_xmit_data__metrics_for_server_rpc)
 
 	srpc->msgout.granted = 4000;
 	homa_rpc_lock(srpc);
-	XMIT_DATA(srpc, false);
+	homa_xmit_data(srpc);
 	EXPECT_EQ(4200, homa_metrics_per_cpu()->server_response_bytes_done);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->server_responses_done);
 
 	srpc->msgout.granted = 9900;
-	XMIT_DATA(srpc, false);
+	homa_xmit_data(srpc);
 	EXPECT_EQ(10000, homa_metrics_per_cpu()->server_response_bytes_done);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->server_responses_done);
 	homa_rpc_unlock(srpc);
@@ -1057,7 +932,7 @@ TEST_F(homa_outgoing, homa_xmit_data__rpc_freed)
 	homa_rpc_lock(crpc);
 	unit_hook_register(lock_end_hook);
 	hook_rpc = crpc;
-	XMIT_DATA(crpc, false);
+	homa_xmit_data(crpc);
 	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("xmit DATA 1400@0; homa_rpc_end invoked",
 			unit_log_get());
@@ -1370,7 +1245,7 @@ TEST_F(homa_outgoing, homa_rpc_tx_end)
 
 	homa_rpc_lock(srpc);
 	srpc->msgout.granted = 5000;
-	homa_xmit_data(srpc, true);
+	homa_xmit_data(srpc);
 	EXPECT_EQ(5600, homa_rpc_tx_end(srpc));
 
 	h.common = (struct homa_common_hdr){

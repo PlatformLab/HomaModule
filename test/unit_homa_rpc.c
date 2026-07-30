@@ -4,15 +4,12 @@
 #include "homa_grant.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
+#include "homa_qdisc.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "ccutils.h"
 #include "mock.h"
 #include "utils.h"
-
-#ifndef __STRIP__ /* See strip.py */
-#include "homa_pacer.h"
-#endif /* See strip.py */
 
 #define n(x) htons(x)
 #define N(x) htonl(x)
@@ -525,20 +522,6 @@ TEST_F(homa_rpc, homa_rpc_end__dead_buffs)
 	EXPECT_EQ(14, self->homa.max_dead_buffs);
 	EXPECT_EQ(14, self->hsk.dead_skbs);
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_rpc, homa_rpc_end__remove_from_throttled_list)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 10000, 1000);
-
-	homa_pacer_manage_rpc(crpc);
-	EXPECT_EQ(1, unit_list_length(&self->homa.pacer->throttled_rpcs));
-	unit_log_clear();
-	homa_rpc_end(crpc);
-	EXPECT_EQ(0, unit_list_length(&self->homa.pacer->throttled_rpcs));
-}
-#endif /* See strip.py */
 
 TEST_F(homa_rpc, homa_rpc_abort__server)
 {
@@ -1036,7 +1019,7 @@ TEST_F(homa_rpc, homa_rpc_reap__metrics_for_client_request)
 	ASSERT_NE(NULL, crpc);
 	crpc->msgout.granted = 1000;
 	homa_rpc_lock(crpc);
-	homa_xmit_data(crpc, false);
+	homa_xmit_data(crpc);
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(1400, homa_metrics_per_cpu()->client_request_bytes_done);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->client_requests_done);
@@ -1073,7 +1056,7 @@ TEST_F(homa_rpc, homa_rpc_reap__metrics_for_server_response)
 	ASSERT_NE(NULL, srpc);
 	srpc->msgout.granted = 1000;
 	homa_rpc_lock(srpc);
-	homa_xmit_data(srpc, false);
+	homa_xmit_data(srpc);
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(1400, homa_metrics_per_cpu()->server_response_bytes_done);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->server_responses_done);

@@ -101,8 +101,6 @@ Notes for Homa implementation in Linux:
   configuration parameter fifo_mbps? Maybe the grant mechanism needs
   to be net_device-specific?
 
-* Eliminate HOMA_FLAG_DONT_THROTTLE
-
 * Optimizations for skb freeing:
   * In GRO, merge page frags out of skbs and return skbs to napi with
     napi_reuse_skb (return GRO_MERGED_FREE?). See also napi_get_frags (used

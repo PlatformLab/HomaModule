@@ -444,14 +444,6 @@ struct homa_rpc {
 #endif /* See strip.py */
 
 	/**
-	 * @throttled_links: Used to link this RPC into
-	 * homa->pacer.throttled_rpcs. If this RPC isn't in
-	 * homa->pacer.throttled_rpcs, this is an empty
-	 * list pointing to itself.
-	 */
-	struct list_head throttled_links;
-
-	/**
 	 * @silent_ticks: Number of times homa_timer has been invoked
 	 * since the last time a packet indicating progress was received
 	 * for this RPC, so we don't need to send a resend for a while.

@@ -2,9 +2,9 @@
 
 #include "homa_impl.h"
 #include "homa_grant.h"
-#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
+#include "homa_qdisc.h"
 #include "homa_rpc.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
@@ -104,7 +104,6 @@ FIXTURE_SETUP(homa_grant)
 	self->hnet = mock_hnet(0, &self->homa);
 	self->homa.num_priorities = 1;
 	self->homa.poll_cycles = 0;
-	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.qshared->fifo_fraction = 0;
 	self->homa.grant->fifo_fraction = 0;
 	self->homa.grant->window = 1200;

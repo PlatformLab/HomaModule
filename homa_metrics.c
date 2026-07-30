@@ -369,10 +369,6 @@ char *homa_metrics_print(void)
 		  "Socket lock misses\n");
 		M("socket_lock_miss_cycles", m->socket_lock_miss_cycles,
 		  "Time lost waiting for socket locks\n");
-		M("throttle_lock_misses", m->throttle_lock_misses,
-		  "Throttle lock misses\n");
-		M("throttle_lock_miss_cycles", m->throttle_lock_miss_cycles,
-		  "Time lost waiting for throttle locks\n");
 		M("peer_ack_lock_misses", m->peer_ack_lock_misses,
 		  "Misses on peer ack locks\n");
 		M("peer_ack_lock_miss_cycles", m->peer_ack_lock_miss_cycles,
@@ -401,10 +397,6 @@ char *homa_metrics_print(void)
 		  "Sum of hsk->dead_skbs across all reaper calls\n");
 		M("reaper_active_skbs", m->reaper_active_skbs,
 		  "RPCs skipped by reaper because of active tx skbs\n");
-		M("throttle_list_adds", m->throttle_list_adds,
-		  "Calls to homa_add_to_throttled\n");
-		M("throttle_list_checks", m->throttle_list_checks,
-		  "List elements checked in homa_add_to_throttled\n");
 		M("ack_overflows", m->ack_overflows,
 		  "Explicit ACKs sent because peer->acks was full\n");
 		M("ignored_need_acks", m->ignored_need_acks,

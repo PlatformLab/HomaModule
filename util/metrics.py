@@ -355,7 +355,7 @@ if elapsed_secs != 0:
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
-    for lock in ["client", "server", "socket", "grant", "throttle", "peer_ack"]:
+    for lock in ["client", "server", "socket", "grant", "peer_ack"]:
         misses = float(deltas[lock + "_lock_misses"])
         cycles = float(deltas[lock + "_lock_miss_cycles"])
         if misses == 0:
@@ -517,10 +517,6 @@ if elapsed_secs != 0:
         percent = percent.ljust(12)
         print("%-30s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
 
-    if deltas["throttle_list_adds"] > 0:
-        print("%-30s %15.1f              List traversals per throttle "
-                "list insert" % ("checks_per_throttle_insert",
-                deltas["throttle_list_checks"]/deltas["throttle_list_adds"]))
 
     if deltas["responses_received"] > 0:
         print("%-30s %15.1f              ACK packets sent per 1000 client RPCs"

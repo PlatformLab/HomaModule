@@ -20,7 +20,6 @@ HOMA_OBJS += homa_grant.o \
 	homa_hijack.o \
 	homa_metrics.o \
 	homa_offload.o \
-	homa_pacer.o \
 	homa_qdisc.o \
 	homa_skb.o
 endif

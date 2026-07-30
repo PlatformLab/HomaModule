@@ -36,7 +36,6 @@ FIXTURE_SETUP(homa_timer)
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
 	homa_init(&self->homa);
 	self->hnet = mock_hnet(0, &self->homa);
-	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.resend_ticks = 2;
 	self->homa.timer_ticks = 100;
 #ifndef __STRIP__ /* See strip.py */
@@ -65,11 +64,7 @@ TEST_F(homa_timer, homa_timer_check_rpc__request_ack)
 	homa_rpc_lock(srpc);
 	homa_timer_check_rpc(srpc);
 	EXPECT_EQ(0, srpc->done_timer_ticks);
-#ifndef __STRIP__ /* See strip.py */
-	homa_xmit_data(srpc, false);
-#else /* See strip.py */
 	homa_xmit_data(srpc);
-#endif /* See strip.py */
 
 	/* Second call: set done_timer_ticks. */
 	unit_log_clear();

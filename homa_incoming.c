@@ -789,7 +789,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 				rpc->msgout.granted = rpc->msgout.length;
 		}
 		rpc->msgout.sched_priority = h->priority;
-		homa_xmit_data(rpc, false);
+		homa_xmit_data(rpc);
 	}
 	consume_skb(skb);
 }
@@ -864,7 +864,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		rpc->msgout.granted = end;
 		if (rpc->msgout.granted > rpc->msgout.length)
 			rpc->msgout.granted = rpc->msgout.length;
-		homa_xmit_data(rpc, false);
+		homa_xmit_data(rpc);
 	}
 #else /* See strip.py */
 	homa_resend_data(rpc, offset, (end > tx_end) ? tx_end : end);

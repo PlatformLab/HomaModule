@@ -10,7 +10,6 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
 #include "homa_skb.h"
 #else /* See strip.py */
@@ -38,12 +37,6 @@ int homa_init(struct homa *homa)
 	if (IS_ERR(homa->qshared)) {
 		err = PTR_ERR(homa->qshared);
 		homa->qshared = NULL;
-		goto error;
-	}
-	homa->pacer = homa_pacer_alloc(homa);
-	if (IS_ERR(homa->pacer)) {
-		err = PTR_ERR(homa->pacer);
-		homa->pacer = NULL;
 		goto error;
 	}
 	homa->grant = homa_grant_alloc(homa);
@@ -145,10 +138,6 @@ void homa_destroy(struct homa *homa)
 	if (homa->grant) {
 		homa_grant_free(homa->grant);
 		homa->grant = NULL;
-	}
-	if (homa->pacer) {
-		homa_pacer_free(homa->pacer);
-		homa->pacer = NULL;
 	}
 	if (homa->qshared) {
 		homa_qdisc_shared_free(homa->qshared);

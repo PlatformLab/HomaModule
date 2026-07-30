@@ -628,18 +628,6 @@ struct homa_metrics {
 	u64 socket_lock_misses;
 
 	/**
-	 * @throttle_lock_miss_cycles: total time spent waiting for throttle
-	 * lock misses.
-	 */
-	u64 throttle_lock_miss_cycles;
-
-	/**
-	 * @throttle_lock_misses: total number of times that Homa had to wait
-	 * to acquire the throttle lock.
-	 */
-	u64 throttle_lock_misses;
-
-	/**
 	 * @peer_ack_lock_miss_cycles: total time spent waiting for peer lock misses.
 	 */
 	u64 peer_ack_lock_miss_cycles;
@@ -723,17 +711,6 @@ struct homa_metrics {
 	 * pipeline.
 	 */
 	u64 reaper_active_skbs;
-
-	/**
-	 * @throttle_list_adds: total number of calls to homa_add_to_throttled.
-	 */
-	u64 throttle_list_adds;
-
-	/**
-	 * @throttle_list_checks: number of list elements examined in
-	 * calls to homa_add_to_throttled.
-	 */
-	u64 throttle_list_checks;
 
 	/**
 	 * @ack_overflows: total number of times that homa_peer_add_ack

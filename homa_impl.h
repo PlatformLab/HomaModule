@@ -84,9 +84,6 @@ struct homa_sock;
 #ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"
 #include "homa_metrics.h"
-
-/* Declarations used in this file, so they can't be made at the end. */
-void     homa_throttle_lock_slow(struct homa *homa);
 #endif /* See strip.py */
 
 /**
@@ -123,10 +120,6 @@ struct homa {
 #endif /* See strip.py */
 
 #ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @pacer:  Information related to the pacer; managed by homa_pacer.c.
-	 */
-	struct homa_pacer *pacer;
 
 	/**
 	 * @grant: Contains information used by homa_grant.c to manage
@@ -441,12 +434,6 @@ struct homa {
 	 */
 	u32 timer_ticks;
 
-	/**
-	 * @flags: a collection of bits that can be set using sysctl
-	 * to trigger various behaviors.
-	 */
-	int flags;
-
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @freeze_type: determines conditions under which the time trace
@@ -758,6 +745,7 @@ int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			   size_t length, struct homa_rpc *rpc);
 int      __homa_xmit_control(void *contents, size_t length,
 			     struct homa_peer *peer, struct homa_sock *hsk);
+void     homa_xmit_data(struct homa_rpc *rpc);
 void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
 #ifndef __STRIP__ /* See strip.py */
@@ -776,13 +764,11 @@ int      homa_sysctl_softirq_cores(const struct ctl_table *table,
 				   loff_t *ppos);
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			       int length);
-void     homa_xmit_data(struct homa_rpc *rpc, bool force);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			  int priority);
 #else /* See strip.py */
 int      homa_message_in_init(struct homa_rpc *rpc, int length);
 void     homa_resend_data(struct homa_rpc *rpc, int start, int end);
-void     homa_xmit_data(struct homa_rpc *rpc);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc);
 #endif /* See strip.py */
 

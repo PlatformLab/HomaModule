@@ -12,7 +12,6 @@
 #include "homa_grant.h"
 #include "homa_hijack.h"
 #include "homa_offload.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
 #endif /* See strip.py */
 
@@ -206,13 +205,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "drop_bits",
 		.data		= OFFSET(drop_bits),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "flags",
-		.data		= OFFSET(flags),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -1868,7 +1860,6 @@ int homa_dointvec(const struct ctl_table *table, int write,
 		 * dependent information).
 		 */
 		homa_incoming_sysctl_changed(homa);
-		homa_pacer_update_sysctl_deps(homa->pacer);
 		homa_qdisc_update_sysctl_deps(homa->qshared);
 
 		/* For this value, only call the method when this
@@ -1894,8 +1885,6 @@ int homa_dointvec(const struct ctl_table *table, int write,
 			} else if (homa->sysctl_action == 3) {
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
-			} else if (homa->sysctl_action == 4) {
-				homa_pacer_log_throttled(homa->pacer);
 			} else if (homa->sysctl_action == 5) {
 				tt_printk();
 			} else if (homa->sysctl_action == 6) {

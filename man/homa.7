@@ -561,14 +561,6 @@ An integer value. When Homa decides to issue a grant to the oldest message
 .IR grant_fifo_fraction )
 it will grant this many additional bytes.
 .TP
-.IR flags
-Individual bits can be set or cleared to control particular Homa behaviors.
-If the
-.B HOMA_FLAG_DONT_THROTTLE
-bit is set, Homa will not throttle output transmissions; packets will
-always be sent immediately. This could result in long transmit queues for
-the NIC, which defeats part of Homa's SRPT scheduling mechanism.
-.TP
 .IR freeze_type
 If this value is nonzero, it specifies one of several conditions under which
 Homa will freeze its internal timetrace. This is used for debugging and
@@ -867,18 +859,6 @@ When releasing pages from the sk_buff page pools back to Linux, Homa will
 not release pages from a pool if the amount of unused space in
 the pool has been less than this (specified in Kbytes) at any point
 in the recent past.
-.TP
-.IR throttle_min_bytes
-An integer value specifying the smallest packet size subject to
-output queue throttling.
-Packets smaller than this will be immediately added to the NIC
-queue without considering the queue length.
-The rationale for this is that small packets are limited by CPU
-overheads: there is no way that the CPU can generate
-small packets fast enough to build up a queue at the NIC.
-Bypassing the throttling mechanism improves efficiency.
-This value can be set to 0 to force all packets to use the throttling
-mechanism.
 .TP
 .I timeout_resends
 An integer value specifying how long to wait before considering a peer

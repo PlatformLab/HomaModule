@@ -5,6 +5,7 @@
 #include "homa_interest.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
+#include "homa_qdisc.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "ccutils.h"
@@ -13,13 +14,6 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_offload.h"
-#include "homa_pacer.h"
-#endif /* See strip.py */
-
-#ifndef __STRIP__ /* See strip.py */
-#define XMIT_DATA(rpc, force) homa_xmit_data(rpc, force)
-#else /* See strip.py */
-#define XMIT_DATA(rpc, force) homa_xmit_data(rpc)
 #endif /* See strip.py */
 
 static struct homa_rpc *hook_rpc;
@@ -123,7 +117,6 @@ FIXTURE_SETUP(homa_incoming)
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.num_priorities = 1;
 	self->homa.poll_cycles = 0;
-	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.qshared->fifo_fraction = 0;
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
@@ -1728,7 +1721,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 
 	ASSERT_NE(NULL, srpc);
 	homa_rpc_lock(srpc);
-	XMIT_DATA(srpc, false);
+	homa_xmit_data(srpc);
 	homa_rpc_unlock(srpc);
 	unit_log_clear();
 
@@ -1925,7 +1918,7 @@ TEST_F(homa_incoming, homa_resend_pkt__update_granted_and_xmit)
 	ASSERT_NE(NULL, crpc);
 	crpc->msgout.granted = 1400;
 	homa_rpc_lock(crpc);
-	XMIT_DATA(crpc, false);
+	homa_xmit_data(crpc);
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	EXPECT_EQ(1400, crpc->msgout.next_xmit_offset);
@@ -1949,7 +1942,7 @@ TEST_F(homa_incoming, homa_resend_pkt__rpc_ends_so_dont_update_granted)
 	ASSERT_NE(NULL, crpc);
 	crpc->msgout.granted = 3000;
 	homa_rpc_lock(crpc);
-	XMIT_DATA(crpc, false);
+	homa_xmit_data(crpc);
 	unit_log_clear();
 	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
 	unit_hook_register(lock_end_hook);
@@ -2012,7 +2005,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_all)
 
 	ASSERT_NE(NULL, crpc);
 	homa_rpc_lock(crpc);
-	XMIT_DATA(crpc, false);
+	homa_xmit_data(crpc);
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 
@@ -2044,7 +2037,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_part)
 	crpc->msgout.granted = 1400;
 #endif /* See strip.py */
 	homa_rpc_lock(crpc);
-	XMIT_DATA(crpc, false);
+	homa_xmit_data(crpc);
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 

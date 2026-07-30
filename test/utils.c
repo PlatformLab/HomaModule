@@ -8,15 +8,12 @@
 #include "homa_grant.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+#include "homa_qdisc.h"
 #include "ccutils.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "mock.h"
 #include "utils.h"
-
-#ifndef __STRIP__ /* See strip.py */
-#include "homa_pacer.h"
-#endif /* See strip.py */
 
 /**
  * unit_client_rpc() - Create a homa_client_rpc and arrange for it to be
@@ -306,25 +303,6 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
 		unit_log_printf("; ", "%s", buffer);
 	}
 }
-
-#ifndef __STRIP__ /* See strip.py */
-/**
- * unit_log_throttled() - Append to the test log information about all of
- * the messages in homa->throttle_rpcs.
- * @homa:     Homa's overall state.
- */
-void unit_log_throttled(struct homa *homa)
-{
-	struct homa_rpc *rpc;
-
-	list_for_each_entry_rcu(rpc, &homa->pacer->throttled_rpcs, throttled_links) {
-		unit_log_printf("; ", "%s id %llu, next_offset %d",
-				homa_is_client(rpc->id) ? "request"
-				: "response", rpc->id,
-				rpc->msgout.next_xmit_offset);
-	}
-}
-#endif /* See strip.py */
 
 /**
  * unit_print_gaps() - Returns a static string describing the gaps in an RPC.

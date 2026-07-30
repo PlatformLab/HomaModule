@@ -6,7 +6,6 @@
 
 #include "homa_impl.h"
 #include "homa_offload.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
 
 DEFINE_PER_CPU(struct homa_offload_core, homa_offload_core);
@@ -367,7 +366,6 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		homa_set_softirq_cpu(skb, smp_processor_id());
 
 done:
-	homa_pacer_check(homa->pacer);
 	homa_qdisc_pacer_check(homa);
 	offload_core->last_gro = homa_clock();
 	return result;

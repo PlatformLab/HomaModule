@@ -40,7 +40,6 @@ FIXTURE_SETUP(homa_hijack)
 {
 	homa_init(&self->homa);
 	self->hnet = mock_hnet(0, &self->homa);
-	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.unsched_bytes = 10000;
 	mock_sock_init(&self->hsk, self->hnet, 99);
 	self->ip = unit_get_in_addr("196.168.0.1");

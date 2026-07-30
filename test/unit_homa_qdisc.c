@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 #include "homa_impl.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
 #include "homa_rpc.h"
 #define KSELFTEST_NOT_MAIN 1

@@ -24,7 +24,7 @@ parser.add_argument('-B', '--benchmark', dest='config', default='homa',
                 'max_gro', 'max_gso', 'max_incoming', 'mtu', 'nic_backlog',
                 'nic_queue', 'nodes', 'pacer', 'poll', 'ports', 'prios',
                 'receivers', 'repeat', 'tcp', 'tcp_buffers', 'tcp_nodes',
-                'tcp_qdisc', 'throttle', 'time', 'unsched_bytes', 'window'],
+                'tcp_qdisc', 'time', 'unsched_bytes', 'window'],
         help='Benchmark to run (default: homa)')
 
 options = parser.parse_args()
@@ -463,13 +463,6 @@ elif options.config == 'tcp_qdisc':
             'options': ['protocol', 'tcp'],
             'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic']
     })
-elif options.config == 'throttle':
-    # Vary the cuttoff for short messages that bypass the throttle mechanism
-    for cutoff in [100, 200, 500, 1000]:
-        specs.append({'exp_name': 'throttle_%d' % (cutoff),
-                'label': 'throttle_min_bytes %d' % (cutoff),
-                'sysctl': ['.net.homa.throttle_min_bytes', cutoff]
-                })
 elif options.config == 'time':
     # Vary the experiment running time
     for seconds in [10, 20, 30, 50, 100]:

@@ -58,7 +58,6 @@ TEST_SRCS +=  unit_homa_grant.c \
 	      unit_homa_hijack.c \
 	      unit_homa_metrics.c \
 	      unit_homa_offload.c \
-	      unit_homa_pacer.c \
 	      unit_homa_qdisc.c \
 	      unit_homa_skb.c
 endif
@@ -81,7 +80,6 @@ HOMA_SRCS +=  homa_grant.c \
 	      homa_hijack.c \
 	      homa_metrics.c \
 	      homa_offload.c \
-	      homa_pacer.c \
 	      homa_qdisc.c \
 	      homa_skb.c
 endif

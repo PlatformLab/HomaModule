@@ -9,7 +9,6 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
 #include "homa_skb.h"
 #else /* See strip.py */
@@ -65,7 +64,6 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 #ifndef __STRIP__ /* See strip.py */
 	INIT_LIST_HEAD(&crpc->grantable_links);
 #endif /* See strip.py */
-	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	crpc->magic = HOMA_RPC_MAGIC;
 	crpc->start_time = homa_clock();
@@ -172,7 +170,6 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 #ifndef __STRIP__ /* See strip.py */
 	INIT_LIST_HEAD(&srpc->grantable_links);
 #endif /* See strip.py */
-	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_time = homa_clock();
@@ -347,7 +344,6 @@ void homa_rpc_end(struct homa_rpc *rpc)
 		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
 
 	homa_sock_unlock(rpc->hsk);
-	IF_NO_STRIP(homa_pacer_unmanage_rpc(rpc));
 }
 
 /**

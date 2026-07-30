@@ -43,7 +43,6 @@ FIXTURE_SETUP(homa_offload)
 
 	homa_init(&self->homa);
 	self->hnet = mock_hnet(0, &self->homa);
-	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.unsched_bytes = 10000;
 	mock_sock_init(&self->hsk, self->hnet, 99);
 	self->ip = unit_get_in_addr("196.168.0.1");
@@ -229,7 +228,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 			20000);
 	ASSERT_NE(NULL, srpc);
 	homa_rpc_lock(srpc);
-	homa_xmit_data(srpc, false);
+	homa_xmit_data(srpc);
 	homa_rpc_unlock(srpc);
 	unit_log_clear();
 

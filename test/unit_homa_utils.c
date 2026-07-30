@@ -57,15 +57,6 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 	homa->unsched_cutoffs[7] = c7;
 }
 
-TEST_F(homa_utils, homa_init__pacer_alloc_failure)
-{
-	struct homa homa2;
-
-	mock_kmalloc_errors = 1;
-	unit_log_clear();
-	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_EQ(NULL, homa2.pacer);
-}
 TEST_F(homa_utils, homa_init__grant_alloc_failure)
 {
 	struct homa homa2;

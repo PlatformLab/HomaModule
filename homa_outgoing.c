@@ -11,7 +11,6 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_hijack.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
 #include "homa_skb.h"
 #else /* See strip.py */
@@ -393,7 +392,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		 * and the SoftIRQ core sending packets.
 		 */
 		if (offset < rpc->msgout.unscheduled && xmit)
-			homa_xmit_data(rpc, false);
+			homa_xmit_data(rpc);
 #endif /* See strip.py */
 	}
 	tt_record2("finished copy from user space for id %d, length %d",
@@ -402,7 +401,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
 	if (xmit)
 #ifndef __STRIP__ /* See strip.py */
-		homa_xmit_data(rpc, false);
+		homa_xmit_data(rpc);
 #else /* See strip.py */
 		homa_xmit_data(rpc);
 #endif /* See strip.py */
@@ -544,24 +543,6 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	}
 }
 
-#ifndef __STRIP__ /* See strip.py */
-/**
- * homa_xmit_data() - If an RPC has outbound data packets that are permitted
- * to be transmitted according to the scheduling mechanism, arrange for
- * them to be sent (some may be sent immediately; others may be sent
- * later by the pacer thread).
- * @rpc:       RPC to check for transmittable packets. Must be locked by
- *             caller. Note: this function will release the RPC lock while
- *             passing packets through the RPC stack, then reacquire it
- *             before returning. It is possible that the RPC gets terminated
- *             when the lock isn't held, in which case the state will
- *             be RPC_DEAD on return.
- * @force:     True means send at least one packet, even if the NIC queue
- *             is too long. False means that zero packets may be sent, if
- *             the NIC queue is sufficiently long.
- */
-void homa_xmit_data(struct homa_rpc *rpc, bool force)
-#else /* See strip.py */
 /**
  * homa_xmit_data() - If an RPC has outbound data packets that are permitted
  * to be transmitted according to the scheduling mechanism, arrange for
@@ -574,7 +555,6 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
  *             be RPC_DEAD on return.
  */
 void homa_xmit_data(struct homa_rpc *rpc)
-#endif /* See strip.py */
 	__must_hold(rpc->bucket->lock)
 {
 	int length;
@@ -593,17 +573,6 @@ void homa_xmit_data(struct homa_rpc *rpc)
 				   rpc->msgout.next_xmit_offset, rpc->id,
 				   rpc->msgout.granted);
 			break;
-		}
-
-		if (rpc->msgout.length - rpc->msgout.next_xmit_offset >
-		    homa->qshared->defer_min_bytes &&
-		    !homa_qdisc_active(rpc->hsk->homa)) {
-			if (!homa_pacer_check_nic_q(homa->pacer, skb, force)) {
-				tt_record1("homa_xmit_data adding id %u to throttle queue",
-					   rpc->id);
-				homa_pacer_manage_rpc(rpc);
-				break;
-			}
 		}
 
 		if (rpc->msgout.next_xmit_offset < rpc->msgout.unscheduled)
@@ -638,7 +607,6 @@ void homa_xmit_data(struct homa_rpc *rpc)
 			tt_record4("homa_xmit_data found stopped txq for id %d, qid %d, num_queued %d, limit %d",
 				   rpc->id, skb->queue_mapping,
 				   txq->dql.num_queued, txq->dql.adj_limit);
-		force = false;
 #else /* See strip.py */
 		__homa_xmit_data(skb, rpc);
 #endif /* See strip.py */
@@ -843,8 +811,6 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 				   offset, seg_length, rpc->id);
 			homa_rpc_unlock(rpc);
 #ifndef __STRIP__ /* See strip.py */
-			homa_pacer_check_nic_q(rpc->hsk->homa->pacer, new_skb,
-					       true);
 			__homa_xmit_data(new_skb, rpc, priority);
 #else /* See strip.py */
 			__homa_xmit_data(new_skb, rpc);

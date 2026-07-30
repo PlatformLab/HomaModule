@@ -161,16 +161,6 @@ struct homa_rcvbuf_args {
 	__u64 length;
 };
 
-/* Meanings of the bits in Homa's flag word, which can be set using
- * "sysctl /net/homa/flags".
- */
-
-/**
- * define HOMA_FLAG_DONT_THROTTLE - disable the output throttling mechanism
- * (always send all packets immediately).
- */
-#define HOMA_FLAG_DONT_THROTTLE   2
-
 /**
  * struct homa_rpc_info - Used by HOMAIOCINFO to return information about
  * a specific RPC.
