@@ -12,6 +12,7 @@ Notes for Homa implementation in Linux:
   need to be divided into two levels: the top level contains the flow and
   dst and may be socket-specific, and the lower level contains stuff that must
   be shared, such as priorities.
+  * See if peer fields like "least_recent_rpc" can be removed.
 
 * Need to do cgroup accounting (using __GRP_ACCOUNT or GFP_KERNEL_ACCOUNT)
   for memory allocations made on behalf of applications. Places are affected:
@@ -24,7 +25,8 @@ Notes for Homa implementation in Linux:
   tx sk_buffs (homa_skb.c)
 
 * Homa's bipartite matching algorithm is failing under very high loads
-  where there are large backlogs of messages waiting to be sent:
+  in large clusters where there are large backlogs of messages waiting to
+  be sent:
   * Some nodes will send unscheduled packets for a hundred or more
     long messages (they aren't getting grants for any of them).
   * Later on, they get simultaneous grants for more than they can handle,

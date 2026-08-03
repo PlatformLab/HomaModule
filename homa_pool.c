@@ -546,7 +546,6 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			   atomic_read(&pool->free_bpages),
 			   pool->bpages_needed);
 		homa_pool_alloc_msg(rpc);
-		homa_rpc_unlock(rpc);
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgin.num_bpages > 0) {
 			struct homa_resend_hdr resend;
@@ -563,6 +562,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 		}
 #endif /* See strip.py */
+		homa_rpc_unlock(rpc);
 	}
 }
 

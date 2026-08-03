@@ -919,20 +919,20 @@ TEST_F(homa_rpc, homa_rpc_reap__free_gaps)
 	homa_rpc_reap(&self->hsk);
 	/* (Test infrastructure will complain if gaps aren't freed) */
 }
-TEST_F(homa_rpc, homa_rpc_reap__release_peer_ref)
+TEST_F(homa_rpc, homa_rpc_reap__release_route_ref)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			4000, 98, 1000,	150000);
-	struct homa_peer *peer;
+	struct homa_route *route;
 
 	ASSERT_NE(NULL, crpc);
-	peer = crpc->peer;
-	EXPECT_EQ(2, refcount_read(&peer->refs));
+	route = crpc->route;
+	EXPECT_EQ(2, refcount_read(&route->refs));
 
 	homa_rpc_end(crpc);
 	homa_rpc_reap(&self->hsk);
-	EXPECT_EQ(1, refcount_read(&peer->refs));
+	EXPECT_EQ(1, refcount_read(&route->refs));
 }
 TEST_F(homa_rpc, homa_rpc_reap__release_bpages)
 {

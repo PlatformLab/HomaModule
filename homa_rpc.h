@@ -365,11 +365,11 @@ struct homa_rpc {
 	refcount_t refs;
 
 	/**
-	 * @peer: Information about the other machine (the server, if
-	 * this is a client RPC, or the client, if this is a server RPC).
-	 * If non-NULL then we own a reference on the object.
+	 * @route: Holds a dst_entry that can be used to route to the peer;
+	 * also provides indirect access to a homa_peer for the peer. This
+	 * value can change due to route invalidations, if RPC lock not held.
 	 */
-	struct homa_peer *peer;
+	struct homa_route *route;
 
 	/** @dport: Port number on @peer that will handle packets. */
 	u16 dport;

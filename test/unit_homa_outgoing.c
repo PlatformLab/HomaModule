@@ -89,7 +89,7 @@ FIXTURE(homa_outgoing) {
 	struct net_device *dev;
 	struct homa_sock hsk;
 	union sockaddr_in_union server_addr;
-	struct homa_peer *peer;
+	struct homa_route *route;
 };
 FIXTURE_SETUP(homa_outgoing)
 {
@@ -113,13 +113,13 @@ FIXTURE_SETUP(homa_outgoing)
 	self->server_addr.in6.sin6_family = AF_INET;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port = htons(self->server_port);
-	self->peer = homa_peer_get(&self->hsk,
-				    &self->server_addr.in6.sin6_addr);
+	self->route = homa_route_get(&self->hsk,
+				     &self->server_addr.in6.sin6_addr);
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_outgoing)
 {
-	homa_peer_release(self->peer);
+	homa_route_release(self->route);
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
@@ -192,10 +192,12 @@ TEST_F(homa_outgoing, set_priority__priority_mapping)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
+	homa_rpc_lock(srpc);
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	self->homa.priority_map[7] = 3;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("7 3", mock_xmit_prios);
+	homa_rpc_unlock(srpc);
 }
 #endif /* See strip.py */
 
@@ -938,12 +940,14 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 	unit_log_clear();
 
 	mock_xmit_log_verbose = 1;
+	homa_rpc_lock(srpc);
 	EXPECT_EQ(0, homa_xmit_control(BUSY, &h, sizeof(h), srpc));
 	EXPECT_STREQ("xmit BUSY from 0.0.0.0:99, dport 40000, id 1235",
 			unit_log_get());
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("7", mock_xmit_prios);
 #endif /* See strip.py */
+	homa_rpc_unlock(srpc);
 }
 TEST_F(homa_outgoing, homa_xmit_control__client_response)
 {
@@ -957,12 +961,14 @@ TEST_F(homa_outgoing, homa_xmit_control__client_response)
 	unit_log_clear();
 
 	mock_xmit_log_verbose = 1;
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, homa_xmit_control(BUSY, &h, sizeof(h), crpc));
 	EXPECT_STREQ("xmit BUSY from 0.0.0.0:40000, dport 99, id 1234",
 			unit_log_get());
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("7", mock_xmit_prios);
 #endif /* See strip.py */
+	homa_rpc_unlock(crpc);
 }
 
 TEST_F(homa_outgoing, __homa_xmit_control__cant_alloc_skb)
@@ -978,8 +984,8 @@ TEST_F(homa_outgoing, __homa_xmit_control__cant_alloc_skb)
 	h.common.type = BUSY;
 	mock_xmit_log_verbose = 1;
 	mock_alloc_skb_errors = 1;
-	EXPECT_EQ(ENOBUFS, -__homa_xmit_control(&h, sizeof(h), srpc->peer,
-			&self->hsk));
+	EXPECT_EQ(ENOBUFS, -__homa_xmit_control(&h, sizeof(h), srpc->route,
+		  &self->hsk));
 	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
@@ -991,10 +997,12 @@ TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 	unit_log_clear();
+	homa_rpc_lock(srpc);
 	EXPECT_EQ(0, homa_xmit_control(BUSY, &h, 10, srpc));
 	EXPECT_STREQ("padded control packet with 16 bytes; "
 			"xmit unknown packet type 0x0",
 			unit_log_get());
+	homa_rpc_unlock(srpc);
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, __homa_xmit_control__ipv6_set_hijack)
@@ -1012,9 +1020,11 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_set_hijack)
 	h.offset = htonl(12345);
 	h.priority = 4;
 	mock_xmit_log_hijack = 1;
+	homa_rpc_lock(srpc);
 	EXPECT_EQ(0, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("xmit GRANT 12345@4; hijack checksum 666, flags 0x6",
 		     unit_log_get());
+	homa_rpc_unlock(srpc);
 }
 TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 {
@@ -1032,9 +1042,11 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 	h.priority = 4;
 	mock_xmit_log_verbose = 1;
 	mock_ip6_xmit_errors = 1;
+	homa_rpc_lock(srpc);
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors));
+	homa_rpc_unlock(srpc);
 }
 TEST_F(homa_outgoing, __homa_xmit_control__ipv4_set_hijack)
 {
@@ -1054,9 +1066,11 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_set_hijack)
 	h.offset = htonl(12345);
 	h.priority = 4;
 	mock_xmit_log_hijack = 1;
+	homa_rpc_lock(srpc);
 	EXPECT_EQ(0, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("xmit GRANT 12345@4; hijack checksum 444, flags 0x6",
 		     unit_log_get());
+	homa_rpc_unlock(srpc);
 }
 TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 {
@@ -1077,9 +1091,11 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 	h.priority = 4;
 	mock_xmit_log_verbose = 1;
 	mock_ip_queue_xmit_errors = 1;
+	homa_rpc_lock(srpc);
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors));
+	homa_rpc_unlock(srpc);
 }
 
 TEST_F(homa_outgoing, homa_xmit_unknown__basics)

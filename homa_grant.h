@@ -240,7 +240,8 @@ struct homa_grant
 	*homa_grant_alloc(struct homa *homa);
 void     homa_grant_adjust_peer(struct homa_grant *grant,
 				struct homa_peer *peer);
-void     homa_grant_check_fifo(struct homa_grant *grant);
+void     homa_grant_check_fifo(struct homa_grant *grant,
+			       struct homa_rpc *locked_rpc);
 void     homa_grant_check_needy(struct homa_grant *grant);
 void     homa_grant_check_rpc(struct homa_rpc *rpc);
 int      homa_grant_dointvec(const struct ctl_table *table, int write,

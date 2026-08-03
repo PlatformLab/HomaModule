@@ -44,6 +44,7 @@ struct homa_rpc
 			     struct in6_addr *server_ip, int server_port, int id,
 			     int req_length, int resp_length);
 int          unit_count_peers(struct homa *homa);
+int          unit_count_routes(struct homa *homa);
 struct in6_addr
 	     unit_get_in_addr(char *s);
 struct iov_iter

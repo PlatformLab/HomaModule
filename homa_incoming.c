@@ -137,17 +137,15 @@ void homa_request_retrans(struct homa_rpc *rpc)
 #endif /* See strip.py */
 			i++;
 		}
-		homa_rpc_unlock(rpc);
 		for (i = 0; i < num_gaps; i++) {
 			tt_record4("Sending RESEND for id %d, peer 0x%x, offset %d, length %d",
-				   rpc->id, tt_addr(rpc->peer->addr),
+				   rpc->id, tt_addr(rpc->route->peer->addr),
 				   ntohl(resends[i].offset),
 				   ntohl(resends[i].length));
 			homa_xmit_control(RESEND, &resends[i],
 					  sizeof(resends[i]), rpc);
 		}
 		kfree(resends);
-		homa_rpc_lock(rpc);
 
 		/* Issue a RESEND for any granted data after the last gap. */
 		offset = rpc->msgin.recv_end;
@@ -173,10 +171,8 @@ void homa_request_retrans(struct homa_rpc *rpc)
 	resend.priority = rpc->hsk->homa->num_priorities - 1;
 #endif /* See strip.py */
 	tt_record4("Sending RESEND for id %d, peer 0x%x, offset %d, length %d",
-		   rpc->id, tt_addr(rpc->peer->addr), offset, length);
-	homa_rpc_unlock(rpc);
+		   rpc->id, tt_addr(rpc->route->peer->addr), offset, length);
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
-	homa_rpc_lock(rpc);
 }
 
 /**
@@ -594,7 +590,7 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 #endif /* See strip.py */
 			    h->common.type == BUSY)
 				rpc->silent_ticks = 0;
-			rpc->peer->outstanding_resends = 0;
+			rpc->route->peer->outstanding_resends = 0;
 		}
 
 		switch (h->common.type) {
@@ -619,7 +615,7 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 		case BUSY:
 			INC_METRIC(packets_received[BUSY - DATA], 1);
 			tt_record2("received BUSY for id %d, peer 0x%x",
-				   id, tt_addr(rpc->peer->addr));
+				   id, tt_addr(rpc->route->peer->addr));
 			/* Nothing to do for these packets except reset
 			 * silent_ticks, which happened above.
 			 */
@@ -694,7 +690,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 		   homa_local_id(h->common.sender_id),
-		   tt_addr(rpc->peer->addr), ntohl(h->seg.offset),
+		   tt_addr(rpc->route->peer->addr), ntohl(h->seg.offset),
 		   ntohl(h->message_length));
 
 	if (rpc->state != RPC_INCOMING && homa_is_client(rpc->id)) {
@@ -752,7 +748,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		 * *and* it is been a while since the previous CUTOFFS
 		 * packet.
 		 */
-		if (jiffies != rpc->peer->last_update_jiffies) {
+		if (jiffies != rpc->route->peer->last_update_jiffies) {
 			struct homa_cutoffs_hdr h2;
 			int i;
 
@@ -761,10 +757,8 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 						htonl(homa->unsched_cutoffs[i]);
 			}
 			h2.cutoff_version = htons(homa->cutoff_version);
-			homa_rpc_unlock(rpc);
 			homa_xmit_control(CUTOFFS, &h2, sizeof(h2), rpc);
-			homa_rpc_lock(rpc);
-			rpc->peer->last_update_jiffies = jiffies;
+			rpc->route->peer->last_update_jiffies = jiffies;
 		}
 	}
 #endif /* See strip.py */
@@ -868,9 +862,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		 */
 		tt_record2("sending BUSY from resend, id %d, state %d",
 			   rpc->id, rpc->state);
-		homa_rpc_unlock(rpc);
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
-		homa_rpc_lock(rpc);
 		goto done;
 	}
 
@@ -905,9 +897,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		 */
 		tt_record3("sending BUSY from resend, id %d, offset %d, tx_end %d",
 			   rpc->id, offset, tx_end);
-		homa_rpc_unlock(rpc);
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
-		homa_rpc_lock(rpc);
 		goto done;
 	}
 
@@ -926,7 +916,7 @@ void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	tt_record3("Received unknown for id %llu, peer %x:%d",
-		   rpc->id, tt_addr(rpc->peer->addr), rpc->dport);
+		   rpc->id, tt_addr(rpc->route->peer->addr), rpc->dport);
 	if (homa_is_client(rpc->id)) {
 		if (rpc->state == RPC_OUTGOING) {
 			int tx_end = homa_rpc_tx_end(rpc);
@@ -935,29 +925,30 @@ void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			 * has been lost; retransmit it.
 			 */
 			tt_record4("Restarting id %d to server 0x%x:%d, lost %d bytes",
-				   rpc->id, tt_addr(rpc->peer->addr),
+				   rpc->id, tt_addr(rpc->route->peer->addr),
 				   rpc->dport, tx_end);
 #ifndef __STRIP__ /* See strip.py */
 			rpc->msgout.retrans_priority = homa_unsched_priority(
-				rpc->hsk->homa, rpc->peer, rpc->msgout.length);
+				rpc->hsk->homa, rpc->route->peer,
+				rpc->msgout.length);
 #endif /* See strip.py */
 			homa_resend_data(rpc, 0, tx_end);
 			goto done;
 		}
 #ifndef __STRIP__ /* See strip.py */
 		pr_err("Received unknown for RPC id %llu, peer %s:%d in bogus state %d; discarding unknown\n",
-		       rpc->id, homa_print_ipv6_addr(&rpc->peer->addr),
+		       rpc->id, homa_print_ipv6_addr(&rpc->route->peer->addr),
 		       rpc->dport, rpc->state);
 #endif /* See strip.py */
 		tt_record4("Discarding unknown for RPC id %d, peer 0x%x:%d: bad state %d",
-			   rpc->id, tt_addr(rpc->peer->addr), rpc->dport,
+			   rpc->id, tt_addr(rpc->route->peer->addr), rpc->dport,
 			   rpc->state);
 #ifndef __STRIP__ /* See strip.py */
 	} else {
 		if (rpc->hsk->homa->verbose)
 			pr_notice("Ending rpc id %llu from client %s:%d: unknown to client",
 				  rpc->id,
-				  homa_print_ipv6_addr(&rpc->peer->addr),
+				  homa_print_ipv6_addr(&rpc->route->peer->addr),
 				  rpc->dport);
 		homa_rpc_end(rpc);
 		INC_METRIC(server_rpcs_unknown, 1);
@@ -981,16 +972,18 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 {
 	struct homa_cutoffs_hdr *h = (struct homa_cutoffs_hdr *)skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-	struct homa_peer *peer;
+	struct homa_route *route;
 	int i;
 
-	peer = homa_peer_get(hsk, &saddr);
-	if (!IS_ERR(peer)) {
+	route = homa_route_get(hsk, &saddr);
+	if (!IS_ERR(route)) {
+		struct homa_peer *peer = route->peer;
+
 		peer->unsched_cutoffs[0] = INT_MAX;
 		for (i = 1; i < HOMA_MAX_PRIORITIES; i++)
 			peer->unsched_cutoffs[i] = ntohl(h->unsched_cutoffs[i]);
 		peer->cutoff_version = h->cutoff_version;
-		homa_peer_release(peer);
+		homa_route_release(route);
 	}
 	consume_skb(skb);
 }
@@ -1011,8 +1004,8 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	struct homa_common_hdr *h = (struct homa_common_hdr *)skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	u64 id = homa_local_id(h->sender_id);
+	struct homa_route *route;
 	struct homa_ack_hdr ack;
-	struct homa_peer *peer;
 
 	tt_record1("Received NEED_ACK for id %d", id);
 
@@ -1026,11 +1019,10 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			   rpc->id, rpc->state, rpc->msgin.bytes_remaining);
 		homa_request_retrans(rpc);
 		goto done;
-	} else {
-		peer = homa_peer_get(hsk, &saddr);
-		if (IS_ERR(peer))
-			goto done;
 	}
+	route = homa_route_get(hsk, &saddr);
+	if (IS_ERR(route))
+		goto done;
 
 	/* Send an ACK for this RPC. At the same time, include all of the
 	 * other acks available for the peer. Note: can't use rpc below,
@@ -1041,17 +1033,17 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	ack.common.sport = h->dport;
 	ack.common.dport = h->sport;
 	ack.common.sender_id = cpu_to_be64(id);
-	ack.num_acks = htons(homa_peer_get_acks(peer,
+	ack.num_acks = htons(homa_peer_get_acks(route->peer,
 						HOMA_MAX_ACKS_PER_PKT,
 						ack.acks));
 	if (rpc)
 		homa_rpc_unlock(rpc);
-	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
+	__homa_xmit_control(&ack, sizeof(ack), route, hsk);
 	if (rpc)
 		homa_rpc_lock(rpc);
 	tt_record3("Responded to NEED_ACK for id %d, peer 0x%x with %d other acks",
 		   id, tt_addr(saddr), ntohs(ack.num_acks));
-	homa_peer_release(peer);
+	homa_route_release(route);
 
 done:
 	consume_skb(skb);

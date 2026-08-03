@@ -134,7 +134,7 @@ TEST_F(homa_utils, homa_net_destroy__delete_sockets)
 }
 TEST_F(homa_utils, homa_net_destroy__delete_peers)
 {
-	struct homa_peer *peer;
+	struct homa_route *route;
 	struct homa_net *hnet;
 	struct homa_sock hsk2;
 	struct in6_addr addr;
@@ -143,17 +143,17 @@ TEST_F(homa_utils, homa_net_destroy__delete_peers)
 	mock_sock_init(&hsk2, hnet, 44);
 
 	addr = unit_get_in_addr("1.2.3.4");
-	peer = homa_peer_get(&hsk2, &addr);
-	homa_peer_release(peer);
-	peer = homa_peer_get(&self->hsk, &addr);
-	homa_peer_release(peer);
+	route = homa_route_get(&hsk2, &addr);
+	homa_route_release(route);
+	route = homa_route_get(&self->hsk, &addr);
+	homa_route_release(route);
 	addr = unit_get_in_addr("1.2.3.5");
-	peer = homa_peer_get(&hsk2, &addr);
-	homa_peer_release(peer);
-	EXPECT_EQ(3, unit_count_peers(&self->homa));
+	route = homa_route_get(&hsk2, &addr);
+	homa_route_release(route);
+	EXPECT_EQ(3, unit_count_routes(&self->homa));
 
 	homa_net_destroy(hnet);
-	EXPECT_EQ(1, unit_count_peers(&self->homa));
+	EXPECT_EQ(1, unit_count_routes(&self->homa));
 }
 
 #ifndef __STRIP__ /* See strip.py */

@@ -46,10 +46,10 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	crpc->bucket = bucket;
 	crpc->state = RPC_OUTGOING;
 	refcount_set(&crpc->refs, 1);
-	crpc->peer = homa_peer_get(hsk, &dest_addr_as_ipv6);
-	if (IS_ERR(crpc->peer)) {
-		err = PTR_ERR(crpc->peer);
-		crpc->peer = NULL;
+	crpc->route = homa_route_get(hsk, &dest_addr_as_ipv6);
+	if (IS_ERR(crpc->route)) {
+		err = PTR_ERR(crpc->route);
+		crpc->route = NULL;
 		goto error;
 	}
 	crpc->dport = ntohs(dest->in6.sin6_port);
@@ -89,8 +89,8 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	return crpc;
 
 error:
-	if (crpc->peer)
-		homa_peer_release(crpc->peer);
+	if (crpc->route)
+		homa_route_release(crpc->route);
 	kfree(crpc);
 	return ERR_PTR(err);
 }
@@ -130,7 +130,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
 		if (srpc->id == id &&
 		    srpc->dport == ntohs(h->common.sport) &&
-		    ipv6_addr_equal(&srpc->peer->addr, source)) {
+		    ipv6_addr_equal(&srpc->route->peer->addr, source)) {
 			/* RPC already exists; just return it instead
 			 * of creating a new RPC.
 			 */
@@ -152,10 +152,10 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->bucket = bucket;
 	srpc->state = RPC_INCOMING;
 	refcount_set(&srpc->refs, 1);
-	srpc->peer = homa_peer_get(hsk, source);
-	if (IS_ERR(srpc->peer)) {
-		err = PTR_ERR(srpc->peer);
-		srpc->peer = NULL;
+	srpc->route = homa_route_get(hsk, source);
+	if (IS_ERR(srpc->route)) {
+		err = PTR_ERR(srpc->route);
+		srpc->route = NULL;
 		goto error;
 	}
 	srpc->dport = ntohs(h->common.sport);
@@ -204,8 +204,8 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 error:
 	if (srpc) {
 		homa_pool_release(srpc);
-		if (srpc->peer)
-			homa_peer_release(srpc->peer);
+		if (srpc->route)
+			homa_route_release(srpc->route);
 	}
 	homa_bucket_unlock(bucket, id);
 	kfree(srpc);
@@ -345,12 +345,12 @@ void homa_rpc_abort(struct homa_rpc *rpc, int error)
 	if (!homa_is_client(rpc->id)) {
 		INC_METRIC(server_rpc_discards, 1);
 		tt_record3("aborting server RPC: peer 0x%x, id %d, error %d",
-			   tt_addr(rpc->peer->addr), rpc->id, error);
+			   tt_addr(rpc->route->peer->addr), rpc->id, error);
 		homa_rpc_end(rpc);
 		return;
 	}
 	tt_record3("aborting client RPC: peer 0x%x, id %d, error %d",
-		   tt_addr(rpc->peer->addr), rpc->id, error);
+		   tt_addr(rpc->route->peer->addr), rpc->id, error);
 	rpc->error = error;
 	homa_rpc_handoff(rpc);
 }
@@ -382,7 +382,7 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			continue;
 		rcu_read_lock();
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-			if (!ipv6_addr_equal(&rpc->peer->addr, addr))
+			if (!ipv6_addr_equal(&rpc->route->peer->addr, addr))
 				continue;
 			if (port && rpc->dport != port)
 				continue;
@@ -575,9 +575,9 @@ release:
 			homa_qdisc_flush_rpc(rpc);
 		}
 
-		if (rpc->peer) {
-			homa_peer_release(rpc->peer);
-			rpc->peer = NULL;
+		if (rpc->route) {
+			homa_route_release(rpc->route);
+			rpc->route = NULL;
 		}
 		homa_pool_release(rpc);
 		homa_tx_pool_free(hsk->homa, rpc->msgout.num_frags,
@@ -654,7 +654,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 		}
 		tt_record4("homa_abort_sock_rpcs aborting id %u on port %d, peer 0x%x, error %d",
 			   rpc->id, hsk->port,
-			   tt_addr(rpc->peer->addr), error);
+			   tt_addr(rpc->route->peer->addr), error);
 		if (error)
 			homa_rpc_abort(rpc, error);
 		else
@@ -710,7 +710,8 @@ struct homa_rpc *homa_rpc_find_server(struct homa_sock *hsk,
 
 	homa_bucket_lock(bucket, id);
 	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
-		if (srpc->id == id && ipv6_addr_equal(&srpc->peer->addr, saddr))
+		if (srpc->id == id && ipv6_addr_equal(&srpc->route->peer->addr,
+						      saddr))
 			return srpc;
 	}
 	homa_bucket_unlock(bucket, id);
@@ -790,11 +791,11 @@ void homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info)
 	info->id = rpc->id;
 	if (rpc->hsk->inet.sk.sk_family == AF_INET6) {
 		info->peer.in6.sin6_family = AF_INET6;
-		info->peer.in6.sin6_addr = rpc->peer->addr;
+		info->peer.in6.sin6_addr = rpc->route->peer->addr;
 		info->peer.in6.sin6_port = htons(rpc->dport);
 	} else {
 		info->peer.in6.sin6_family = AF_INET;
-		info->peer.in4.sin_addr.s_addr = ipv6_to_ipv4(rpc->peer->addr);
+		info->peer.in4.sin_addr.s_addr = ipv6_to_ipv4(rpc->route->peer->addr);
 		info->peer.in4.sin_port = htons(rpc->dport);
 	}
 	info->completion_cookie = rpc->completion_cookie;

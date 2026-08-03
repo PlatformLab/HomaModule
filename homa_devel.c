@@ -394,6 +394,7 @@ void homa_freeze_peers(void)
 	struct homa_socktab_scan scan;
 	struct homa_freeze_hdr freeze;
 	struct rhashtable_iter iter;
+	struct homa_route *route;
 	struct homa_peer *peer;
 	struct homa_sock *hsk;
 	struct homa_net *hnet;
@@ -418,7 +419,7 @@ void homa_freeze_peers(void)
 	freeze.common.dport = 0;
 	freeze.common.sender_id = 0;
 
-	rhashtable_walk_enter(&hnet->homa->peertab->ht, &iter);
+	rhashtable_walk_enter(&hnet->homa->peertab->peer_ht, &iter);
 	rhashtable_walk_start(&iter);
 	wrong_family = 0;
 	while (true) {
@@ -440,11 +441,19 @@ void homa_freeze_peers(void)
 			wrong_family += 1;
 			continue;
 		}
-		tt_record1("Sending freeze to 0x%x", tt_addr(peer->addr));
-		err = __homa_xmit_control(&freeze, sizeof(freeze), peer, hsk);
-		if (err != 0)
-			tt_record2("homa_freeze_peers got error %d in xmit to 0x%x\n",
-				   err, tt_addr(peer->addr));
+		route = homa_route_get(hsk, &peer->addr);
+		if (IS_ERR(route)) {
+			tt_record2("homa_freeze_peers couldn't get route to 0x%x; error %d",
+				   tt_addr(peer->addr), PTR_ERR(route));
+		} else {
+			tt_record1("Sending freeze to 0x%x", tt_addr(peer->addr));
+			err = __homa_xmit_control(&freeze, sizeof(freeze),
+						  route, hsk);
+			if (err != 0)
+				tt_record2("homa_freeze_peers got error %d in xmit to 0x%x\n",
+					err, tt_addr(peer->addr));
+			homa_route_release(route);
+		}
 	}
 	rhashtable_walk_stop(&iter);
 	rhashtable_walk_exit(&iter);
@@ -586,7 +595,7 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 		homa_rpc_log_active_tt(rpc->hsk->homa, 0);
 		homa_validate_incoming(rpc->hsk->homa, 1, &dummy);
 		pr_notice("%s\n", format);
-		tt_record2(format, rpc->id, tt_addr(rpc->peer->addr));
+		tt_record2(format, rpc->id, tt_addr(rpc->route->peer->addr));
 		tt_freeze();
 //		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 		homa_freeze_peers();
@@ -655,7 +664,7 @@ void homa_check_list(struct list_head *list, int max_length)
 void homa_rpc_log(struct homa_rpc *rpc)
 {
 	char *type = homa_is_client(rpc->id) ? "Client" : "Server";
-	char *peer = homa_print_ipv6_addr(&rpc->peer->addr);
+	char *peer = homa_print_ipv6_addr(&rpc->route->peer->addr);
 
 	if (rpc->state == RPC_INCOMING)
 		pr_notice("%s RPC INCOMING, id %llu, peer %s:%d, %d/%d bytes received, incoming %d\n",
@@ -731,7 +740,7 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 		int active_ix;
 
 		tt_record4("Incoming RPC id %d, peer 0x%x, %d/%d bytes received",
-			   rpc->id, tt_addr(rpc->peer->addr),
+			   rpc->id, tt_addr(rpc->route->peer->addr),
 			   received, rpc->msgin.length);
 #ifndef __STRIP__
 		tt_record3("RPC id %d has incoming %d, granted %d", rpc->id,
@@ -763,7 +772,7 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 		}
 	} else if (rpc->state == RPC_OUTGOING) {
 		tt_record4("Outgoing RPC id %d, peer 0x%x, %d/%d bytes sent",
-			   rpc->id, tt_addr(rpc->peer->addr),
+			   rpc->id, tt_addr(rpc->route->peer->addr),
 			   rpc->msgout.next_xmit_offset,
 			   rpc->msgout.length);
 #ifndef __STRIP__
@@ -817,7 +826,9 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 #endif /* __STRIP__ */
 			freeze_count--;
 			pr_notice("Emitting FREEZE in %s\n", __func__);
+			homa_rpc_lock(rpc);
 			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+			homa_rpc_unlock(rpc);
 		}
 		homa_unprotect_rpcs(hsk);
 	}

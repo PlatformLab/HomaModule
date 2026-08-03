@@ -2386,6 +2386,24 @@ void *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
 	return rhashtable_lookup_get_insert_fast(ht, obj, params);
 }
 
+void *mock_rht_lookup_get_insert_key(struct rhashtable *ht, void *key,
+				      struct rhash_head *obj,
+				      const struct rhashtable_params params)
+{
+	if (mock_check_error(&mock_rht_insert_errors))
+		return ERR_PTR(-EINVAL);
+	return rhashtable_lookup_get_insert_key(ht, key, obj, params);
+}
+
+int mock_rht_lookup_insert_fast(struct rhashtable *ht,
+				struct rhash_head *obj,
+				const struct rhashtable_params params)
+{
+	if (mock_check_error(&mock_rht_insert_errors))
+		return -EINVAL;
+	return rhashtable_lookup_insert_fast(ht, obj, params);
+}
+
 void *mock_rht_walk_next(struct rhashtable_iter *iter)
 {
 	void *result;
@@ -2656,6 +2674,8 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	if (port != 0 && port < mock_min_default_port)
 		homa_sock_bind(hnet, hsk, port);
 	hsk->inet.pinet6 = &hsk_pinfo;
+	hsk->inet.inet_saddr = ipv6_to_ipv4(unit_get_in_addr("2.4.6.8"));
+	hsk->inet.pinet6->saddr = unit_get_in_addr("6::7:8:9");
 	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
 		+ sizeof(struct homa_data_hdr);
 	mock_devices[0].gso_max_size = mock_mtu;

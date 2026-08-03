@@ -213,6 +213,7 @@ int homa_sock_init(struct homa_sock *hsk)
 	hsk->shutdown = false;
 	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET) ?
 				sizeof(struct iphdr) : sizeof(struct ipv6hdr);
+	hsk->error_msg = "no error";
 	spin_lock_init(&hsk->lock);
 	atomic_set(&hsk->protect_count, 0);
 	INIT_LIST_HEAD(&hsk->active_rpcs);

@@ -331,7 +331,7 @@ char *homa_metrics_print(void)
 		  "Total time in all Homa-related functions\n");
 		M("resent_packets", m->resent_packets,
 		  "DATA packets sent in response to RESENDs\n");
-		M("peer_allocs", m->peer_allocs,
+		M("route_allocs", m->route_allocs,
 		  "New entries created in peer table\n");
 		M("peer_kmalloc_errors", m->peer_kmalloc_errors,
 		  "kmalloc failures creating peer table entries\n");

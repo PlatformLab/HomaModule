@@ -295,6 +295,12 @@ int         mock_rht_init(struct rhashtable *ht,
 void       *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
 					    struct rhash_head *obj,
 					    const struct rhashtable_params params);
+void       *mock_rht_lookup_get_insert_key(struct rhashtable *ht, void *key,
+					   struct rhash_head *obj,
+					   const struct rhashtable_params params);
+int         mock_rht_lookup_insert_fast(struct rhashtable *ht,
+					struct rhash_head *obj,
+					const struct rhashtable_params params);
 void       *mock_rht_walk_next(struct rhashtable_iter *iter);
 void        mock_rpc_hold(struct homa_rpc *rpc);
 void        mock_rpc_put(struct homa_rpc *rpc);

@@ -504,10 +504,11 @@ int __init homa_load(void)
 
 #ifndef __UPSTREAM__ /* See strip.py */
 	pr_err("Homa module loading\n");
-	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu skb_shared_info %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
+	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, route %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu skb_shared_info %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
 		  sizeof(struct homa_data_hdr),
 		  sizeof(struct homa_seg_hdr),
 		  sizeof(struct homa_ack),
+		  sizeof(struct homa_route),
 		  sizeof(struct homa_peer),
 		  sizeof(struct iphdr),
 		  sizeof(struct flowi),
@@ -944,11 +945,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 	}
 	kfree(rpcs);
 
-	if (hsk->error_msg)
-		snprintf(hinfo.error_msg, HOMA_ERROR_MSG_SIZE, "%s",
-			 hsk->error_msg);
-	else
-		hinfo.error_msg[0] = 0;
+	snprintf(hinfo.error_msg, HOMA_ERROR_MSG_SIZE, "%s", hsk->error_msg);
 
 	if (copy_to_user((void __user *)arg, &hinfo, sizeof(hinfo))) {
 		hsk->error_msg = "couldn't copy homa_info to user space: read-only address?";
@@ -1453,7 +1450,8 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		    rpc->msgin.length >= hsk->homa->temp[2] &&
 		    rpc->msgin.length < hsk->homa->temp[3]) {
 			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, length %d",
-				   elapsed, rpc->id, tt_addr(rpc->peer->addr),
+				   elapsed, rpc->id,
+				   tt_addr(rpc->route->peer->addr),
 				   rpc->msgin.length);
 			homa_freeze(rpc, SLOW_RPC,
 				    "Freezing because of long elapsed time for RPC id %d, peer 0x%x");
@@ -1475,14 +1473,14 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 
 		in6->sin6_family = AF_INET6;
 		in6->sin6_port = htons(rpc->dport);
-		in6->sin6_addr = rpc->peer->addr;
+		in6->sin6_addr = rpc->route->peer->addr;
 		*addr_len = sizeof(*in6);
 	} else {
 		struct sockaddr_in *in4 = msg->msg_name;
 
 		in4->sin_family = AF_INET;
 		in4->sin_port = htons(rpc->dport);
-		in4->sin_addr.s_addr = ipv6_to_ipv4(rpc->peer->addr);
+		in4->sin_addr.s_addr = ipv6_to_ipv4(rpc->route->peer->addr);
 		*addr_len = sizeof(*in4);
 	}
 
@@ -1912,6 +1910,9 @@ int homa_dointvec(const struct ctl_table *table, int write,
 				homa_rpc_stats_log();
 			} else if (homa->sysctl_action == 10) {
 				tt_unfreeze();
+			} else if (homa->sysctl_action == 11) {
+				pr_notice("Number of live routes: %d\n",
+					  homa->peertab->num_routes);
 			} else {
 				homa_rpc_log_active(homa, homa->sysctl_action);
 			}

@@ -37,12 +37,10 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 					- 1 - homa->timer_ticks) & 1 << 31) {
 				struct homa_need_ack_hdr h;
 
-				homa_rpc_unlock(rpc);
 				homa_xmit_control(NEED_ACK, &h, sizeof(h), rpc);
-				homa_rpc_lock(rpc);
 				tt_record4("Sent NEED_ACK for RPC id %d to peer 0x%x, port %d, ticks %d",
 					   rpc->id,
-					   tt_addr(rpc->peer->addr),
+					   tt_addr(rpc->route->peer->addr),
 					   rpc->dport, homa->timer_ticks
 					   - rpc->done_timer_ticks);
 			}
@@ -92,7 +90,7 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 	if (rpc->silent_ticks >= homa->timeout_ticks) {
 		INC_METRIC(rpc_timeouts, 1);
 		tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, state %d",
-			   rpc->id, tt_addr(rpc->peer->addr), rpc->state);
+			   rpc->id, tt_addr(rpc->route->peer->addr), rpc->state);
 #ifndef __STRIP__ /* See strip.py */
 #if 0
 		homa_rpc_log_active_tt(homa, 0);
@@ -103,7 +101,7 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 		if (homa->verbose)
 			pr_notice("RPC id %llu, peer %s, aborted because of timeout, state %d\n",
 				  rpc->id,
-				  homa_print_ipv6_addr(&rpc->peer->addr),
+				  homa_print_ipv6_addr(&rpc->route->peer->addr),
 				  rpc->state);
 #endif /* See strip.py */
 		homa_rpc_abort(rpc, -ETIMEDOUT);
@@ -241,7 +239,7 @@ void homa_timer(struct homa *homa)
 			   atomic_read(&homa->grant->total_incoming));
 #endif /* See strip.py */
 	homa_tx_pool_gc(homa);
-	homa_peer_gc(homa->peertab);
+	homa_route_gc(homa->peertab);
 #ifndef __STRIP__ /* See strip.py */
 	homa_snapshot_rpcs();
 	end = homa_clock();

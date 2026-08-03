@@ -79,6 +79,7 @@
 struct homa;
 struct homa_peer;
 struct homa_rpc;
+struct homa_route;
 struct homa_sock;
 
 #ifndef __STRIP__ /* See strip.py */
@@ -497,10 +498,10 @@ struct homa_net {
 	u16 prev_default_port;
 
 	/**
-	 * @num_peers: The total number of struct homa_peers that exist
+	 * @num_routes: The total number of struct homa_peers that exist
 	 * for this namespace. Managed by homa_peer.c under the peertab lock.
 	 */
-	int num_peers;
+	int num_routes;
 };
 
 /**
@@ -703,7 +704,7 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking);
 int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			   size_t length, struct homa_rpc *rpc);
 int      __homa_xmit_control(void *contents, size_t length,
-			     struct homa_peer *peer, struct homa_sock *hsk);
+			     struct homa_route *route, struct homa_sock *hsk);
 void     homa_xmit_data(struct homa_rpc *rpc);
 void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 

@@ -1365,16 +1365,16 @@ TEST_F(homa_incoming, homa_dispatch_pkts__cutoffs_for_unknown_client_rpc)
 			htonl(7), htonl(6), htonl(5), htonl(4),
 			htonl(3)},
 			.cutoff_version = 400};
-	struct homa_peer *peer;
+	struct homa_route *route;
 
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0));
-	peer = homa_peer_get(&self->hsk, self->server_ip);
-	ASSERT_FALSE(IS_ERR(peer));
-	EXPECT_EQ(400, peer->cutoff_version);
-	EXPECT_EQ(9, peer->unsched_cutoffs[1]);
-	EXPECT_EQ(3, peer->unsched_cutoffs[7]);
-	homa_peer_release(peer);
+	route = homa_route_get(&self->hsk, self->server_ip);
+	ASSERT_FALSE(IS_ERR(route));
+	EXPECT_EQ(400, route->peer->cutoff_version);
+	EXPECT_EQ(9, route->peer->unsched_cutoffs[1]);
+	EXPECT_EQ(3, route->peer->unsched_cutoffs[7]);
+	homa_route_release(route);
 }
 #endif /* See strip.py */
 TEST_F(homa_incoming, homa_dispatch_pkts__resend_for_unknown_server_rpc)
@@ -1414,19 +1414,19 @@ TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
 	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 	crpc->silent_ticks = 5;
-	crpc->peer->outstanding_resends = 2;
+	crpc->route->peer->outstanding_resends = 2;
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0));
 	EXPECT_EQ(0, crpc->silent_ticks);
-	EXPECT_EQ(0, crpc->peer->outstanding_resends);
+	EXPECT_EQ(0, crpc->route->peer->outstanding_resends);
 
 	/* Don't reset silent_ticks for some packet types. */
 	crpc->silent_ticks = 5;
-	crpc->peer->outstanding_resends = 2;
+	crpc->route->peer->outstanding_resends = 2;
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &cutoffs.common, 0, 0));
 	EXPECT_EQ(5, crpc->silent_ticks);
-	EXPECT_EQ(0, crpc->peer->outstanding_resends);
+	EXPECT_EQ(0, crpc->route->peer->outstanding_resends);
 }
 #endif /* See strip.py */
 TEST_F(homa_incoming, homa_dispatch_pkts__dont_reset_silent_ticks_on_NEED_ACK)
@@ -1449,11 +1449,11 @@ TEST_F(homa_incoming, homa_dispatch_pkts__dont_reset_silent_ticks_on_NEED_ACK)
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	crpc->silent_ticks = 2;
-	crpc->peer->outstanding_resends = 3;
+	crpc->route->peer->outstanding_resends = 3;
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0));
 	EXPECT_EQ(2, crpc->silent_ticks);
-	EXPECT_EQ(0, crpc->peer->outstanding_resends);
+	EXPECT_EQ(0, crpc->route->peer->outstanding_resends);
 }
 TEST_F(homa_incoming, homa_dispatch_pkts__multiple_ack_packets)
 {
@@ -2220,9 +2220,9 @@ TEST_F(homa_incoming, homa_cutoffs_pkt_basics)
 	unit_log_clear();
 
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip, &h.common, 0, 0));
-	EXPECT_EQ(400, crpc->peer->cutoff_version);
-	EXPECT_EQ(9, crpc->peer->unsched_cutoffs[1]);
-	EXPECT_EQ(3, crpc->peer->unsched_cutoffs[7]);
+	EXPECT_EQ(400, crpc->route->peer->cutoff_version);
+	EXPECT_EQ(9, crpc->route->peer->unsched_cutoffs[1]);
+	EXPECT_EQ(3, crpc->route->peer->unsched_cutoffs[7]);
 }
 TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 {
@@ -2235,15 +2235,15 @@ TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 			.cutoff_version = 400};
 	struct sk_buff *skb = mock_skb_alloc(self->server_ip, self->client_ip,
 					     &h.common, 0, 0);
-	struct homa_peer *peer;
+	struct homa_route *route;
 
 	mock_kmalloc_errors = 1;
 	homa_cutoffs_pkt(skb, &self->hsk);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_kmalloc_errors);
-	peer = homa_peer_get(&self->hsk, self->server_ip);
-	ASSERT_FALSE(IS_ERR(peer));
-	EXPECT_EQ(0, peer->cutoff_version);
-	homa_peer_release(peer);
+	route = homa_route_get(&self->hsk, self->server_ip);
+	ASSERT_FALSE(IS_ERR(route));
+	EXPECT_EQ(0, route->peer->cutoff_version);
+	homa_route_release(route);
 }
 #endif /* See strip.py */
 
@@ -2318,22 +2318,22 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_not_incoming)
 }
 TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
 {
-	struct homa_peer *peer = homa_peer_get(&self->hsk, self->server_ip);
+	struct homa_route *route = homa_route_get(&self->hsk, self->server_ip);
 	struct homa_need_ack_hdr h = {.common = {
 			.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = NEED_ACK}};
 
-	peer->acks[0].server_port = htons(self->server_port);
-	peer->acks[0].client_id = cpu_to_be64(self->client_id+2);
-	peer->num_acks = 1;
+	route->peer->acks[0].server_port = htons(self->server_port);
+	route->peer->acks[0].client_id = cpu_to_be64(self->client_id+2);
+	route->peer->num_acks = 1;
 	mock_xmit_log_verbose = 1;
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0));
 	EXPECT_STREQ("xmit ACK from 0.0.0.0:32768, dport 99, id 1234, acks [sp 99, id 1236]",
 			unit_log_get());
-	homa_peer_release(peer);
+	homa_route_release(route);
 }
 
 TEST_F(homa_incoming, homa_ack_pkt__target_rpc_exists_no_extras)

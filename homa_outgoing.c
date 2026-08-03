@@ -42,7 +42,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 	rpc->msgout.init_time = homa_clock();
 
 	/* Compute the geometry of packets. */
-	dst = homa_get_dst(rpc->peer, rpc->hsk);
+	dst = rpc->route->dst;
 	mtu = dst_mtu(dst);
 	rpc->msgout.max_seg_data = mtu - rpc->hsk->ip_header_length -
 				   sizeof(struct homa_data_hdr);
@@ -57,7 +57,6 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 		max_segs = 1;
 	rpc->msgout.max_gso_segs = max_segs;
 	rpc->msgout.max_gso_data = max_segs * rpc->msgout.max_seg_data;
-	dst_release(dst);
 }
 
 /**
@@ -258,7 +257,6 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 	skb = __homa_skb_alloc(sizeof(struct homa_data_hdr));
 	if (unlikely(!skb))
 		return ERR_PTR(-ENOMEM);
-	skb_dst_set(skb, homa_get_dst(rpc->peer, hsk));
 	skb->ooo_okay = 1;
 	shinfo = skb_shinfo(skb);
 
@@ -276,8 +274,8 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 	h->common.sender_id = cpu_to_be64(rpc->id);
 	h->message_length = htonl(rpc->msgout.length);
 	IF_NO_STRIP(h->incoming = htonl(rpc->msgout.unscheduled));
-	homa_peer_get_acks(rpc->peer, 1, &h->ack);
-	IF_NO_STRIP(h->cutoff_version = rpc->peer->cutoff_version);
+	homa_peer_get_acks(rpc->route->peer, 1, &h->ack);
+	IF_NO_STRIP(h->cutoff_version = rpc->route->peer->cutoff_version);
 	if (offset < rpc->msgout.next_xmit_offset)
 		h->retransmit = 1;
 	h->seg.offset = ntohl(offset);
@@ -378,6 +376,7 @@ error:
 int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 	__must_hold(rpc->bucket->lock)
 {
+	struct homa_route *route;
 	struct sk_buff *skb;
 
 	IF_NO_STRIP(int err);
@@ -394,7 +393,8 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 			   offset, *end - offset, rpc->id);
 		priority = rpc->msgout.retrans_priority;
 	} else if (offset < rpc->msgout.unscheduled)
-		priority = homa_unsched_priority(rpc->hsk->homa, rpc->peer,
+		priority = homa_unsched_priority(rpc->hsk->homa,
+						 rpc->route->peer,
 						 rpc->msgout.length);
 	else
 		priority = rpc->msgout.sched_priority;
@@ -412,48 +412,37 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 	if (*end > rpc->msgout.next_xmit_offset)
 		rpc->msgout.next_xmit_offset = *end;
 
+	err = homa_route_validate(rpc);
+	if (err != 0) {
+		kfree_skb_reason(skb, SKB_DROP_REASON_IP_OUTNOROUTES);
+		return err;
+	}
+	route = rpc->route;
+
+	/* Take a reference on the route so we can safely use it even after
+	 * the RPC lock has been released (rpc->route may change, but not
+	 * route).
+	 */
+	homa_route_hold(route);
+	homa_rpc_unlock(rpc);
 	INC_METRIC(packets_sent[0], 1);
 	INC_METRIC(priority_bytes[priority], skb->len);
 	INC_METRIC(priority_packets[priority], 1);
-	if (ipv6_addr_v4mapped(&rpc->peer->addr)) {
-		tt_record4("calling ip_queue_xmit: peer 0x%x, id %d, offset %d, length %d",
-			   tt_addr(rpc->peer->addr), rpc->id, skb_offset,
-			   data_bytes);
-
+	tt_record4("calling ip*_xmit: peer 0x%x, id %d, offset %d, length %d",
+			tt_addr(route->peer->addr), rpc->id, skb_offset,
+			data_bytes);
 #ifndef __STRIP__ /* See strip.py */
-		homa_hijack_set_hdr(skb, rpc->peer, false);
-		rpc->hsk->inet.tos = priority << 5;
-		homa_rpc_unlock(rpc);
-		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
+	err = homa_route_xmit(skb, rpc->hsk, route, priority);
 #else /* See strip.py */
-		homa_rpc_unlock(rpc);
-		ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
+	err = homa_route_xmit(skb, rpc->hsk, route, 0);
 #endif /* See strip.py */
-	} else {
-		tt_record4("calling ip6_xmit: peer 0x%x, id %d, offset %d, length %d",
-			   tt_addr(rpc->peer->addr), rpc->id, skb_offset,
-			   data_bytes);
-#ifndef __STRIP__ /* See strip.py */
-		homa_hijack_set_hdr(skb, rpc->peer, true);
-		homa_rpc_unlock(rpc);
-		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
-			       0, NULL, priority << 5, 0);
-#else /* See strip.py */
-		homa_rpc_unlock(rpc);
-		ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
-			 0, NULL, 0, 0);
-#endif /* See strip.py */
-	}
+	homa_route_release(route);
 	homa_rpc_lock(rpc);
-#ifndef __STRIP__ /* See strip.py */
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, qid %d",
 		   rpc->id, skb_offset, data_bytes, queue);
 	if (err)
 		INC_METRIC(data_xmit_errors, 1);
 	return err;
-#else /* See strip.py */
-	return 0;
-#endif /* See strip.py */
 }
 
 /**
@@ -466,23 +455,38 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
  * @rpc:       The packet will go to the socket that handles the other end
  *             of this RPC. Addressing info for the packet, including all of
  *             the fields of homa_common_hdr except type, will be set from this.
- *             Caller must not hold any locks (see "Homa Locking Strategy"
- *             in homa_impl.h).
  *
  * Return:     Either zero (for success), or a negative errno value if there
  *             was a problem.
  */
 int homa_xmit_control(enum homa_packet_type type, void *contents,
 		      size_t length, struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_common_hdr *h = contents;
+	struct homa_route *route;
+	int err;
 
 	memset(h, 0, sizeof(*h));
 	h->type = type;
 	h->sport = htons(rpc->hsk->port);
 	h->dport = htons(rpc->dport);
 	h->sender_id = cpu_to_be64(rpc->id);
-	return __homa_xmit_control(contents, length, rpc->peer, rpc->hsk);
+	err = homa_route_validate(rpc);
+	if (err != 0)
+		return err;
+	route = rpc->route;
+
+	/* Must take a reference on route to ensure it persists through
+	 * packet transmission (rpc->route could get replaced once we
+	 * release the RPC lock).
+	 */
+	homa_route_hold(route);
+	homa_rpc_unlock(rpc);
+	err = __homa_xmit_control(contents, length, route, rpc->hsk);
+	homa_route_release(route);
+	homa_rpc_lock(rpc);
+	return err;
 }
 
 /**
@@ -492,26 +496,25 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
  *             The caller must have filled in all of the information,
  *             including the common header.
  * @length:    Length of @contents.
- * @peer:      Destination to which the packet will be sent.
+ * @route:     Route via which to send packet (includes destination).
  * @hsk:       Socket via which the packet will be sent.
  *
  * Return:     Either zero (for success), or a negative errno value if there
  *             was a problem.
  */
-int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
+int __homa_xmit_control(void *contents, size_t length, struct homa_route *route,
 			struct homa_sock *hsk)
 {
 	struct homa_common_hdr *h;
 	struct sk_buff *skb;
 	int extra_bytes;
-	int result;
+	int err;
 
 	IF_NO_STRIP(int priority);
 
 	skb = __homa_skb_alloc(HOMA_MAX_HEADER);
 	if (unlikely(!skb))
 		return -ENOBUFS;
-	skb_dst_set(skb, homa_get_dst(peer, hsk));
 
 	h = skb_put(skb, length);
 	memcpy(h, contents, length);
@@ -530,28 +533,13 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	INC_METRIC(priority_bytes[priority], skb->len);
 	INC_METRIC(priority_packets[priority], 1);
 #ifndef __STRIP__ /* See strip.py */
-	if (ipv6_addr_v4mapped(&peer->addr)) {
-		homa_hijack_set_hdr(skb, peer, false);
-
-		/* This will find its way to the DSCP field in the IPv4 hdr. */
-		hsk->inet.tos = hsk->homa->priority_map[priority] << 5;
-		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
-	} else {
-		homa_hijack_set_hdr(skb, peer, true);
-		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
-				  NULL, hsk->homa->priority_map[priority] << 5,
-				  0);
-	}
-	if (unlikely(result != 0))
-		INC_METRIC(control_xmit_errors, 1);
+	err = homa_route_xmit(skb, hsk, route, priority);
 #else /* See strip.py */
-	if (hsk->inet.sk.sk_family == AF_INET6)
-		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
-				  NULL, 0, 0);
-	else
-		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
+	err = homa_route_xmit(skb, hsk, route, 0);
 #endif /* See strip.py */
-	return result;
+	if (unlikely(err != 0))
+		INC_METRIC(control_xmit_errors, 1);
+	return err;
 }
 
 /**
@@ -565,7 +553,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	struct homa_common_hdr *h = (struct homa_common_hdr *)skb->data;
 	struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct homa_rpc_unknown_hdr unknown;
-	struct homa_peer *peer;
+	struct homa_route *route;
 
 #ifndef __STRIP__ /* See strip.py */
 	if (hsk->homa->verbose)
@@ -581,10 +569,10 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	unknown.common.dport = h->sport;
 	unknown.common.type = RPC_UNKNOWN;
 	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
-	peer = homa_peer_get(hsk, &saddr);
-	if (!IS_ERR(peer)) {
-		__homa_xmit_control(&unknown, sizeof(unknown), peer, hsk);
-		homa_peer_release(peer);
+	route = homa_route_get(hsk, &saddr);
+	if (!IS_ERR(route)) {
+		__homa_xmit_control(&unknown, sizeof(unknown), route, hsk);
+		homa_route_release(route);
 	}
 }
 

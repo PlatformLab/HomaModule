@@ -389,5 +389,5 @@ uint64_t xxh64_digest(const struct xxh64_state *state)
 }
 EXPORT_SYMBOL(xxh64_digest);
 
-MODULE_LICENSE("Dual BSD/GPL");
-MODULE_DESCRIPTION("xxHash");
+// MODULE_LICENSE("Dual BSD/GPL");
+// MODULE_DESCRIPTION("xxHash");

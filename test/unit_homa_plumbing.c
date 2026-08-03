@@ -148,19 +148,19 @@ TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
 	homa_unload();
 }
 
-TEST_F(homa_plumbing, homa_net_exit__free_peers)
+TEST_F(homa_plumbing, homa_net_exit__free_route)
 {
 	struct in6_addr addr1 = unit_get_in_addr("1.2.3.4");
 	struct in6_addr addr2 = unit_get_in_addr("1.2.3.5");
 	struct in6_addr addr3 = unit_get_in_addr("1.2.3.6");
 
-	homa_peer_release(homa_peer_get(&self->hsk, &addr1));
-	homa_peer_release(homa_peer_get(&self->hsk, &addr2));
-	homa_peer_release(homa_peer_get(&self->hsk, &addr3));
+	homa_route_release(homa_route_get(&self->hsk, &addr1));
+	homa_route_release(homa_route_get(&self->hsk, &addr2));
+	homa_route_release(homa_route_get(&self->hsk, &addr3));
 
-	EXPECT_EQ(3, unit_count_peers(&self->homa));
+	EXPECT_EQ(3, unit_count_routes(&self->homa));
 	homa_net_exit(mock_net_for_hnet(self->hsk.hnet));
-	EXPECT_EQ(0, unit_count_peers(&self->homa));
+	EXPECT_EQ(0, unit_count_routes(&self->homa));
 }
 
 TEST_F(homa_plumbing, homa_bind__version_mismatch)
@@ -509,7 +509,7 @@ TEST_F(homa_plumbing, homa_ioc_info__error_msg)
 	strcpy(hinfo.error_msg, "Bogus message");
 	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
 				    (unsigned long) &hinfo));
-	EXPECT_STREQ("", hinfo.error_msg);
+	EXPECT_STREQ("no error", hinfo.error_msg);
 
 	/* Second call: there is a message. */
 	self->hsk.error_msg = "Sample error message";
@@ -853,21 +853,29 @@ TEST_F(homa_plumbing, homa_sendmsg__address_too_short)
 	EXPECT_STREQ("msg_namelen too short", self->hsk.error_msg);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_alloc_client)
+TEST_F(homa_plumbing, homa_sendmsg__zero_length_message)
 {
-	mock_kmalloc_errors = 2;
-	EXPECT_EQ(ENOMEM, -homa_sendmsg(&self->hsk.inet.sk,
+	self->sendmsg_hdr.msg_iter.count = 0;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_STREQ("couldn't allocate memory for homa_peer",
-		     self->hsk.error_msg);
+	EXPECT_STREQ("message has length zero", self->hsk.error_msg);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_tx_copy_from_user)
+TEST_F(homa_plumbing, homa_sendmsg__message_too_long)
 {
 	self->sendmsg_hdr.msg_iter.count = HOMA_MAX_MESSAGE_LENGTH+1;
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_STREQ("message length exceeded HOMA_MAX_MESSAGE_LENGTH",
+		     self->hsk.error_msg);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_alloc_client)
+{
+	mock_kmalloc_errors = 2;
+	EXPECT_EQ(ENOMEM, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_STREQ("couldn't allocate memory for homa_route",
 		     self->hsk.error_msg);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -1272,7 +1280,7 @@ TEST_F(homa_plumbing, homa_recvmsg__add_ack)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
 
-	peer = crpc->peer;
+	peer = crpc->route->peer;
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(1, peer->num_acks);
@@ -1288,7 +1296,7 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-	EXPECT_EQ(0, srpc->peer->num_acks);
+	EXPECT_EQ(0, srpc->route->peer->num_acks);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
