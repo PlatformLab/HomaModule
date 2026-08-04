@@ -151,7 +151,9 @@ def get_interfaces():
             if (('s1f1' in current) or ('s1f0' in current)
                     or ('s0f0' in current) or ('s0f1' in current)
                     or (current == 'eno1')) and not interface:
-                interface = current
+                ethtool_info = exec_cmd(["ethtool", current], check=True).stdout
+                if "Link detected: yes" in ethtool_info:
+                    interface = current
             continue
         if re.match(r'^[ ]+ inet 10\.0\.1\.', line):
             vlan = current
