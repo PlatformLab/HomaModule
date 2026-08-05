@@ -108,7 +108,7 @@ void homa_metric_append(const char *name, u64 value, const char *format, ...)
  */
 char *homa_metrics_print(void)
 {
-	int core, i, lower = 0;
+	int core, i;
 	char name[30];
 
 	homa_mout.length = 0;
@@ -119,6 +119,7 @@ char *homa_metrics_print(void)
 	  "Clock rate in khz\n");
 	for (core = 0; core < nr_cpu_ids; core++) {
 		struct homa_metrics *m = &per_cpu(homa_metrics, core);
+		int lower = 0;
 		s64 delta;
 
 		M("core", core,
@@ -271,9 +272,9 @@ char *homa_metrics_print(void)
 		  "Time spent in homa_sendmsg for responses\n");
 		M("reply_calls", m->reply_calls,
 		  "Total invocations of homa_sendmsg for responses\n");
-		M("abort_cycles", m->reply_cycles,
+		M("abort_cycles", m->abort_cycles,
 		  "Time spent in homa_ioc_abort kernel call\n");
-		M("abort_calls", m->reply_calls,
+		M("abort_calls", m->abort_calls,
 		  "Total invocations of abort kernel call\n");
 		M("so_set_buf_cycles", m->so_set_buf_cycles,
 		  "Time spent in setsockopt SO_HOMA_RCVBUF\n");

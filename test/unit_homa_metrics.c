@@ -94,3 +94,36 @@ TEST_F(homa_metrics, homa_metrics_release)
 	EXPECT_EQ(0, homa_metrics_release(NULL, NULL));
 	EXPECT_EQ(0, homa_mout.active_opens);
 }
+
+TEST_F(homa_metrics, homa_metrics_print__uses_abort_counters)
+{
+	char *output;
+	char *line;
+
+	per_cpu(homa_metrics, 0).reply_cycles = 123456;
+	per_cpu(homa_metrics, 0).abort_cycles = 654321;
+	per_cpu(homa_metrics, 0).reply_calls = 123;
+	per_cpu(homa_metrics, 0).abort_calls = 456;
+	output = homa_metrics_print();
+
+	line = strstr(output, "abort_cycles");
+	ASSERT_NE(NULL, line);
+	EXPECT_SUBSTR("654321", line);
+	line = strstr(output, "abort_calls");
+	ASSERT_NE(NULL, line);
+	EXPECT_SUBSTR("456", line);
+}
+
+TEST_F(homa_metrics, homa_metrics_print__resets_histogram_range_per_core)
+{
+	char *output;
+	char *core_line;
+
+	output = homa_metrics_print();
+	core_line = strstr(output, "Core id for following metrics\n");
+	ASSERT_NE(NULL, core_line);
+	core_line = strstr(core_line + 1, "Core id for following metrics\n");
+	ASSERT_NE(NULL, core_line);
+	EXPECT_SUBSTR("Bytes in incoming messages containing 0-64 bytes\n",
+			core_line);
+}

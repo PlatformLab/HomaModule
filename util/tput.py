@@ -37,7 +37,7 @@ else:
 rpcs = {}
 
 for line in f:
-    match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\]', line)
+    match = re.match(r' *([-0-9.]+) us .* \[C([0-9]+)\]', line)
     if not match:
         continue
     time = float(match.group(1))
@@ -111,6 +111,9 @@ tputs.sort()
 if verbose:
   print("")
 print("Messages >= 300KB: %d" % (len(tputs)))
+if not tputs:
+  print("No qualifying messages found.")
+  sys.exit(0)
 print("Entire messages:")
 print("Minimum tput: %4.1f Gbps" % (tputs[0]))
 print("Median tput:  %4.1f Gbps" % (tputs[len(tputs)//2]))
@@ -121,6 +124,9 @@ print("Average tput: %4.1f Gbps" % (total_bytes*8.0/total_time/1000))
 
 tputs2.sort()
 print("\nMessage data after first grant:")
+if not tputs2:
+  print("No messages with a grant found.")
+  sys.exit(0)
 print("Minimum tput: %4.1f Gbps" % (tputs2[0]))
 print("Median tput:  %4.1f Gbps" % (tputs2[len(tputs2)//2]))
 print("P90 tput:     %4.1f Gbps" % (tputs2[len(tputs2)*9//10]))

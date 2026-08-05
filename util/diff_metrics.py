@@ -37,7 +37,7 @@ def scan_first(name):
         if not match:
             print("Didn't match: %s\n" % (line))
             continue
-        metrics[match.group(1)] = long(match.group(2))
+        metrics[match.group(1)] = int(match.group(2))
     f.close()
 
 def scan_second(name):
@@ -55,7 +55,7 @@ def scan_second(name):
             print("Didn't match: %s\n" % (line))
             continue
         name = match.group(1)
-        value = long(match.group(2))
+        value = int(match.group(2))
         comment = match.group(3)
         if not name in metrics:
             print("No metric for %s\n" % (name))
@@ -68,8 +68,8 @@ def scan_second(name):
     f.close()
 
 if len(sys.argv) != 3:
-    printf("Usage: %s file file2\n" % sys.argv[0])
-    exit(1)
+    print("Usage: %s file file2" % sys.argv[0])
+    sys.exit(1)
 
 scan_first(sys.argv[1])
 scan_second(sys.argv[2])
