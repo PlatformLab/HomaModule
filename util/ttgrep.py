@@ -33,7 +33,7 @@ def scan(f, pattern):
     writes = 0
     compiled = re.compile(pattern)
     for line in f:
-        match = re.match(' *([-0-9.]+) us \(\+ *([0-9.]+) us\) (.*)',
+        match = re.match(r' *([-0-9.]+) us \(\+ *([0-9.]+) us\) (.*)',
                 line)
         if not match:
             continue
