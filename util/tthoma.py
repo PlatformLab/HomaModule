@@ -11072,6 +11072,41 @@ class AnalyzeRxsnapshot:
         # from an earlier grant, if available.
         return priority
 
+    def print_softirq_backlog(self, live_rpcs):
+        """
+            For each core, pruint how many bytes of data are ready for
+            SoftIRQ processing on that core but haven't yet been processed.
+            live_rpcs:   Information about RPCs that are live at the
+                         current time.
+        """
+        global options
+
+        core_bytes = defaultdict(lambda: 0)
+        for id, live_rpc in live_rpcs.items():
+            for pkt in live_rpc['pkts']:
+                state = pkt_state(pkt, options.time)
+                if not 'gro' in pkt or pkt['gro'] >= options.time:
+                    continue
+                if 'softirq' in pkt and pkt['softirq'] < options.time:
+                    continue
+                if 'softirq_core' in pkt:
+                    core_bytes[pkt['softirq_core']] += pkt['length']
+                else:
+                    core_bytes['unknown'] += pkt['length']
+
+        print('\nBacklog of bytes that have been processed by GRO but not '
+                'by SoftIRQ:')
+        print('Core:   Core on which SoftIRQ eventually runs')
+        print('Bytes   Bytes destined for Core that have already been '
+                'processed by GRO')
+        print('Pct:    % of all SoftIRQ backlog destined for Core')
+        print('\nCore       Bytes    Pct')
+        total_bytes = sum(core_bytes.values())
+        for core in sorted(core_bytes.keys()):
+            print('%-7s %8d  %5.1f' % (core, core_bytes[core],
+                    100 * core_bytes[core] / total_bytes))
+        print('Total  %9d' % (total_bytes))
+
     def output(self):
         global packets, rpcs, options, traces
 
@@ -11110,25 +11145,47 @@ class AnalyzeRxsnapshot:
         print('Copied:    Offset just after last data byte that has been '
                 'copied to user space')
         print('Incoming:  Gxmit - SoftIrq')
+        print('Gaps:      Bytes in packets with offset < SoftIRQ that have '
+                'not yet')
+        print('           been processed by SoftIRQ')
         print('Lost:      Packets that appear to have been dropped in the network')
         print('Prio:      Priority in most recent grant, if any')
         print('')
         print('Id          Peer           Start  Length      Rem   GXmit    ',
                 end='')
-        print('GGro   GSoft    Xmit     Nic     Gro SoftIrq  Copied Incoming Lost Prio')
+        print('GGro   GSoft    Xmit     Nic     Gro SoftIrq  ', end='')
+        print('Copied Incoming   Gaps Lost Prio')
 
+        total_incoming = 0
+        total_gaps = 0
         for id in sorted_ids:
             rx_rpc = rpcs[id^1]
             live_rpc = live_rpcs[id]
+
+            # Count gap bytes: all bytes in packets with SoftIRQ time
+            # after current time, but with offset < live_rpc['pre_softirq'].
+            gaps = 0
+            for pkt in live_rpc['pkts']:
+                if (pkt['offset'] < live_rpc['pre_softirq'] and
+                    (not 'softirq' in pkt or pkt['softirq'] > options.time)):
+                    gaps += pkt['length']
+            if gaps == 0:
+                gaps = ''
+            else:
+                total_gaps += gaps
+
             post_data = self.count_data(rx_rpc, options.time,
                     rx_rpc['stats_time'] if 'stats_time' in rx_rpc else 1e20)
             if 'remaining' in rx_rpc:
                 received = rx_rpc['in_length'] - rx_rpc['remaining'] - post_data
             else:
                 received = rx_rpc['in_length'] - post_data
-            incoming = live_rpc['pre_grant_xmit'] - received
+            incoming = max(live_rpc['pre_grant_xmit'], live_rpc['unsched'])
+            incoming -= received
             if incoming <= 0:
                 incoming = ''
+            else:
+                total_incoming += incoming
             if rx_rpc['in_length']:
                 remaining = rx_rpc['in_length'] - received
             else:
@@ -11147,15 +11204,16 @@ class AnalyzeRxsnapshot:
                     remaining,
                     str(live_rpc['pre_grant_xmit'])
                     if live_rpc['pre_grant_xmit'] > live_rpc['unsched'] else ''), end='')
-            print('%7s %7s %7d %7d %7d %7d %7d  %7s %4d %s' % (
+            print('%7s %7s %7d %7d %7d %7d' % (
                     str(live_rpc['pre_grant_gro'])
                     if live_rpc['pre_grant_gro'] > live_rpc['unsched'] else '',
                     str(live_rpc['pre_grant_softirq'])
                     if live_rpc['pre_grant_softirq'] > live_rpc['unsched']
                     else '',
                     live_rpc['pre_xmit'], live_rpc['pre_nic'],
-                    live_rpc['pre_gro'], live_rpc['pre_softirq'],
-                    live_rpc['pre_copied'], incoming, live_rpc['lost'],
+                    live_rpc['pre_gro'], live_rpc['pre_softirq']), end='')
+            print('%7d  %7s %7s %4d %s' % (
+                    live_rpc['pre_copied'], incoming, gaps, live_rpc['lost'],
                     prio))
 
         # Priority level -> incoming bytes on that priority level
@@ -11236,21 +11294,31 @@ class AnalyzeRxsnapshot:
                 total_live += num_bytes
                 excess += num_bytes
 
-        print('\nTotal xmitted bytes across all RPCs:   %8d' % (total_live))
+        print('')
+        print('Total incoming bytes:                  %8d' % (total_incoming))
+        print('Total bytes in gaps:                   %8d' % (total_gaps))
+        print('Unscheduled bytes xmitted:             %8d' % (unsched))
+        print('Bytes xmitted beyond grants:           %8d' % (excess))
+        print('')
+        print('Priorities for all xmitted packets in active RPCs:')
+        print('Total xmitted bytes across all RPCs:   %8d' % (total_live))
         prio_sum = 0
         for prio in sorted(prio_bytes.keys()):
             if total_live > 0:
                 percent = 100*prio_bytes[prio]/total_live
             else:
                 percent = 0
-            print('Xmitted bytes at P%d:                   %8d (%4.1f%%)' % (prio,
-                    prio_bytes[prio], percent))
+            print('Xmitted bytes at P%d:                   %8d (%4.1f%%)' %
+                    (prio, prio_bytes[prio], percent))
             prio_sum += prio_bytes[prio]
         if prio_sum != total_live:
-            print('Xmitted bytes with unknown priorities: %8d' %
-                    (total_live - prio_sum))
-        print('Unscheduled bytes xmitted:             %8d' % (unsched))
-        print('Bytes xmitted beyond grants:           %8d' % (excess))
+            print('Xmitted bytes with unknown priorities: %8d (%4.1f%%)' %
+                    (total_live - prio_sum,
+                    100*(total_live - prio_sum)/total_live))
+        print('Total:                                 %8d (100%%)' %
+                (total_live))
+
+        self.print_softirq_backlog(live_rpcs)
 
         print('\nFields in the tables below:')
         print('Offset:    Starting offset of packet data within its message')
