@@ -380,6 +380,7 @@ int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
 void            homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev,
 				     struct homa_rpc *rpc);
+void            homa_qdisc_lock_qdev_slow(struct homa_qdisc_dev *qdev);
 int             homa_qdisc_pacer(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_pacer_check(struct homa *homa);
 int             homa_qdisc_pacer_main(void *device);
@@ -476,6 +477,28 @@ static inline int homa_qdisc_deferred_offset(struct homa_rpc *rpc)
 	if (skb_queue_len(&rpc->qrpc.packets) > 0)
 		return rpc->msgout.length - rpc->qrpc.tx_left;
 	return -1;
+}
+
+/**
+ * homa_qdisc_lock_qdev() - Acquire the defer_lock for a homa_qdisc_dev. If
+ * the lock isn't immediately available, record stats on the waiting time.
+ * @qdev:     Acquire the defer_lock for this struct.
+ */
+static inline void homa_qdisc_lock_qdev(struct homa_qdisc_dev *qdev)
+	__acquires(qdev->defer_lock)
+{
+	if (!spin_trylock_bh(&qdev->defer_lock))
+		homa_qdisc_lock_qdev_slow(qdev);
+}
+
+/**
+ * homa_qdisc_unlock_qdev() - Release the defer_lock for a homa_qdisc_dev.
+ * @qdev:   Release the defer_lock for this struct.
+ */
+static inline void homa_qdisc_unlock_qdev(struct homa_qdisc_dev *qdev)
+	__releases(qdev->defer_lock)
+{
+	spin_unlock_bh(&qdev->defer_lock);
 }
 
 #endif /* _HOMA_QDISC_H */

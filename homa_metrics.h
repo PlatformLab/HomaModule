@@ -495,6 +495,18 @@ struct homa_metrics {
 	u64 qdisc_flushes;
 
 	/**
+	 * @qdisc_lock_misses: total number of times that Homa had to wait
+	 * to acquire the lock for a homa_qdisc_dev.
+	 */
+	u64 qdisc_lock_misses;
+
+	/**
+	 * @qdisc_lock_miss_cycles: total time spent waiting for homa_qdisc_dev
+	 * lock misses.
+	 */
+	u64 qdisc_lock_miss_cycles;
+
+	/**
 	 * @resent_packets: total number of data packets issued in response to
 	 * RESEND packets.
 	 */

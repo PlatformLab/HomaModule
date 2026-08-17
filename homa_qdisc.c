@@ -469,12 +469,12 @@ void homa_qdisc_destroy(struct Qdisc *qdisc)
 
 	qdisc_reset_queue(qdisc);
 
-	spin_lock_bh(&q->qdev->defer_lock);
+	homa_qdisc_lock_qdev(q->qdev);
 	while (!skb_queue_empty(&q->deferred_tcp))
 		kfree_skb_reason(__skb_dequeue(&q->deferred_tcp),
 				 SKB_DROP_REASON_QDISC_DROP);
 	list_del_init(&q->defer_links);
-	spin_unlock_bh(&q->qdev->defer_lock);
+	homa_qdisc_unlock_qdev(q->qdev);
 	homa_qdisc_qdev_put(q->qdev);
 }
 
@@ -669,7 +669,7 @@ bool homa_qdisc_can_bypass(struct sk_buff *skb, struct homa_qdisc *q)
 	dest = tcp_hdr(skb)->dest;
 	element = 0;
 	result = true;
-	spin_lock_bh(&q->qdev->defer_lock);
+	homa_qdisc_lock_qdev(q->qdev);
 	skb_queue_walk(&q->deferred_tcp, skb2) {
 		element++;
 		if (skb2->protocol == htons(ETH_P_IP)) {
@@ -694,7 +694,7 @@ bool homa_qdisc_can_bypass(struct sk_buff *skb, struct homa_qdisc *q)
 			break;
 		}
 	}
-	spin_unlock_bh(&q->qdev->defer_lock);
+	homa_qdisc_unlock_qdev(q->qdev);
 	return result;
 }
 
@@ -713,14 +713,14 @@ void homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb)
 		"0x%x to 0x%x, data bytes %d, seq/ack %u",
 		skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
 
-	spin_lock_bh(&qdev->defer_lock);
+	homa_qdisc_lock_qdev(qdev);
 	__skb_queue_tail(&q->deferred_tcp, skb);
 	if (list_empty(&q->defer_links))
 		list_add_tail(&q->defer_links, &qdev->deferred_qdiscs);
 	if (qdev->last_defer)
 		INC_METRIC(nic_backlog_cycles, now - qdev->last_defer);
 	qdev->last_defer = now;
-	spin_unlock_bh(&qdev->defer_lock);
+	homa_qdisc_unlock_qdev(qdev);
 	wake_up_interruptible(&qdev->pacer_sleep);
 }
 
@@ -746,7 +746,7 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 		return;
 	}
 
-	spin_lock_bh(&qdev->defer_lock);
+	homa_qdisc_lock_qdev(qdev);
 	__skb_queue_tail(&rpc->qrpc.packets, skb);
 	if (skb_queue_len(&rpc->qrpc.packets) == 1) {
 		int bytes_left;
@@ -760,7 +760,7 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 	if (qdev->last_defer)
 		INC_METRIC(nic_backlog_cycles, now - qdev->last_defer);
 	qdev->last_defer = now;
-	spin_unlock_bh(&qdev->defer_lock);
+	homa_qdisc_unlock_qdev(qdev);
 	homa_rpc_unlock(rpc);
 	wake_up_interruptible(&qdev->pacer_sleep);
 }
@@ -825,9 +825,9 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 	 * the same NIC queue as a long message.
 	 */
 
-	spin_lock_bh(&qdev->defer_lock);
+	homa_qdisc_lock_qdev(qdev);
 	if (list_empty(&qdev->deferred_qdiscs)) {
-		spin_unlock_bh(&qdev->defer_lock);
+		homa_qdisc_unlock_qdev(qdev);
 		return 0;
 	}
 	if (qdev->next_qdisc == &qdev->deferred_qdiscs)
@@ -847,7 +847,7 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 			qdev->last_defer = 0;
 		}
 	}
-	spin_unlock_bh(&qdev->defer_lock);
+	homa_qdisc_unlock_qdev(qdev);
 
 	pkt_len = qdisc_pkt_len(skb);
 	homa_qdisc_update_link_idle(qdev, pkt_len, -1);
@@ -915,10 +915,10 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 	bool fifo = false;
 	int bytes_left;
 
-	spin_lock_bh(&qdev->defer_lock);
+	homa_qdisc_lock_qdev(qdev);
 	node = rb_first_cached(&qdev->deferred_rpcs);
 	if (!node) {
-		spin_unlock_bh(&qdev->defer_lock);
+		homa_qdisc_unlock_qdev(qdev);
 		return NULL;
 	}
 	qrpc = container_of(node, struct homa_rpc_qdisc, rb_node);
@@ -965,7 +965,7 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 		INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
 		qdev->last_defer = 0;
 	}
-	spin_unlock_bh(&qdev->defer_lock);
+	homa_qdisc_unlock_qdev(qdev);
 	return skb;
 }
 
@@ -1042,7 +1042,7 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 		return;
 
 	INC_METRIC(qdisc_flushes, 1);
-	spin_lock_bh(&qdev->defer_lock);
+	homa_qdisc_lock_qdev(qdev);
 	if (skb_queue_len(&rpc->qrpc.packets) > 0) {
 		/* Remove the RPC from the table of deferred RPCs. */
 		rb_erase_cached(&rpc->qrpc.rb_node, &qdev->deferred_rpcs);
@@ -1060,7 +1060,7 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 			qdev->last_defer = 0;
 		}
 	}
-	spin_unlock_bh(&qdev->defer_lock);
+	homa_qdisc_unlock_qdev(qdev);
 }
 
 /**
@@ -1463,4 +1463,23 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 	list_for_each_entry_rcu(qdev, &qshared->qdevs, links)
 		homa_qdev_update_sysctl(qdev);
 	mutex_unlock(&qshared->mutex);
+}
+
+/**
+ * homa_qdisc_lock_qdev_slow() - This function implements the slow path for
+ * acquiring athe lock for a homa_qdisc_dev. It is invoked when a lock isn't
+ * immediately available. It waits for the lock, but also records statistics
+ * about the waiting time.
+ * @qdev:   Acquire the defer lock for this struct.
+ */
+void homa_qdisc_lock_qdev_slow(struct homa_qdisc_dev *qdev)
+	__acquires(hsk->lock)
+{
+	u64 start = homa_clock();
+
+	tt_record("beginning wait for homa_qdisc_dev->defer_lock");
+	spin_lock_bh(&qdev->defer_lock);
+	tt_record("ending wait for homa_qdisc_dev->defer_lock");
+	INC_METRIC(qdisc_lock_misses, 1);
+	INC_METRIC(qdisc_lock_miss_cycles, homa_clock() - start);
 }

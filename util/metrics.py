@@ -352,13 +352,17 @@ if elapsed_secs != 0:
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
-    for lock in ["client", "server", "socket", "grant", "peer_ack"]:
+    for lock in ["client", "server", "socket", "grant", "peer_ack", "qdisc"]:
         misses = float(deltas[lock + "_lock_misses"])
         cycles = float(deltas[lock + "_lock_miss_cycles"])
         if misses == 0:
             cycles_per_miss = 0.0
         else:
             cycles_per_miss = cycles/misses
+        if lock == "client":
+            lock = "client RPC"
+        elif lock == "server":
+            lock = "server RPC"
         print("%-10s    %s    %6.1f   %5.1f" % (lock,
                 scale_number(misses/elapsed_secs),
                 cycles_per_miss/(cpu_khz/1e06), 100.0*cycles/time_delta))

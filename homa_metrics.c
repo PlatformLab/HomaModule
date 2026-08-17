@@ -319,6 +319,10 @@ char *homa_metrics_print(void)
 		  "TCP packets processed by homa_qdisc\n");
 		M("qdisc_flushes", m->qdisc_flushes,
 		  "RPCs that required qdisc cleanup when ended\n");
+		M("qdisc_lock_misses", m->qdisc_lock_misses,
+		  "Lock misses for homa_qdisc_devs\n");
+		M("qdisc_lock_miss_cycles", m->qdisc_lock_miss_cycles,
+		  "Time lost waiting for homa_qdisc_dev locks\n");
 		M("homa_cycles",
 		  m->softirq_cycles + m->napi_cycles +
 		  m->send_cycles + m->recv_cycles +
