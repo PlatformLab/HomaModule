@@ -6731,7 +6731,9 @@ class AnalyzeNet:
                 xmit_length = 0
             xmit_bytes = 0
             for i in range(0, len(recv_pkts)):
-                recv_time, recv_offset, prio = recv_pkts[i]
+                recv_time = recv_pkts[i]['gro']
+                recv_offset= recv_pkts[i]['offset']
+                recv_tprioime = recv_pkts[i]['priority']
                 length = get_recv_length(recv_offset, xmit_end)
 
                 while recv_offset >= (xmit_offset + xmit_length):
