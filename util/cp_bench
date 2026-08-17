@@ -448,7 +448,7 @@ elif options.config == 'tcp_buffers':
                 'switch_buffer': mb})
 elif options.config == 'tcp_nodes':
     # Measure TCP with varying numbers of nodes.
-    for nodes in [49, 40, 30, 20, 10]:
+    for nodes in [50, 40, 30, 20, 10]:
         specs.append({'exp_name': 'tcp%dnodes' % (nodes),
                 'label': '%d nodes' % (nodes),
                 'options': ['protocol', 'tcp',
