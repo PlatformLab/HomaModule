@@ -278,7 +278,8 @@ void        mock_preempt_enable(void);
 int         mock_processor_id(void);
 void        mock_put_page(struct page *page);
 struct sk_buff *
-	    mock_raw_skb(struct in6_addr *saddr, int protocol, int length);
+	    mock_raw_skb(struct in6_addr *saddr, struct in6_addr *daddr,
+			 int protocol, int length);
 void        mock_rcu_free(void);
 void        mock_rcu_read_lock(void);
 void        mock_rcu_read_unlock(void);
@@ -300,11 +301,10 @@ void        mock_rpc_put(struct homa_rpc *rpc);
 void        mock_set_clock_vals(u64 t, ...);
 void        mock_set_core(int num);
 void        mock_set_ipv6(struct homa_sock *hsk);
-void        mock_spin_lock(spinlock_t *lock);
-void        mock_spin_unlock(spinlock_t *lock);
 struct sk_buff *
-            mock_skb_alloc(struct in6_addr *saddr, struct homa_common_hdr *h,
-			   int extra_bytes, int first_value);
+            mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
+			   struct homa_common_hdr *h, int extra_bytes,
+			   int first_value);
 int         mock_skb_count(void);
 void        mock_sock_destroy(struct homa_sock *hsk,
 			      struct homa_socktab *socktab);
@@ -312,8 +312,11 @@ void        mock_sock_hold(struct sock *sk);
 int         mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet,
 			   int port);
 void        mock_sock_put(struct sock *sk);
+void        mock_spin_lock(spinlock_t *lock);
+void        mock_spin_unlock(spinlock_t *lock);
 struct sk_buff *
-	    mock_tcp_skb(struct in6_addr *saddr, int sequence, int extra_bytes);
+	    mock_tcp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
+			 int sequence, int extra_bytes);
 void        mock_teardown(void);
 void       *mock_vmalloc(size_t size);
 

@@ -53,7 +53,7 @@ FIXTURE_SETUP(homa_rpc)
 	self->homa.grant->fifo_fraction = 0;
 	homa_grant_update_sysctl_deps(self->homa.grant);
 #endif /* See strip.py */
-	mock_sock_init(&self->hsk, self->hnet, 0);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 	memset(&self->data, 0, sizeof(self->data));
 	self->data.common = (struct homa_common_hdr){
 		.sport = htons(self->client_port),
@@ -141,8 +141,8 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__normal)
 	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
 	self->data.message_length = N(1600);
-	homa_data_pkt(mock_skb_alloc(self->client_ip, &self->data.common,
-			1400, 0), srpc);
+	homa_data_pkt(mock_skb_alloc(self->client_ip, self->server_ip,
+				     &self->data.common, 1400, 0), srpc);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	homa_rpc_end(srpc);
@@ -479,6 +479,32 @@ TEST_F(homa_rpc, homa_rpc_end__state_ready)
 	homa_rpc_end(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 }
+TEST_F(homa_rpc, homa_rpc_end__delete_deferred_skbs_in_homa_qdisc)
+{
+	struct homa_qdisc_dev *qdev;
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+
+	qdev = homa_qdisc_qdev_get(mock_dev(0, &self->homa));
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 10000, 10000);
+	ASSERT_NE(NULL, crpc);
+
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 0);
+	homa_qdisc_defer_homa(qdev, skb);
+	self->data.seg.offset = htonl(2800);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 2800);
+	homa_qdisc_defer_homa(qdev, skb);
+	EXPECT_STREQ("[id 1234, offsets 0 2800]", unit_log_deferred(qdev));
+
+	homa_rpc_end(crpc);
+	EXPECT_STREQ("", unit_log_deferred(qdev));
+	homa_qdisc_qdev_put(qdev);
+}
 TEST_F(homa_rpc, homa_rpc_end__free_gaps)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -493,12 +519,14 @@ TEST_F(homa_rpc, homa_rpc_end__free_gaps)
 #endif /* See strip.py */
 	unit_log_clear();
 	self->data.seg.offset = htonl(1400);
-	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
+	skb =  mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 1400);
 	homa_add_packet(crpc, skb);
 	kfree_skb(skb);
 
 	self->data.seg.offset = htonl(4200);
-	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 4200);
+	skb =  mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 4200);
 	homa_add_packet(crpc, skb);
 	kfree_skb(skb);
 	EXPECT_STREQ("start 0, end 1400; start 2800, end 4200",
@@ -1200,6 +1228,156 @@ TEST_F(homa_rpc, homa_rpc_find_server)
 	EXPECT_EQ(NULL, homa_rpc_find_server(&self->hsk, self->client_ip, 3));
 }
 
+TEST_F(homa_rpc, homa_rpc_find_from_skb__outgoing)
+{
+	struct homa_rpc *crpc, *rpc;
+	struct sk_buff *skb;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 10000, 1000);
+
+	skb =  mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 0);
+	rpc = homa_rpc_find_from_skb(skb, false);
+	ASSERT_NE(NULL, rpc);
+	EXPECT_EQ(crpc, rpc);
+	EXPECT_EQ(self->client_id, rpc->id);
+	homa_rpc_unlock(rpc);
+	kfree_skb(skb);
+}
+TEST_F(homa_rpc, homa_rpc_find_from_skb__incoming)
+{
+	struct homa_rpc *crpc, *rpc;
+	struct sk_buff *skb;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 10000, 1000);
+
+	self->data.common.sender_id = cpu_to_be64(self->server_id);
+	self->data.common.sport = htons(self->server_port);
+	self->data.common.dport = htons(self->client_port);
+	skb = mock_skb_alloc(self->server_ip, self->client_ip,
+			     &self->data.common, 1400, 0);
+	rpc = homa_rpc_find_from_skb(skb, true);
+	ASSERT_NE(NULL, rpc);
+	EXPECT_EQ(crpc, rpc);
+	EXPECT_EQ(self->client_id, rpc->id);
+	homa_rpc_unlock(rpc);
+	kfree_skb(skb);
+}
+TEST_F(homa_rpc, homa_rpc_find_from_skb__cant_find_socket)
+{
+	struct homa_rpc *rpc;
+	struct sk_buff *skb;
+
+	unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port,
+			self->client_id, 10000, 1000);
+
+	self->data.common.sport = self->client_port + 1;
+	skb =  mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 0);
+	rpc = homa_rpc_find_from_skb(skb, false);
+	EXPECT_EQ(NULL, rpc);
+	kfree_skb(skb);
+}
+TEST_F(homa_rpc, homa_rpc_find_from_skb__server_ipv6_incoming)
+{
+	struct homa_rpc *srpc, *rpc;
+	struct homa_sock hsk;
+	struct sk_buff *skb;
+
+	mock_ipv6 = true;
+	mock_sock_init(&hsk, self->hnet, self->server_port);
+	srpc = unit_server_rpc(&hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->server_id, 10000, 1000);
+
+	skb =  mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 0);
+	rpc = homa_rpc_find_from_skb(skb, true);
+	ASSERT_NE(NULL, rpc);
+	EXPECT_EQ(srpc, rpc);
+	EXPECT_EQ(self->server_id, rpc->id);
+	homa_rpc_unlock(rpc);
+	kfree_skb(skb);
+	unit_sock_destroy(&hsk);
+}
+TEST_F(homa_rpc, homa_rpc_find_from_skb__server_ipv6_outgoing)
+{
+	struct homa_rpc *srpc, *rpc;
+	struct homa_sock hsk;
+	struct sk_buff *skb;
+
+	mock_ipv6 = true;
+	mock_sock_init(&hsk, self->hnet, self->server_port);
+	srpc = unit_server_rpc(&hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->server_id, 10000, 1000);
+
+	self->data.common.sender_id = cpu_to_be64(self->server_id);
+	self->data.common.sport = htons(self->server_port);
+	self->data.common.dport = htons(self->client_port);
+	skb = mock_skb_alloc(self->server_ip, self->client_ip,
+			     &self->data.common, 1400, 0);
+	rpc = homa_rpc_find_from_skb(skb, false);
+	ASSERT_NE(NULL, rpc);
+	EXPECT_EQ(srpc, rpc);
+	EXPECT_EQ(self->server_id, rpc->id);
+	homa_rpc_unlock(rpc);
+	kfree_skb(skb);
+	unit_sock_destroy(&hsk);
+}
+TEST_F(homa_rpc, homa_rpc_find_from_skb__server_ipv4_incoming)
+{
+	struct homa_rpc *srpc, *rpc;
+	struct homa_sock hsk;
+	struct sk_buff *skb;
+
+	mock_ipv6 = false;
+	mock_sock_init(&hsk, self->hnet, self->server_port);
+	srpc = unit_server_rpc(&hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->server_id, 10000, 1000);
+
+	skb =  mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 0);
+	rpc = homa_rpc_find_from_skb(skb, true);
+	ASSERT_NE(NULL, rpc);
+	EXPECT_EQ(srpc, rpc);
+	EXPECT_EQ(self->server_id, rpc->id);
+	homa_rpc_unlock(rpc);
+	kfree_skb(skb);
+	unit_sock_destroy(&hsk);
+}
+TEST_F(homa_rpc, homa_rpc_find_from_skb__server_ipv4_outgoing)
+{
+	struct homa_rpc *srpc, *rpc;
+	struct homa_sock hsk;
+	struct sk_buff *skb;
+
+	mock_ipv6 = false;
+	mock_sock_init(&hsk, self->hnet, self->server_port);
+	srpc = unit_server_rpc(&hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->server_id, 10000, 1000);
+
+	self->data.common.sender_id = cpu_to_be64(self->server_id);
+	self->data.common.sport = htons(self->server_port);
+	self->data.common.dport = htons(self->client_port);
+	skb = mock_skb_alloc(self->server_ip, self->client_ip,
+			     &self->data.common, 1400, 0);
+	rpc = homa_rpc_find_from_skb(skb, false);
+	ASSERT_NE(NULL, rpc);
+	EXPECT_EQ(srpc, rpc);
+	EXPECT_EQ(self->server_id, rpc->id);
+	homa_rpc_unlock(rpc);
+	kfree_skb(skb);
+	unit_sock_destroy(&hsk);
+}
+
 TEST_F(homa_rpc, homa_rpc_get_info__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -1329,8 +1507,8 @@ TEST_F(homa_rpc, homa_rpc_get_info__HOMA_RPC_RX_READY_and_HOMA_RPC_RX_COPY)
 
 	/* Second call: all bytes received, but haven't been copied out. */
 	self->data.seg.offset = htonl(1400);
-	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, &self->data.common,
-			1000, 0));
+	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
+			   &self->data.common, 1000, 0));
 	homa_rpc_get_info(srpc, &info);
 	EXPECT_EQ(0, info.rx_remaining);
 	EXPECT_EQ(2, skb_queue_len(&srpc->msgin.packets));

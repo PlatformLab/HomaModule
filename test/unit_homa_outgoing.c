@@ -725,7 +725,6 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__homa_info_fields)
 		  homa_info->wire_bytes);
 	EXPECT_EQ(3600, homa_info->data_bytes);
 	EXPECT_EQ(1400, homa_info->seg_length);
-	EXPECT_EQ(crpc, homa_info->rpc);
 	EXPECT_EQ(0, homa_info->dont_defer);
 	kfree_skb(skb);
 }
@@ -1097,7 +1096,7 @@ TEST_F(homa_outgoing, homa_xmit_unknown__basics)
 	struct sk_buff *skb;
 
 	mock_xmit_log_verbose = 1;
-	skb = mock_skb_alloc(self->client_ip, &h.common, 0, 0);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip, &h.common, 0, 0);
 	homa_xmit_unknown(skb, &self->hsk);
 	EXPECT_STREQ("xmit RPC_UNKNOWN from 0.0.0.0:99, dport 40000, id 99991",
 			unit_log_get());
@@ -1113,7 +1112,7 @@ TEST_F(homa_outgoing, homa_xmit_unknown__cant_find_peer)
 	struct sk_buff *skb;
 
 	mock_kmalloc_errors = 1;
-	skb = mock_skb_alloc(self->client_ip, &h.common, 0, 0);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip, &h.common, 0, 0);
 	homa_xmit_unknown(skb, &self->hsk);
 	EXPECT_STREQ("", unit_log_get());
 	kfree_skb(skb);
@@ -1300,6 +1299,7 @@ TEST_F(homa_outgoing, homa_rpc_tx_end)
 	srpc->msgout.granted = 5000;
 	homa_xmit_data(srpc);
 	EXPECT_EQ(5600, homa_rpc_tx_end(srpc));
+	homa_rpc_unlock(srpc);
 
 	h.common = (struct homa_common_hdr){
 		.sport = htons(srpc->hsk->port),
@@ -1311,10 +1311,9 @@ TEST_F(homa_outgoing, homa_rpc_tx_end)
 	length = 1000;
 	h.message_length = htonl(srpc->msgout.length);
 	h.seg.offset = htonl(offset);
-	skb = mock_skb_alloc(self->client_ip, &h.common,
+	skb = mock_skb_alloc(self->server_ip, self->client_ip, &h.common,
 			     length + sizeof(struct homa_skb_info), 0);
 	info = homa_get_skb_info(skb);
-	info->rpc = srpc;
 	info->data_bytes = length;
 	info->offset = offset;
 	info->dont_defer = 0;
@@ -1325,7 +1324,6 @@ TEST_F(homa_outgoing, homa_rpc_tx_end)
 
 	homa_qdisc_xmit_deferred_homa(qdev);
 	EXPECT_EQ(5600, homa_rpc_tx_end(srpc));
-	homa_rpc_unlock(srpc);
 
         homa_qdisc_qdev_put(qdev);
 }

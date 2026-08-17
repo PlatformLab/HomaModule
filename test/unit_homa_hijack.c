@@ -30,7 +30,8 @@ FIXTURE(homa_hijack)
 	struct homa homa;
 	struct homa_net *hnet;
 	struct homa_sock hsk;
-	struct in6_addr ip;
+	struct in6_addr src_ip;
+	struct in6_addr dst_ip;
 	struct homa_data_hdr header;
 	struct list_head empty_list;
 	struct net_offload tcp_offloads;
@@ -42,7 +43,8 @@ FIXTURE_SETUP(homa_hijack)
 	self->hnet = mock_hnet(0, &self->homa);
 	self->homa.unsched_bytes = 10000;
 	mock_sock_init(&self->hsk, self->hnet, 99);
-	self->ip = unit_get_in_addr("196.168.0.1");
+	self->src_ip = unit_get_in_addr("196.168.0.1");
+	self->dst_ip = unit_get_in_addr("1.2.3.4");
 	memset(&self->header, 0, sizeof(self->header));
 	self->header.common = (struct homa_common_hdr){
 		.sport = htons(40000), .dport = htons(88),
@@ -102,7 +104,8 @@ TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_tcp)
 
 	homa_hijack_init();
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			     &self->header.common, 1400, 0);
 	h = (struct homa_common_hdr *) skb_transport_header(skb);
 	h->flags = 0;
 	EXPECT_EQ(NULL, homa_hijack_gro_receive(&self->empty_list, skb));
@@ -110,7 +113,8 @@ TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_tcp)
 	kfree_skb(skb);
 	unit_log_clear();
 
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			     &self->header.common, 1400, 0);
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	h->urgent -= 1;
 	EXPECT_EQ(NULL, homa_hijack_gro_receive(&self->empty_list, skb));
@@ -126,7 +130,8 @@ TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_homa_ipv6)
 	mock_ipv6 = true;
 	homa_hijack_init();
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip, &self->header.common,
+			     1400, 0);
 	ip_hdr(skb)->protocol = IPPROTO_TCP;
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	h->flags = HOMA_HIJACK_FLAGS;
@@ -149,7 +154,8 @@ TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_homa_ipv4)
 	mock_ipv6 = false;
 	homa_hijack_init();
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			     &self->header.common, 1400, 0);
 	ip_hdr(skb)->protocol = IPPROTO_TCP;
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	h->flags = HOMA_HIJACK_FLAGS;
@@ -170,12 +176,13 @@ TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_homa_ipv4)
 
 TEST_F(homa_hijack, homa_hijack_set_hdr)
 {
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &self->ip);
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &self->src_ip);
 	struct homa_common_hdr *h;
 	struct sk_buff *skb;
 	int summed;
 
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			     &self->header.common, 1400, 0);
 	homa_hijack_set_hdr(skb, peer, true);
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	EXPECT_EQ(HOMA_HIJACK_FLAGS, h->flags);
@@ -212,10 +219,11 @@ TEST_F(homa_hijack, homa_sock_hijacked)
 
 TEST_F(homa_hijack, homa_skb_hijacked)
 {
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &self->ip);
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &self->src_ip);
 	struct sk_buff *skb;
 
-	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			     &self->header.common, 1400, 0);
 	EXPECT_EQ(0, homa_skb_hijacked(skb));
 	homa_hijack_set_hdr(skb, peer, true);
 	EXPECT_EQ(1, homa_skb_hijacked(skb));

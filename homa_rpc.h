@@ -234,7 +234,9 @@ struct homa_message_in {
 struct homa_rpc_qdisc {
 	/**
 	 * @qdev: If @packets has ever been non-empty, this points to the
-	 * structure where this RPC is enqueued; otherwise NULL.
+	 * structure where this RPC is enqueued; otherwise NULL. This also
+	 * serves as an indicator that qdisc-related cleanup is required
+	 * when the RPC ends.
 	 */
 	struct homa_qdisc_dev *qdev;
 
@@ -507,6 +509,8 @@ struct homa_rpc
 void     homa_rpc_end(struct homa_rpc *rpc);
 struct homa_rpc
 	*homa_rpc_find_client(struct homa_sock *hsk, u64 id);
+struct homa_rpc
+	*homa_rpc_find_from_skb(struct sk_buff *skb, bool incoming);
 struct homa_rpc
 	*homa_rpc_find_server(struct homa_sock *hsk,
 			      const struct in6_addr *saddr, u64 id);

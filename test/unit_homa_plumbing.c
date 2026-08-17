@@ -1365,7 +1365,8 @@ TEST_F(homa_plumbing, homa_softirq__basics)
 {
 	struct sk_buff *skb;
 
-	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 1400);
 	homa_softirq(skb);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -1373,7 +1374,8 @@ TEST_F(homa_plumbing, homa_softirq__cant_pull_header)
 {
 	struct sk_buff *skb;
 
-	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 1400);
 	skb->data_len = skb->len - 20;
 	homa_softirq(skb);
 	EXPECT_STREQ("pskb discard", unit_log_get());
@@ -1382,7 +1384,8 @@ TEST_F(homa_plumbing, homa_softirq__remove_extra_headers)
 {
 	struct sk_buff *skb;
 
-	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 1400);
 	__skb_push(skb, 10);
 	homa_softirq(skb);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
@@ -1393,7 +1396,7 @@ TEST_F(homa_plumbing, homa_softirq__packet_too_short)
 	struct homa_ack_hdr h;
 
 	h.common.type = ACK;
-	skb = mock_skb_alloc(self->client_ip, &h.common, 0, 0);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip, &h.common, 0, 0);
 	skb->len -= 1;
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -1406,7 +1409,8 @@ TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 	struct sk_buff *skb;
 
 	self->data.common.type = MAX_OP + 1;
-	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 1400);
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 #ifndef __STRIP__ /* See strip.py */
@@ -1419,18 +1423,22 @@ TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 
 	self->data.common.sender_id = cpu_to_be64(2000);
 	self->data.message_length = htonl(2000);
-	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 0);
 	self->data.common.sender_id = cpu_to_be64(300);
 	self->data.message_length = htonl(300);
-	skb2 = mock_skb_alloc(self->client_ip, &self->data.common, 300, 0);
+	skb2 = mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 300, 0);
 	self->data.common.sender_id = cpu_to_be64(200);
 	self->data.message_length = htonl(1600);
 	self->data.seg.offset = htonl(1400);
-	skb3 = mock_skb_alloc(self->client_ip, &self->data.common, 200, 0);
+	skb3 = mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 200, 0);
 	self->data.common.sender_id = cpu_to_be64(5000);
 	self->data.message_length = htonl(5000);
 	self->data.seg.offset = 0;
-	skb4 = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	skb4 = mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 0);
 	skb_shinfo(skb)->frag_list = skb2;
 	skb2->next = skb3;
 	skb3->next = skb4;
@@ -1452,8 +1460,10 @@ TEST_F(homa_plumbing, homa_softirq__process_control_first)
 
 	self->data.common.sender_id = cpu_to_be64(2000);
 	self->data.message_length = htonl(2000);
-	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
-	skb2 = mock_skb_alloc(self->client_ip, &unknown, 0, 0);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 0);
+	skb2 = mock_skb_alloc(self->client_ip, self->server_ip,
+			      &unknown, 0, 0);
 
 	skb_shinfo(skb)->frag_list = skb2;
 	skb2->next = NULL;
@@ -1467,13 +1477,16 @@ TEST_F(homa_plumbing, homa_softirq__nothing_to_reorder)
 
 	self->data.common.sender_id = cpu_to_be64(2000);
 	self->data.message_length = htonl(2000);
-	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 0);
 	self->data.common.sender_id = cpu_to_be64(3000);
 	self->data.message_length = htonl(3000);
-	skb2 = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	skb2 = mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 0);
 	self->data.common.sender_id = cpu_to_be64(5000);
 	self->data.message_length = htonl(5000);
-	skb3 = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	skb3 = mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 0);
 	skb_shinfo(skb)->frag_list = skb2;
 	skb2->next = skb3;
 	skb3->next = NULL;
@@ -1488,44 +1501,53 @@ TEST_F(homa_plumbing, homa_softirq__per_rpc_batching)
 
 	self->data.common.sender_id = cpu_to_be64(2000);
 	self->data.message_length = htonl(10000);
-	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 0);
 	tail = skb;
 
 	self->data.common.sender_id = cpu_to_be64(2002);
-	tail->next = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	tail->next = mock_skb_alloc(self->client_ip, self->server_ip,
+				    &self->data.common, 1400, 0);
 	tail = tail->next;
 
 	self->data.common.sender_id = cpu_to_be64(2004);
-	tail->next = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	tail->next = mock_skb_alloc(self->client_ip, self->server_ip,
+				    &self->data.common, 1400, 0);
 	tail = tail->next;
 
 	self->data.common.sender_id = cpu_to_be64(2002);
 	self->data.seg.offset = htonl(1400);
-	tail->next = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	tail->next = mock_skb_alloc(self->client_ip, self->server_ip,
+				    &self->data.common, 1400, 0);
 	tail = tail->next;
 
 	self->data.common.sender_id = cpu_to_be64(2004);
-	tail->next = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	tail->next = mock_skb_alloc(self->client_ip, self->server_ip,
+				    &self->data.common, 1400, 0);
 	tail = tail->next;
 
 	self->data.common.sender_id = cpu_to_be64(2002);
 	self->data.seg.offset = htonl(4200);
-	tail->next = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	tail->next = mock_skb_alloc(self->client_ip, self->server_ip,
+				    &self->data.common, 1400, 0);
 	tail = tail->next;
 
 	self->data.common.sender_id = cpu_to_be64(2002);
 	self->data.seg.offset = htonl(2800);
-	tail->next = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	tail->next = mock_skb_alloc(self->client_ip, self->server_ip,
+				    &self->data.common, 1400, 0);
 	tail = tail->next;
 
 	self->data.common.sender_id = cpu_to_be64(2004);
 	self->data.seg.offset = htonl(5600);
-	tail->next = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	tail->next = mock_skb_alloc(self->client_ip, self->server_ip,
+				    &self->data.common, 1400, 0);
 	tail = tail->next;
 
 	self->data.common.sender_id = cpu_to_be64(2002);
 	self->data.seg.offset = htonl(7000);
-	tail->next = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 0);
+	tail->next = mock_skb_alloc(self->client_ip, self->server_ip,
+				    &self->data.common, 1400, 0);
 	tail = tail->next;
 
 	skb_shinfo(skb)->frag_list = skb->next;
@@ -1553,10 +1575,12 @@ TEST_F(homa_plumbing, homa_err_handler_v4__port_unreachable)
 			       self->client_id, 100, 100);
 	ASSERT_NE(NULL, crpc);
 
-	failed = mock_skb_alloc(self->server_ip, &self->data.common, 100, 0);
+	failed = mock_skb_alloc(self->server_ip, self->client_ip,
+				&self->data.common, 100, 0);
 	ip_hdr(failed)->daddr = ipv6_to_ipv4(self->server_ip[0]);
 
-	icmp = mock_raw_skb(self->server_ip, IPPROTO_ICMP, 1000);
+	icmp = mock_raw_skb(self->server_ip, self->client_ip, IPPROTO_ICMP,
+			    1000);
 	icmph = skb_put(icmp, sizeof *icmph);
 	icmph->type = ICMP_DEST_UNREACH;
 	icmph->code = ICMP_PORT_UNREACH;
@@ -1581,10 +1605,12 @@ TEST_F(homa_plumbing, homa_err_handler_v4__host_unreachable)
 			       self->client_id, 100, 100);
 	ASSERT_NE(NULL, crpc);
 
-	failed = mock_skb_alloc(self->server_ip, &self->data.common, 100, 0);
+	failed = mock_skb_alloc(self->server_ip, self->client_ip,
+				&self->data.common, 100, 0);
 	ip_hdr(failed)->daddr = ipv6_to_ipv4(self->server_ip[0]);
 
-	icmp = mock_raw_skb(self->server_ip, IPPROTO_ICMP, 1000);
+	icmp = mock_raw_skb(self->server_ip, self->client_ip, IPPROTO_ICMP,
+			    1000);
 	icmph = skb_put(icmp, sizeof *icmph);
 	icmph->type = ICMP_DEST_UNREACH;
 	icmph->code = ICMP_HOST_UNKNOWN;
@@ -1608,10 +1634,12 @@ TEST_F(homa_plumbing, homa_err_handler_v6__port_unreachable)
 			       self->client_id, 100, 100);
 	ASSERT_NE(NULL, crpc);
 
-	failed = mock_skb_alloc(self->server_ip, &self->data.common, 100, 0);
+	failed = mock_skb_alloc(self->server_ip, self->client_ip,
+				&self->data.common, 100, 0);
 	ipv6_hdr(failed)->daddr = self->server_ip[0];
 
-	icmp = mock_raw_skb(self->server_ip, IPPROTO_ICMP, 1000);
+	icmp = mock_raw_skb(self->server_ip, self->client_ip, IPPROTO_ICMP,
+			    1000);
 	memcpy(skb_put(icmp, failed->len), skb_network_header(failed),
 	       failed->len);
 
@@ -1632,10 +1660,12 @@ TEST_F(homa_plumbing, homa_err_handler_v6__protocol_not_supported)
 			       self->client_id, 100, 100);
 	ASSERT_NE(NULL, crpc);
 
-	failed = mock_skb_alloc(self->server_ip, &self->data.common, 100, 0);
+	failed = mock_skb_alloc(self->server_ip, self->client_ip,
+				&self->data.common, 100, 0);
 	ipv6_hdr(failed)->daddr = self->server_ip[0];
 
-	icmp = mock_raw_skb(self->server_ip, IPPROTO_ICMP, 1000);
+	icmp = mock_raw_skb(self->server_ip, self->client_ip, IPPROTO_ICMP,
+			    1000);
 	memcpy(skb_put(icmp, failed->len), skb_network_header(failed),
 	       failed->len);
 

@@ -488,6 +488,13 @@ struct homa_metrics {
 	u64 qdisc_tcp_packets;
 
 	/**
+	 * @qdisc_flushes: total number of times that homa_qdisc_flush_rpc
+	 * had to do real work (e.g, acquire the defer_lock) because the RPC
+	 * had been managed by homaa_qdisc at some point.
+	 */
+	u64 qdisc_flushes;
+
+	/**
 	 * @resent_packets: total number of data packets issued in response to
 	 * RESEND packets.
 	 */

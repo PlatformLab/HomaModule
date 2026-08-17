@@ -317,6 +317,8 @@ char *homa_metrics_print(void)
 		  "Bytes transmitted via homa_qdisc_pacer_check\n");
 		M("qdisc_tcp_packets", m->qdisc_tcp_packets,
 		  "TCP packets processed by homa_qdisc\n");
+		M("qdisc_flushes", m->qdisc_flushes,
+		  "RPCs that required qdisc cleanup when ended\n");
 		M("homa_cycles",
 		  m->softirq_cycles + m->napi_cycles +
 		  m->send_cycles + m->recv_cycles +

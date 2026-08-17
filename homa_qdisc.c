@@ -733,8 +733,18 @@ void homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb)
 void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 {
 	struct homa_skb_info *info = homa_get_skb_info(skb);
-	struct homa_rpc *rpc = info->rpc;
 	u64 now = homa_clock();
+	struct homa_rpc *rpc;
+
+	/* Must hold the RPC lock while queuing the RPC in the qdisc, in
+	 * order to prevent concurrent deletion of the RPC.
+	 */
+	rpc = homa_rpc_find_from_skb(skb, false);
+	if (!rpc) {
+		/* RPC has ended; discard packet. */
+		kfree_skb_reason(skb, SKB_DROP_REASON_NO_SOCKET);
+		return;
+	}
 
 	spin_lock_bh(&qdev->defer_lock);
 	__skb_queue_tail(&rpc->qrpc.packets, skb);
@@ -751,6 +761,7 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 		INC_METRIC(nic_backlog_cycles, now - qdev->last_defer);
 	qdev->last_defer = now;
 	spin_unlock_bh(&qdev->defer_lock);
+	homa_rpc_unlock(rpc);
 	wake_up_interruptible(&qdev->pacer_sleep);
 }
 
@@ -1023,12 +1034,14 @@ void homa_qdisc_free_homa(struct homa_qdisc_dev *qdev)
  *         the RPC is dead when this function is called.
  */
 void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_qdisc_dev *qdev = rpc->qrpc.qdev;
 
 	if (!qdev)
 		return;
 
+	INC_METRIC(qdisc_flushes, 1);
 	spin_lock_bh(&qdev->defer_lock);
 	if (skb_queue_len(&rpc->qrpc.packets) > 0) {
 		/* Remove the RPC from the table of deferred RPCs. */
@@ -1038,7 +1051,8 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 
 		/* Free all of the RPC's deferred packets. */
 		while (skb_queue_len(&rpc->qrpc.packets) > 0)
-			kfree_skb(skb_dequeue(&rpc->qrpc.packets));
+			kfree_skb_reason(skb_dequeue(&rpc->qrpc.packets),
+					 SKB_DROP_REASON_NO_SOCKET);
 
 		if (!rb_first_cached(&qdev->deferred_rpcs) &&
 	    	    list_empty(&qdev->deferred_qdiscs)) {

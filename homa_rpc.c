@@ -316,6 +316,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	__list_del_entry(&rpc->ready_links);
 	homa_pool_unlink(rpc);
 	homa_interest_notify_private(rpc);
+	homa_qdisc_flush_rpc(rpc);
 
 	if (rpc->msgin.length >= 0) {
 		while (1) {
@@ -561,6 +562,17 @@ release:
 			     skb = __skb_dequeue(&rpc->msgin.packets))
 				consume_skb(skb);
 		}
+		if (skb_queue_len(&rpc->qrpc.packets) > 0) {
+			tt_record2("Freezing because homa_rpc_reap found %d packets in qdisc queue for id %d",
+				   skb_queue_len(&rpc->qrpc.packets), rpc->id);
+			tt_record("Freezing cluster");
+			homa_freeze_peers();
+			tt_record("Finished freezing cluster");
+			tt_freeze();
+			pr_err("homa_rpc_end found %d skbs in qdisc queue for rpc id %llu\n",
+			       skb_queue_len(&rpc->qrpc.packets), rpc->id);
+			homa_qdisc_flush_rpc(rpc);
+		}
 
 		if (rpc->peer) {
 			homa_peer_release(rpc->peer);
@@ -702,6 +714,64 @@ struct homa_rpc *homa_rpc_find_server(struct homa_sock *hsk,
 	}
 	homa_bucket_unlock(bucket, id);
 	return NULL;
+}
+
+/**
+ * homa_rpc_find_from_skb() - Given an skb for a Homa packet, find the homa_rpc
+ * associated with the packet and lock it.
+ * @skb:        Packet buffer; must contain a Homa packet that is "fully
+ *              populated" (e.g. the dev field and IP header are initialized).
+ * @incoming:   True means this is an incoming packet, false means outgoing.
+ * Return:      Pointer an RPC that has been locked; the caller is responsible
+ *              for unlocking it. If no RPC could be found, NULL is returned.
+ */
+struct homa_rpc *homa_rpc_find_from_skb(struct sk_buff *skb, bool incoming)
+{
+	struct homa_common_hdr *h;
+	u64 id;
+	int port;
+	struct homa_rpc *rpc;
+	struct homa_sock *hsk;
+	struct homa_net *hnet;
+
+	/* Find the appropriate socket.*/
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
+	id = be64_to_cpu(h->sender_id);
+	if (incoming) {
+		port = ntohs(h->dport);
+		id ^= 1;
+	} else {
+		port = ntohs(h->sport);
+	}
+	hnet = homa_net(dev_net(skb->dev));
+	hsk = homa_sock_find(hnet, port);
+	if (!hsk)
+		return NULL;
+
+	/* Look up the RPC (client and server RPCs are handled differently) */
+	if (homa_is_client(id)) {
+		rpc = homa_rpc_find_client(hsk, id);
+	} else {
+		if (skb_is_ipv6(skb)) {
+			struct in6_addr *addr;
+
+			addr = (incoming) ? &ipv6_hdr(skb)->saddr :
+					&ipv6_hdr(skb)->daddr;
+			rpc = homa_rpc_find_server(hsk, addr, id);
+		} else {
+			struct in6_addr addr;
+
+			if (incoming)
+				ipv6_addr_set_v4mapped(ip_hdr(skb)->saddr,
+						       &addr);
+			else
+				ipv6_addr_set_v4mapped(ip_hdr(skb)->daddr,
+						       &addr);
+			rpc = homa_rpc_find_server(hsk, &addr, id);
+		}
+	}
+	sock_put(&hsk->sock);
+	return rpc;
 }
 
 /**

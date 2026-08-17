@@ -1,7 +1,7 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* New approach to managing tx skbs:d
+* New approach to managing tx skbs:
   * Deal with homa_skb_info?
   * Eliminate homa_info->wire_bytes?
   * Stop using @common.sequence?
@@ -10,6 +10,7 @@ Notes for Homa implementation in Linux:
   * Eliminate homa_info->seg_length? (redundant)
   * Set hsk->error_msg on errors.
   * Test with __STRIP__
+  * Check new qdisc_flushes metric, time for homa_rpc_find_from_skb
 
 * Finish exploring how to provide pacer helpers when TCP is running wihout
   Homa: is it possible to trigger everything from callbacks without a

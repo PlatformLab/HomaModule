@@ -359,7 +359,6 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 	homa_info->data_bytes = *end - offset;
 	homa_info->seg_length = rpc->msgout.max_seg_data;
 	homa_info->offset = offset;
-	homa_info->rpc = rpc;
 	homa_info->dont_defer = false;
 	return skb;
 
