@@ -700,24 +700,19 @@ def config_qdisc():
 
 def config_reset_qdisc():
     """
-    Reset the qdisc configuration by replacing any homa qdiscs with
-    fq ones.
+    Reset the qdisc configuration to its boot-time default.
     """
 
     nic = get_interfaces()[0]
-    config = get_qdisc_config()
-    root = config['root_handle']
+    print('Restoring storing default qdisc configuration')
 
-    print('Removing Homa qdisc, restoring fq')
-    for child in config['children']:
-        if child['type'] != 'homa':
-            continue
-        exec_cmd(['sudo', 'tc', 'qdisc', 'del', 'dev', nic,
-                'parent', '%s%x' % (root, child['queue']), 'handle',
-                '%x:' % (64 + child['queue'])], check=True)
-        exec_cmd(['sudo', 'tc', 'qdisc', 'replace', 'dev', nic,
-                'parent', '%s%x' % (root, child['queue']), 'handle',
-                '%x:' % (64 + child['queue']), 'fq'], check=True)
+    # Make sure we're not already in the default configuration, to
+    # avoid error messages.
+    first_line = exec_cmd(['tc', 'qdisc', 'show', 'dev', nic],
+            check=True).stdout.splitlines()[0]
+    if first_line.split()[2] != '0:':
+        exec_cmd(['sudo', 'tc', 'qdisc', 'del', 'dev', nic, 'root'],
+                check=True)
 
 def config_reset_switch_all_ports():
     """
