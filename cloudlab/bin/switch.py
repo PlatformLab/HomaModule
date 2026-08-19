@@ -24,7 +24,7 @@ class Switch:
         self.ssh = subprocess.Popen(["ssh", "-T", "-p", "51295",
                 "-o", "HostKeyAlgorithms=+ssh-rsa",
                 "-o", "PubkeyAcceptedKeyTypes=+ssh-rsa", "admin@localhost"],
-                encoding="utf-8", stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                universal_newlines=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT)
         fl = fcntl.fcntl(self.ssh.stdout, fcntl.F_GETFL)
         fcntl.fcntl(self.ssh.stdout, fcntl.F_SETFL, fl | os.O_NONBLOCK)

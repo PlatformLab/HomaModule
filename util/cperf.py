@@ -526,7 +526,7 @@ def start_nodes(ids, options):
         if not id in active_nodes:
             vlog("Starting cp_node on node%d" % (id))
             node = subprocess.Popen(["ssh", "-o", "StrictHostKeyChecking=no",
-                    "node%d" % (id), "cp_node"], encoding="utf-8",
+                    "node%d" % (id), "cp_node"], universal_newlines=True,
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT)
             fl = fcntl.fcntl(node.stdin, fcntl.F_GETFL)
@@ -545,7 +545,7 @@ def start_nodes(ids, options):
                         "StrictHostKeyChecking=no", "node%d" % (id), "sudo",
                         "bin/homa_prio", "--interval", "500", "--unsched",
                         str(options.unsched), "--unsched-boost",
-                        str(options.unsched_boost)], encoding="utf-8",
+                        str(options.unsched_boost)], universal_newlines=True,
                         stdout=f, stderr=subprocess.STDOUT)
                 f.close
     wait_output("% ", started, "ssh")
@@ -692,7 +692,7 @@ def do_subprocess(words):
 
     words:   List of words for the command to run.
     """
-    result = subprocess.run(words, capture_output=True, encoding="utf-8")
+    result = subprocess.run(words, capture_output=True, universal_newlines=True)
     if (result.returncode != 0):
         log("Command %s exited with status %d" % (words, result.returncode))
     if (result.stderr != ""):

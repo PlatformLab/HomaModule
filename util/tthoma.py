@@ -12399,7 +12399,7 @@ class AnalyzeSync:
                         file=sys.stderr)
                 src = open(file)
                 dst = tempfile.NamedTemporaryFile(dir=os.path.dirname(file),
-                        mode='w', encoding='utf-8', delete=False)
+                        mode='w', delete=False)
                 for line in src:
                     match = re.match(' *([-0-9.]+) us (\(\+ *[-0-9.]+ us\) \[C[0-9]+\].*)',
                             line)
