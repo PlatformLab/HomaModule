@@ -505,36 +505,6 @@ TEST_F(homa_rpc, homa_rpc_end__delete_deferred_skbs_in_homa_qdisc)
 	EXPECT_STREQ("", unit_log_deferred(qdev));
 	homa_qdisc_qdev_put(qdev);
 }
-TEST_F(homa_rpc, homa_rpc_end__free_gaps)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, 99, 1000, 1000);
-	struct sk_buff *skb;
-
-#ifndef __STRIP__ /* See strip.py */
-	homa_message_in_init(crpc, 10000, 0);
-#else /* See strip.py */
-	homa_message_in_init(crpc, 10000);
-#endif /* See strip.py */
-	unit_log_clear();
-	self->data.seg.offset = htonl(1400);
-	skb =  mock_skb_alloc(self->client_ip, self->server_ip,
-			      &self->data.common, 1400, 1400);
-	homa_add_packet(crpc, skb);
-	kfree_skb(skb);
-
-	self->data.seg.offset = htonl(4200);
-	skb =  mock_skb_alloc(self->client_ip, self->server_ip,
-			      &self->data.common, 1400, 4200);
-	homa_add_packet(crpc, skb);
-	kfree_skb(skb);
-	EXPECT_STREQ("start 0, end 1400; start 2800, end 4200",
-			unit_print_gaps(crpc));
-
-	homa_rpc_end(crpc);
-	/* (Test infrastructure will complain if gaps aren't freed) */
-}
 TEST_F(homa_rpc, homa_rpc_end__dead_frags)
 {
 	struct homa_rpc *crpc1, *crpc2;
@@ -915,6 +885,39 @@ TEST_F(homa_rpc, homa_rpc_reap__free_rx_skbs)
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
 
 	/* (Test infrastructure will complain if the skb wasn't freed) */
+}
+TEST_F(homa_rpc, homa_rpc_reap__free_gaps)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, 99, 1000, 1000);
+	struct sk_buff *skb;
+
+#ifndef __STRIP__ /* See strip.py */
+	homa_message_in_init(crpc, 10000, 0);
+#else /* See strip.py */
+	homa_message_in_init(crpc, 10000);
+#endif /* See strip.py */
+	unit_log_clear();
+	self->data.seg.offset = htonl(1400);
+	skb =  mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 1400);
+	homa_add_packet(crpc, skb);
+	kfree_skb(skb);
+
+	self->data.seg.offset = htonl(4200);
+	skb =  mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 1400, 4200);
+	homa_add_packet(crpc, skb);
+	kfree_skb(skb);
+	EXPECT_STREQ("start 0, end 1400; start 2800, end 4200",
+		     unit_print_gaps(crpc));
+
+	homa_rpc_end(crpc);
+	EXPECT_STREQ("start 0, end 1400; start 2800, end 4200",
+		     unit_print_gaps(crpc));
+	homa_rpc_reap(&self->hsk);
+	/* (Test infrastructure will complain if gaps aren't freed) */
 }
 TEST_F(homa_rpc, homa_rpc_reap__release_peer_ref)
 {

@@ -291,9 +291,12 @@ struct homa_rpc {
 	 * @RPC_IN_SERVICE:   Used only for server RPCs: the request message
 	 *                    has been read from the socket, but the response
 	 *                    message has not yet been presented to the kernel.
-	 * @RPC_DEAD:         RPC has been deleted and is waiting to be
-	 *                    reaped. In some cases, information in the RPC
-	 *                    structure may be accessed in this state.
+	 * @RPC_DEAD:         The RPC has been killed and is waiting to be
+	 *                    reaped. The RPC may continue to be used in this
+	 *                    state using references that existed when
+	 *                    homa_rpc_end was invoked, but it can no longer
+	 *                    be discovered and no code may make it
+	 *                    discoverable.
 	 *
 	 * Client RPCs pass through states in the following order:
 	 * RPC_OUTGOING, RPC_INCOMING, RPC_DEAD.

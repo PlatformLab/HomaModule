@@ -661,9 +661,10 @@ void homa_peer_lock_slow(struct homa_peer *peer)
  * homa_peer_add_ack() - Add a given RPC to the list of unacked
  * RPCs for its server. Once this method has been invoked, it's safe
  * to delete the RPC, since it will eventually be acked to the server.
- * @rpc:    Client RPC that has now completed.
+ * @rpc:    Client RPC that has now completed. Must be locked by caller.
  */
 void homa_peer_add_ack(struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_peer *peer = rpc->peer;
 	struct homa_ack_hdr ack;
@@ -685,7 +686,9 @@ void homa_peer_add_ack(struct homa_rpc *rpc)
 	ack.num_acks = htons(peer->num_acks);
 	peer->num_acks = 0;
 	homa_peer_unlock(peer);
+	homa_rpc_unlock(rpc);
 	homa_xmit_control(ACK, &ack, sizeof(ack), rpc);
+	homa_rpc_lock(rpc);
 }
 
 /**

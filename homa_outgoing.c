@@ -474,7 +474,8 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
  * @rpc:       The packet will go to the socket that handles the other end
  *             of this RPC. Addressing info for the packet, including all of
  *             the fields of homa_common_hdr except type, will be set from this.
- *             Caller must hold either the lock or a reference.
+ *             Caller must not hold any locks (see "Homa Locking Strategy"
+ *             in homa_impl.h).
  *
  * Return:     Either zero (for success), or a negative errno value if there
  *             was a problem.
@@ -600,11 +601,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
  * to be transmitted according to the scheduling mechanism, arrange for
  * them to be sent.
  * @rpc:       RPC to check for transmittable packets. Must be locked by
- *             caller. Note: this function will release the RPC lock while
- *             passing packets through the RPC stack, then reacquire it
- *             before returning. It is possible that the RPC gets terminated
- *             when the lock isn't held, in which case the state will
- *             be RPC_DEAD on return.
+ *             caller.
  */
 void homa_xmit_data(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
@@ -662,8 +659,6 @@ void homa_xmit_data(struct homa_rpc *rpc)
  * requests. It retransmits the packet(s) containing a given range of bytes
  * from a message.
  * @rpc:      RPC for which data should be resent. Must be locked by caller.
- *            The RPC lock is released temporarily during this function, so
- *            the RPC may be dead on return.
  * @start:    Offset within @rpc->msgout of the first byte to retransmit.
  * @end:      Offset within @rpc->msgout of the byte just after the last one
  *            to retransmit.

@@ -831,13 +831,17 @@ TEST_F(homa_peer, homa_peer_add_ack)
 	peer->num_acks = 3;
 
 	/* Add one RPC to unacked (fits). */
+	homa_rpc_lock(crpc1);
 	homa_peer_add_ack(crpc1);
+	homa_rpc_unlock(crpc1);
 	EXPECT_EQ(4, peer->num_acks);
 	EXPECT_STREQ("server_port 99, client_id 101",
 			unit_ack_string(&peer->acks[3]));
 
 	/* Add another RPC to unacked (also fits). */
+	homa_rpc_lock(crpc2);
 	homa_peer_add_ack(crpc2);
+	homa_rpc_unlock(crpc2);
 	EXPECT_EQ(5, peer->num_acks);
 	EXPECT_STREQ("server_port 99, client_id 102",
 			unit_ack_string(&peer->acks[4]));
@@ -845,7 +849,9 @@ TEST_F(homa_peer, homa_peer_add_ack)
 	/* Third RPC overflows, triggers ACK transmission. */
 	unit_log_clear();
 	mock_xmit_log_verbose = 1;
+	homa_rpc_lock(crpc3);
 	homa_peer_add_ack(crpc3);
+	homa_rpc_unlock(crpc3);
 	EXPECT_EQ(0, peer->num_acks);
 	EXPECT_STREQ("xmit ACK from 0.0.0.0:32768, dport 99, id 103, acks [sp 99, id 90] [sp 99, id 91] [sp 99, id 92] [sp 99, id 101] [sp 99, id 102]",
 			unit_log_get());

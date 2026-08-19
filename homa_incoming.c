@@ -111,24 +111,43 @@ struct homa_gap *homa_gap_alloc(struct list_head *next, int start, int end)
 void homa_request_retrans(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
+	struct homa_resend_hdr *resends;
 	struct homa_resend_hdr resend;
 	struct homa_gap *gap;
 	int offset, length;
-
-#ifndef __STRIP__ /* See strip.py */
-	resend.priority = rpc->hsk->homa->num_priorities - 1;
-#endif /* See strip.py */
+	int num_gaps, i;
 
 	if (rpc->msgin.length >= 0) {
-		/* Issue RESENDS for any gaps in incoming data. */
+		/* Issue RESENDS for any gaps in incoming data.  Must
+		 * pre-allocate space for all of the packet headers because
+		 * so we don't have to release the RPC lock while iterating
+		 * the gap list.
+		 */
+		num_gaps = list_count_nodes(&rpc->msgin.gaps);
+		resends = kzalloc(num_gaps * sizeof(*resends), GFP_ATOMIC);
+		if (!resends)
+			return;
+		i = 0;
 		list_for_each_entry(gap, &rpc->msgin.gaps, links) {
-			resend.offset = htonl(gap->start);
-			resend.length = htonl(gap->end - gap->start);
+			resends[i].offset = htonl(gap->start);
+			resends[i].length = htonl(gap->end - gap->start);
+#ifndef __STRIP__ /* See strip.py */
+			resends[i].priority = rpc->hsk->homa->num_priorities -
+					      1;
+#endif /* See strip.py */
+			i++;
+		}
+		homa_rpc_unlock(rpc);
+		for (i = 0; i < num_gaps; i++) {
 			tt_record4("Sending RESEND for id %d, peer 0x%x, offset %d, length %d",
 				   rpc->id, tt_addr(rpc->peer->addr),
-				   gap->start, gap->end - gap->start);
-			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
+				   ntohl(resends[i].offset),
+				   ntohl(resends[i].length));
+			homa_xmit_control(RESEND, &resends[i],
+					  sizeof(resends[i]), rpc);
 		}
+		kfree(resends);
+		homa_rpc_lock(rpc);
 
 		/* Issue a RESEND for any granted data after the last gap. */
 		offset = rpc->msgin.recv_end;
@@ -147,11 +166,17 @@ void homa_request_retrans(struct homa_rpc *rpc)
 		length = -1;
 	}
 
+	memset(&resend, 0, sizeof(resend));
 	resend.offset = htonl(offset);
 	resend.length = htonl(length);
+#ifndef __STRIP__ /* See strip.py */
+	resend.priority = rpc->hsk->homa->num_priorities - 1;
+#endif /* See strip.py */
 	tt_record4("Sending RESEND for id %d, peer 0x%x, offset %d, length %d",
 		   rpc->id, tt_addr(rpc->peer->addr), offset, length);
+	homa_rpc_unlock(rpc);
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
+	homa_rpc_lock(rpc);
 }
 
 /**
@@ -736,7 +761,9 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 						htonl(homa->unsched_cutoffs[i]);
 			}
 			h2.cutoff_version = htons(homa->cutoff_version);
+			homa_rpc_unlock(rpc);
 			homa_xmit_control(CUTOFFS, &h2, sizeof(h2), rpc);
+			homa_rpc_lock(rpc);
 			rpc->peer->last_update_jiffies = jiffies;
 		}
 	}
@@ -841,7 +868,9 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		 */
 		tt_record2("sending BUSY from resend, id %d, state %d",
 			   rpc->id, rpc->state);
+		homa_rpc_unlock(rpc);
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
+		homa_rpc_lock(rpc);
 		goto done;
 	}
 
@@ -876,7 +905,9 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		 */
 		tt_record3("sending BUSY from resend, id %d, offset %d, tx_end %d",
 			   rpc->id, offset, tx_end);
+		homa_rpc_unlock(rpc);
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
+		homa_rpc_lock(rpc);
 		goto done;
 	}
 
@@ -971,7 +1002,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
  *           This function now owns the packet.
  * @hsk:     Socket on which the packet was received.
  * @rpc:     The RPC named in the packet header, or NULL if no such
- *           RPC exists. The RPC has been locked by the caller.
+ *           RPC exists. The RPC must have been locked by the caller.
  */
 void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		       struct homa_rpc *rpc)
@@ -1013,7 +1044,11 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	ack.num_acks = htons(homa_peer_get_acks(peer,
 						HOMA_MAX_ACKS_PER_PKT,
 						ack.acks));
+	if (rpc)
+		homa_rpc_unlock(rpc);
 	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
+	if (rpc)
+		homa_rpc_lock(rpc);
 	tt_record3("Responded to NEED_ACK for id %d, peer 0x%x with %d other acks",
 		   id, tt_addr(saddr), ntohs(ack.num_acks));
 	homa_peer_release(peer);
@@ -1028,7 +1063,7 @@ done:
  *           This function now owns the packet.
  * @hsk:     Socket on which the packet was received.
  * @rpc:     The RPC named in the packet header, or NULL if no such
- *           RPC exists. The RPC lock will be dead on return.
+ *           RPC exists. The RPC must be locked by the caller.
  */
 void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		  struct homa_rpc *rpc)
@@ -1256,6 +1291,9 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_sock *hsk = rpc->hsk;
+
+	if (rpc->state == RPC_DEAD)
+		return;
 
 	if (test_bit(RPC_PRIVATE, &rpc->flags)) {
 		homa_interest_notify_private(rpc);

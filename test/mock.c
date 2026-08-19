@@ -834,6 +834,10 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 	char buffer[200];
 	const char *prefix = " ";
 
+	if (unit_hash_size(spinlocks_held)  > 0)
+		FAIL("ip6_xmit invoked with %d spinlocks held; this isn't safe because homa_qdisc_enqueue may acquire an RPC lock",
+		     unit_hash_size(spinlocks_held));
+
 	if (mock_check_error(&mock_ip6_xmit_errors)) {
 		kfree_skb(skb);
 		return -ENETDOWN;
@@ -867,6 +871,9 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 	const char *prefix = " ";
 	char buffer[200];
 
+	if (unit_hash_size(spinlocks_held)  > 0)
+		FAIL("ip_queue_xmit invoked with %d spinlocks held; this isn't safe because homa_qdisc_enqueue may acquire an RPC lock",
+		     unit_hash_size(spinlocks_held));
 	if (mock_check_error(&mock_ip_queue_xmit_errors)) {
 		/* Latest data (as of 1/2019) suggests that ip_queue_xmit
 		 * frees packets after errors.

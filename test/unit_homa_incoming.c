@@ -290,7 +290,9 @@ TEST_F(homa_incoming, homa_request_retrans__request_gaps)
 #endif /* See strip.py */
 	unit_log_clear();
 
+	homa_rpc_lock(srpc);
 	homa_request_retrans(srpc);
+	homa_rpc_unlock(srpc);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 1000-1999@7; "
 			"xmit RESEND 4000-5999@7; "
@@ -304,6 +306,19 @@ TEST_F(homa_incoming, homa_request_retrans__request_gaps)
 			unit_log_get());
 #endif /* See strip.py */
 }
+TEST_F(homa_incoming, homa_request_retrans__cant_allocate_packet_headers)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_RCVD_ONE_PKT,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 10000, 100);
+
+	homa_gap_alloc(&srpc->msgin.gaps, 1000, 2000);
+	unit_log_clear();
+	mock_kmalloc_errors = 1;
+
+	homa_request_retrans(srpc);
+	EXPECT_STREQ("", unit_log_get());
+}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_request_retrans__no_granted_but_not_received_data)
 {
@@ -315,7 +330,9 @@ TEST_F(homa_incoming, homa_request_retrans__no_granted_but_not_received_data)
 	unit_log_clear();
 
 	srpc->msgin.granted = 1400;
+	homa_rpc_lock(srpc);
 	homa_request_retrans(srpc);
+	homa_rpc_unlock(srpc);
 	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_incoming, homa_request_retrans__granted_data_after_last_gap)
@@ -328,7 +345,9 @@ TEST_F(homa_incoming, homa_request_retrans__granted_data_after_last_gap)
 	unit_log_clear();
 
 	srpc->msgin.granted = 3000;
+	homa_rpc_lock(srpc);
 	homa_request_retrans(srpc);
+	homa_rpc_unlock(srpc);
 	EXPECT_STREQ("xmit RESEND 1400-2999@0", unit_log_get());
 }
 #endif /* See strip.py */
@@ -341,7 +360,9 @@ TEST_F(homa_incoming, homa_request_retrans__no_data_received_yet)
 	EXPECT_EQ(-1, crpc->msgin.length);
 	unit_log_clear();
 
+	homa_rpc_lock(crpc);
 	homa_request_retrans(crpc);
+	homa_rpc_unlock(crpc);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 0--2@0", unit_log_get());
 #else /* See strip.py */
@@ -2703,6 +2724,25 @@ TEST_F(homa_incoming, homa_wait_shared__rpc_dead)
 	homa_rpc_unlock(rpc);
 }
 
+TEST_F(homa_incoming, homa_rpc_handoff__rpc_dead)
+{
+	struct homa_interest interest;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 20000, 1600);
+
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_end(crpc);
+	set_bit(RPC_PRIVATE, &crpc->flags);
+	homa_interest_init_private(&interest, crpc);
+	mock_log_wakeups = 1;
+	unit_log_clear();
+
+	homa_rpc_handoff(crpc);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(0, atomic_read(&interest.state));
+	homa_interest_unlink_private(&interest);
+}
 TEST_F(homa_incoming, homa_rpc_handoff__private_rpc)
 {
 	struct homa_interest interest;

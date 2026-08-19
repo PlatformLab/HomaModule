@@ -965,6 +965,15 @@ static inline int homa_high_priority(struct homa *homa)
  *    socket lock. If this fails, then release the socket lock and retry
  *    both the socket lock and the RPC lock. Of course, the state of both
  *    socket and RPC could change before the locks are finally acquired.
+ *
+ * Locks and Packet Transmission:
+ *
+ * Homa must not hold locks while transmitting packets (e.g. by calling
+ * ip_queue_xmit or ip6_xmit). This is because homa_qdisc could be invoked
+ * during the transmission process, and it may need to acquire locks under
+ * some conditions (such as an RPC lock). Homa_qdisc is invoked with the
+ * qdisc lock held, so invoking ip*xmit with a lock held can result in
+ * AB-BA deadlocks.
  */
 
 #endif /* _HOMA_IMPL_H */

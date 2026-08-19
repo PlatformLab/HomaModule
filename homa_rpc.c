@@ -216,9 +216,7 @@ error:
  * homa_rpc_ack() - Handle one or more acknowledgments for RPCs.
  * @hsk:      Socket on which the ack(s) were received. Can sometimes be used
  *            to avoid a socket lookup.
- * @rpc:      RPC for which caller holds lock (NULL if none). If non-NULL,
- *            the lock will be released and reacquired here. The RPC may
- *           be dead on return.
+ * @rpc:      RPC for which caller holds lock (NULL if none).
  * @saddr:    Source address from which the ack was received (the client
  *            node for the RPC)
  * @num_acks: Number of acknowlegments in @acks
@@ -271,8 +269,12 @@ void homa_rpc_ack(struct homa_sock *hsk, struct homa_rpc *rpc,
  * releasing its resources; this process will continue in the background
  * until homa_rpc_reap eventually completes it.
  * @rpc:  Structure to clean up, or NULL. Must be locked. Its socket must
- *        not be locked. Once this function returns the caller should not
- *        use the RPC except to unlock it.
+ *        not be locked. The RPC may still be used after this function returns
+ *        (there are many places where the RPC lock is temporarily released,
+ *        and it would add too much complexity to put checks for death
+ *        every time the lock is reacquired). However, any code that could
+ *        make the RPC visible again must check rpc->state; if the RPC is
+ *        dead then that code must no-op itself.
  */
 void homa_rpc_end(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
@@ -301,7 +303,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 
 #ifndef __STRIP__ /* See strip.py */
 	/* The following line must occur before the socket is locked. This is
-	 * necessary because homa_grant_unmanage_rpc may releases the RPC lock
+	 * necessary because homa_grant_unmanage_rpc may release the RPC lock
 	 * and reacquire it.
 	 */
 	if (rpc->msgin.length >= 0)
@@ -318,18 +320,6 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	homa_interest_notify_private(rpc);
 	homa_qdisc_flush_rpc(rpc);
 
-	if (rpc->msgin.length >= 0) {
-		while (1) {
-			struct homa_gap *gap;
-
-			gap = list_first_entry_or_null(&rpc->msgin.gaps,
-						       struct homa_gap, links);
-			if (!gap)
-				break;
-			list_del(&gap->links);
-			kfree(gap);
-		}
-	}
 	rpc->hsk->dead_frags += rpc->msgout.num_frags + 1;
 	if (rpc->hsk->dead_frags > rpc->hsk->homa->max_dead_frags)
 		/* This update isn't thread-safe; it's just a
@@ -552,8 +542,8 @@ release:
 		rpc = rpcs[i];
 		UNIT_LOG("; ", "reaped %llu", rpc->id);
 
-		/* Free any unconsumed input packets (there shouldn't
-		 * usually be any).
+		/* Free any unconsumed input packets and gaps (there
+		 * shouldn't usually be any of either).
 		 */
 		if (rpc->msgin.length >= 0) {
 			struct sk_buff *skb;
@@ -561,6 +551,17 @@ release:
 			for (skb = __skb_dequeue(&rpc->msgin.packets); skb;
 			     skb = __skb_dequeue(&rpc->msgin.packets))
 				consume_skb(skb);
+			while (1) {
+				struct homa_gap *gap;
+
+				gap = list_first_entry_or_null(&rpc->msgin.gaps,
+							       struct homa_gap,
+							       links);
+				if (!gap)
+					break;
+				list_del(&gap->links);
+				kfree(gap);
+			}
 		}
 		if (skb_queue_len(&rpc->qrpc.packets) > 0) {
 			tt_record2("Freezing because homa_rpc_reap found %d packets in qdisc queue for id %d",

@@ -37,7 +37,9 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 					- 1 - homa->timer_ticks) & 1 << 31) {
 				struct homa_need_ack_hdr h;
 
+				homa_rpc_unlock(rpc);
 				homa_xmit_control(NEED_ACK, &h, sizeof(h), rpc);
+				homa_rpc_lock(rpc);
 				tt_record4("Sent NEED_ACK for RPC id %d to peer 0x%x, port %d, ticks %d",
 					   rpc->id,
 					   tt_addr(rpc->peer->addr),
