@@ -457,7 +457,8 @@ elif options.config == 'tcp_nodes':
                 'no_qdisc': True
                 })
 elif options.config == 'tcp_qdisc':
-    # Basic test of TCP latency
+    # Basic test of TCP latency but don't do anything to change the qdisc
+    # (presumably this will leave homa_qdisc in place).
     specs.append({'exp_name': 'tcp_qdisc',
             'label': 'TCP',
             'options': ['protocol', 'tcp'],
