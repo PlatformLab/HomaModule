@@ -225,8 +225,6 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	}
 
 	if (h_new->common.type == DATA) {
-		if (h_new->seg.offset == (__force __be32)-1)
-			h_new->seg.offset = h_new->common.sequence;
 		tt_record4("homa_gro_receive got packet from 0x%x id %llu, offset %d, priority %d",
 			   saddr, homa_local_id(h_new->common.sender_id),
 			   ntohl(h_new->seg.offset), priority);

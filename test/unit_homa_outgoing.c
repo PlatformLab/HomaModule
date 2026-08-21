@@ -720,11 +720,7 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__homa_info_fields)
 		EXPECT_EQ(0, -PTR_ERR(skb));
 	EXPECT_EQ(5000, end);
 	homa_info = homa_get_skb_info(skb);
-	EXPECT_EQ(3600 + 3 * (sizeof(struct homa_data_hdr) +
-			      self->hsk.ip_header_length + HOMA_ETH_OVERHEAD),
-		  homa_info->wire_bytes);
 	EXPECT_EQ(3600, homa_info->data_bytes);
-	EXPECT_EQ(1400, homa_info->seg_length);
 	EXPECT_EQ(0, homa_info->dont_defer);
 	kfree_skb(skb);
 }
@@ -1315,7 +1311,6 @@ TEST_F(homa_outgoing, homa_rpc_tx_end)
 			     length + sizeof(struct homa_skb_info), 0);
 	info = homa_get_skb_info(skb);
 	info->data_bytes = length;
-	info->offset = offset;
 	info->dont_defer = 0;
 	qdisc_skb_cb(skb)->pkt_len = length + 100;
 

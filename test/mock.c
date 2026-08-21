@@ -2522,7 +2522,6 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 	if (h && h->type == DATA) {
 		info = homa_get_skb_info(skb);
 		info->data_bytes = extra_bytes;
-		info->offset = ntohl(((struct homa_data_hdr *)h)->seg.offset);
 		info->dont_defer = 0;
 	}
 	qdisc_skb_cb(skb)->pkt_len = extra_bytes + 100;

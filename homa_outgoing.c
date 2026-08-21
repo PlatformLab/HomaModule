@@ -270,7 +270,6 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 	memset(h, 0, sizeof(*h));
 	h->common.sport = htons(hsk->port);
 	h->common.dport = htons(rpc->dport);
-	h->common.sequence = htonl(offset);
 	h->common.type = DATA;
 	homa_set_doff(skb, sizeof(struct homa_data_hdr) -
 			   sizeof(struct homa_seg_hdr));
@@ -352,13 +351,7 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 	/* Initialize homa_skb_info for the packet. */
 	homa_info = homa_get_skb_info(skb);
 	memset(homa_info, 0, sizeof(*homa_info));
-	homa_info->wire_bytes = num_segs * (sizeof(struct homa_data_hdr) +
-					    hsk->ip_header_length +
-					    HOMA_ETH_OVERHEAD) +
-				*end - offset;
 	homa_info->data_bytes = *end - offset;
-	homa_info->seg_length = rpc->msgout.max_seg_data;
-	homa_info->offset = offset;
 	homa_info->dont_defer = false;
 	return skb;
 
@@ -388,8 +381,8 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 	struct sk_buff *skb;
 
 	IF_NO_STRIP(int err);
-
 	IF_NO_STRIP(int priority, skb_offset, data_bytes, queue);
+	IF_NO_STRIP(struct homa_data_hdr *h);
 
 	skb = homa_tx_skb_alloc(rpc, offset, end);
 	if (IS_ERR(skb))
@@ -406,7 +399,8 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 	else
 		priority = rpc->msgout.sched_priority;
 	priority = rpc->hsk->homa->priority_map[priority];
-	skb_offset = homa_get_skb_info(skb)->offset;
+	h = (struct homa_data_hdr *)skb_transport_header(skb);
+	skb_offset = ntohl(h->seg.offset);
 	data_bytes = homa_get_skb_info(skb)->data_bytes;
 	queue = skb->queue_mapping;
 #endif /* See strip.py */
@@ -422,10 +416,9 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 	INC_METRIC(priority_bytes[priority], skb->len);
 	INC_METRIC(priority_packets[priority], 1);
 	if (ipv6_addr_v4mapped(&rpc->peer->addr)) {
-		tt_record4("calling ip_queue_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",
-			   homa_get_skb_info(skb)->wire_bytes,
-			   tt_addr(rpc->peer->addr), rpc->id,
-			   homa_get_skb_info(skb)->offset);
+		tt_record4("calling ip_queue_xmit: peer 0x%x, id %d, offset %d, length %d",
+			   tt_addr(rpc->peer->addr), rpc->id, skb_offset,
+			   data_bytes);
 
 #ifndef __STRIP__ /* See strip.py */
 		homa_hijack_set_hdr(skb, rpc->peer, false);
@@ -437,10 +430,9 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 		ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
 #endif /* See strip.py */
 	} else {
-		tt_record4("calling ip6_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",
-			   homa_get_skb_info(skb)->wire_bytes,
-			   tt_addr(rpc->peer->addr), rpc->id,
-			   homa_get_skb_info(skb)->offset);
+		tt_record4("calling ip6_xmit: peer 0x%x, id %d, offset %d, length %d",
+			   tt_addr(rpc->peer->addr), rpc->id, skb_offset,
+			   data_bytes);
 #ifndef __STRIP__ /* See strip.py */
 		homa_hijack_set_hdr(skb, rpc->peer, true);
 		homa_rpc_unlock(rpc);

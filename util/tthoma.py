@@ -1933,17 +1933,17 @@ class Dispatcher:
     })
 
     def __ip_xmit(self, trace, time, core, match, interests):
-        wire_bytes = int(match.group(1))
-        peer = match.group(2)
-        id = int(match.group(3))
-        offset = int(match.group(4))
+        peer = match.group(1)
+        id = int(match.group(2))
+        offset = int(match.group(3))
+        length = int(match.group(4))
         for interest in interests:
-            interest.tt_ip_xmit(trace, time, core, peer, id, offset, wire_bytes)
+            interest.tt_ip_xmit(trace, time, core, peer, id, offset, length)
 
     patterns.append({
         'name': 'ip_xmit',
-        'regexp': 'calling ip.*_xmit: wire_bytes ([0-9]+), peer ([^,]+), '
-                'id ([0-9]+), offset ([0-9]+)'
+        'regexp': 'calling ip.*_xmit: peer ([^,]+), id ([0-9]+), '
+                  'offset ([0-9]+), length ([0-9]+)'
     })
 
     def __send_data(self, trace, time, core, match, interests):
@@ -8874,14 +8874,14 @@ class AnalyzePackets:
         # that core (but not yet freed).
         self.copied = defaultdict(list)
 
-    def tt_ip_xmit(self, trace, t, core, peer, id, offset, wire_bytes):
+    def tt_ip_xmit(self, trace, t, core, peer, id, offset, length):
         global packets, rpcs
         p = packets[pkt_id(id, offset)]
         p['tx_node'] = trace['node']
         if not p['retransmits']:
             p['xmit'] = t
             p['tx_core'] = core
-            p['tso_length'] = wire_bytes
+            p['tso_length'] = length
             rpcs[id]['send_data_pkts'].append(p)
         else:
             p['retransmits'][-1]['xmit'] = t
@@ -11780,7 +11780,7 @@ class AnalyzeSync:
         # Node name -> node id (position in get_sorted_nodes()).
         self.node_id = {}
 
-    def tt_ip_xmit(self, trace, t, core, peer, id, offset, wire_bytes):
+    def tt_ip_xmit(self, trace, t, core, peer, id, offset, length):
         node = trace['node']
         key = '%d:%d' % (id, offset)
         if not key in self.tx_pkts:

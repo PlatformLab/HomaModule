@@ -513,30 +513,10 @@ struct homa_skb_info {
 	struct sk_buff *next_skb;
 
 	/**
-	 * @wire_bytes: total number of bytes of network bandwidth that
-	 * will be consumed by this packet. This includes everything,
-	 * including additional headers added by GSO, IP header, Ethernet
-	 * header, CRC, preamble, and inter-packet gap.
-	 */
-	int wire_bytes;
-
-	/**
 	 * @data_bytes: total bytes of message data across all of the
 	 * segments in this packet.
 	 */
 	int data_bytes;
-
-	/** @seg_length: maximum number of data bytes in each GSO segment. */
-	int seg_length;
-
-	/**
-	 * @offset: offset within the message of the first byte of data in
-	 * this packet.
-	 */
-	int offset;
-
-	/** @rpc: RPC that this packet belongs to. */
-	void *rpc;
 
 	/**
 	 * @dont_defer: True means that homa_qdisc_enqueue should pass this

@@ -107,9 +107,7 @@ struct homa_common_hdr {
 
 	/**
 	 * @sequence: corresponds to the sequence number field in TCP headers;
-	 * used in DATA packets to hold the offset in the message of the first
-	 * byte of data. However, when TSO is used without TCP hijacking, this
-	 * value will only be correct in the first segment of a GSO packet.
+	 * not used by Homa (may be auto-incremented by TSO).
 	 */
 	__be32 sequence;
 
@@ -200,51 +198,6 @@ struct homa_ack {
 	__be16 server_port;
 } __packed;
 
-#ifndef __STRIP__ /* See strip.py */
-/* struct homa_data_hdr - Contains data for part or all of a Homa message.
- * An incoming packet consists of a homa_data_hdr followed by message data.
- * An outgoing packet can have this simple format as well, or it can be
- * structured as a GSO packet. Homa supports two different formats for GSO
- * packets, depending on whether TCP hijacking is enabled:
- *
- *    No hijacking:                          TCP hijacking:
- *
- *    |-----------------------|              |-----------------------|
- *    |                       |              |                       |
- *    |     homa_data_hdr     |              |     homa_data_hdr     |
- *    |                       |              |                       |
- *    |---------------------- |              |-----------------------|
- *    |                       |              |                       |
- *    |                       |              |                       |
- *    |     segment data      |              |     segment data      |
- *    |                       |              |                       |
- *    |                       |              |                       |
- *    |-----------------------|              |-----------------------|
- *    |     homa_seg_hdr      |              |                       |
- *    |-----------------------|              |                       |
- *    |                       |              |     segment data      |
- *    |                       |              |                       |
- *    |     segment data      |              |                       |
- *    |                       |              |-----------------------|
- *    |                       |              |                       |
- *    |-----------------------|              |                       |
- *    |     homa_seg_hdr      |              |     segment data      |
- *    |-----------------------|              |                       |
- *    |                       |              |                       |
- *    |                       |              |-----------------------|
- *    |     segment data      |
- *    |                       |
- *    |                       |
- *    |-----------------------|
- *
- * With TCP hijacking, TSO will automatically adjust @common.sequence in
- * the segments, so that value can be used as the offset of the data within
- * the message. Without TCP hijacking, TSO will not adjust @common.sequence
- * in the segments, so Homa sprinkles correct offsets (in homa_seg_hdrs)
- * throughout the segment data; TSO/GSO will include a different homa_seg_hdr
- * in each generated packet.
- */
-#else /* See strip.py */
 /* struct homa_data_hdr - Contains data for part or all of a Homa message.
  * An incoming packet consists of a homa_data_hdr followed by message data.
  * An outgoing packet can have this simple format as well, or it can be
@@ -278,11 +231,10 @@ struct homa_ack {
  *    |                       |
  *    |-----------------------|
  *
- * TSO will not adjust @homa_common_hdr.sequence in the segments, so Homa
+ * TSO may not adjust @homa_common_hdr.sequence in the segments, so Homa
  * sprinkles correct offsets (in homa_seg_hdrs) throughout the segment data;
  * TSO/GSO will include a different homa_seg_hdr in each generated packet.
  */
-#endif /* See strip.py */
 
 struct homa_seg_hdr {
 #ifndef __STRIP__ /* See strip.py */
@@ -539,23 +491,6 @@ static inline u64 homa_local_id(__be64 sender_id)
 	 * removed here, and conversely.
 	 */
 	return be64_to_cpu(sender_id) ^ 1;
-}
-
-/**
- * homa_get_offset() - Returns the offset within message of the first byte
- * of data in a Homa DATA packet (the offset is stored in different places
- * in different situations).
- * @h:       Header for DATA packet
- * Return:   See above
- */
-static inline int homa_get_offset(struct homa_data_hdr *h)
-{
-#ifndef __STRIP__ /* See strip.py */
-	return (h->seg.offset != -1) ? ntohl(h->seg.offset) :
-	       ntohl(h->common.sequence);
-#else /* See strip.py */
-	return ntohl(h->seg.offset);
-#endif /* See strip.py */
 }
 
 #endif /* _HOMA_WIRE_H */

@@ -476,7 +476,7 @@ int unit_count_peers(struct homa *homa)
  */
 const char *unit_log_deferred(struct homa_qdisc_dev *qdev)
 {
-	struct homa_skb_info *info;
+	struct homa_data_hdr *h;
 	struct rb_node *node;
 	struct homa_rpc *rpc;
 	struct sk_buff *skb;
@@ -487,8 +487,8 @@ const char *unit_log_deferred(struct homa_qdisc_dev *qdev)
 		rpc = container_of(node, struct homa_rpc, qrpc.rb_node);
 		unit_log_printf("; ", "[id %llu, offsets", rpc->id);
         	skb_queue_walk(&rpc->qrpc.packets, skb) {
-			info = homa_get_skb_info(skb);
-			unit_log_printf(" ", "%d", info->offset);
+			h = (struct homa_data_hdr *)skb_transport_header(skb);
+			unit_log_printf(" ", "%d", ntohl(h->seg.offset));
 		}
 		unit_log_printf("", "]");
 	}
