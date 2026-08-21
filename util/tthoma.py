@@ -19,7 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from optparse import OptionParser
 import math
-from operator import itemgetter
+from operator import itemgetter, add
 import os
 from pathlib import Path
 import re
@@ -193,7 +193,8 @@ class PacketDict(dict):
     def __missing__(self, key):
         id_str, offset_str = key.split(':')
         self[key] = {'type': 'data', 'id': int(id_str),
-                'offset': int(offset_str), 'retransmits': [], 'segments': []}
+                'offset': int(offset_str), 'retransmits': [],
+                'rx_node': '', 'segments': []}
         return self[key]
 packets = PacketDict()
 
@@ -1026,6 +1027,22 @@ def get_xmit_time(offset, rpc, rx_time=1e20):
 
 def pkt_id(id, offset):
     return '%d:%d' % (id, offset)
+
+def pkt_recv_length(pkt):
+    """
+    Return the total received length of a packet in bytes, including all
+    headers.
+    pkt:        Packet to consider (either data, tcp, or grant)
+    """
+
+    if pkt['type'] == 'data':
+        return data_hdr_length + pkt['length']
+    if pkt['type'] == 'grant':
+        return grant_pkt_length
+    if pkt['type'] == 'tcp':
+        return tcp_hdr_length + pkt['length']
+    raise Exception('Unexpected packet type "%s" in pkt_recv_length for packet: %s',
+            pkt['type'], pkt)
 
 def pkt_state(pkt, t):
     """
@@ -9092,7 +9109,7 @@ class AnalyzePackets:
                         new_pkts.append([pid, pkt2])
                     for key in ['xmit', 'qdisc_xmit', 'xmit2', 'nic', 'id',
                                 'msg_length', 'priority', 'tx_node', 'tx_core',
-                                'free_tx_skb', 'tx_qid', 'type']:
+                                'free_tx_skb', 'tx_qid', 'type', 'rx_node']:
                         if key in pkt:
                             pkt2[key] = pkt[key]
                     if pkt2['msg_length'] != None and pkt2['offset'] > pkt2['msg_length']:
@@ -13238,6 +13255,257 @@ class AnalyzeTimeline:
             print('%-32s Avg %7.1f us (+%7.1f us)  P90 %7.1f us (+%7.1f us)' %
                 (label, sum(elapsed)/len(elapsed), sum(gaps)/len(gaps),
                 elapsed[9*len(elapsed)//10], gaps[9*len(gaps)//10]))
+
+#------------------------------------------------
+# Analyzer: torqs
+#------------------------------------------------
+class AnalyzeTorqs:
+    """
+    Generate graphs showing the amount of data queued in switch downlinks.
+    More precisely, the graphs show data that is known to have been transmitted
+    by the source (the buffers have been returned to Linux) but has not been
+    seen by GRO on the destination. Thus it could include some data that
+    is still in-flight through the network or has been received but not yet
+    processed by GRO. Requires the --plot option. The --interval option can
+    be used to change the granularity at which data is plotted.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
+        dispatcher.interest('AnalyzeRpcs')
+        require_options('downlinks', 'plot')
+
+    def output(self):
+        global packets, grants, tcp_packets, options, traces
+
+        # List of <time, event, bytes, packet> records, eventually sorted
+        # by the 'time' field:
+        # time:      Time of event.
+        # event:     What happened at time: 'enqueue' (estimate of when the
+        #            packet was enqueued at the switch downlink; actually,
+        #            the 'free_tx_skb' time for the packet) or 'dequeue'
+        #            (time when packet was processed by GRO).
+        # bytes:     Total length of the packet in bytes, including headers.
+        # packet:    Information about the packet (a record from either
+        #            packets or tcp_packets).
+        events = []
+
+        # Statistics about current state of the world (updated as events
+        # are scanned). Keys are node names or 'total', values are total
+        # number of bytes currently queued for that node (or all nodes, for
+        # 'total').
+        queued = defaultdict(lambda: 0)
+
+        # Statistics about unscheduled Homa bytes that are queued (updated as
+        # events are scanned). Keys are node names or 'total', values are
+        # unscheduled bytes currently queued for that node (or all nodes,
+        # for 'total').
+        unsched_queued = defaultdict(lambda: 0)
+
+        # Keys are node names or 'total', values are TCP bytes currently
+        # queued for that node (or all nodes, for 'total'). Updated as
+        # events are scanned.
+        tcp_queued = defaultdict(lambda: 0)
+
+        # Node -> Longest length ever seen for that node in @queued.
+        max_queue = defaultdict(lambda: 0)
+
+        # Largest value ever seen for @queued['total']
+        max_total = 0
+
+        # Create the list of events
+        for pkt in itertools.chain(packets.values(), tcp_packets.values(),
+                grants.values()):
+            if pkt['rx_node'] == '':
+                continue
+            if not 'gro' in pkt or not 'free_tx_skb' in pkt:
+                continue
+            free = pkt['free_tx_skb']
+            gro = pkt['gro']
+            bytes = pkt_recv_length(pkt)
+            if free < gro:
+                events.append([pkt['free_tx_skb'], 'enqueue', bytes, pkt])
+                events.append([pkt['gro'], 'dequeue', bytes, pkt])
+
+        events.sort(key = lambda event: event[0])
+
+        # List of interval end times, for plotting.
+        interval_ends = []
+
+        # node -> list of total kbytes queued for that node for each
+        # time in interval_ends
+        interval_queued = {}
+
+        # node -> list of unscheduled Homa kbytes queued for that node for each
+        # time in interval_ends
+        interval_unsched = {}
+
+        # node -> list of TCP kbytes queued for that node for each
+        # time in interval_ends
+        interval_tcp = {}
+
+        # For each time in interval_ends, the total amount of data queued
+        # for all nodes at that time.
+        interval_total = []
+
+        # For each time in interval_ends, the total amount of unscheduled
+        # data queued for all nodes at that time.
+        interval_total_unsched = []
+
+        # For each time in interval_ends, the total amount of TCP data
+        # queued across all nodes at that time.
+        interval_total_tcp = []
+
+        # True means there was some Homa data in the traces; false means
+        # TCP only
+        got_homa = False
+
+        for node in get_sorted_nodes():
+            interval_queued[node] = []
+            interval_unsched[node] = []
+            interval_tcp[node] = []
+
+        # Scan events in time order to build plot datasets.
+        interval_end = (math.ceil(events[0][0] / options.interval) *
+                    options.interval)
+        last_start = get_last_start()
+        for t, event, bytes, pkt in events:
+            while t >= interval_end:
+                # For plotting, ignore intervals where we don't have
+                # trace data for all nodes (queue sizes will be underestimated
+                # for those intervals).
+                if t > last_start:
+                    # Create a new interval for plots.
+                    interval_ends.append(interval_end)
+                    interval_total.append(queued['total'] * 1e-3)
+                    interval_total_unsched.append(unsched_queued['total'] * 1e-3)
+                    interval_total_tcp.append(tcp_queued['total'] * 1e-3)
+                    for node in get_sorted_nodes():
+                        interval_queued[node].append(queued[node] * 1e-3)
+                        interval_unsched[node].append(unsched_queued[node] * 1e-3)
+                        interval_tcp[node].append(tcp_queued[node] * 1e-3)
+                interval_end += options.interval
+
+            unsched = 0
+            if pkt['type'] == 'data':
+                got_homa = True
+                rpc = rpcs[pkt['id']]
+                if 'unsched' in rpc and pkt['offset'] < rpc['unsched']:
+                    unsched = bytes
+            tcp = 0
+            if pkt['type'] == 'tcp':
+                tcp = bytes
+
+            node = pkt['rx_node']
+            if event == 'enqueue':
+                queued[node] += bytes
+                if queued[node] > max_queue[node]:
+                    max_queue[node] = queued[node]
+                queued['total'] += bytes
+                if queued['total'] > max_total:
+                    max_total = queued['total']
+                unsched_queued[node] += unsched
+                unsched_queued['total'] += unsched
+                tcp_queued[node] += tcp
+                tcp_queued['total'] += tcp
+            elif event == 'dequeue':
+                queued[node] -= bytes
+                queued['total'] -= bytes
+                unsched_queued[node] -= unsched
+                unsched_queued['total'] -= unsched
+                tcp_queued[node] -= tcp
+                tcp_queued['total'] -= tcp
+
+        # Generate time-series plots showing queues for each node and sums
+        # across all nodes.
+        x_max = get_last_time()
+        y_max = max(max_queue.values()) * 1e-3
+        nodes = get_sorted_nodes()
+        fig, axes = plt.subplots(nrows = len(nodes) + 1, ncols = 1,
+                sharex = False, figsize = [8, (1 + len(nodes)) * 2])
+        show_tcp = len(tcp_packets) >= 0.01 * len(packets)
+        ax = axes[0]
+        ax.set_xlim(last_start, x_max)
+        ax.set_xlabel('Time (μsecs)')
+        ax.set_ylim(0, max_total * 1e-3)
+        ax.set_ylabel('TOR Total (KB)')
+        ax.grid(which="major", axis="y")
+        if got_homa:
+            ax.plot(interval_ends, interval_total, color=color_blue)
+            ax.plot(interval_ends, list(map(add, interval_total_unsched,
+                    interval_total_tcp)), color=color_red)
+        ax.plot(interval_ends, interval_total_tcp, color=color_brown)
+        for i in range(len(nodes)):
+            node = nodes[i]
+            ax = axes[i + 1]
+            ax.set_xlim(last_start, x_max)
+            ax.set_xlabel('Time (μsecs), %s' % node)
+            ax.set_ylim(0, y_max)
+            ax.set_ylabel('TOR Queues (KB)')
+            ax.grid(which="major", axis="y")
+            if got_homa:
+                ax.plot(interval_ends, interval_queued[node], color=color_blue)
+                ax.plot(interval_ends, list(map(add, interval_unsched[node],
+                        interval_tcp[node])), color=color_red)
+            ax.plot(interval_ends, interval_tcp[node], color=color_brown)
+        legend_handles = [matplotlib.lines.Line2D([], [], color=color_blue,
+                marker='o', linestyle='None', markersize=8,
+                label='Total')]
+        legend_handles.append(matplotlib.lines.Line2D([], [], color=color_red,
+                marker='o', linestyle='None', markersize=8,
+                label='Unsched'))
+        legend_handles.append(matplotlib.lines.Line2D([], [],
+                color=color_brown, marker='o', linestyle='None',
+                markersize=8, label='TCP'))
+        fig.legend(handles=legend_handles)
+        plt.tight_layout()
+        plt.savefig("%s/torqs.pdf" % (options.plot), bbox_inches='tight')
+
+        print('\n---------------------')
+        print('Analyzer: torqs')
+        print('---------------------')
+        print()
+        print('Estimated buffer occupancy at TOR downlinks (packets that '
+                'have been returned')
+        print('to Linux on the source but not yet processed by GRO on the '
+                'destination).')
+        print('Note: numbers are based on buffer occupancies at the end of '
+                '%.1f usec intervals' % (options.interval))
+        print('except for AllMax, which considers all times, not just '
+                'interval ends.')
+        print('Node:     Destination node, or \'Total\' for sum across all '
+                'downlinks')
+        print('Tcp50:    50th percentile of TCP packets (KB)')
+        print('Tcp90:    90th percentile of TCP packets (KB)')
+        print('TcpMax:   Largest value seen for TCP packets (KB)')
+        print('Unsch50:  50th percentile of unscheduled Homa packets (KB)')
+        print('Unsch90:  90th percentile of unscheduled Homa packets (KB)')
+        print('UnschMax: Largest value seen for unscheduled Homa packets (KB)')
+        print('All50:    50th percentile of total for node (KB)')
+        print('All90:    90th percentile of total for node (KB)')
+        print('AllMax:   Largest value seen for node (KB)')
+        print('\nNode        Tcp50  Tcp90 TcpMax Unsch50 Unsch90 UnschMax  All50  All90 AllMax')
+        for node in get_sorted_nodes():
+            tcp_sort = sorted(interval_tcp[node])
+            unsched_sort = sorted(interval_unsched[node])
+            total_sort = sorted(interval_queued[node])
+            size = len(tcp_sort)
+            print(' %-9s %6.0f %6.0f %6.0f  %6.0f  %6.0f   %6.0f %6.0f %6.0f %6.0f'
+                    % (node, tcp_sort[size // 2], tcp_sort[size * 9 // 10],
+                    tcp_sort[-1], unsched_sort[size // 2],
+                    unsched_sort[size * 9 // 10], unsched_sort[-1],
+                    total_sort[size // 2], total_sort[size * 9 // 10],
+                    max_queue[node] * 1e-3))
+        tcp_sort = sorted(interval_total_tcp)
+        unsched_sort = sorted(interval_total_unsched)
+        total_sort = sorted(interval_total)
+        size = len(tcp_sort)
+        print(' Total     %6.0f %6.0f %6.0f  %6.0f  %6.0f   %6.0f %6.0f %6.0f %6.0f'
+                % (tcp_sort[size // 2], tcp_sort[size * 9 // 10], tcp_sort[-1],
+                unsched_sort[size //2 ], unsched_sort[size * 9 // 10],
+                unsched_sort[-1], total_sort[size // 2],
+                total_sort[size * 9 // 10], max_total * 1e-3))
 
 #------------------------------------------------
 # Analyzer: txintervals
