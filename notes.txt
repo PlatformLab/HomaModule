@@ -1,20 +1,9 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* New approach to managing tx skbs:
-  * Deal with homa_skb_info?
-  * Eliminate homa_info->wire_bytes?
-  * Stop using @common.sequence?
-  * Fix comments in homa_wire.h about data packet format? (and make TCP
-    hijacking use the same packet structure as non-hijacking?)
-  * Eliminate homa_info->seg_length? (redundant)
-  * Set hsk->error_msg on errors.
-
 * Finish exploring how to provide pacer helpers when TCP is running wihout
   Homa: is it possible to trigger everything from callbacks without a
   thread?
-
-* Recheck TCP performance at 50 nodes (e.g. without packet steering).
 
 * By sharing peers across sockets, Homa doesn't account for information
   in the flows such as sk_uid, sk_mark, tos, and sk_bound_dev_if, which
@@ -34,20 +23,8 @@ Notes for Homa implementation in Linux:
   homa_sock_init
   tx sk_buffs (homa_skb.c)
 
-* homa_skb_info is not necessarily retained once a tx packet is passed to
-  ip*xmit: calls to pskb_expand_heador or skb_unshare may copy data, but
-  they only copy known live data, which will not include homa_skb_info.
-  Problem areas:
-  * If a TSO packet gets segmented in software, the homa_skb_info is not
-    replicated in the segments, which causes crashes (e.g.,
-    homq_qdisc_defer_homa ends up with a NULL value for rpc; hmmm, homa_qdisc
-    shouldn't see packets after segmentation?).
-  One possible solution is to embed a token in the actual data of the
-  packet (extra header field), which can be used to look up extra metadata.
-  Or, maybe put the extra metadata in the first frag, just before the "real"
-  packet data? However, this won't help in the case of packet fragmentation,
-  where the data areas change.
-  This problem may have been fixed by the implementation of homa_tx_pool.
+* Check to see that software segmentation works again (with new homa_tx_pool
+  functionality).
 
 * Homa's throughput on W3 seems to be worse than TCP on c6620 cluster.
 
