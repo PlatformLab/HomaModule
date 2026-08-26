@@ -3141,6 +3141,111 @@ class AnalyzeBpages:
             print('%-10s  %5d  %6d' % (node, self.node_rpcs[node],
                     self.node_bpages[node]))
 
+
+#------------------------------------------------
+# Analyzer: bw
+#------------------------------------------------
+class AnalyzeBw:
+    """
+    Compute the rate of bytes transmitted and received in data packets for
+    each node over the time range given by the --time-range option. If the
+    --nodes option in specified, then also compute bandwidth for each node
+    considering only packets going to or from that set of peer nodes.
+    """
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeTcppackets')
+        require_options('bw', 'time_range')
+
+    def output(self):
+        global packets
+
+        # Node -> total bytes passed to the NIC during the given time range.
+        node_tx = defaultdict(lambda: 0)
+
+        # Node -> total bytes received by GRO during the given time range.
+        node_rx = defaultdict(lambda: 0)
+
+        # Count traffic to/from these peers separately.
+        peers = {}
+        for node in options.nodes.split():
+            peers[node] = 1
+
+        # Node -> total bytes transmitted to nodes in peers during the
+        # time range
+        peer_tx = defaultdict(lambda: 0)
+
+        # Node -> total bytes received from nodes in peers during the
+        # time range
+        peer_rx = defaultdict(lambda: 0)
+
+        start, end = get_range(options.time_range,
+                option_name='--time-range', parse_float=True)
+        for pkt in itertools.chain(packets.values(), tcp_packets.values()):
+            if 'tso_length' in pkt and 'nic' in pkt and 'tx_node' in pkt:
+                nic = pkt['nic']
+                tx_node = pkt['tx_node']
+                tso_length = pkt['tso_length']
+                if nic >= start and nic < end:
+                    node_tx[tx_node] += tso_length
+                    if 'rx_node' in pkt and pkt['rx_node'] in peers:
+                        peer_tx[tx_node] += tso_length
+            if 'gro' in pkt and 'rx_node' in pkt:
+                gro = pkt['gro']
+                rx_node = pkt['rx_node']
+                length = pkt['length']
+                if gro >= start and gro < end:
+                    node_rx[rx_node] += length
+                    if 'tx_node' in pkt and pkt['tx_node'] in peers:
+                        peer_rx[rx_node] += length
+
+        print('\n--------------------')
+        print('Analyzer: bw')
+        print('--------------------')
+
+        print('\nInput and output bandwidth for each node in the time range from')
+        print('%.3f to %.3f' % (start, end), end='')
+        if peers:
+            print('. For the Alt measurements below, only traffic')
+            print('to/from the following nodes was considered:')
+            nodes = options.nodes.split()
+            for i in range(0, len(nodes), 5):
+                line = ''
+                for node in nodes[i:i+5]:
+                   line += '%-10s' % (node)
+                print(line.rstrip())
+        else:
+            print(':')
+        print('Node:   Name of node')
+        print('Tx:     Rate of message bytes passed to the NIC by Node '
+                'during the')
+        print('        time range (Gbps)')
+        print('Rx:     Rate of message bytes received by GRO on Node '
+                'during the')
+        print('        time range (Gbps)')
+        if peers:
+            print('AltTx:  Rate of message bytes transmitted by Node to the '
+                    'nodes listed above')
+            print('AltRx:  Rate of message bytes received by Node from the '
+                    'nodes listed above')
+
+        alt = '    AltTx   AltRx' if peers else ''
+        print('\nNode             Tx      Rx%s' % (alt))
+        for node in get_sorted_nodes():
+            if peers:
+                peer_string = ' %7.1f %7.1f' % (
+                    (peer_tx[node] * 8 / (end - start)) * 1e-3,
+                    (peer_rx[node] * 8 / (end - start)) * 1e-3)
+            else:
+                peer_string = ''
+            print(' %-9s  %7.1f %7.1f %s' % (node,
+                    (node_tx[node] * 8 / (end - start)) * 1e-3,
+                    (node_rx[node] * 8 / (end - start)) * 1e-3, peer_string))
+            # print('node_tx[%s]: %d, end - start %.1f, bits/usec %.1f' % (node,
+            #         node_tx[node], end - start,
+            #         (node_tx[node] * 8 / (end - start))))
+
 #------------------------------------------------
 # Analyzer: copy
 #------------------------------------------------
@@ -14469,6 +14574,9 @@ parser.add_option('--no-update', action='store_false', default=True,
 parser.add_option('--node', dest='node', default=None,
         metavar='N', help='Specifies a particular node (the name of its '
         'trace file without the extension); required by some analyzers')
+parser.add_option('--nodes', dest='nodes', default='',
+        metavar='N', help='Used by some analyzers to focus on a subset '
+        'of the nodes; consists of a list of node names (default: none)')
 parser.add_option('--pid', dest='pid', type=int, default=None,
         metavar='P', help='Process identifier; used by some analyzers to '
         'select a particular process.')
@@ -14517,6 +14625,10 @@ parser.add_option('--threshold', dest='threshold', type=int, default=50,
         'in microseconds (default: 100)')
 parser.add_option('--time', dest='time', type=float, default=None,
         metavar='T', help='Time of interest; required by some analyzers')
+parser.add_option('--time-range', dest='time_range', default=None,
+        metavar='R', help='Used by some analyzers to select a range of '
+        'times; contains two floating-point values giving start and end '
+        'times')
 parser.add_option('--tx-core', dest='tx_core', type=int, default=None,
         metavar='C', help='If specified, some analyzers will ignore packets '
         'transmitted from cores other than C')
