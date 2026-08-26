@@ -509,9 +509,6 @@ struct homa_net {
  * linear part of the skb.
  */
 struct homa_skb_info {
-	/** @next_skb: used to link together outgoing skb's for a message. */
-	struct sk_buff *next_skb;
-
 	/**
 	 * @data_bytes: total bytes of message data across all of the
 	 * segments in this packet.

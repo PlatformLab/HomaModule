@@ -244,28 +244,6 @@ const char *unit_log_grantables(struct homa *homa)
 #endif /* See strip.py */
 
 /**
- * unit_log_filled_skbs() - Append to the test log a human-readable description
- * of a list of packet buffers created by homa_fill_packets.
- * @skb:         First in list of sk_buffs to print; the list is linked
- *               using homa_skb_info->next_skb.
- * @verbose:     If non-zero, use homa_print_packet for each packet;
- *               otherwise use homa_print_packet_short.
- */
-void unit_log_filled_skbs(struct sk_buff *skb, int verbose)
-{
-	char buffer[400];
-
-	while (skb != NULL) {
-		if (verbose)
-			homa_print_packet(skb, buffer, sizeof(buffer));
-		else
-			homa_print_packet_short(skb, buffer, sizeof(buffer));
-		unit_log_printf("; ", "%s", buffer);
-		skb = homa_get_skb_info(skb)->next_skb;
-	}
-}
-
-/**
  * unit_log_skb_list() - Append to the test log a human-readable description
  * of a list of packet buffers.
  * @packets:     Header for list of sk_buffs to print.
