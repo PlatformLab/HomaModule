@@ -23,6 +23,34 @@ Notes for Homa implementation in Linux:
   homa_sock_init
   tx sk_buffs (homa_skb.c)
 
+* Homa's bipartite matching algorithm is failing under very high loads
+  where there are large backlogs of messages waiting to be sent:
+  * Some nodes will send unscheduled packets for a hundred or more
+    long messages (they aren't getting grants for any of them).
+  * Later on, they get simultaneous grants for more than they can handle,
+    so many grants are "stranded". In some cases, all of a node's outstanding
+    grants are stranded, so its incoming throughput can drop to near zero.
+  * Because of this, other nodes have unused outgoing bandwidth, which
+    causes them to start more long messages, which makes the problem even
+    worse.
+  * As a result, cluster throughput is only about 60-70% of network bandwidth.
+    Interesting that this number is similar to the throughput when there is
+    no overcommitment.
+  * Possible solutions:
+    * Limit the number of outstanding messages that need grants but
+      haven't received them.
+      * In homa_qdisc, when see offset 0 of msg that requires grants,
+        check count and queue message according to length.
+      * When xmit last packet, decrement count, queue packet(s) for next
+        message.
+    * Implement the SIRD approach, where nodes return grants that they can't
+      respond to quickly. But, with this approach could it take a long time
+      (many attempts) to find a node that will respond?
+
+* There is also a problem at very high loads with FIFO grants using up most
+  or all of a node's incoming budget (they get spread across a large number
+  of messages, none of which is responding).
+
 * Check to see that software segmentation works again (with new homa_tx_pool
   functionality).
 
