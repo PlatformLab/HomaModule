@@ -1215,12 +1215,14 @@ def print_pkts(pkts, header=True, comment=False):
         buf.write(prefix + '            number for TCP\n')
         buf.write(prefix + 'MsgLen:     Length of Homa message\n')
         buf.write(prefix + 'Offset:     Offset of packet within message or '
-                '"TCP" if packet is TCP\n')
+                'grant offset for grants;\n')
+        buf.write('                     "TCP" if packet is TCP\n')
         buf.write(prefix + 'Length:     Size of packet; for the first segment '
                 'generated from a TSO\n')
         buf.write(prefix + '            frame this is the size of the TSO '
                 'frame; for other segments\n')
-        buf.write(prefix + '            it is the size of the received packet\n')
+        buf.write(prefix + '            it is the size of the received packet. '
+                'for grants this is "Grant"\n')
         buf.write(prefix + 'Xmit:       Time when packet was passed to ip*xmit\n')
         buf.write(prefix + 'Qdisc:      Time when homa_qdisc requeued packet '
                 'after deferral, if any\n')
@@ -1235,7 +1237,7 @@ def print_pkts(pkts, header=True, comment=False):
         buf.write(prefix + 'Prio:       Packet priority\n')
         buf.write(prefix + 'Rx:         Number of times segments in the packet '
                 'were retransmitted\n\n')
-        buf.write('Source    Dest         Id/Seq  MsgLen Offset  Length       ')
+        buf.write('Source    Dest         Id/Seq  MsgLen  Offset  Length       ')
         buf.write('Xmit      Qdisc  Qid        Nic  NDelay         ')
         buf.write('Gro  GDelay       Free  FDelay Prio Rx\n')
     for pkt in pkts:
@@ -1256,9 +1258,14 @@ def print_pkts(pkts, header=True, comment=False):
         gro = pkt['gro'] if 'gro' in pkt else None
         free = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
         qid = pkt['tx_qid'] if 'tx_qid' in pkt else None
-        length = pkt['tso_length'] if 'tso_length' in pkt else pkt['length']
+        if 'tso_length' in pkt:
+            length = pkt['tso_length']
+        elif 'length' in pkt:
+            length = pkt['length']
+        else:
+            length = 'Grant'
         msg_length = ''
-        if pkt['type'] == 'data':
+        if pkt['type'] == 'data' or pkt['type'] == 'grant':
             if pkt['id'] in rpcs:
                 rpc = rpcs[pkt['id']]
                 if 'out_length' in rpc:
@@ -1269,11 +1276,14 @@ def print_pkts(pkts, header=True, comment=False):
             # This is a TCP packet
             id_string = '%d' % (pkt['seq_ack'])
             offset_string = 'TCP'
-        rx = len(pkt['retransmits'])
-        if 'segments' in pkt:
-            for seg in pkt['segments']:
-                rx += len(seg['retransmits'])
-        rx_msg = str(rx) if rx > 0 else ""
+        if pkt['type'] == 'grant':
+            rx_msg = ''
+        else:
+            rx = len(pkt['retransmits'])
+            if 'segments' in pkt:
+                for seg in pkt['segments']:
+                    rx += len(seg['retransmits'])
+            rx_msg = str(rx) if rx > 0 else ""
         nic_delay_string = ''
         if nic_delay != None:
             nic_delay_string = '%.1f' % (nic_delay)
@@ -1287,7 +1297,7 @@ def print_pkts(pkts, header=True, comment=False):
         if 'priority' in pkt:
             prio_string = pkt['priority']
 
-        line = ' %-8s %-8s %10s %7s %6s  %6s' % (pkt['tx_node'], pkt['rx_node'],
+        line = ' %-8s %-8s %10s %7s %7s  %6s' % (pkt['tx_node'], pkt['rx_node'],
                 id_string, msg_length, offset_string, length)
         line += ' %10s %10s  %3s %10s %7s' % (print_if(xmit, '%.3f'),
                 qdisc_string, print_if(qid, '%d'), print_if(nic, '%.3f'),
@@ -4281,7 +4291,7 @@ class AnalyzeFilter:
     """
     Select packets based on various criteria, then print summary statistics
     for those packets. The following command-line options are used to filter
-    the packets: --tx-node, --rx-node, --tx-qid, --msglen, --grolat, --segs,
+    the packets: --tx-nodes, --rx-nodes, --tx-qid, --msglen, --grolat, --segs,
     --pkt_type, and --filter. If --verbose is specified then the matching
     packets are printed in detail. The --sort option selects a column to
     use for sorting the packets; it must be one of Xmit, Nic, Gro, SoftIRQ,
@@ -4316,6 +4326,7 @@ class AnalyzeFilter:
         """
         global packets, tcp_packets, grants, rpcs
 
+        # Set up filter information.
         filter_func = None
         if options.filter != None:
             name = 'filter_' + options.filter
@@ -4353,37 +4364,64 @@ class AnalyzeFilter:
                 raise Exception('Unknown packet type \'%s\'; must be \'data\', '
                         '\'tcp\', or \'grant\'' % (name))
 
+        rx_nodes = {}
+        if options.rx_nodes != None:
+            for node in options.rx_nodes.split():
+                rx_nodes[node] = 1
+        else:
+            for node in get_sorted_nodes():
+                rx_nodes[node] = 1
+        tx_nodes = {}
+        if options.tx_nodes != None:
+            for node in options.tx_nodes.split():
+                tx_nodes[node] = 1
+        else:
+            for node in get_sorted_nodes():
+                tx_nodes[node] = 1
+
         result = []
+        passed = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         for pkt_list in pkt_dict.values():
             for pkt in pkt_list:
                 if not 'gro' in pkt or not 'xmit' in pkt:
                     continue
-                if options.tx_node != None and options.tx_node != pkt['tx_node']:
+                passed[0] += 1
+                if not pkt['tx_node'] in tx_nodes:
                     continue
-                if options.rx_node != None and options.rx_node != pkt['rx_node']:
+                passed[1] += 1
+                if not pkt['rx_node'] in rx_nodes:
                     continue
+                passed[2] += 1
                 if options.tx_core != None and options.tx_core != pkt['tx_core']:
                     continue
+                passed[3] += 1
                 if options.rx_core != None and options.rx_core != pkt['gro_core']:
                     continue
+                passed[4] += 1
                 if options.tx_qid != None and (not 'tx_qid' in pkt or
                         options.tx_qid != pkt['tx_qid']):
                     continue
+                passed[5] += 1
                 if options.msglen != None:
                     if not 'msg_length' in pkt:
                         continue
                     length = pkt['msg_length']
                     if length < min_length or length > max_length:
                         continue
+                passed[6] += 1
                 if options.grolat != None:
                     latency = pkt['gro'] - pkt['xmit']
                     if latency < min_gro or latency > max_gro:
                         continue
-                if not options.segs and not 'tso_length' in pkt:
-                    continue
+                passed[7] += 1
+                if pkt['type'] != 'grant':
+                    if not options.segs and not 'tso_length' in pkt:
+                        continue
+                passed[8] += 1
                 if filter_func != None and not filter_func(pkt):
                     continue
                 result.append(pkt)
+        print('passed: %s' % (passed))
         return result
 
     def output(self):
@@ -4400,14 +4438,14 @@ class AnalyzeFilter:
         print('%d packets were selected using the following filters:' %
                 (len(pkts)))
         print('    --pkt_types %s' % (options.pkt_types))
-        if options.tx_node != None:
-            print('    --tx-node   %s' % (options.tx_node))
+        if options.tx_nodes != None:
+            print('    --tx-nodes  %s' % (options.tx_nodes))
         if options.tx_core != None:
             print('    --tx-core   %d' % (options.tx_core))
         if options.tx_qid != None:
             print('    --tx-qid    %d' % (options.tx_qid))
-        if options.rx_node != None:
-            print('    --rx-node   %s' % (options.rx_node))
+        if options.rx_nodes != None:
+            print('    --rx-nodes  %s' % (options.rx_nodes))
         if options.rx_core != None:
             print('    --rx-core   %s' % (options.rx_core))
         if options.segs:
@@ -13127,6 +13165,7 @@ class AnalyzeTemp2:
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzePackets')
         # dispatcher.interest('AnalyzeTcppackets')
+        require_options('temp2', 'sort')
 
     def output(self):
         '''
@@ -13151,7 +13190,13 @@ class AnalyzeTemp2:
         events = []
 
         # Node -> largest free -> nic delay for packets that arrived on
-        # that node with 18000 <= t <= 19000
+        # that node with begin <= t <= end
+        # begin = 26700
+        # end = 27410
+        # watch_node = 'node34'
+        begin = 19000
+        end = 19600
+        watch_node = 'node26'
         max_delay = defaultdict(lambda: 0)
 
         for pkt in packets.values():
@@ -13167,13 +13212,13 @@ class AnalyzeTemp2:
             events.append([pkt['free_tx_skb'], 'free', pkt])
             gro = pkt['gro']
             events.append([gro, 'gro', pkt])
-            if gro >= 18000 and gro <= 19000 and pkt['offset'] == 0 and pkt['length'] < 5000:
+            if gro >= begin and gro <= end and pkt['offset'] == 0 and pkt['length'] < 5000:
                 delay = gro - pkt['free_tx_skb']
                 if delay > max_delay[rx_node]:
                     max_delay[rx_node] = delay
 
         print('Worst-case delay experienced by each node for short incoming packets')
-        print('with 18000 <= gro <= 19000:')
+        print('with %d <= gro <= %d:' % (begin, end))
         print('Node         Max_Delay (usec)')
         for node, delay in sorted(max_delay.items(), reverse=True, key = lambda t: t[1]):
             print(' %-9s     %6.1f' % (node, delay))
@@ -13216,7 +13261,26 @@ class AnalyzeTemp2:
                     options.interval)
         last_start = get_last_start()
         print('\nInterval data for packets passing from expt4 to expt5:')
-        print('\nTime      NicBklg   FreeBklg  NicGbps GroGbps  Bklg15 MaxDelay  Gbps15')
+        print('Time:      End of interval')
+        print('NicBklg:   KB of data that have been handed off to NICs on '
+                'expt4 but not yet')
+        print('           received by GRO on expt5')
+        print('FreeBklg:  KB of data that have been returned after transmission '
+                'on expt4 but not')
+        print('           yet received by GRO on expt5')
+        print('NicGbps:   Rate of traffic from expt4 to expt5 handed off to '
+                    'NIC in interval')
+        print('GroGbps:   Rate of traffic from expt4 to expt5 received by '
+                    'GRO in interval')
+        print('BklgX:     KB of data from expt4 to %s in packets returned '
+                'after transmission' % (watch_node))
+        print('           but not yet received by GRO')
+        print('MaxDelay:  Maximum time from free_tx_skb to gro for any packet '
+                'processed by GRO')
+        print('           in the interval')
+        print('GbpsX:     Rate at which %s processed packets coming from expt4 '
+                    'in GRO' % (watch_node))
+        print('\nTime      NicBklg   FreeBklg  NicGbps GroGbps  BklgX  MaxDelay  GbpsX')
         for t, event, pkt in events:
             while t >= interval_end:
                 # For plotting, ignore intervals where we don't have
@@ -13244,16 +13308,16 @@ class AnalyzeTemp2:
             elif event == 'free':
                 if t < pkt['gro']:
                     free_backlog += length
-                    if pkt['rx_node'] == 'node15':
+                    if pkt['rx_node'] == watch_node:
                         backlog15 += length
             elif event == 'gro':
                 received += length
-                if rx_node == 'node15':
+                if rx_node == watch_node:
                     received15 += length
                 nic_backlog -= length
                 if t > pkt['free_tx_skb']:
                     free_backlog -= length
-                    if rx_node == 'node15':
+                    if rx_node == watch_node:
                         backlog15 -= length
                 delay = t - pkt['free_tx_skb']
                 if delay > max_free_gro and pkt['priority'] == 7:
@@ -13299,13 +13363,13 @@ class AnalyzeTemp2:
                 node = node + '*'
             print(' %6.1f   %-10s %9.3f' % (gap, node, t))
 
-        print('\nRaw packets (%d), sorted by %s:' % (len(xpkts), options.sort))
-        sort_pkts(xpkts, options.sort)
-        print(print_pkts(xpkts), end='')
+        # print('\nRaw packets (%d), sorted by %s:' % (len(xpkts), options.sort))
+        # sort_pkts(xpkts, options.sort)
+        # print(print_pkts(xpkts), end='')
 
-        print('\nPackets to node15, sorted by %s:' % (options.sort))
-        node15pkts = [pkt for pkt in xpkts if pkt['rx_node'] == 'node15']
-        print(print_pkts(node15pkts), end='')
+        print('\nPackets to %s, sorted by %s:' % (watch_node, options.sort))
+        watch_node_pkts = [pkt for pkt in xpkts if pkt['rx_node'] == watch_node]
+        print(print_pkts(watch_node_pkts), end='')
 
 #------------------------------------------------
 # Analyzer: temp3
@@ -13632,7 +13696,7 @@ class AnalyzeTorqs:
         dispatcher.interest('AnalyzePackets')
         dispatcher.interest('AnalyzeTcppackets')
         dispatcher.interest('AnalyzeRpcs')
-        require_options('downlinks', 'plot')
+        require_options('torqs', 'plot')
 
     def output(self):
         global packets, grants, tcp_packets, options, traces
@@ -14594,7 +14658,7 @@ parser.add_option('--pkt-types', dest='pkt_types', default='data',
         metavar='T', help='Used by some analyzers to determine which types of '
         'packets to include for analysis; a list of the values \'data\' for '
         'Homa data packets, \'tcp\' for TCP packets, and \'grant\' for Homa '
-        'grants, or \'all\' to select all types (default: \'homa\')')
+        'grants, or \'all\' to select all types (default: \'data\')')
 parser.add_option('--rpc-start', dest='rpc_start', default=None,
         metavar='T', help='Used by some analyzers to filter RPCs based on '
         'starting time; contains two values (min and max, inclusive).')
@@ -14605,9 +14669,10 @@ parser.add_option('--rtt', dest='rtt', default=None,
 parser.add_option('--rx-core', dest='rx_core', type=int, default=None,
         metavar='C', help='If specified, some analyzers will ignore packets '
         'transmitted from cores other than C')
-parser.add_option('--rx-node', dest='rx_node', default=None,
-        metavar='N', help='If specified, some analyzers will ignore packets '
-        'received by nodes other than N')
+parser.add_option('--rx-nodes', dest='rx_nodes', default=None,
+        metavar='N', help='A list of node names. In some cases analyzers '
+        'will consider only packets received by nodes in this list '
+        '(default: all nodes)')
 parser.add_option('--same-gro-core', dest='same_gro_core', action="store_true",
         default=False, help='If specified, the pass analyzer will only '
         'consider passing for packets that are processed by GRO on the '
@@ -14635,9 +14700,10 @@ parser.add_option('--tx-core', dest='tx_core', type=int, default=None,
 parser.add_option('--tx-qid', dest='tx_qid', type=int, default=None,
         metavar='C', help='Specifies a transmit queue identifier; used '
         'by some anlyzers to select a specific queue.')
-parser.add_option('--tx-node', dest='tx_node', default=None,
-        metavar='N', help='If specified, some analyzers will ignore ignore packets '
-        'transmitted by nodes other than N')
+parser.add_option('--tx-nodes', dest='tx_nodes', default=None,
+        metavar='N', help='A list of node names. In some cases analyzers '
+        'will consider only packets transmitted by nodes in this list '
+        '(default: all nodes)')
 parser.add_option('--verbose', '-v', action='store_true', default=False,
         dest='verbose',
         help='Print additional output with more details')
