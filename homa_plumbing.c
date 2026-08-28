@@ -892,7 +892,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		 * Must release the RCU lock temporarily while allocating.
 		 */
 		rcu_read_unlock();
-		rpcs = kmalloc(num_rpcs * sizeof(*rpcs), GFP_KERNEL);
+		rpcs = kmalloc_array(num_rpcs, sizeof(*rpcs), GFP_KERNEL);
 		if (!rpcs) {
 			homa_unprotect_rpcs(hsk);
 			return -ENOMEM;
