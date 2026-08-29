@@ -149,10 +149,10 @@ TEST_F(homa_peer, homa_peer_release_fn)
 	peer = homa_peer_alloc(&self->hsk, ip3333);
 	dst = peer->dst;
 	dst_hold(dst);
-	EXPECT_EQ(2, atomic_read(&dst->__refcnt));
+	EXPECT_EQ(2, rcuref_read(&dst->__rcuref));
 
 	homa_peer_release_fn(peer, NULL);
-	EXPECT_EQ(1, atomic_read(&dst->__refcnt));
+	EXPECT_EQ(1, rcuref_read(&dst->__rcuref));
 	dst_release(dst);
 }
 
@@ -439,7 +439,7 @@ TEST_F(homa_peer, homa_peer_alloc__success)
 	EXPECT_EQ(0, peer->cutoff_version);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_allocs);
 #endif /* See strip.py */
-	EXPECT_EQ(1, atomic_read(&peer->dst->__refcnt));
+	EXPECT_EQ(1, rcuref_read(&peer->dst->__rcuref));
 	homa_peer_release(peer);
 }
 TEST_F(homa_peer, homa_peer_alloc__kmalloc_error)
@@ -477,10 +477,10 @@ TEST_F(homa_peer, homa_peer_free)
 	ASSERT_FALSE(IS_ERR(peer));
 	dst = peer->dst;
 	dst_hold(dst);
-	ASSERT_EQ(2, atomic_read(&dst->__refcnt));
+	ASSERT_EQ(2, rcuref_read(&dst->__rcuref));
 
 	homa_peer_release(peer);
-	ASSERT_EQ(1, atomic_read(&dst->__refcnt));
+	ASSERT_EQ(1, rcuref_read(&dst->__rcuref));
 	dst_release(dst);
 }
 
@@ -613,7 +613,7 @@ TEST_F(homa_peer, homa_get_dst__normal)
 	struct dst_entry *dst;
 
 	dst = homa_get_dst(peer, &self->hsk);
-	EXPECT_EQ(2, atomic_read(&dst->__refcnt));
+	EXPECT_EQ(2, rcuref_read(&dst->__rcuref));
 	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->peer_dst_refreshes));
 	dst_release(dst);
 	homa_peer_release(peer);
@@ -627,7 +627,7 @@ TEST_F(homa_peer, homa_get_dst__must_refresh_obsolete)
 	peer->dst->obsolete = 1;
 	mock_dst_check_errors = 1;
 	dst = homa_get_dst(peer, &self->hsk);
-	EXPECT_EQ(2, atomic_read(&dst->__refcnt));
+	EXPECT_EQ(2, rcuref_read(&dst->__rcuref));
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes));
 	EXPECT_NE(old, dst);
 	dst_release(dst);
@@ -643,7 +643,7 @@ TEST_F(homa_peer, homa_get_dst__multiple_refresh_failures)
 	mock_dst_check_errors = 0xf;
 	mock_route_errors = 0xf;
 	dst = homa_get_dst(peer, &self->hsk);
-	EXPECT_EQ(2, atomic_read(&dst->__refcnt));
+	EXPECT_EQ(2, rcuref_read(&dst->__rcuref));
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes));
 	EXPECT_EQ(old, dst);
 	EXPECT_EQ(3, mock_dst_check_errors);

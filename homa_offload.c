@@ -10,7 +10,6 @@
 #include "homa_qdisc.h"
 #include "homa_wire.h"
 #include <net/rps.h>
-#include <net/gro.h>
 
 DEFINE_PER_CPU(struct homa_offload_core, homa_offload_core);
 

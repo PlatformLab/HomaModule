@@ -16,8 +16,6 @@
 #undef alloc_percpu_gfp
 #define alloc_percpu_gfp(type, flags) __kmalloc(10 * sizeof(type), flags)
 
-#define complete_and_exit(...)
-
 #define compound_order mock_compound_order
 
 #ifdef cpu_to_node
@@ -61,6 +59,9 @@
 #undef kmalloc_array
 #define kmalloc_array(count, size, type) __kmalloc((count) * (size), type)
 
+#undef kthread_complete_and_exit
+#define kthread_complete_and_exit(...)
+
 #undef local_irq_save
 #define local_irq_save(flags) (flags) = 0
 
@@ -80,12 +81,6 @@
 
 #undef per_cpu_ptr
 #define per_cpu_ptr(name, core) (&name[core])
-
-#undef preempt_disable
-#define preempt_disable() mock_preempt_disable()
-
-#undef preempt_enable
-#define preempt_enable() mock_preempt_enable()
 
 #define put_page mock_put_page
 
@@ -120,7 +115,7 @@
 #define tcp_v6_check(...) (~(__force __sum16)666U)
 
 #undef this_cpu_ptr
-#define this_cpu_ptr(name) (&name[cpu_number])
+#define this_cpu_ptr(name) (&name[pcpu_hot.cpu_number])
 
 #undef __this_cpu_read
 #define __this_cpu_read(name) (name)

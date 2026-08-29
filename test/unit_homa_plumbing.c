@@ -574,14 +574,15 @@ TEST_F(homa_plumbing, homa_socket__homa_sock_init_failure)
 TEST_F(homa_plumbing, homa_setsockopt__bad_level)
 {
 	EXPECT_EQ(ENOPROTOOPT, -homa_setsockopt(&self->hsk.sock, 0, 0,
-		(void *)0x100000, sizeof(struct homa_rcvbuf_args)));
+		  USER_SOCKPTR((void *)0x100000),
+		  sizeof(struct homa_rcvbuf_args)));
 	EXPECT_STREQ("homa_setsockopt invoked with level not IPPROTO_HOMA",
 		     self->hsk.error_msg);
 }
 TEST_F(homa_plumbing, homa_setsockopt__recvbuf_bad_optlen)
 {
 	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_RCVBUF, (void *)0x100000,
+			SO_HOMA_RCVBUF, USER_SOCKPTR((void *)0x100000),
 			sizeof(struct homa_rcvbuf_args) - 1));
 	EXPECT_STREQ("invalid optlen argument: must be sizeof(struct homa_rcvbuf_args)",
 		     self->hsk.error_msg);
@@ -590,7 +591,7 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_copy_from_sockptr_fails)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_RCVBUF, (void *)0x100000,
+			SO_HOMA_RCVBUF, USER_SOCKPTR((void *)0x100000),
 			sizeof(struct homa_rcvbuf_args)));
 	EXPECT_STREQ("invalid address for homa_rcvbuf_args",
 		     self->hsk.error_msg);
@@ -601,7 +602,7 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_region_not_writable)
 
 	mock_copy_to_user_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_RCVBUF, (void *)&args,
+			SO_HOMA_RCVBUF, KERNEL_SOCKPTR(&args),
 			sizeof(struct homa_rcvbuf_args)));
 	EXPECT_STREQ("receive buffer region is not writable",
 		     self->hsk.error_msg);
@@ -617,7 +618,7 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_success)
 	homa_pool_free(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_RCVBUF, (void *)&args,
+			SO_HOMA_RCVBUF, KERNEL_SOCKPTR(&args),
 			sizeof(struct homa_rcvbuf_args)));
 	EXPECT_EQ(args.start, (uintptr_t)self->hsk.buffer_pool->region);
 	EXPECT_EQ(64, self->hsk.buffer_pool->num_bpages);
@@ -628,7 +629,8 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_success)
 TEST_F(homa_plumbing, homa_setsockopt__server_bad_optlen)
 {
 	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SERVER, (void *)0x100000, sizeof(int) - 1));
+		  SO_HOMA_SERVER, USER_SOCKPTR((void *)0x100000),
+		  sizeof(int) - 1));
 	EXPECT_STREQ("invalid optlen argument: must be sizeof(int)",
 		     self->hsk.error_msg);
 }
@@ -636,7 +638,8 @@ TEST_F(homa_plumbing, homa_setsockopt__server_copy_from_sockptr_fails)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SERVER, (void *)0x100000, sizeof(int)));
+		  SO_HOMA_SERVER, USER_SOCKPTR((void *)0x100000),
+		  sizeof(int)));
 	EXPECT_STREQ("invalid address for SO_HOMA_SERVER value",
 		     self->hsk.error_msg);
 }
@@ -645,18 +648,19 @@ TEST_F(homa_plumbing, homa_setsockopt__server_success)
 	int arg = 7;
 
 	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SERVER, (void *)&arg, sizeof(int)));
+			SO_HOMA_SERVER, KERNEL_SOCKPTR(&arg), sizeof(int)));
 	EXPECT_EQ(1, self->hsk.is_server);
 
 	arg = 0;
 	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SERVER, (void *)&arg, sizeof(int)));
+			SO_HOMA_SERVER, KERNEL_SOCKPTR(&arg), sizeof(int)));
 	EXPECT_EQ(0, self->hsk.is_server);
 }
 TEST_F(homa_plumbing, homa_setsockopt__bad_optname)
 {
 	EXPECT_EQ(ENOPROTOOPT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA, 0,
-		(void *)0x100000, sizeof(struct homa_rcvbuf_args)));
+		  USER_SOCKPTR((void *)0x100000),
+		  sizeof(struct homa_rcvbuf_args)));
 	EXPECT_STREQ("setsockopt option not supported by Homa",
 		     self->hsk.error_msg);
 }

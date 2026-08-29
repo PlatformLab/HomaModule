@@ -41,8 +41,10 @@
 #include <linux/skbuff.h>
 #include <linux/socket.h>
 #include <linux/vmalloc.h>
+#include <net/gro.h>
 #include <net/icmp.h>
 #include <net/ip.h>
+#include <net/ip6_checksum.h>
 #include <net/ip6_route.h>
 #include <net/netns/generic.h>
 #include <net/protocol.h>
