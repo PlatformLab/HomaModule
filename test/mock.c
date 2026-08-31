@@ -972,6 +972,11 @@ void kfree_skb(struct sk_buff *skb)
 	free(skb);
 }
 
+void kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
+{
+	kfree_skb(skb);
+}
+
 void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 {
 	return kmalloc(size, gfpflags);
