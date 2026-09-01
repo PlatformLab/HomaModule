@@ -1,5 +1,5 @@
 /* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+ * SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
  */
 
 /* This file contains a program that runs on one node, as part of
@@ -229,7 +229,7 @@ std::mutex cmd_lock;
  * @fd_locks: used to synchronize concurrent accesses to the same fd
  * (indexed by fd).
  */
-#define MAX_FDS 10000
+#define MAX_FDS 100000
 std::atomic_bool fd_locks[MAX_FDS];
 
 /**
@@ -322,8 +322,8 @@ void print_help(const char *name)
 		"                      there is an \"option\" that doesn't start with \"--\",\n"
 		"                      then it and all of the remaining words are printed to\n"
 		"                      the log as a message.\n");
-	printf("    --file            Name of log file to use for future messages (\"-\"\n"
-		"                      means use standard output)\n");
+	printf("    --file            Name of log file where messages should be appended in the\n"
+		"                      future (\"-\" means use standard output)");
 	printf("    --level           Log level: either normal or verbose\n\n");
 	printf("server [options]      Start serving requests on one or more ports\n");
 	printf("    --buf-bpages      Number of bpages to allocate in the buffer poool for\n"
@@ -3370,7 +3370,7 @@ int log_cmd(std::vector<string> &words)
 			if (strcmp(name, "-") == 0)
 				f = stdout;
 			else {
-				f = fopen(name, "w");
+				f = fopen(name, "a");
 				if (f == NULL) {
 					printf("Couldn't open %s: %s\n", name,
 							strerror(errno));

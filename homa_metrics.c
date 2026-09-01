@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 /* This file contains various functions for managing Homa's performance
  * counters.
@@ -214,14 +214,16 @@ char *homa_metrics_print(void)
 		  "Data sk_buffs freed in normal paths\n");
 		M("skb_free_cycles", m->skb_free_cycles,
 		  "Time spent freeing data sk_buffs\n");
-		M("skb_page_allocs", m->skb_page_allocs,
-		  "Pages allocated for sk_buff frags\n");
-		M("skb_page_alloc_cycles", m->skb_page_alloc_cycles,
-		  "Time spent allocating pages for sk_buff frags\n");
+		M("tx_page_allocs", m->tx_page_allocs,
+		  "Page allocations (pool underflows) made for tx packets\n");
+		M("tx_page_alloc_cycles", m->tx_page_alloc_cycles,
+		  "Time spent allocating pages for tx packets\n");
 		M("requests_received", m->requests_received,
 		  "Incoming request messages\n");
 		M("responses_received", m->responses_received,
 		  "Incoming response messages\n");
+		M("gaps_created", m->gaps_created,
+		  "Number of homa_gap objects created\n");
 		M("wait_none", m->wait_none,
 		  "Messages received without blocking or polling\n");
 		M("wait_fast", m->wait_fast,
@@ -283,7 +285,7 @@ char *homa_metrics_print(void)
 		  "Time spent in homa_timer\n");
 		M("timer_reap_cycles", m->timer_reap_cycles,
 		  "Time in homa_timer spent reaping RPCs\n");
-		M("data_pkt_reap_cycles", m->data_pkt_reap_cycles,
+		M("dispatch_pkt_reap_cycles", m->dispatch_pkt_reap_cycles,
 		  "Time in homa_data_pkt spent reaping RPCs\n");
 		M("idle_time_conflicts", m->idle_time_conflicts,
 		  "Cache conflicts when updating link_idle_time\n");
@@ -303,10 +305,24 @@ char *homa_metrics_print(void)
 		  "TCP packets transmitted by the pacer\n");
 		M("pacer_tcp_bytes", m->pacer_tcp_bytes,
 		  "TCP bytes transmitted by the pacer (including headers)\n");
+		M("pacer_bubble_cycles", m->pacer_bubble_cycles,
+		  "Time NIC uplink was idle because pacer was slow\n");
+		M("nic_congest_cycles", m->nic_congest_cycles,
+		  "Time when the amount of data in NIC's possession was excessive\n");
+		M("pacer_checks", m->pacer_checks,
+		  "Calls to homa_qdisc_pacer_check\n");
+		M("pacer_helps", m->pacer_helps,
+		  "Calls to pacer from homa_qdisc_pacer_check\n");
 		M("pacer_help_bytes", m->pacer_help_bytes,
 		  "Bytes transmitted via homa_qdisc_pacer_check\n");
 		M("qdisc_tcp_packets", m->qdisc_tcp_packets,
 		  "TCP packets processed by homa_qdisc\n");
+		M("qdisc_flushes", m->qdisc_flushes,
+		  "RPCs that required qdisc cleanup when ended\n");
+		M("qdisc_lock_misses", m->qdisc_lock_misses,
+		  "Lock misses for homa_qdisc_devs\n");
+		M("qdisc_lock_miss_cycles", m->qdisc_lock_miss_cycles,
+		  "Time lost waiting for homa_qdisc_dev locks\n");
 		M("homa_cycles",
 		  m->softirq_cycles + m->napi_cycles +
 		  m->send_cycles + m->recv_cycles +
@@ -359,10 +375,6 @@ char *homa_metrics_print(void)
 		  "Socket lock misses\n");
 		M("socket_lock_miss_cycles", m->socket_lock_miss_cycles,
 		  "Time lost waiting for socket locks\n");
-		M("throttle_lock_misses", m->throttle_lock_misses,
-		  "Throttle lock misses\n");
-		M("throttle_lock_miss_cycles", m->throttle_lock_miss_cycles,
-		  "Time lost waiting for throttle locks\n");
 		M("peer_ack_lock_misses", m->peer_ack_lock_misses,
 		  "Misses on peer ack locks\n");
 		M("peer_ack_lock_miss_cycles", m->peer_ack_lock_miss_cycles,
@@ -387,14 +399,6 @@ char *homa_metrics_print(void)
 		  "RPCs skipped by reaper because still in use\n");
 		M("reaper_calls", m->reaper_calls,
 		  "Reaper invocations that were not disabled\n");
-		M("reaper_dead_skbs", m->reaper_dead_skbs,
-		  "Sum of hsk->dead_skbs across all reaper calls\n");
-		M("reaper_active_skbs", m->reaper_active_skbs,
-		  "RPCs skipped by reaper because of active tx skbs\n");
-		M("throttle_list_adds", m->throttle_list_adds,
-		  "Calls to homa_add_to_throttled\n");
-		M("throttle_list_checks", m->throttle_list_checks,
-		  "List elements checked in homa_add_to_throttled\n");
 		M("ack_overflows", m->ack_overflows,
 		  "Explicit ACKs sent because peer->acks was full\n");
 		M("ignored_need_acks", m->ignored_need_acks,

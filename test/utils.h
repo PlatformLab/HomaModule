@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+ */
 
 /* Utility functions for unit tests, implemented in C. */
 
@@ -31,7 +31,13 @@ enum unit_rpc_state {
 	UNIT_IN_SERVICE     = 24,
 };
 
+static inline u8 *unit_frag_first_byte(skb_frag_t *frag)
+{
+	return (u8 *)page_address(skb_frag_page(frag)) + skb_frag_off(frag);
+}
+
 char        *unit_ack_string(struct homa_ack *ack);
+void         unit_alloc_frags(int num_frags, skb_frag_t *frags, ...);
 struct homa_rpc
 	    *unit_client_rpc(struct homa_sock *hsk,
 			     enum unit_rpc_state state, struct in6_addr *client_ip,
@@ -40,7 +46,6 @@ struct homa_rpc
 int          unit_count_peers(struct homa *homa);
 struct in6_addr
 	     unit_get_in_addr(char *s);
-void         unit_homa_destroy(struct homa *homa);
 struct iov_iter
 	    *unit_iov_iter(void *buffer, size_t length);
 int          unit_list_length(struct list_head *head);
@@ -49,12 +54,9 @@ const char  *unit_log_deferred(struct homa_qdisc_dev *qdev);
 void         unit_log_filled_skbs(struct sk_buff *skb, int verbose);
 void         unit_log_frag_list(struct sk_buff *skb, int verbose);
 void         unit_log_hashed_rpcs(struct homa_sock *hsk);
-void         unit_log_message_out_packets(struct homa_message_out *message,
-				      int verbose);
 void         unit_log_skb_list(struct sk_buff_head *packets,
 			       int verbose);
 const char  *unit_print_gaps(struct homa_rpc *rpc);
-void         unit_reset_tx(struct homa_rpc *rpc);
 struct homa_rpc
 	    *unit_server_rpc(struct homa_sock *hsk,
 			     enum unit_rpc_state state,
@@ -67,7 +69,6 @@ void         unit_teardown(void);
 
 #ifndef __STRIP__ /* See strip.py */
 const char  *unit_log_grantables(struct homa *homa);
-void         unit_log_throttled(struct homa *homa);
 #endif /* See strip.py */
 
 /* Kludge to avoid including arpa/inet.h, which causes definition

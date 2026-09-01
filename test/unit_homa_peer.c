@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 #include "homa_impl.h"
 #include "homa_peer.h"
@@ -276,14 +276,27 @@ TEST_F(homa_peer, homa_peer_pick_victims__filter_idle_jiffies_min)
 	mock_rht_num_walk_results = 2;
 	jiffies = peertab->idle_jiffies_min + 150;
 	self->hnet->num_peers = peertab->net_max + 1000;
+	memset(victims, 0, sizeof(victims));
 
+	/* First call selects one victim */
 	EXPECT_EQ(1, homa_peer_pick_victims(peertab, victims, 5));
 	EXPECT_EQ(peers[1], victims[0]);
+
+	/* Second call tests whether the comparison with idle_jiffies_min
+	 * is robust if somehow jiffies < peer->access_jiffies.
+	 */
+	mock_rht_walk_results = (void **)peers;
+	mock_rht_num_walk_results = 2;
+	peers[1]->access_jiffies = 500;
+	jiffies = 400;
+	memset(victims, 0, sizeof(victims));
+	EXPECT_EQ(0, homa_peer_pick_victims(peertab, victims, 5));
+	EXPECT_EQ(NULL, victims[0]);
 }
 TEST_F(homa_peer, homa_peer_pick_victims__filter_idle_jiffies_max)
 {
 	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peers[3], *victims[5];
+	struct homa_peer *peers[4], *victims[5];
 	struct homa_net *hnet2;
 	struct homa_sock hsk2;
 
@@ -306,8 +319,16 @@ TEST_F(homa_peer, homa_peer_pick_victims__filter_idle_jiffies_max)
 	peers[2] = homa_peer_get(&self->hsk, ip3333);
 	homa_peer_release(peers[2]);
 
+	/* Fourth peer: net below limit, idle negative (to test robustness). */
+	jiffies = peertab->idle_jiffies_max + 200;
+	peers[3] = homa_peer_get(&self->hsk, ip4444);
+	homa_peer_release(peers[3]);
+
+	/* Make sure idle_jiffies_min test is a no-op. */
+	peertab->idle_jiffies_min = -10000;
+
 	mock_rht_walk_results = (void **)peers;
-	mock_rht_num_walk_results = 3;
+	mock_rht_num_walk_results = 4;
 	jiffies = peertab->idle_jiffies_max + 100;
 
 	EXPECT_EQ(2, homa_peer_pick_victims(peertab, victims, 5));
@@ -809,13 +830,17 @@ TEST_F(homa_peer, homa_peer_add_ack)
 	peer->num_acks = 3;
 
 	/* Add one RPC to unacked (fits). */
+	homa_rpc_lock(crpc1);
 	homa_peer_add_ack(crpc1);
+	homa_rpc_unlock(crpc1);
 	EXPECT_EQ(4, peer->num_acks);
 	EXPECT_STREQ("server_port 99, client_id 101",
 			unit_ack_string(&peer->acks[3]));
 
 	/* Add another RPC to unacked (also fits). */
+	homa_rpc_lock(crpc2);
 	homa_peer_add_ack(crpc2);
+	homa_rpc_unlock(crpc2);
 	EXPECT_EQ(5, peer->num_acks);
 	EXPECT_STREQ("server_port 99, client_id 102",
 			unit_ack_string(&peer->acks[4]));
@@ -823,7 +848,9 @@ TEST_F(homa_peer, homa_peer_add_ack)
 	/* Third RPC overflows, triggers ACK transmission. */
 	unit_log_clear();
 	mock_xmit_log_verbose = 1;
+	homa_rpc_lock(crpc3);
 	homa_peer_add_ack(crpc3);
+	homa_rpc_unlock(crpc3);
 	EXPECT_EQ(0, peer->num_acks);
 	EXPECT_STREQ("xmit ACK from 0.0.0.0:32768, dport 99, id 103, acks [sp 99, id 90] [sp 99, id 91] [sp 99, id 92] [sp 99, id 101] [sp 99, id 102]",
 			unit_log_get());

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 /* This file implements GSO (Generic Segmentation Offload) and GRO (Generic
  * Receive Offload) for Homa.
@@ -6,7 +6,6 @@
 
 #include "homa_impl.h"
 #include "homa_offload.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
 #include "homa_wire.h"
 
@@ -44,8 +43,6 @@ int homa_offload_init(void)
 		for (j = 1; j < NUM_GEN3_SOFTIRQ_CORES; j++)
 			offload_core->gen3_softirq_cores[j] = -1;
 		offload_core->last_app_active = 0;
-		offload_core->held_skb = NULL;
-		offload_core->held_bucket = 0;
 	}
 
 	res1 = inet_add_offload(&homa_offload, IPPROTO_HOMA);
@@ -227,12 +224,6 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 	}
 
 	if (h_new->common.type == DATA) {
-		if (h_new->seg.offset == (__force __be32)-1) {
-			tt_record2("homa_gro_receive replaced offset %d with %d",
-				   ntohl(h_new->seg.offset),
-				   ntohl(h_new->common.sequence));
-			h_new->seg.offset = h_new->common.sequence;
-		}
 		tt_record4("homa_gro_receive got packet from 0x%x id %llu, offset %d, priority %d",
 			   saddr, homa_local_id(h_new->common.sender_id),
 			   ntohl(h_new->seg.offset), priority);
@@ -326,7 +317,6 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 		homa_set_softirq_cpu(skb, smp_processor_id());
 
 done:
-	homa_pacer_check(homa->pacer);
 	homa_qdisc_pacer_check(homa);
 	offload_core->last_gro = homa_clock();
 	return result;
@@ -477,7 +467,6 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 	//		ntohl(h->seg.offset),
 	//		NAPI_GRO_CB(skb)->count);
 
-	per_cpu(homa_offload_core, smp_processor_id()).held_skb = NULL;
 	if (homa->gro_policy & HOMA_GRO_GEN3) {
 		homa_gro_gen3(homa, skb);
 	} else if (homa->gro_policy & HOMA_GRO_GEN2) {

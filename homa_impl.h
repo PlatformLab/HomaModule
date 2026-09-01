@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+ */
 
 /* This file contains definitions that are shared across the files
  * that implement Homa for Linux.
@@ -46,6 +46,7 @@
 #include <linux/vmalloc.h>
 #include <net/icmp.h>
 #include <net/ip.h>
+#include <net/ip6_checksum.h>
 #include <net/ip6_route.h>
 #include <net/netns/generic.h>
 #include <net/protocol.h>
@@ -92,9 +93,6 @@ struct homa_sock;
 #ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"
 #include "homa_metrics.h"
-
-/* Declarations used in this file, so they can't be made at the end. */
-void     homa_throttle_lock_slow(struct homa *homa);
 #endif /* See strip.py */
 
 /**
@@ -131,10 +129,6 @@ struct homa {
 #endif /* See strip.py */
 
 #ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @pacer:  Information related to the pacer; managed by homa_pacer.c.
-	 */
-	struct homa_pacer *pacer;
 
 	/**
 	 * @grant: Contains information used by homa_grant.c to manage
@@ -155,57 +149,48 @@ struct homa {
 	 */
 	struct homa_socktab *socktab;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
-	 * @page_pool_mutex: Synchronizes access to any/all of the page_pools
-	 * used for outgoing sk_buff data.
+	 * @tx_pools: One tx_page_pool for each NUMA node on the machine.
+	 * If there are no cores for a node, then its value is NULL.
 	 */
-	spinlock_t page_pool_mutex ____cacheline_aligned_in_smp;
-
-	/**
-	 * @page_pools: One page pool for each NUMA node on the machine.
-	 * If there are no cores for node, then this value is NULL.
-	 */
-	struct homa_page_pool *page_pools[MAX_NUMNODES];
-#endif /* See strip.py */
+	struct homa_tx_pool *tx_pools[MAX_NUMNODES];
 
 	/** @max_numa: Highest NUMA node id in use by any core. */
 	int max_numa;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
-	 * @skb_page_frees_per_sec: Rate at which to return pages from sk_buff
-	 * page pools back to Linux. This is the total rate across all pools.
-	 * Set externally via sysctl.
+	 * @tx_page_frees_per_sec: Rate at which to return pages from
+	 * homa_tx_page_pools back to Linux. This is the total rate across
+	 * all pools. Set externally via sysctl.
 	 */
-	int skb_page_frees_per_sec;
+	int tx_page_frees_per_sec;
 
 	/**
-	 * @skb_pages_to_free: Space in which to collect pages that are
+	 * @tx_pages_to_free: Space in which to collect pages that are
 	 * about to be released. Dynamically allocated.
 	 */
-	struct page **skb_pages_to_free;
+	struct page **tx_pages_to_free;
 
 	/**
-	 * @pages_to_free_slots: Maximum number of pages that can be
-	 * stored in skb_pages_to_free;
+	 * @tx_pages_to_free_slots: Maximum number of pages that can be
+	 * stored in tx_pages_to_free;
 	 */
-	int pages_to_free_slots;
+	int tx_pages_to_free_slots;
 
 	/**
-	 * @skb_page_free_time: homa_clock() time when the next sk_buff
+	 * @tx_page_free_time: homa_clock() time when the next tx
 	 * page should be freed. Could be in the past.
 	 */
-	u64 skb_page_free_time;
+	u64 tx_page_free_time;
 
 	/**
-	 * @skb_page_pool_min_kb: Don't return pages from a pool to Linux
-	 * if the amount of unused space in the pool has been less than this
-	 * many KBytes at any time in the recent past. Set externally via
+	 * @tx_page_pool_min_kb: A floor on the amount of space for Homa to
+	 * retain in a pool, specified in Kbytes. Set externally via
 	 * sysctl.
 	 */
-	int skb_page_pool_min_kb;
+	int tx_page_pool_min_kb;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @unsched_bytes: The number of bytes that may be sent in a
 	 * new message without receiving any grants. There used to be a
@@ -312,28 +297,20 @@ struct homa {
 	int request_ack_ticks;
 
 	/**
-	 * @reap_limit: Maximum number of packet buffers to free in a
-	 * single call to home_rpc_reap.
+	 * @dead_frags_limit: If hsk->dead_frags is less than this number
+	 * for a socket, then Homa reaps RPCs in a way that minimizes impact
+	 * on performance but may permit dead RPCs to accumulate. If
+	 * dead_frags exceeds this value, then Homa switches to a more
+	 * aggressive approach to reaping RPCs. Set externally via sysctl.
 	 */
-	int reap_limit;
+	int dead_frags_limit;
 
 	/**
-	 * @dead_buffs_limit: If the number of packet buffers in dead but
-	 * not yet reaped RPCs is less than this number, then Homa reaps
-	 * RPCs in a way that minimizes impact on performance but may permit
-	 * dead RPCs to accumulate. If the number of dead packet buffers
-	 * exceeds this value, then Homa switches to a more aggressive approach
-	 * to reaping RPCs. Set externally via sysctl.
+	 * @max_dead_frags: The largest value of hsk->dead_frags that has
+	 * existed so far for any socket.  Readable via sysctl, and may be
+	 * reset via sysctl to begin recalculating.
 	 */
-	int dead_buffs_limit;
-
-	/**
-	 * @max_dead_buffs: The largest aggregate number of packet buffers
-	 * in dead (but not yet reaped) RPCs that has existed so far in a
-	 * single socket.  Readable via sysctl, and may be reset via sysctl
-	 * to begin recalculating.
-	 */
-	int max_dead_buffs;
+	int max_dead_frags;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
@@ -341,6 +318,13 @@ struct homa {
 	 * sysctl.
 	 */
 	int verbose;
+
+	/**
+	 * @gso_force_software: A non-zero value will cause Homa to perform
+	 * segmentation in software using GSO; zero means ask the NIC to
+	 * perform TSO. Set externally via sysctl.
+	 */
+	int gso_force_software;
 #endif /* See strip.py */
 
 	/**
@@ -349,13 +333,6 @@ struct homa {
 	 * externally via sysctl to lower the limit already enforced by Linux.
 	 */
 	int max_gso_size;
-
-	/**
-	 * @gso_force_software: A non-zero value will cause Homa to perform
-	 * segmentation in software using GSO; zero means ask the NIC to
-	 * perform TSO. Set externally via sysctl.
-	 */
-	int gso_force_software;
 
 	/**
 	 * @wmem_max: Limit on the value of sk_sndbuf for any socket. Set
@@ -449,12 +426,6 @@ struct homa {
 	 */
 	u32 timer_ticks;
 
-	/**
-	 * @flags: a collection of bits that can be set using sysctl
-	 * to trigger various behaviors.
-	 */
-	int flags;
-
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @freeze_type: determines conditions under which the time trace
@@ -547,34 +518,18 @@ struct homa_net {
  * linear part of the skb.
  */
 struct homa_skb_info {
-	/** @next_skb: used to link together outgoing skb's for a message. */
-	struct sk_buff *next_skb;
-
-	/**
-	 * @wire_bytes: total number of bytes of network bandwidth that
-	 * will be consumed by this packet. This includes everything,
-	 * including additional headers added by GSO, IP header, Ethernet
-	 * header, CRC, preamble, and inter-packet gap.
-	 */
-	int wire_bytes;
-
 	/**
 	 * @data_bytes: total bytes of message data across all of the
 	 * segments in this packet.
 	 */
 	int data_bytes;
 
-	/** @seg_length: maximum number of data bytes in each GSO segment. */
-	int seg_length;
-
 	/**
-	 * @offset: offset within the message of the first byte of data in
-	 * this packet.
+	 * @dont_defer: True means that homa_qdisc_enqueue should pass this
+	 * packet along without considering NIC congestion. This flag is set
+	 * by the pacer when it retransmits packets after deferral.
 	 */
-	int offset;
-
-	/** @rpc: RPC that this packet belongs to. */
-	void *rpc;
+	bool dont_defer;
 };
 
 /**
@@ -695,7 +650,8 @@ extern unsigned int homa_net_id;
 
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);
-void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
+enum skb_drop_reason
+         homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 int      homa_bind(struct socket *sk, struct sockaddr *addr,
 		   int addr_len);
 void     homa_close(struct sock *sock, long timeout);
@@ -707,8 +663,6 @@ int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
 int      homa_err_handler_v6(struct sk_buff *skb,
 			     struct inet6_skb_parm *opt, u8 type,  u8 code,
 			     int offset, __be32 info);
-int      homa_fill_data_interleaved(struct homa_rpc *rpc,
-				    struct sk_buff *skb, struct iov_iter *iter);
 struct homa_gap *homa_gap_alloc(struct list_head *next, int start, int end);
 int      homa_getsockopt(struct sock *sk, int level, int optname,
 			 char __user *optval, int __user *optlen);
@@ -718,38 +672,38 @@ int      homa_init(struct homa *homa);
 int      homa_ioc_info(struct socket *sock, unsigned long arg);
 int      homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
 int      homa_load(void);
-int      homa_message_out_fill(struct homa_rpc *rpc,
-			       struct iov_iter *iter, int xmit);
 void     homa_message_out_init(struct homa_rpc *rpc, int length);
 void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			   struct homa_rpc *rpc);
 void     homa_net_destroy(struct homa_net *hnet);
 void     homa_net_exit(struct net *net);
-int      homa_net_init(struct homa_net *hnet, struct net *net,
-		       struct homa *homa);
+int      homa_net_init(struct homa_net *hnet, struct homa *homa);
 int      homa_net_start(struct net *net);
 __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait);
 int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		      int flags, int noblock, int *addr_len);
 void     homa_request_retrans(struct homa_rpc *rpc);
+int      homa_resend_data(struct homa_rpc *rpc, int start, int end);
 void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			 struct homa_sock *hsk);
 void     homa_rpc_handoff(struct homa_rpc *rpc);
 int      homa_rpc_tx_end(struct homa_rpc *rpc);
 int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 int      homa_setsockopt(struct sock *sk, int level, int optname,
-			char __user *optval, unsigned int optlen);
+			 char __user *optval, unsigned int optlen);
 int      homa_shutdown(struct socket *sock, int how);
+struct sk_buff *__homa_skb_alloc(int length);
 int      homa_socket(struct sock *sk);
 int      homa_softirq(struct sk_buff *skb);
 void     homa_spin(int ns);
 void     homa_timer(struct homa *homa);
 void     homa_timer_check_rpc(struct homa_rpc *rpc);
 int      homa_timer_main(void *transport);
-struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
-				       struct iov_iter *iter, int offset,
-				       int length, int max_seg_data);
+int      homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
+				bool xmit);
+struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end);
+int      homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end);
 void     homa_unhash(struct sock *sk);
 void     homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_unload(void);
@@ -759,6 +713,7 @@ int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			   size_t length, struct homa_rpc *rpc);
 int      __homa_xmit_control(void *contents, size_t length,
 			     struct homa_peer *peer, struct homa_sock *hsk);
+void     homa_xmit_data(struct homa_rpc *rpc);
 void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
 #ifndef __STRIP__ /* See strip.py */
@@ -770,21 +725,13 @@ int      homa_ioc_abort(struct socket *sock, unsigned long arg);
 int      homa_message_in_init(struct homa_rpc *rpc, int length,
 			      int unsched);
 void     homa_prios_changed(struct homa *homa);
-void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
-			  int priority);
 int      homa_sysctl_softirq_cores(struct ctl_table *table,
 				   int write, void *buffer, size_t *lenp,
 				   loff_t *ppos);
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			       int length);
-void     homa_xmit_data(struct homa_rpc *rpc, bool force);
-void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
-			  int priority);
 #else /* See strip.py */
-int      homa_message_in_init(struct homa_rpc *rpc, int unsched);
-void     homa_resend_data(struct homa_rpc *rpc, int start, int end);
-void     homa_xmit_data(struct homa_rpc *rpc);
-void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc);
+int      homa_message_in_init(struct homa_rpc *rpc, int length);
 #endif /* See strip.py */
 
 /**
@@ -1004,6 +951,15 @@ static inline int homa_high_priority(struct homa *homa)
  *    socket lock. If this fails, then release the socket lock and retry
  *    both the socket lock and the RPC lock. Of course, the state of both
  *    socket and RPC could change before the locks are finally acquired.
+ *
+ * Locks and Packet Transmission:
+ *
+ * Homa must not hold locks while transmitting packets (e.g. by calling
+ * ip_queue_xmit or ip6_xmit). This is because homa_qdisc could be invoked
+ * during the transmission process, and it may need to acquire locks under
+ * some conditions (such as an RPC lock). Homa_qdisc is invoked with the
+ * qdisc lock held, so invoking ip*xmit with a lock held can result in
+ * AB-BA deadlocks.
  */
 
 #endif /* _HOMA_IMPL_H */

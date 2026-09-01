@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+ */
 
 /* This file defines structs and other things related to Homa sockets.  */
 
@@ -8,6 +8,7 @@
 /* Forward declarations. */
 struct homa;
 struct homa_pool;
+struct homa_sock;
 
 /* Number of hash buckets in a homa_socktab. Must be a power of 2. */
 #define HOMA_SOCKTAB_BUCKET_BITS 10
@@ -29,10 +30,46 @@ struct homa_socktab {
 	spinlock_t write_lock;
 
 	/**
+	 * @next_sequence: Next sequence number to assign for a
+	 * homa_sock_link.
+	 */
+	u64 next_sequence;
+
+	/**
 	 * @buckets: Heads of chains for hash table buckets. Chains
-	 * consist of homa_sock objects.
+	 * consist of homa_sock_link objects, in decreasing order of
+	 * sequence number.
 	 */
 	struct hlist_head buckets[HOMA_SOCKTAB_BUCKETS];
+};
+
+/**
+ * struct homa_sock_link - Used to link a socket into a list associated
+ * with a bucket in a homa_socktab. This is a separate dynamically
+ * allocated object because a socket may need to change its position in
+ * the homa_socktab (because its port number changes); during the
+ * transition, multiple of these objects may exist for a socket so that
+ * socktab scans are not disrupted by the change in position. The lifetime
+ * of these objects is managed with RCU.
+ */
+struct homa_sock_link {
+	/** @hsk: The socket associated with this link. */
+	struct homa_sock *hsk;
+
+	/**
+	 * @sequence: Unique sequence number for this struct among all structs
+	 * in a socktab (smaller means older).
+	 */
+	u64 sequence;
+
+	/**
+	 * @links: Links this object into the chain for a bucket in a
+	 * homa_socktab.
+	 */
+	struct hlist_node links;
+
+	/** @rcu_head: Used for RCU-based freeing of this object. */
+	struct rcu_head rcu_head;
 };
 
 /**
@@ -46,16 +83,37 @@ struct homa_socktab_scan {
 
 	/**
 	 * @hsk: Points to the current socket in the iteration, or NULL if
-	 * we're at the beginning or end of the iteration. If non-NULL then
-	 * we are holding a reference to this socket.
+	 * we're at the beginning of the iteration or have reached the end of
+	 * the current bucket. If non-NULL then we are holding a reference
+	 * to this socket.
 	 */
 	struct homa_sock *hsk;
 
 	/**
 	 * @current_bucket: The index of the bucket in socktab->buckets
-	 * currently being scanned (-1 if @hsk == NULL).
+	 * currently being scanned.
 	 */
 	int current_bucket;
+
+	/**
+	 * @avail: The first @avail entries in @links are valid and
+	 * available for homa_sock_next to return.
+	 */
+	int avail;
+
+	/**
+	 * @links: Used to collect a bunch of sockets by scanning hash table
+	 * bucket chains. Sockets are then returned from here by
+	 * homa_socktab_next. We own a reference for each of these sockets.
+	 */
+#define HOMA_MAX_SCANNED_SOCKS 5
+	struct homa_sock *socks[HOMA_MAX_SCANNED_SOCKS];
+
+	/**
+	 * @sequence: All homa_sock_links with @sequence numbers >= this
+	 * have already been scanned from @current_bucket.
+	 */
+	u64 sequence;
 };
 
 /**
@@ -177,8 +235,8 @@ struct homa_sock {
 	 */
 	int ip_header_length;
 
-	/** @socktab_links: Links this socket into a homa_socktab bucket. */
-	struct hlist_node socktab_links;
+	/** @slink: Links this socket into a homa_socktab bucket. */
+	struct homa_sock_link *slink;
 
 	/**
 	 * @error_msg: Static string giving human-readable information about
@@ -246,8 +304,15 @@ struct homa_sock {
 	 */
 	struct list_head dead_rpcs;
 
-	/** @dead_skbs: Total number of socket buffers in RPCs on dead_rpcs. */
-	int dead_skbs;
+	/**
+	 * @dead_frags: An estimate of the amount of memory tied up in
+	 * RPCs that are dead but have not yet been reaped. The sum of
+	 * rpc->msgout.num_frags + 1 for all of the dead RPCs (the 1 accounts
+	 * for the RPC itself). Used to detect when the reaper is lagging
+	 * behind. See "RPC Reaping Strategy" in homa_rpc_reap code for
+	 * deetails.
+	 */
+	u64 dead_frags;
 
 	/**
 	 * @waiting_for_bufs: Contains RPCs that are blocked because there
@@ -303,8 +368,10 @@ void               homa_sock_lock_slow(struct homa_sock *hsk);
 int                homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 				  u16 port);
 void               homa_sock_destroy(struct sock *sk);
+void               homa_socktab_fill_scan(struct homa_socktab_scan *scan);
 struct homa_sock  *homa_sock_find(struct homa_net *hnet, u16 port);
 int                homa_sock_init(struct homa_sock *hsk);
+int                homa_sock_link(struct homa_sock *hsk, int port);
 void               homa_sock_shutdown(struct homa_sock *hsk);
 void               homa_sock_unlink(struct homa_sock *hsk);
 int                homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking);

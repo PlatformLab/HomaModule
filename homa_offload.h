@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+ */
 
 /* This file contains definitions related to homa_offload.c. */
 
@@ -55,20 +55,6 @@ struct homa_offload_core {
 	 * (see balance.txt).
 	 */
 	u64 last_app_active;
-
-	/**
-	 * @held_skb: last packet buffer known to be available for
-	 * merging other packets into on this core (note: may not still
-	 * be available), or NULL if none.
-	 */
-	struct sk_buff *held_skb;
-
-	/**
-	 * @held_bucket: the index, within napi->gro_hash, of the list
-	 * containing @held_skb; undefined if @held_skb is NULL. Used to
-	 * verify that @held_skb is still available.
-	 */
-	int held_bucket;
 };
 DECLARE_PER_CPU(struct homa_offload_core, homa_offload_core);
 

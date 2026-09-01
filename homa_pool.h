@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+ */
 
 /* This file contains definitions used to manage user-space buffer pools.
  */
@@ -24,7 +24,7 @@ struct homa_bpage {
 	 * this page, plus an additional tick if the @owner
 	 * field is set).
 	 */
-	atomic_t refs;
+	int refs;
 
 	/**
 	 * @owner: kernel core that currently owns this page

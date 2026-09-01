@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 /* This file contains functions that are useful to have in Homa during
  * development, but aren't needed in production versions.
@@ -11,9 +11,6 @@
 #include "homa_rpc.h"
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_qdisc.h"
-#include "homa_skb.h"
-#else /* See strip.py */
-#include "homa_stub.h"
 #endif /* See strip.py */
 #include "homa_wire.h"
 
@@ -119,7 +116,7 @@ char *homa_print_ipv6_addr(const struct in6_addr *addr)
 	} else {
 		const char *inet_ntop(int af, const void *src, char *dst,
 				      size_t size);
-		inet_ntop(AF_INET6, addr, buffer + 1, BUF_SIZE);
+		inet_ntop(AF_INET6, addr, buffer + 1, BUF_SIZE - 2);
 		buffer[0] = '[';
 		strcat(buffer, "]");
 	}
@@ -151,7 +148,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		return buffer;
 	}
 
-	homa_skb_get(skb, &header, 0, sizeof(header));
+	skb_copy_bits(skb, 0, &header, min(sizeof(header), skb->len));
 	common = (struct homa_common_hdr *)header;
 	saddr = skb_canonical_ipv6_saddr(skb);
 	used = homa_snprintf(buffer, buf_len, used,
@@ -170,12 +167,13 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 			seg_length = homa_data_len(skb);
 			data_left = 0;
 		} else {
-			seg_length = homa_info->seg_length;
+			seg_length = skb_shinfo(skb)->gso_size -
+				     sizeof(struct homa_seg_hdr);
 			if (seg_length > homa_info->data_bytes)
 				seg_length = homa_info->data_bytes;
 			data_left = homa_info->data_bytes - seg_length;
 		}
-		offset = homa_get_offset(h);
+		offset = ntohl(h->seg.offset);
 #ifndef __STRIP__ /* See strip.py */
 		used = homa_snprintf(buffer, buf_len, used,
 				     ", message_length %d, offset %d, data_length %d, incoming %d",
@@ -202,14 +200,10 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		pos = skb_transport_offset(skb) + sizeof(*h) + seg_length;
 		used = homa_snprintf(buffer, buf_len, used, ", extra segs");
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
-			if (homa_info->seg_length < skb_shinfo(skb)->gso_size) {
-				struct homa_seg_hdr seg;
+			struct homa_seg_hdr seg;
 
-				homa_skb_get(skb, &seg, pos, sizeof(seg));
-				offset = ntohl(seg.offset);
-			} else {
-				offset += seg_length;
-			}
+			skb_copy_bits(skb, pos, &seg, sizeof(seg));
+			offset = ntohl(seg.offset);
 			if (seg_length > data_left)
 				seg_length = data_left;
 			used = homa_snprintf(buffer, buf_len, used,
@@ -310,7 +304,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 	char header[HOMA_MAX_HEADER];
 
 	common = (struct homa_common_hdr *)header;
-	homa_skb_get(skb, header, 0, HOMA_MAX_HEADER);
+	skb_copy_bits(skb, 0, header, min(HOMA_MAX_HEADER, skb->len));
 	switch (common->type) {
 	case DATA: {
 		struct homa_data_hdr *h = (struct homa_data_hdr *)header;
@@ -321,24 +315,21 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 			seg_length = homa_data_len(skb);
 			data_left = 0;
 		} else {
-			seg_length = homa_info->seg_length;
+			seg_length = skb_shinfo(skb)->gso_size -
+				     sizeof(struct homa_seg_hdr);
 			data_left = homa_info->data_bytes - seg_length;
 		}
-		offset = homa_get_offset(h);
+		offset = ntohl(h->seg.offset);
 
 		pos = skb_transport_offset(skb) + sizeof(*h) + seg_length;
 		used = homa_snprintf(buffer, buf_len, 0, "DATA%s %d@%d",
 				     h->retransmit ? " retrans" : "",
 				     seg_length, offset);
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
-			if (homa_info->seg_length < skb_shinfo(skb)->gso_size) {
-				struct homa_seg_hdr seg;
+			struct homa_seg_hdr seg;
 
-				homa_skb_get(skb, &seg, pos, sizeof(seg));
-				offset = ntohl(seg.offset);
-			} else {
-				offset += seg_length;
-			}
+			skb_copy_bits(skb, pos, &seg, sizeof(seg));
+			offset = ntohl(seg.offset);
 			if (seg_length > data_left)
 				seg_length = data_left;
 			used = homa_snprintf(buffer, buf_len, used,
@@ -771,7 +762,7 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 				h = (struct homa_data_hdr *) skb->data;
 				tt_record3("RPC id %d has %d bpages allocated, first uncopied offset %d",
 					rpc->id, rpc->msgin.num_bpages,
-					homa_get_offset(h));
+					ntohl(h->seg.offset));
 			}
 		}
 	} else if (rpc->state == RPC_OUTGOING) {

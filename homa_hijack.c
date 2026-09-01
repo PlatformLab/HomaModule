@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 /* This file implements TCP hijacking for Homa. See comments at the top of
  * homa_hijack.h for an overview of TCP hijacking.

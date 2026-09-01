@@ -37,8 +37,9 @@ endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS) \
-		-fsanitize=address -fno-omit-frame-pointer
+CFLAGS :=    $(WARNS) -Wstrict-prototypes -Wno-pointer-sign -MD -no-pie \
+		-g $(CINCLUDES) $(DEFS) -fsanitize=address \
+		-fno-omit-frame-pointer
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) \
 		-fsanitize=address -fno-omit-frame-pointer
 
@@ -51,6 +52,7 @@ TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_rpc.c \
 	      unit_homa_sock.c \
 	      unit_homa_timer.c \
+	      unit_homa_tx_pool.c \
 	      unit_homa_utils.c \
 	      unit_timetrace.c
 ifeq ($(__STRIP__),)
@@ -58,9 +60,7 @@ TEST_SRCS +=  unit_homa_grant.c \
 	      unit_homa_hijack.c \
 	      unit_homa_metrics.c \
 	      unit_homa_offload.c \
-	      unit_homa_pacer.c \
-	      unit_homa_qdisc.c \
-	      unit_homa_skb.c
+	      unit_homa_qdisc.c
 endif
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 
@@ -74,6 +74,7 @@ HOMA_SRCS :=  homa_devel.c \
 	      homa_rpc.c \
 	      homa_sock.c \
 	      homa_timer.c \
+	      homa_tx_pool.c \
 	      homa_utils.c \
 	      timetrace.c
 ifeq ($(__STRIP__),)
@@ -81,9 +82,7 @@ HOMA_SRCS +=  homa_grant.c \
 	      homa_hijack.c \
 	      homa_metrics.c \
 	      homa_offload.c \
-	      homa_pacer.c \
-	      homa_qdisc.c \
-	      homa_skb.c
+	      homa_qdisc.c
 endif
 HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS)) rbtree.o rhashtable.o
 

@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # Copyright (c) 2019-2022 Homa Developers
-# SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+# SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 """
 Scan the time trace data in a log file; find all records whose events
@@ -33,7 +33,7 @@ def scan(f, pattern):
     writes = 0
     compiled = re.compile(pattern)
     for line in f:
-        match = re.match(' *([-0-9.]+) us \(\+ *([0-9.]+) us\) (.*)',
+        match = re.match(r' *([-0-9.]+) us \(\+ *([0-9.]+) us\) (.*)',
                 line)
         if not match:
             continue

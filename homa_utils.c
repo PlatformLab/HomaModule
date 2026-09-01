@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 /* This file contains miscellaneous utility functions for Homa, such
  * as initializing and destroying homa structs.
@@ -7,23 +7,18 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+#include "homa_tx_pool.h"
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
-#include "homa_skb.h"
-#else /* See strip.py */
-#include "homa_stub.h"
 #endif /* See strip.py */
 
 /**
  * homa_init() - Constructor for homa objects.
  * @homa:   Object to initialize.
  *
- * Return:  0 on success, or a negative errno if there was an error. Even
- *          if an error occurs, it is safe (and necessary) to call
- *          homa_destroy at some point.
+ * Return:  0 on success, or a negative errno if there was an error.
  */
 int homa_init(struct homa *homa)
 {
@@ -40,39 +35,33 @@ int homa_init(struct homa *homa)
 	if (IS_ERR(homa->qshared)) {
 		err = PTR_ERR(homa->qshared);
 		homa->qshared = NULL;
-		return err;
-	}
-	homa->pacer = homa_pacer_alloc(homa);
-	if (IS_ERR(homa->pacer)) {
-		err = PTR_ERR(homa->pacer);
-		homa->pacer = NULL;
-		return err;
+		goto error;
 	}
 	homa->grant = homa_grant_alloc(homa);
 	if (IS_ERR(homa->grant)) {
 		err = PTR_ERR(homa->grant);
 		homa->grant = NULL;
-		return err;
+		goto error;
 	}
 #endif /* See strip.py */
 	homa->peertab = homa_peer_alloc_peertab();
 	if (IS_ERR(homa->peertab)) {
 		err = PTR_ERR(homa->peertab);
 		homa->peertab = NULL;
-		return err;
+		goto error;
 	}
 	homa->socktab = kmalloc(sizeof(*homa->socktab), GFP_KERNEL);
-	if (!homa->socktab)
-		return -ENOMEM;
-	homa_socktab_init(homa->socktab);
-#ifndef __STRIP__ /* See strip.py */
-	err = homa_skb_init(homa);
-	if (err) {
-		pr_err("Couldn't initialize skb management (errno %d)\n",
-		       -err);
-		return err;
+	if (!homa->socktab) {
+		err = -ENOMEM;
+		goto error;
 	}
-#endif /* See strip.py */
+	homa_socktab_init(homa->socktab);
+	err = homa_tx_pool_init(homa);
+	if (err) {
+		pr_err("Couldn't initialize homa_tx_pool (errno %d)\n",
+		       -err);
+		goto error;
+	}
 
 	/* Wild guesses to initialize configuration values... */
 #ifndef __STRIP__ /* See strip.py */
@@ -100,12 +89,11 @@ int homa_init(struct homa *homa)
 	homa->timeout_ticks = 100;
 	homa->timeout_resends = 5;
 	homa->request_ack_ticks = 2;
-	homa->reap_limit = 10;
-	homa->dead_buffs_limit = 5000;
+	homa->dead_frags_limit = 100;
 #ifndef __STRIP__ /* See strip.py */
 	homa->verbose = 0;
 #endif /* See strip.py */
-	homa->max_gso_size = 10000;
+	homa->max_gso_size = 1000;
 	homa->wmem_max = 100000000;
 #ifndef __STRIP__ /* See strip.py */
 	homa->max_gro_skbs = 20;
@@ -114,10 +102,17 @@ int homa_init(struct homa *homa)
 	homa->gro_busy_usecs = 5;
 #endif /* See strip.py */
 	homa->bpage_lease_usecs = 10000;
+#ifdef __STRIP__ /* See strip.py */
+	homa->bpage_lease_cycles = homa->bpage_lease_usecs  * 2500;
+#endif /* See strip.py */
 #ifndef __STRIP__ /* See strip.py */
 	homa_incoming_sysctl_changed(homa);
 #endif /* See strip.py */
 	return 0;
+
+error:
+	homa_destroy(homa);
+	return err;
 }
 
 /**
@@ -127,11 +122,6 @@ int homa_init(struct homa *homa)
  */
 void homa_destroy(struct homa *homa)
 {
-#ifdef __UNIT_TEST__
-#include "utils.h"
-	unit_homa_destroy(homa);
-#endif /* __UNIT_TEST__ */
-
 	/* The order of the following cleanups matters! */
 	if (homa->socktab) {
 		homa_socktab_destroy(homa->socktab, NULL);
@@ -143,10 +133,6 @@ void homa_destroy(struct homa *homa)
 		homa_grant_free(homa->grant);
 		homa->grant = NULL;
 	}
-	if (homa->pacer) {
-		homa_pacer_free(homa->pacer);
-		homa->pacer = NULL;
-	}
 	if (homa->qshared) {
 		homa_qdisc_shared_free(homa->qshared);
 		homa->qshared = NULL;
@@ -156,20 +142,16 @@ void homa_destroy(struct homa *homa)
 		homa_peer_free_peertab(homa->peertab);
 		homa->peertab = NULL;
 	}
-#ifndef __STRIP__ /* See strip.py */
-
-	homa_skb_cleanup(homa);
-#endif /* See strip.py */
+	homa_tx_pool_cleanup(homa);
 }
 
 /**
- * homa_net_init() - Initialize a new struct homa_net as a per-net subsystem.
- * @hnet:    Struct to initialzie.
- * @net:     The network namespace the struct will be associated with.
+ * homa_net_init() - Initialize a new struct homa_net.
+ * @hnet:    Struct to initialize.
  * @homa:    The main Homa data structure to use for the net.
  * Return:  0 on success, otherwise a negative errno.
  */
-int homa_net_init(struct homa_net *hnet, struct net *net, struct homa *homa)
+int homa_net_init(struct homa_net *hnet, struct homa *homa)
 {
 	memset(hnet, 0, sizeof(*hnet));
 	hnet->homa = homa;

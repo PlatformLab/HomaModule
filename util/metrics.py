@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # Copyright (c) 2019-2023 Homa Developers
-# SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+# SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 """
 Reads Homa metrics from the kernel and prints out anything that is changed
@@ -180,9 +180,6 @@ for symbol in symbols:
                 total_packets += delta
             if symbol == "softirq_calls":
                 gro_packets = delta
-        if (symbol == "reaper_dead_skbs") and ("reaper_calls" in deltas):
-            print("%-30s          %6.1f %sAvg. hsk->dead_skbs in reaper" % (
-                  "avg_dead_skbs", delta/deltas["reaper_calls"], pad))
         if symbol.endswith("_miss_cycles") and (time_delta != 0):
             prefix = symbol[:-12]
             if ((prefix + "_misses") in deltas) and (deltas[prefix + "_misses"] != 0):
@@ -355,13 +352,17 @@ if elapsed_secs != 0:
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
-    for lock in ["client", "server", "socket", "grant", "throttle", "peer_ack"]:
+    for lock in ["client", "server", "socket", "grant", "peer_ack", "qdisc"]:
         misses = float(deltas[lock + "_lock_misses"])
         cycles = float(deltas[lock + "_lock_miss_cycles"])
         if misses == 0:
             cycles_per_miss = 0.0
         else:
             cycles_per_miss = cycles/misses
+        if lock == "client":
+            lock = "client RPC"
+        elif lock == "server":
+            lock = "server RPC"
         print("%-10s    %s    %6.1f   %5.1f" % (lock,
                 scale_number(misses/elapsed_secs),
                 cycles_per_miss/(cpu_khz/1e06), 100.0*cycles/time_delta))
@@ -487,10 +488,10 @@ if elapsed_secs != 0:
         print("Skb alloc time:           %4.2f usec/skb" % (
                 float(deltas["skb_alloc_cycles"]) / (cpu_khz / 1000.0) /
                 deltas["skb_allocs"]))
-    if deltas["skb_page_allocs"] != 0:
-        print("Skb page alloc time:     %5.2f usec/page" % (
-                float(deltas["skb_page_alloc_cycles"]) / (cpu_khz / 1000.0) /
-                deltas["skb_page_allocs"]))
+    if deltas["tx_page_allocs"] != 0:
+        print("tx_pool page alloc time:  %5.2f usec/page" % (
+                float(deltas["tx_page_alloc_cycles"]) / (cpu_khz / 1000.0) /
+                deltas["tx_page_allocs"]))
 
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")
@@ -508,8 +509,8 @@ if elapsed_secs != 0:
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
         print("%-30s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
-    for symbol in ["timer_reap_cycles", "data_pkt_reap_cycles",
-            "grant_lock_cycles"]:
+    for symbol in ["timer_reap_cycles", "dispatch_pkt_reap_cycles",
+            "grant_lock_cycles", "pacer_bubble_cycles", "nic_congest_cycles"]:
         delta = deltas[symbol]
         if delta == 0 or time_delta == 0:
             continue
@@ -517,10 +518,6 @@ if elapsed_secs != 0:
         percent = percent.ljust(12)
         print("%-30s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
 
-    if deltas["throttle_list_adds"] > 0:
-        print("%-30s %15.1f              List traversals per throttle "
-                "list insert" % ("checks_per_throttle_insert",
-                deltas["throttle_list_checks"]/deltas["throttle_list_adds"]))
 
     if deltas["responses_received"] > 0:
         print("%-30s %15.1f              ACK packets sent per 1000 client RPCs"

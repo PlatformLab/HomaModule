@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+ */
 
 /* This file contains declarations related to Homa's performance metrics.  */
 
@@ -198,12 +198,16 @@ struct homa_metrics {
 	u64 skb_free_cycles;
 
 	/**
-	 * @skb_page_allocs: total number of calls to homa_skb_page_alloc.
+	 * @tx_page_allocs: total number of new page allocations performed
+	 * by homa_tx_pages.c.
 	 */
-	u64 skb_page_allocs;
+	u64 tx_page_allocs;
 
-	/** @skb_page_alloc_cycles: total time spent in homa_skb_page_alloc. */
-	u64 skb_page_alloc_cycles;
+	/**
+	 * @tx_page_alloc_cycles: total time spent by homa_tx_pages.c
+	 * performing page allocation.
+	 */
+	u64 tx_page_alloc_cycles;
 
 	/**
 	 * @requests_received: total number of request messages received.
@@ -214,6 +218,12 @@ struct homa_metrics {
 	 * @responses_received: total number of response messages received.
 	 */
 	u64 responses_received;
+
+	/*
+	 * @gapcs_created: total number of homa_gaps created because of
+	 * out-of-order arrival of packets in a message.
+	 */
+	u64 gaps_created;
 
 	/**
 	 * @wait_none: total number of times that an incoming message was
@@ -369,10 +379,10 @@ struct homa_metrics {
 	u64 timer_reap_cycles;
 
 	/**
-	 * @data_pkt_reap_cycles: total time spent by homa_data_pkt to reap
+	 * @dispatch_pkt_reap_cycles: total time spent by homa_data_pkt to reap
 	 * dead RPCs.
 	 */
-	u64 data_pkt_reap_cycles;
+	u64 dispatch_pkt_reap_cycles;
 
 	/**
 	 * @idle_time_conflicts: total number of times that an update to
@@ -436,6 +446,33 @@ struct homa_metrics {
 	u64 pacer_tcp_bytes;
 
 	/**
+	 * @pacer_bubble_cycles: total (estimated) lost transmission time on
+	 * the NIC uplink because the pacer failed to queue a packet before
+	 * the NIC became idle.
+	 */
+	u64 pacer_bubble_cycles;
+
+	/**
+	 * @nic_congest_cycles: total time when the pacer could not transmit
+	 * because the amount of data in the NIC's possession exceeded
+	 * max_nic_queue_usecs.
+	 */
+	u64 nic_congest_cycles;
+
+	/**
+	 * @pacer_help_checks: total number of times that homa_qdisc_pacer_check
+	 * was invoked.
+	 */
+	u64 pacer_checks;
+
+	/**
+	 * @pacer_helps: total number of times that homa_qdisc_pacer_check
+	 * actually called homa_qdisc_pacer because the pacer appeared to
+	 * be running behind.
+	 */
+	u64 pacer_helps;
+
+	/**
 	 * @pacer_help_bytes: bytes that the pacer transmitted via calls to
 	 * homa_qdisc_pacer_check (presumably because the pacer thread
 	 * wasn't keeping up). Includes both TCP and Homa packets as well as
@@ -449,6 +486,25 @@ struct homa_metrics {
 	 * well as those that were deferred.
 	 */
 	u64 qdisc_tcp_packets;
+
+	/**
+	 * @qdisc_flushes: total number of times that homa_qdisc_flush_rpc
+	 * had to do real work (e.g, acquire the defer_lock) because the RPC
+	 * had been managed by homaa_qdisc at some point.
+	 */
+	u64 qdisc_flushes;
+
+	/**
+	 * @qdisc_lock_misses: total number of times that Homa had to wait
+	 * to acquire the lock for a homa_qdisc_dev.
+	 */
+	u64 qdisc_lock_misses;
+
+	/**
+	 * @qdisc_lock_miss_cycles: total time spent waiting for homa_qdisc_dev
+	 * lock misses.
+	 */
+	u64 qdisc_lock_miss_cycles;
 
 	/**
 	 * @resent_packets: total number of data packets issued in response to
@@ -595,18 +651,6 @@ struct homa_metrics {
 	u64 socket_lock_misses;
 
 	/**
-	 * @throttle_lock_miss_cycles: total time spent waiting for throttle
-	 * lock misses.
-	 */
-	u64 throttle_lock_miss_cycles;
-
-	/**
-	 * @throttle_lock_misses: total number of times that Homa had to wait
-	 * to acquire the throttle lock.
-	 */
-	u64 throttle_lock_misses;
-
-	/**
 	 * @peer_ack_lock_miss_cycles: total time spent waiting for peer lock misses.
 	 */
 	u64 peer_ack_lock_miss_cycles;
@@ -677,30 +721,6 @@ struct homa_metrics {
 	 * and was not disabled.
 	 */
 	u64 reaper_calls;
-
-	/**
-	 * @reaper_dead_skbs: incremented by hsk->dead_skbs each time that
-	 * reaper_calls is incremented.
-	 */
-	u64 reaper_dead_skbs;
-
-	/**
-	 * @reaper_active_skbs: total number of times homa_rpc_reap had to skip
-	 * an RPC because one of its tx skb's was still in the transmit
-	 * pipeline.
-	 */
-	u64 reaper_active_skbs;
-
-	/**
-	 * @throttle_list_adds: total number of calls to homa_add_to_throttled.
-	 */
-	u64 throttle_list_adds;
-
-	/**
-	 * @throttle_list_checks: number of list elements examined in
-	 * calls to homa_add_to_throttled.
-	 */
-	u64 throttle_list_checks;
 
 	/**
 	 * @ack_overflows: total number of times that homa_peer_add_ack

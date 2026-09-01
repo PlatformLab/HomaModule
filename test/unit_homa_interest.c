@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 #include "homa_impl.h"
 #include "homa_interest.h"
@@ -38,7 +38,31 @@ static void notify_hook(char *id)
 	hook_count--;
 	if (hook_count != 0)
 		return;
-	atomic_set(&hook_interest->ready, 1);
+	atomic_set(&hook_interest->state, HOMA_INTEREST_READY);
+}
+
+static void signal_hook(char *id)
+{
+	if (strcmp(id, "spin_lock") != 0)
+		return;
+	if (hook_interest) {
+		hook_interest->rpc = NULL;
+		atomic_set(&hook_interest->state, HOMA_INTEREST_READY);
+		hook_interest = NULL;
+	}
+}
+
+static void relax_hook(char *id)
+{
+	if (strcmp(id, "cpu_relax") != 0)
+		return;
+	if (hook_count <= 0)
+		return;
+	hook_count--;
+	unit_log_printf("; ", "relax_hook");
+	if (hook_count != 0)
+		return;
+	atomic_set(&hook_interest->state, HOMA_INTEREST_READY);
 }
 
 FIXTURE(homa_interest) {
@@ -75,7 +99,7 @@ FIXTURE_TEARDOWN(homa_interest)
 	unit_teardown();
 }
 
-TEST_F(homa_interest, homa_interest_init_shared_and_unlink_shared)
+TEST_F(homa_interest, homa_interest_init_shared)
 {
 	struct homa_interest interests[4];
 	int i;
@@ -87,14 +111,8 @@ TEST_F(homa_interest, homa_interest_init_shared_and_unlink_shared)
 	EXPECT_EQ(3, list_first_entry(&self->hsk.interests,
 				      struct homa_interest, links)
 		      - interests);
-	homa_interest_unlink_shared(&interests[1]);
-	EXPECT_EQ(3, unit_list_length(&self->hsk.interests));
-	homa_interest_unlink_shared(&interests[0]);
-	EXPECT_EQ(2, unit_list_length(&self->hsk.interests));
-	homa_interest_unlink_shared(&interests[3]);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.interests));
-	homa_interest_unlink_shared(&interests[2]);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.interests));
+	for (i = 0; i < 4; i++)
+		list_del_init(&interests[i].links);
 }
 
 TEST_F(homa_interest, homa_interest_init_private)
@@ -143,11 +161,21 @@ TEST_F(homa_interest, homa_interest_wait__already_ready)
 	struct homa_interest interest;
 
 	homa_interest_init_shared(&interest, &self->hsk);
-	atomic_set(&interest.ready, 1);
+	atomic_set(&interest.state, HOMA_INTEREST_READY);
 	EXPECT_EQ(0, homa_interest_wait(&interest));
 	EXPECT_EQ(0, interest.blocked);
 
-	homa_interest_unlink_shared(&interest);
+	list_del_init(&interest.links);
+}
+TEST_F(homa_interest, homa_interest_wait__poll_interrupted_by_signal)
+{
+	struct homa_interest interest;
+
+	homa_interest_init_shared(&interest, &self->hsk);
+	mock_signal_pending = 1;
+
+	EXPECT_EQ(EINTR, -homa_interest_wait(&interest));
+	EXPECT_EQ(0, interest.blocked);
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_interest, homa_interest_wait__call_schedule)
@@ -165,7 +193,7 @@ TEST_F(homa_interest, homa_interest_wait__call_schedule)
 
 	EXPECT_EQ(0, homa_interest_wait(&interest));
 	EXPECT_STREQ("schedule; schedule", unit_log_get());
-	homa_interest_unlink_shared(&interest);
+	list_del_init(&interest.links);
 }
 #endif /* See strip.py */
 TEST_F(homa_interest, homa_interest_wait__call_homa_rpc_reap)
@@ -178,7 +206,8 @@ TEST_F(homa_interest, homa_interest_wait__call_homa_rpc_reap)
 			       self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
 	homa_rpc_end(crpc);
-	EXPECT_EQ(15, self->hsk.dead_skbs);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->reaper_calls));
 
 	homa_interest_init_shared(&interest, &self->hsk);
 
@@ -189,8 +218,9 @@ TEST_F(homa_interest, homa_interest_wait__call_homa_rpc_reap)
 	unit_log_clear();
 
 	EXPECT_EQ(0, homa_interest_wait(&interest));
-	EXPECT_EQ(5, self->hsk.dead_skbs);
-	homa_interest_unlink_shared(&interest);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.dead_rpcs));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls));
+	list_del_init(&interest.links);
 }
 TEST_F(homa_interest, homa_interest_wait__poll_then_block)
 {
@@ -210,7 +240,7 @@ TEST_F(homa_interest, homa_interest_wait__poll_then_block)
 	EXPECT_EQ(0, homa_metrics_per_cpu()->blocked_cycles);
 	EXPECT_EQ(1, interest.blocked);
 #endif /* See strip.py */
-	homa_interest_unlink_shared(&interest);
+	list_del_init(&interest.links);
 }
 TEST_F(homa_interest, homa_interest_wait__interrupted_by_signal)
 {
@@ -222,7 +252,38 @@ TEST_F(homa_interest, homa_interest_wait__interrupted_by_signal)
 
 	EXPECT_EQ(EINTR, -homa_interest_wait(&interest));
 	EXPECT_EQ(1, interest.blocked);
-	homa_interest_unlink_shared(&interest);
+	list_del_init(&interest.links);
+}
+TEST_F(homa_interest, homa_interest_wait__handoff_occurs_during_signal)
+{
+	struct homa_interest interest;
+
+	homa_interest_init_shared(&interest, &self->hsk);
+	mock_prepare_to_wait_errors = 1;
+	unit_hook_register(signal_hook);
+	hook_interest = &interest;
+	IF_NO_STRIP(self->homa.poll_cycles = 0);
+
+	EXPECT_EQ(0, -homa_interest_wait(&interest));
+	EXPECT_EQ(1, interest.blocked);
+	EXPECT_EQ(1, atomic_read(&interest.state));
+}
+TEST_F(homa_interest, homa_interest_wait__wait_for_state_to_clear)
+{
+	struct homa_interest interest;
+
+	homa_interest_init_shared(&interest, &self->hsk);
+	atomic_set(&interest.state, HOMA_INTEREST_READY |
+				    HOMA_INTEREST_HANDOFF_ACTIVE);
+	unit_hook_register(relax_hook);
+	hook_interest = &interest;
+	hook_count = 3;
+	unit_log_clear();
+
+	EXPECT_EQ(0, -homa_interest_wait(&interest));
+	EXPECT_EQ(HOMA_INTEREST_READY, atomic_read(&interest.state));
+	EXPECT_STREQ("relax_hook; relax_hook; relax_hook", unit_log_get());
+	list_del_init(&interest.links);
 }
 TEST_F(homa_interest, homa_interest_wait__time_metrics)
 {
@@ -239,10 +300,10 @@ TEST_F(homa_interest, homa_interest_wait__time_metrics)
 	EXPECT_EQ(0, -homa_interest_wait(&interest));
 	IF_NO_STRIP(EXPECT_EQ(700, homa_metrics_per_cpu()->poll_cycles));
 	IF_NO_STRIP(EXPECT_EQ(1500, homa_metrics_per_cpu()->blocked_cycles));
-	homa_interest_unlink_shared(&interest);
+	list_del_init(&interest.links);
 }
 
-TEST_F(homa_interest, homa_interest_wait__notify_private)
+TEST_F(homa_interest, homa_interest_notify_private)
 {
 	struct homa_interest interest;
 	struct homa_rpc *crpc;
@@ -253,13 +314,13 @@ TEST_F(homa_interest, homa_interest_wait__notify_private)
 	ASSERT_NE(NULL, crpc);
 
 	homa_interest_init_private(&interest, crpc);
-	EXPECT_EQ(0, atomic_read(&interest.ready));
+	EXPECT_EQ(0, atomic_read(&interest.state));
 	unit_log_clear();
 	mock_log_wakeups = 1;
 
 	/* First call: RPC has an interest. */
 	homa_interest_notify_private(crpc);
-	EXPECT_EQ(1, atomic_read(&interest.ready));
+	EXPECT_EQ(HOMA_INTEREST_READY, atomic_read(&interest.state));
 	EXPECT_STREQ("wake_up", unit_log_get());
 	homa_interest_unlink_private(&interest);
 
@@ -267,6 +328,29 @@ TEST_F(homa_interest, homa_interest_wait__notify_private)
 	unit_log_clear();
 	homa_interest_notify_private(crpc);
 	EXPECT_STREQ("", unit_log_get());
+}
+
+TEST_F(homa_interest, homa_interest_notify_shared)
+{
+	struct homa_interest interest;
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->server_port,
+			       self->client_id, 20000, 1600);
+	ASSERT_NE(NULL, crpc);
+
+	homa_interest_init_shared(&interest, &self->hsk);
+	EXPECT_EQ(0, atomic_read(&interest.state));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.interests));
+	unit_log_clear();
+	mock_log_wakeups = 1;
+
+	homa_interest_notify_shared(&self->hsk, crpc);
+	EXPECT_EQ(HOMA_INTEREST_READY, atomic_read(&interest.state));
+	EXPECT_STREQ("wake_up", unit_log_get());
+	EXPECT_EQ(crpc, interest.rpc);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.interests));
 }
 
 #ifndef __STRIP__ /* See strip.py */

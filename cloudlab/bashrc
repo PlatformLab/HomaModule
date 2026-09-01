@@ -104,8 +104,16 @@ alias gitmods="git status --short | awk '{print(\$2);}'"
 
 alias makemore='make 2>&1 | more'
 
-# Starts Docker container for the version of Linux corresponding to these
-# sources
-alias dkr='docker run -it  --rm --hostname docker-rhel8 -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro -e HOME=/users/ouster -v /ouster:/ouster/ -v /users/ouster:/users/ouster -w /users/ouster -u $(id -u):$(id -g) rhel8 /bin/bash --login'
+dkr() {
+    docker run -it  --rm --hostname docker-"$1" -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro -e HOME=/users/ouster -v /ouster:/ouster/ -v /users/ouster:/users/ouster -w /users/ouster -u $(id -u):$(id -g) "$1" /bin/bash --login
+}
+
+# This sets up group information needed for Docker and spawns the daemon.
+# After running this, log out and log back in again to get the new group.
+init_docker() {
+    sudo groupadd -f docker
+    sudo usermod -aG docker ouster
+    sudo systemctl start docker.socket
+}
 
 export GRPC_VERBOSITY=INFO

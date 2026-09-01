@@ -23,70 +23,19 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
 - Please contact me if you have any problems using this repo; I'm happy to
   provide advice and support.
 
-- The head is known to work under Linux 6.17.8. In the past, Homa has
-  run under several earlier versions of Linux. There is a separate branch
-  for each of these
-  older versions, with names such as linux_4.15.18. Older branches
-  are generally out of date feature-wise: recent commits have
-  not been back-ported to them. Other versions of Linux have not been tested and
-  may require code changes (typically this is easy to do). If you get Homa
-  working on some other version, please submit a pull request with the
-  required code changes. The branches `rhel8` and `rhel9.5` are known to run
-  on the corresdponding versions of Red Hat Enterprise Linux and are
-  relatively up to date.
+- To build and install Homa, see instructions in `INSTALL.md`.
+
+- A collection of man pages is available in the "man" subdirectory. The API for
+  Homa is different from TCP sockets.
 
 - Related work that you may find useful:
   - [Preliminary support for using Homa with gRPC](https://github.com/PlatformLab/grpc_homa)
   - [A Go client that works with this module](https://github.com/dpeckett/go-homa)
 
-- To build the module, type `make all`; then type `sudo insmod homa.ko` to install
-  it, and `sudo rmmod homa` to remove an installed module. In practice, though,
-  you'll probably want to do several other things as part of installing Homa.
-  I have created a Python script that I use for installing Homa on clusters
-  managed by the CloudLab project; it's in `cloudlab/bin/config`. I normally
-  invoke it with no parameters to install and configure Homa on the current
-  machine.
-
-- The script `cloudlab/bin/install_homa` will copy relevant Homa files
-  across a cluster of machines and configure Homa on each node. It assumes
-  that nodes have names `nodeN` where N is a small integer, and it also
-  assumes that you have already run `make` both in the top-level directory and
-  in `util`.
-
-- A collection of man pages is available in the "man" subdirectory. The API for
-  Homa is different from TCP sockets.
-
-- For best Homa performance, you should also make the following configuration
-  changes:
-  - Enable priority queues in your switches, selected by the 3
-    high-order bits of the DSCP field in IPv4 packet headers or the 4
-    high-order bits of the Traffic Class field in IPv6 headers.
-    You can use `sysctl` to configure Homa's use of
-    priorities (e.g., if you want it to use fewer than 8 levels). See the man
-    page `homa.7` for more info.
-  - Enable jumbo frames on your switches and on the Linux nodes.
-
 - NIC support: Homa is known to work with the following NICs:
   - Mellanox ConnectX-4, ConnectX-5, and ConnectX-6
   - Intel E810 series (ice)
   Please let me know if you find other NICs that work (or don't work).
-
-- TSO support: in order to get best peformance Homa needs to take advantage
-  of TSO support provided by NICs for TCP. This can happen in either of two
-  ways. Some NICs, such as those from Mellanox/NVIDIA, will perform TSO
-  even on packets with IP protocols other than TCP. Homa uses a header format
-  that matches TCP's headers closely enough that TSO will work "out of the box".
-  For other NICs, such as the Intel E810 series, the NIC refuses to perform
-  TCP if the IP protocol is not TCP. For these NICs Homa has a "TCP hijacking"
-  mode where it encapsulates its packets as TCP frames, with an IP protocol
-  of TCP. Then, on the receiver side, Homa intercepts the incoming "TCP"
-  packets and steals them back before they can be processed by TCP. To
-  enable TCP hijacking, use `sysctl` to set the `hijack_tcp` parameter to 1
-  on all nodes.
-
-- If you don't use TCP hijacking and your NICs don't support TSO for non-TCP
-  protocols, then you must make sure that the `max_gso_size` parameter is
-  no larger than the MTU (otherwise large outgoing packets will be dropped).
 
 - The subdirectory "test" contains unit tests, which you can run by typing
   "make" in that subdirectory.
@@ -102,19 +51,20 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
     information. Or, run `cp_node client --workload 500000` on the client:
     this will send continuous 500 KB messages for a simple througput test.
     Type `cp_node --help` to learn about other ways you can use this program.
-  - The `cp_vs_tcp` script uses `cp_node` to run cluster-wide tests comparing
-    Homa with TCP (and/or DCTCP); it was used to generate the data for
-    Figures 3 and 4 in the Homa ATC paper. Here is an example command:
+  - The `cp_bench` script uses `cp_node` to run any of a variety of
+    benchmarks; it was used to generate the data for Figures 3 and 4 in
+    the Homa ATC paper. Here is an example command:
     ```
-    cp_vs_tcp -n 10 -w w4 -b 20
+    cp_bench -n 10 -w w4 -b 20 -B homa_vs_tcp
     ```
-    When invoked on node0, this will run a benchmark using the W4 workload
+    The `-B` option selects one of several benchmarks; `homa_vs_tcp`
+    will run both Homa and TCP on the same workload and generate graphs
+    comparing them.
+    When invoked on node0, this will run the W4 workload
     from the ATC paper,
     running on 10 nodes and generating 20 Gbps of offered load (80%
-    network load on a 25 Gbps network). Type `cp_vs_tcp --help` for
+    network load on a 25 Gbps network). Type `cp_bench --help` for
     information on all available options.
-  - Other `cp_` scripts can be used for different benchmarks.
-    See `util/README.md` for more information.
 
  - Some additional tools you might find useful:
    - Homa collects various metrics about its behavior, such as the size
@@ -126,9 +76,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant changes
-- March 2026: backported Homa to Linux version 4.18.0, using the
-  `linux_4.18.0` branch. Future changes made to the `main` branch are
-  likely to be reflected in this branch also.
+- March 2026: backported Homa to Red Hat Enterprise Linux versions
+  8 and 9.5, using the branches `rhel8` and `rhel9.5`. Future changes made to
+  the `main` branch are likely to be reflected in these branches also.
 - January 2026: introduced new 'homa_qdisc' queuing discpline to improve
   performance when TCP and Homa run simultaneously. Results on c6620 CloudLab
   cluster (100 Gbps network):
@@ -137,8 +87,8 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
     improves.
   - Homa_qdisc improves performance for both Homa and TCP, whether
     running stand-alone or together.
-  - homa_qdisc improves Homa short message P99 3x when running together
-    with TCP, but P99 is still slower than Homa standalone.
+  - homa_qdisc improves Homa's performance when running with TCP to almost
+    what is is when running without TCP.
   - TCP performance improves when running together with Homa, with or
     without homa_qdisc.
 - November 2025: upgraded to Linux 6.17.8.
