@@ -553,8 +553,7 @@ void dst_release(struct dst_entry *dst)
 {
 	if (!dst)
 		return;
-	atomic_dec(&dst->__rcuref.refcnt);
-	if (atomic_read(&dst->__rcuref.refcnt) > 0)
+	if (!rcuref_put(&dst->__rcuref))
 		return;
 	if (!routes_in_use || unit_hash_get(routes_in_use, dst) == NULL) {
 		FAIL(" %s on unknown route", __func__);
@@ -813,7 +812,7 @@ struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 		FAIL(" malloc failed");
 		return ERR_PTR(-ENOMEM);
 	}
-	atomic_set(&route->dst.__rcuref.refcnt, 1);
+	rcuref_init(&route->dst.__rcuref, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_devices[0];
 	route->dst.obsolete = 0;
@@ -929,7 +928,7 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 		FAIL(" malloc failed");
 		return ERR_PTR(-ENOMEM);
 	}
-	atomic_set(&route->dst.__rcuref.refcnt, 1);
+	rcuref_init(&route->dst.__rcuref, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_devices[0];
 	route->dst.obsolete = 0;
@@ -1451,6 +1450,11 @@ void __rcu_read_unlock(void)
 bool rcuref_get_slowpath(rcuref_t *ref)
 {
 	return true;
+}
+
+bool rcuref_put_slowpath(rcuref_t *ref, unsigned int cnt)
+{
+	return cnt == RCUREF_NOREF;
 }
 
 void refcount_warn_saturate(refcount_t *r, enum refcount_saturation_type t) {}
