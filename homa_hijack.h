@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+ */
 
 /* This file defines things related to TCP hijacking. TCP hijacking is an
  * optional mechanism in which Homa packets are encapsulated as TCP frames

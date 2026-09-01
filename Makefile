@@ -10,6 +10,7 @@ HOMA_OBJS := homa_devel.o \
 	homa_rpc.o \
 	homa_sock.o \
 	homa_timer.o \
+	homa_tx_pool.o \
 	homa_utils.o \
 	timetrace.o
 
@@ -20,9 +21,7 @@ HOMA_OBJS += homa_grant.o \
 	homa_hijack.o \
 	homa_metrics.o \
 	homa_offload.o \
-	homa_pacer.o \
-	homa_qdisc.o \
-	homa_skb.o
+	homa_qdisc.o
 endif
 
 CHECK_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o timetrace.o, $(HOMA_OBJS)))

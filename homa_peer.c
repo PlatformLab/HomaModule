@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 /* This file provides functions related to homa_peer and homa_peertab
  * objects.
@@ -206,12 +206,14 @@ int homa_peer_prefer_evict(struct homa_peertab *peertab,
 		if (peer2->ht_key.hnet->num_peers <= peertab->net_max)
 			return true;
 		else
-			return peer1->access_jiffies < peer2->access_jiffies;
+			return time_before(peer1->access_jiffies,
+					   peer2->access_jiffies);
 	}
 	if (peer2->ht_key.hnet->num_peers > peertab->net_max)
 		return false;
 	else
-		return peer1->access_jiffies < peer2->access_jiffies;
+		return time_before(peer1->access_jiffies,
+				   peer2->access_jiffies);
 }
 
 /**
@@ -411,6 +413,8 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 
 	key.addr = *addr;
 	key.hnet = hsk->hnet;
+
+	/* Fast path: use existing entry if it exists. */
 	rcu_read_lock();
 	peer = rhashtable_lookup(&peertab->ht, &key, ht_params);
 	if (peer && refcount_inc_not_zero(&peer->refs)) {
@@ -419,12 +423,16 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 		return peer;
 	}
 
-	/* No existing entry, so we have to create a new one. */
+	/* No existing entry, so we have to create a new one. This could
+	 * sleep, so must release the RCU lock.
+	 */
+        rcu_read_unlock();
 	peer = homa_peer_alloc(hsk, addr);
 	if (IS_ERR(peer)) {
-		rcu_read_unlock();
 		return peer;
 	}
+
+	rcu_read_lock();
 	spin_lock_bh(&peertab->lock);
 	other = rhashtable_lookup_get_insert_fast(&peertab->ht,
 						  &peer->ht_linkage, ht_params);
@@ -464,14 +472,15 @@ struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
 	struct dst_entry *dst;
 	int pass;
 
-	rcu_read_lock();
 	for (pass = 0; ; pass++) {
+		rcu_read_lock();
 		do {
 			/* This loop repeats only if we happen to fetch
 			 * the dst right when it is being reset.
 			 */
 			dst = rcu_dereference(peer->dst);
 		} while (!dst_hold_safe(dst));
+		rcu_read_unlock();
 
 		/* After the first pass it's OK to return an obsolete dst
 		 * (we're basically giving up; continuing could result in
@@ -483,8 +492,8 @@ struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
 		INC_METRIC(peer_dst_refreshes, 1);
 		homa_peer_reset_dst(peer, hsk);
 	}
-	rcu_read_unlock();
 
+#ifndef __UPSTREAM__ /* See strip.py */
 	/* This code is needed to handle situations where the same peer
 	 * is used by multiple sockets, some of which use TCP hijacking
 	 * and some of which don't (e.g. the peer is created for a socket
@@ -492,8 +501,12 @@ struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
 	 * uses the same peer). flowi_proto determines the IP protocol
 	 * that will be stored in IP headers for IPv6; sk_protocol is
 	 * IPPROTO_TCP if hijacking is being used, IPPROTO_HOMA if not.
+	 * This code is racy in that a socket using TCP hijacking could
+	 * change the value out from under another socket that doesn't
+	 * use TCP hijacking.
 	 */
 	peer->flow.flowi_proto = hsk->sock.sk_protocol;
+#endif /* See strip.py */
 	return dst;
 }
 
@@ -509,56 +522,58 @@ struct dst_entry *homa_get_dst(struct homa_peer *peer, struct homa_sock *hsk)
  */
 int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 {
-	struct dst_entry *dst, *old;
+	struct dst_entry *dst;
+	struct flowi flow;
 	int result = 0;
+	u32 cookie;
 
-	homa_peer_lock(peer);
-	memset(&peer->flow, 0, sizeof(peer->flow));
-	if (hsk->sock.sk_family == AF_INET) {
+	/* Collect information before locking the peer. */
+	memset(&flow, 0, sizeof(flow));
+	if (ipv6_addr_v4mapped(&peer->addr)) {
 		struct rtable *rt;
 
-		flowi4_init_output(&peer->flow.u.ip4, hsk->sock.sk_bound_dev_if,
+		flowi4_init_output(&flow.u.ip4, hsk->sock.sk_bound_dev_if,
 				   hsk->sock.sk_mark, hsk->inet.tos,
 				   RT_SCOPE_UNIVERSE, hsk->sock.sk_protocol, 0,
 				   ipv6_to_ipv4(peer->addr),
 				   hsk->inet.inet_saddr, 0, 0,
 				   hsk->sock.sk_uid);
-		security_sk_classify_flow(&hsk->sock,
-					 &peer->flow.u.__fl_common);
-		rt = ip_route_output_flow(sock_net(&hsk->sock),
-					  &peer->flow.u.ip4, &hsk->sock);
+		security_sk_classify_flow(&hsk->sock, &flow.u.__fl_common);
+		rt = ip_route_output_flow(sock_net(&hsk->sock), &flow.u.ip4,
+					  &hsk->sock);
 		if (IS_ERR(rt)) {
 			result = PTR_ERR(rt);
 			INC_METRIC(peer_route_errors, 1);
 			goto done;
 		}
 		dst = &rt->dst;
-		peer->dst_cookie = 0;
+		cookie = 0;
 	} else {
 		/* This code is derived from code in tcp_v6_connect. */
-		peer->flow.u.ip6.flowi6_proto = hsk->sock.sk_protocol;
-		peer->flow.u.ip6.daddr = peer->addr;
-		peer->flow.u.ip6.saddr = hsk->inet.pinet6->saddr;
-		peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos,
-							       0);
-		peer->flow.u.ip6.flowi6_oif = hsk->sock.sk_bound_dev_if;
-		peer->flow.u.ip6.flowi6_mark = hsk->sock.sk_mark;
-		peer->flow.u.ip6.fl6_dport = 0;
-		peer->flow.u.ip6.fl6_sport = 0;
-		peer->flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
-		security_sk_classify_flow(&hsk->sock,
-					 &peer->flow.u.__fl_common);
+		flow.u.ip6.flowi6_proto = hsk->sock.sk_protocol;
+		flow.u.ip6.daddr = peer->addr;
+		flow.u.ip6.saddr = hsk->inet.pinet6->saddr;
+		flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos, 0);
+		flow.u.ip6.flowi6_oif = hsk->sock.sk_bound_dev_if;
+		flow.u.ip6.flowi6_mark = hsk->sock.sk_mark;
+		flow.u.ip6.fl6_dport = 0;
+		flow.u.ip6.fl6_sport = 0;
+		flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
+		security_sk_classify_flow(&hsk->sock, &flow.u.__fl_common);
 		dst = ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
-						   &peer->flow.u.ip6,
-						   &peer->addr);
+						   &flow.u.ip6, &peer->addr);
 
 		if (IS_ERR(dst)) {
 			result = PTR_ERR(dst);
 			INC_METRIC(peer_route_errors, 1);
 			goto done;
 		}
-		peer->dst_cookie = rt6_get_cookie((struct rt6_info *)dst);
+		cookie = rt6_get_cookie((struct rt6_info *)dst);
 	}
+
+	homa_peer_lock(peer);
+	memcpy(&peer->flow, &flow, sizeof(flow));
+	peer->dst_cookie = cookie;
 
 	/* From the standpoint of homa_get_dst, peer->dst is not updated
 	 * atomically with peer->dst_cookie, which means homa_get_dst could
@@ -567,12 +582,10 @@ int homa_peer_reset_dst(struct homa_peer *peer, struct homa_sock *hsk)
 	 * a lost packet) or a valid dst to be replaced (resulting in
 	 * unnecessary work).
 	 */
-	old = rcu_dereference_protected(peer->dst, lockdep_is_held(&peer->lock));
-	rcu_assign_pointer(peer->dst, dst);
-	dst_release(old);
+	dst_release(rcu_replace_pointer(peer->dst, dst, true));
+	homa_peer_unlock(peer);
 
 done:
-	homa_peer_unlock(peer);
 	return result;
 }
 
@@ -648,9 +661,10 @@ void homa_peer_lock_slow(struct homa_peer *peer)
  * homa_peer_add_ack() - Add a given RPC to the list of unacked
  * RPCs for its server. Once this method has been invoked, it's safe
  * to delete the RPC, since it will eventually be acked to the server.
- * @rpc:    Client RPC that has now completed.
+ * @rpc:    Client RPC that has now completed. Must be locked by caller.
  */
 void homa_peer_add_ack(struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_peer *peer = rpc->peer;
 	struct homa_ack_hdr ack;
@@ -672,7 +686,9 @@ void homa_peer_add_ack(struct homa_rpc *rpc)
 	ack.num_acks = htons(peer->num_acks);
 	peer->num_acks = 0;
 	homa_peer_unlock(peer);
+	homa_rpc_unlock(rpc);
 	homa_xmit_control(ACK, &ack, sizeof(ack), rpc);
+	homa_rpc_lock(rpc);
 }
 
 /**

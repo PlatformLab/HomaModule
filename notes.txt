@@ -1,23 +1,62 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
-* Backporting to 4.18.0:
-  * Things to port forward:
-    * Change to tt_unfreeze
-    * Changes in tthoma.py
-    * Changes in homa_qdisc.c
-    * Changes in test/Makefile
+* Merge-related changes:
+  * Are mock_lock_bh_disables and mock_preempt_disables correct in mock.c?
 
-* Linux doesn't seem to like packets getting passed to ip*xmit with
-  reference counts > 1. Maybe change Homa to collect packet data in
-  memory pages, separate from skb's? Save the memory pages for the
-  life of the RPC, but don't save skb's once packets have been
-  transmitted.
+* Finish exploring how to provide pacer helpers when TCP is running wihout
+  Homa: is it possible to trigger everything from callbacks without a
+  thread?
 
-* Eliminate homa_skb_get, use skb_copy_bits instead.
+* By sharing peers across sockets, Homa doesn't account for information
+  in the flows such as sk_uid, sk_mark, tos, and sk_bound_dev_if, which
+  could vary from socket to socket. This means a socket for one user could
+  use security or routing information from another socket. Maybe peers
+  need to be divided into two levels: the top level contains the flow and
+  dst and may be socket-specific, and the lower level contains stuff that must
+  be shared, such as priorities.
 
-* Bug with homa_qdisc: if a TSO packet gets segmented in software, the
-  homa_skb_info is not replicated in the segments, which causes crashes
-  (e.g., homq_qdisc_defer_homa ends up with a NULL value for rpc).
+* Need to do cgroup accounting (using __GRP_ACCOUNT or GFP_KERNEL_ACCOUNT)
+  for memory allocations made on behalf of applications. Places are affected:
+  homa_rpc_alloc_client
+  homa_rpc_alloc_server
+  homa_gap_alloc
+  homa_ioc_info
+  homa_pool_alloc?
+  homa_sock_init
+  tx sk_buffs (homa_skb.c)
+
+* Homa's bipartite matching algorithm is failing under very high loads
+  where there are large backlogs of messages waiting to be sent:
+  * Some nodes will send unscheduled packets for a hundred or more
+    long messages (they aren't getting grants for any of them).
+  * Later on, they get simultaneous grants for more than they can handle,
+    so many grants are "stranded". In some cases, all of a node's outstanding
+    grants are stranded, so its incoming throughput can drop to near zero.
+  * Because of this, other nodes have unused outgoing bandwidth, which
+    causes them to start more long messages, which makes the problem even
+    worse.
+  * As a result, cluster throughput is only about 60-70% of network bandwidth.
+    Interesting that this number is similar to the throughput when there is
+    no overcommitment.
+  * Possible solutions:
+    * Limit the number of outstanding messages that need grants but
+      haven't received them.
+      * In homa_qdisc, when see offset 0 of msg that requires grants,
+        check count and queue message according to length.
+      * When xmit last packet, decrement count, queue packet(s) for next
+        message.
+    * Implement the SIRD approach, where nodes return grants that they can't
+      respond to quickly. But, with this approach could it take a long time
+      (many attempts) to find a node that will respond?
+
+* There is also a problem at very high loads with FIFO grants using up most
+  or all of a node's incoming budget (they get spread across a large number
+  of messages, none of which is responding).
+
+* Check to see that software segmentation works again (with new homa_tx_pool
+  functionality).
+
+* Homa's throughput on W3 seems to be worse than TCP on c6620 cluster.
 
 * Significant new functionality:
   * Run Homa SoftIRQ on the GRO core? This would eliminate the latency and
@@ -32,6 +71,17 @@ Notes for Homa implementation in Linux:
     times" below).
   * Implement some of the ideas from SIRD to reduce buffer utilization.
   * Refactor the granting mechanism to grant separately for each device.
+  * Don't use sk.sk_family to decide IPv4 vs. IPv6: use the address itself,
+    using ipv6_addr_v4mapped. Once this is done it should be possible to
+    use either IPv4 or IPv6 addresses regardless of how the socket was
+    created?
+  * Change wakeups so that there are no direct handoffs for shared interests.
+    Instead, just wake up a thread and let it remove the request from the
+    queue. This could potentially eliminate problems (noticed on xl170s)
+    where an RPC is handed off to a thread that is stalled because of
+    GRO or SoftIRQ activity. With the new approach, the thread would get
+    woken up but if it didn't actually retrieve the RPC then some other
+    thread could eventually get it.
 
 * Move interest cleanup code from homa_sock to a new function in
   homa_interest. Also move wakeup code from homa_rpc_handoff.
@@ -42,8 +92,6 @@ Notes for Homa implementation in Linux:
 * Eliminate use of link_mbps in homa_grant.c; perhaps replace with
   configuration parameter fifo_mbps? Maybe the grant mechanism needs
   to be net_device-specific?
-
-* Eliminate HOMA_FLAG_DONT_THROTTLE
 
 * Optimizations for skb freeing:
   * In GRO, merge page frags out of skbs and return skbs to napi with

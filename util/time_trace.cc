@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2022 Homa Developers
- * SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+ * SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
  */
 
 #include <mutex>

@@ -151,7 +151,9 @@ def get_interfaces():
             if (('s1f1' in current) or ('s1f0' in current)
                     or ('s0f0' in current) or ('s0f1' in current)
                     or (current == 'eno1')) and not interface:
-                interface = current
+                ethtool_info = exec_cmd(["ethtool", current], check=True).stdout
+                if "Link detected: yes" in ethtool_info:
+                    interface = current
             continue
         if re.match(r'^[ ]+ inet 10\.0\.1\.', line):
             vlan = current
@@ -521,7 +523,7 @@ def config_ipv6(num_hosts, vlan):
     if "inet6 fd00::" in exec_cmd(["ifconfig", vlan], check=True).stdout:
         print("IPv6 already configured")
     else:
-        print("Configuring IPv6:")
+        print("Configuring IPv6")
         exec_cmd(["sudo", "ifconfig", vlan, "add", "fd00::%d/64" % (
                 get_node_num() + 1)], check=True)
         exec_cmd(["sudo", "route", "-6", "add", "fd00::/16", vlan],
@@ -610,26 +612,38 @@ def config_mtu(size):
 def config_nic():
     """
     Configure the NIC for best performance (turn off interrupt delaying
-    mechanisms).
+    mechanisms and flow steering).
     """
     interface = get_interfaces()[0]
 
     # Use a separate ethtool command for each paramemeter. Otherwise,
-    # if one parameter isn't supported the command will be aborted,
-    # so no parameters will get set.
+    # if one parameter isn't supported the command will be aborted
+    # and no parameters will get set.
     print("Configuring NIC to reduce interrupt latency")
     exec_cmd(["sudo", "ethtool", "-C", interface, "adaptive-rx", "off"],
             check=False)
     exec_cmd(["sudo", "ethtool", "-C", interface, "rx-usecs", "0"], check=False)
     exec_cmd(["sudo", "ethtool", "-C", interface, "rx-frames", "1"], check=False)
+    print("Configuring NIC to reduce recover tx buffers faster")
+    exec_cmd(["sudo", "ethtool", "-C", interface, "adaptive-tx", "off"],
+            check=False)
+    exec_cmd(["sudo", "ethtool", "-C", interface, "tx-usecs", "5"], check=False)
 
     if get_nic_type() == "ice":
         print("Increasing tx ring size for Intel NIC")
         exec_cmd(["sudo", "ethtool", "-G", interface, "tx", "1024"],
                 check=True)
-        print("Disabling adaptive-tx for Intel NIC to recover tx buffers faster")
-        exec_cmd(["sudo", "ethtool", "-C", interface, "adaptive-tx", "off",
-                "tx-usecs", "10"], check=True)
+
+    # As of 7/2026, RPS doesn't scale well with ICE NICs and drivers:
+    # with 20 nodes and thousands of open sockets per node, it can take
+    # 250 usecs to configure RPS for a flow. This happens at SoftIRQ
+    # level, so it blocks packet processing and causes large increases
+    # in tail latency. I don't yet know whether this is a problem for
+    # other NIC/driver combinations, but measurements suggest that there
+    # is no advantage to RPS anyway.
+    print("Disabling flow steering")
+    exec_cmd(["sudo", "ethtool", "-K", interface, "ntuple", "off"],
+            check=False)
 
 def config_power():
     """
@@ -638,7 +652,7 @@ def config_power():
     if "intel" in get_cpu_type().lower():
         # For Intel processors, it's best to leave C-states enabled. This
         # can cause CPUs to sleep in power-saving mode, but if C-states
-        # are disabled, then so is Turbo mode, and that will hurt  peak peformance.
+        # are disabled, then so is Turbo mode, and that will hurt peak peformance.
         print("Configuring power settings for Intel CPUs")
         try:
             exec_cmd(["sudo", "cpupower", "frequency-set", "-g",
@@ -686,24 +700,19 @@ def config_qdisc():
 
 def config_reset_qdisc():
     """
-    Reset the qdisc configuration by replacing any homa qdiscs with
-    fq_codel ones (this assumes that fq_codel is the default).
+    Reset the qdisc configuration to its boot-time default.
     """
 
     nic = get_interfaces()[0]
-    config = get_qdisc_config()
-    root = config['root_handle']
+    print('Restoring storing default qdisc configuration')
 
-    print('Removing Homa qdisc, restoring fq_codel')
-    for child in config['children']:
-        if child['type'] != 'homa':
-            continue
-        exec_cmd(['sudo', 'tc', 'qdisc', 'del', 'dev', nic,
-                'parent', '%s%x' % (root, child['queue']), 'handle',
-                '%x:' % (64 + child['queue'])], check=True)
-        exec_cmd(['sudo', 'tc', 'qdisc', 'replace', 'dev', nic,
-                'parent', '%s%x' % (root, child['queue']), 'handle',
-                '%x:' % (64 + child['queue']), 'fq_codel'], check=True)
+    # Make sure we're not already in the default configuration, to
+    # avoid error messages.
+    first_line = exec_cmd(['tc', 'qdisc', 'show', 'dev', nic],
+            check=True).stdout.splitlines()[0]
+    if first_line.split()[2] != '0:':
+        exec_cmd(['sudo', 'tc', 'qdisc', 'del', 'dev', nic, 'root'],
+                check=True)
 
 def config_reset_switch_all_ports():
     """
@@ -727,7 +736,7 @@ def config_reset_switch_ports():
 
 def config_rps():
     """
-    Enable RPS (Receive Packet Steering) and RFS (Receive Flow Steering).
+    Enable RPS (Receive Packet Steering).
     """
 
     interface = get_interfaces()[0]
@@ -745,7 +754,7 @@ def config_rps():
         exec_cmd(["sudo", "bash", "-c", "echo %s > %s" % (mask, file)],
                 check=True)
         cpus += 1
-    print("Configured RPS and RFS: %d rps_flow_cnt files and %d rps_cpus files"
+    print("Configured RPS: %d rps_flow_cnt files and %d rps_cpus files"
             % (flow_cnt, cpus))
 
 def config_switch_buffer_limit(mbytes):
@@ -809,7 +818,7 @@ def print_help():
     print("                           of the NIC tx queues")
     print("    reset_qdisc            Uninstall Homa's queuing discipline for any")
     print("                           NIC queues where it is installed, and install")
-    print("                           fq_codel in its place")
+    print("                           fq in its place")
     print("    reset_switch_all_ports Issue commands to TOR switch to restore original")
     print("                           port settings for all ports on the switch")
     print("                           (even those not used by current experiment)")

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 /* This file manages homa_sock and homa_socktab objects. */
 
@@ -21,6 +21,7 @@ void homa_socktab_init(struct homa_socktab *socktab)
 	int i;
 
 	spin_lock_init(&socktab->write_lock);
+	socktab->next_sequence = 1;
 	for (i = 0; i < HOMA_SOCKTAB_BUCKETS; i++)
 		INIT_HLIST_HEAD(&socktab->buckets[i]);
 }
@@ -76,9 +77,50 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
 {
 	scan->socktab = socktab;
 	scan->hsk = NULL;
-	scan->current_bucket = -1;
+	scan->current_bucket = 0;
+	scan->avail = 0;
+	scan->sequence = U64_MAX;
 
 	return homa_socktab_next(scan);
+}
+
+
+/**
+ * homa_socktab_fill_scan() - Refill the @socks array for a homa_socktab_scan.
+ * On return, if its @avail member is zero it means all of the sockets in
+ * the socktab have been scanned.
+ * @scan:      State of the scan. Normally the @avail member will be zero,
+ *             but this is not necessary.
+ */
+void homa_socktab_fill_scan(struct homa_socktab_scan *scan)
+{
+	struct homa_sock_link *slink;
+	struct hlist_head *bucket;
+	struct hlist_node *next;
+
+	rcu_read_lock();
+	bucket = &scan->socktab->buckets[scan->current_bucket];
+	next = rcu_dereference(hlist_first_rcu(bucket));
+	while (scan->avail < HOMA_MAX_SCANNED_SOCKS) {
+		if (next == NULL) {
+			if (scan->current_bucket >= HOMA_SOCKTAB_BUCKETS - 1)
+				break;
+			scan->current_bucket++;
+			scan->sequence = U64_MAX;
+			bucket = &scan->socktab->buckets[scan->current_bucket];
+			next = rcu_dereference(hlist_first_rcu(bucket));
+			continue;
+		}
+		slink = hlist_entry(next, struct homa_sock_link, links);
+		next = rcu_dereference(hlist_next_rcu(next));
+		if (slink->sequence < scan->sequence) {
+			scan->sequence = slink->sequence;
+			scan->socks[scan->avail] = slink->hsk;
+		    	if (refcount_inc_not_zero(&slink->hsk->sock.sk_refcnt))
+				scan->avail++;
+		}
+	}
+	rcu_read_unlock();
 }
 
 /**
@@ -87,38 +129,27 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
  *
  * Return:     The next socket in the table, or NULL if the iteration has
  *             returned all of the sockets in the table.  If non-NULL, a
- *             reference is held on the socket to prevent its deletion.
- *             Sockets are not returned in any particular order. It's
- *             possible that the returned socket has been destroyed.
+ *             reference is held on the socket to prevent its deletion (this
+ *             module will release the reference in the next call to
+ *             homa_socktab_next or homa_socktab_end). Sockets are not returned
+ *             in any particular order. It's possible that the returned socket
+ *             has been shutdown.
  */
 struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 {
-	struct hlist_head *bucket;
-	struct hlist_node *next;
-
-	rcu_read_lock();
 	if (scan->hsk) {
 		sock_put(&scan->hsk->sock);
-		next = rcu_dereference(hlist_next_rcu(&scan->hsk->socktab_links));
-		if (next)
-			goto success;
+		scan->hsk = NULL;
 	}
-	for (scan->current_bucket++;
-	     scan->current_bucket < HOMA_SOCKTAB_BUCKETS;
-	     scan->current_bucket++) {
-		bucket = &scan->socktab->buckets[scan->current_bucket];
-		next = rcu_dereference(hlist_first_rcu(bucket));
-		if (next)
-			goto success;
-	}
-	scan->hsk = NULL;
-	rcu_read_unlock();
-	return NULL;
 
-success:
-	scan->hsk = hlist_entry(next, struct homa_sock, socktab_links);
-	sock_hold(&scan->hsk->sock);
-	rcu_read_unlock();
+	if (scan->avail == 0) {
+		homa_socktab_fill_scan(scan);
+		if (scan->avail == 0)
+			return NULL;
+	}
+
+	scan->hsk = scan->socks[scan->avail - 1];
+	scan->avail--;
 	return scan->hsk;
 }
 
@@ -132,6 +163,10 @@ void homa_socktab_end_scan(struct homa_socktab_scan *scan)
 	if (scan->hsk) {
 		sock_put(&scan->hsk->sock);
 		scan->hsk = NULL;
+	}
+	while (scan->avail > 0) {
+		sock_put(&scan->socks[scan->avail - 1]->sock);
+		scan->avail--;
 	}
 }
 
@@ -182,7 +217,6 @@ int homa_sock_init(struct homa_sock *hsk)
 	atomic_set(&hsk->protect_count, 0);
 	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
-	hsk->dead_skbs = 0;
 	INIT_LIST_HEAD(&hsk->waiting_for_bufs);
 	INIT_LIST_HEAD(&hsk->ready_rpcs);
 	INIT_LIST_HEAD(&hsk->interests);
@@ -206,6 +240,12 @@ int homa_sock_init(struct homa_sock *hsk)
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
 	IF_NO_STRIP(homa_hijack_sock_init(hsk));
 
+	/* This is needed to prevent blocking when allocating memory in
+	 * functions like ip_route_output_flow, which could be invoked
+	 * while atomic.
+	 */
+	hsk->sock.sk_allocation = GFP_ATOMIC;
+
 	/* Pick a default port. Must keep the socktab locked from now
 	 * until the new socket is added to the socktab, to ensure that
 	 * no other socket chooses the same port.
@@ -222,8 +262,6 @@ int homa_sock_init(struct homa_sock *hsk)
 		sock_put(&other->sock);
 		if (hnet->prev_default_port == starting_port) {
 			spin_unlock_bh(&socktab->write_lock);
-			hsk->shutdown = true;
-			hsk->homa = NULL;
 			result = -EADDRNOTAVAIL;
 			goto error;
 		}
@@ -231,33 +269,70 @@ int homa_sock_init(struct homa_sock *hsk)
 		cond_resched();
 		spin_lock_bh(&socktab->write_lock);
 	}
-	hsk->port = hnet->prev_default_port;
-	hsk->inet.inet_num = hsk->port;
-	hsk->inet.inet_sport = htons(hsk->port);
-	hlist_add_head_rcu(&hsk->socktab_links,
-			   &socktab->buckets[homa_socktab_bucket(hnet,
-								 hsk->port)]);
+	result = homa_sock_link(hsk, hnet->prev_default_port);
 	spin_unlock_bh(&socktab->write_lock);
-	return result;
+	if (result == 0)
+		return result;
 
 error:
+	hsk->shutdown = true;
+	hsk->homa = NULL;
 	homa_pool_free(buffer_pool);
 	return result;
 }
 
-/*
- * homa_sock_unlink() - Unlinks a socket from its socktab and does
- * related cleanups. Once this method returns, the socket will not be
- * discoverable through the socktab.
- * @hsk:  Socket to unlink.
+/**
+ * homa_sock_link() - Add a socket to the hash table for its socktab,
+ * so that it will be discoverable through homa_sock_find. If the socket
+ * is already linked, the current link will be removed.
+ * @hsk:    Socket to link in; hsk->port will be used to determine
+ *          where the socket is linked in it socktab. Caller must hold
+ *          the lock for the socket's socktab.
+ * @port:   Port to use for the socket; if this function succeeds, this
+ *          number will be stored in hsk.
+ *
+ * Return:  0 for success, otherwise a negative errno.
  */
-void homa_sock_unlink(struct homa_sock *hsk)
+int homa_sock_link(struct homa_sock *hsk, int port)
+	__must_hold(hsk->homa->socktab->write_lock)
 {
 	struct homa_socktab *socktab = hsk->homa->socktab;
+	struct homa_sock_link *slink;
 
-	spin_lock_bh(&socktab->write_lock);
-	hlist_del_rcu(&hsk->socktab_links);
-	spin_unlock_bh(&socktab->write_lock);
+	slink = kmalloc(sizeof(*slink), GFP_ATOMIC);
+	if (!slink)
+		return -ENOMEM;
+	homa_sock_unlink(hsk);
+	slink->hsk = hsk;
+	slink->sequence = socktab->next_sequence;
+	socktab->next_sequence++;
+	hlist_add_head_rcu(&slink->links,
+			   &socktab->buckets[homa_socktab_bucket(hsk->hnet,
+								 port)]);
+	hsk->port = port;
+	hsk->inet.inet_num = port;
+	hsk->inet.inet_sport = htons(port);
+	hsk->slink = slink;
+	return 0;
+}
+
+/*
+ * homa_sock_unlink() - Unlinks a socket from its socktab. Once this method
+ * returns, the socket will not be discoverable through the socktab.
+ * @hsk:  Socket to unlink. Caller must hold the lock for the socket's
+ *        socktab.
+ */
+void homa_sock_unlink(struct homa_sock *hsk)
+	__must_hold(hsk->homa->socktab->write_lock)
+{
+	struct homa_sock_link *slink;
+
+	slink = hsk->slink;
+	if (!slink)
+		return;
+	hsk->slink = NULL;
+	hlist_del_rcu(&slink->links);
+	kfree_rcu(slink, rcu_head);
 }
 
 /**
@@ -270,7 +345,7 @@ void homa_sock_unlink(struct homa_sock *hsk)
  */
 void homa_sock_shutdown(struct homa_sock *hsk)
 {
-	struct homa_interest *interest;
+	struct homa_socktab *socktab;
 	struct homa_rpc *rpc;
 
 	tt_record1("Starting shutdown for socket %d", hsk->port);
@@ -283,9 +358,10 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	/* The order of cleanup is very important, because there could be
 	 * active operations that hold RPC locks but not the socket lock.
 	 * 1. Set @shutdown; this ensures that no new RPCs will be created for
-	 *    this socket (though some creations might already be in progress).
-	 * 2. Remove the socket from its socktab: this ensures that
-	 *    incoming packets for the socket will be dropped.
+	 *    this socket (though some creations might already be in progress)
+	 *    and incoming packets will be dropped.
+	 * 2. Remove the socket from its socktab, so no-one will ever find
+	 *    it again.
 	 * 3. Go through all of the RPCs and delete them; this will
 	 *    synchronize with any operations in progress.
 	 * 4. Perform other socket cleanup: at this point we know that
@@ -296,8 +372,17 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 * about locking.
 	 */
 	hsk->shutdown = true;
-	homa_sock_unlink(hsk);
+
+	/* This protects against RPC deletions during the RCU scan of
+	 * active_rpcs below.
+	 */
+	atomic_inc(&hsk->protect_count);
 	homa_sock_unlock(hsk);
+
+	socktab = hsk->homa->socktab;
+	spin_lock_bh(&socktab->write_lock);
+	homa_sock_unlink(hsk);
+	spin_unlock_bh(&socktab->write_lock);
 
 	rcu_read_lock();
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
@@ -305,16 +390,13 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc);
 	}
+	wake_up_interruptible_poll(sk_sleep(&hsk->sock), EPOLLOUT);
 	rcu_read_unlock();
+	homa_unprotect_rpcs(hsk);
 
 	homa_sock_lock(hsk);
-	while (!list_empty(&hsk->interests)) {
-		interest = list_first_entry(&hsk->interests,
-					    struct homa_interest, links);
-		list_del_init(&interest->links);
-		atomic_set_release(&interest->ready, 1);
-		wake_up(&interest->wait_queue);
-	}
+	while (!list_empty(&hsk->interests))
+		homa_interest_notify_shared(hsk, NULL);
 	homa_sock_unlock(hsk);
 	tt_record1("Finished shutdown for socket %d", hsk->port);
 }
@@ -336,13 +418,16 @@ void homa_sock_destroy(struct sock *sk)
 
 	tt_record1("Starting to destroy socket %d", hsk->port);
 	while (!list_empty(&hsk->dead_rpcs)) {
-		homa_rpc_reap(hsk, true);
 #ifndef __STRIP__ /* See strip.py */
-		i++;
-		if (i == 5) {
-			tt_record("Freezing because reap seems hung");
-			tt_freeze();
+		if (!homa_rpc_reap(hsk)) {
+			i++;
+			if (i == 5) {
+				tt_record("Freezing because reap seems hung");
+				tt_freeze();
+			}
 		}
+#else /* See strip.py */
+		homa_rpc_reap(hsk);
 #endif /* See strip.py */
 	}
 
@@ -406,13 +491,9 @@ int homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 		}
 		goto done;
 	}
-	hlist_del_rcu(&hsk->socktab_links);
-	hsk->port = port;
-	hsk->inet.inet_num = port;
-	hsk->inet.inet_sport = htons(hsk->port);
-	hlist_add_head_rcu(&hsk->socktab_links,
-			   &socktab->buckets[homa_socktab_bucket(hnet, port)]);
-	hsk->is_server = true;
+	result = homa_sock_link(hsk, port);
+	if (result == 0)
+		hsk->is_server = true;
 done:
 	spin_unlock_bh(&socktab->write_lock);
 	homa_sock_unlock(hsk);
@@ -431,14 +512,17 @@ struct homa_sock *homa_sock_find(struct homa_net *hnet, u16 port)
 {
 	int bucket = homa_socktab_bucket(hnet, port);
 	struct homa_sock *result = NULL;
+	struct homa_sock_link *slink;
 	struct homa_sock *hsk;
 
 	rcu_read_lock();
-	hlist_for_each_entry_rcu(hsk, &hnet->homa->socktab->buckets[bucket],
-				 socktab_links) {
-		if (hsk->port == port && hsk->hnet == hnet) {
+	hlist_for_each_entry_rcu(slink, &hnet->homa->socktab->buckets[bucket],
+				 links) {
+		hsk = slink->hsk;
+		if (hsk && hsk->port == port && hsk->hnet == hnet &&
+		    !hsk->shutdown &&
+		    refcount_inc_not_zero(&hsk->sock.sk_refcnt)) {
 			result = hsk;
-			sock_hold(&hsk->sock);
 			break;
 		}
 	}
@@ -511,18 +595,33 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 	/* Note: we can't use sock_wait_for_wmem because that function
 	 * is not available to modules (as of August 2025 it's static).
 	 */
-
 	if (nonblocking)
 		timeo = 0;
 	set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
 	tt_record2("homa_sock_wait_wmem waiting on port %d, wmem %d",
 		   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
+
+	/* Must wakeup if either memory becomes available or HOMA_SOCK_NOSPACE
+	 * gets cleared. The wmem_avl check is needed to handle a race where
+	 * memory gets freed just before HOMA_SOCK_NOSPACE is set above. The
+	 * HOMA_SOCK_NOSPACE check is needed to handle a race where multiple
+	 * threads wakeup and one thread consumes enough memory that the
+	 * wmem_avl check fails for the other. This approach means that we may
+	 * exceed the memory limit if multiple threads wake up at once, but
+	 * it prevents thread starvation that could occur if the second
+	 * thread were to go back to sleep.
+	 */
 	result = wait_event_interruptible_timeout(*sk_sleep(&hsk->sock),
 						  homa_sock_wmem_avl(hsk) ||
-						  hsk->shutdown, timeo);
+						  hsk->shutdown ||
+						  !test_bit(HOMA_SOCK_NOSPACE,
+							    &hsk->flags),
+						  timeo);
 	tt_record4("homa_sock_wait_wmem woke up on port %d with result %d, wmem %d, signal pending %d",
 		   hsk->port, result, refcount_read(&hsk->sock.sk_wmem_alloc),
 		   signal_pending(current));
+	if (hsk->shutdown)
+		return -ESHUTDOWN;
 	if (signal_pending(current))
 		return -EINTR;
 	if (result == 0)

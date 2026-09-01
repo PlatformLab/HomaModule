@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 #include "homa_impl.h"
 #include "homa_grant.h"
@@ -36,7 +36,6 @@ FIXTURE_SETUP(homa_timer)
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
 	homa_init(&self->homa);
 	self->hnet = mock_hnet(0, &self->homa);
-	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.resend_ticks = 2;
 	self->homa.timer_ticks = 100;
 #ifndef __STRIP__ /* See strip.py */
@@ -63,15 +62,9 @@ TEST_F(homa_timer, homa_timer_check_rpc__request_ack)
 
 	/* First call: do nothing (response not fully transmitted). */
 	homa_rpc_lock(srpc);
-#ifndef __STRIP__ /* See strip.py */
-	homa_xmit_data(srpc, false);
-#else /* See strip.py */
-	homa_xmit_data(srpc);
-#endif /* See strip.py */
-	skb_get(srpc->msgout.packets);
 	homa_timer_check_rpc(srpc);
 	EXPECT_EQ(0, srpc->done_timer_ticks);
-	kfree_skb(srpc->msgout.packets);
+	homa_xmit_data(srpc);
 
 	/* Second call: set done_timer_ticks. */
 	unit_log_clear();
@@ -279,35 +272,26 @@ TEST_F(homa_timer, homa_timer__basics)
 }
 TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 {
-	struct homa_rpc *dead = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 40000, 1000);
+	struct homa_rpc *dead;
+
+	mock_no_high_order_pages = true;
+	dead = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 60000, 1000);
 
 	ASSERT_NE(NULL, dead);
 	homa_rpc_end(dead);
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(31, self->hsk.dead_skbs);
-#else /* See strip.py */
-	EXPECT_EQ(30, self->hsk.dead_skbs);
-#endif /* See strip.py */
+	EXPECT_EQ(16, self->hsk.dead_frags);
 
 	// First call to homa_timer: not enough dead skbs.
-	self->homa.dead_buffs_limit = 32;
+	self->homa.dead_frags_limit = 16;
 	homa_timer(&self->homa);
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(31, self->hsk.dead_skbs);
-#else /* See strip.py */
-	EXPECT_EQ(30, self->hsk.dead_skbs);
-#endif /* See strip.py */
+	EXPECT_EQ(16, self->hsk.dead_frags);
 
 	// Second call to homa_timer: must reap.
-	self->homa.dead_buffs_limit = 15;
+	self->homa.dead_frags_limit = 15;
 	homa_timer(&self->homa);
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(11, self->hsk.dead_skbs);
-#else /* See strip.py */
-	EXPECT_EQ(10, self->hsk.dead_skbs);
-#endif /* See strip.py */
+	EXPECT_EQ(0, self->hsk.dead_frags);
 }
 TEST_F(homa_timer, homa_timer__rpc_in_service)
 {

@@ -1,5 +1,5 @@
 /* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+ * SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
  */
 
 /* This file defines the kernel contains information and supporting

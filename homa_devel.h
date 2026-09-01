@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+ */
 
 /* This file defines functions that are useful during Homa development;
  * they are not present in the upstreamed version of Homa in Linux.
@@ -106,7 +106,7 @@ static inline void check_addr_valid(void *addr, char *info)
 }
 
 #ifndef __STRIP__ /* See strip.py */
-#define IF_NO_STRIP(code) code
+#define IF_NO_STRIP(...) __VA_ARGS__
 #else /* See strip.py */
 #define IF_NO_STRIP(...)
 #endif /* See strip.py */

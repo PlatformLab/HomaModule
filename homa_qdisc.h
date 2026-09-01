@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+ */
+/* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+ */
 
 /* This file contains definitions related to Homa's special-purpose
  * queuing discipline
@@ -162,9 +162,17 @@ struct homa_qdisc_dev {
 
 	/**
 	 * @last_defer: The most recent homa_clock() time when a packet was
-	 * deferred, or 0 if there are currently no deferred packets.
+	 * deferred, or 0 if there are currently no deferred packets. Must
+	 * hold defer_lock to modify.
 	 */
 	u64 last_defer;
+
+	/**
+	 * @unfinished: True means that the last time homa_qdisc_pacer
+	 * returned there were still deferred packets waiting to be
+	 * transmitted.
+	 */
+	bool unfinished;
 
 	/**
 	 * @homa_credit: When there are both Homa and TCP deferred packets,
@@ -208,6 +216,12 @@ struct homa_qdisc_dev {
 	 * Manipulated locklessly with atomic_xchg.
 	 */
 	atomic_t total_nic_queue;
+
+	/**
+	 * @congest_start: Time when total_nic_queue was found to be
+	 * excessive, or 0 if it is not currently believed to be excessive.
+	 */
+	u64 congest_start;
 
 	/**
 	 * @pacer_kthread: Kernel thread that eventually transmits packets
@@ -366,6 +380,7 @@ int             homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 				struct netlink_ext_ack *extack);
 void            homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev,
 				     struct homa_rpc *rpc);
+void            homa_qdisc_lock_qdev_slow(struct homa_qdisc_dev *qdev);
 int             homa_qdisc_pacer(struct homa_qdisc_dev *qdev);
 void            homa_qdisc_pacer_check(struct homa *homa);
 int             homa_qdisc_pacer_main(void *device);
@@ -416,22 +431,7 @@ static inline void homa_qdisc_rpc_init(struct homa_rpc_qdisc *qrpc)
  */
 static inline bool homa_qdisc_any_deferred(struct homa_qdisc_dev *qdev)
 {
-	return rb_first_cached(&qdev->deferred_rpcs) ||
-	       !list_empty(&qdev->deferred_qdiscs);
-}
-
-/**
- * homa_qdisc_schedule_skb() - Enqueue an skb on a qdisc and schedule the
- * qdisc for execution.
- * @skb:         Packet buffer to queue for output
- * @qdisc:       homa_qdisc on which to schedule it.
- */
-static inline void homa_qdisc_schedule_skb(struct sk_buff *skb,
-					   struct Qdisc *qdisc) {
-	spin_lock_bh(qdisc_lock(qdisc));
-	qdisc_enqueue_tail(skb, qdisc);
-	spin_unlock_bh(qdisc_lock(qdisc));
-	__netif_schedule(qdisc);
+	return READ_ONCE(qdev->last_defer) != 0;
 }
 
 /**
@@ -459,6 +459,46 @@ static inline bool homa_qdisc_precedes(struct homa_rpc *rpc1,
 	else if (rpc2->msgout.init_time < rpc1->msgout.init_time)
 		return false;
 	return rpc1 < rpc2;
+}
+
+/**
+ * homa_qdisc_deferred_offset() - If there are any deferred packets
+ * for @rpc, return the smallest offset of any packet for that RPC that
+ * has been deferred but not subsequently transmitted. If there are no
+ * deferred packets, return -1.
+ * @rpc:     RPC to check.
+ * Return:   See above.
+ */
+static inline int homa_qdisc_deferred_offset(struct homa_rpc *rpc)
+{
+	/* This doesn't synchronize, but the worst that can happen is
+	 * to return a slightly out-of-date result.
+	 */
+	if (skb_queue_len(&rpc->qrpc.packets) > 0)
+		return rpc->msgout.length - rpc->qrpc.tx_left;
+	return -1;
+}
+
+/**
+ * homa_qdisc_lock_qdev() - Acquire the defer_lock for a homa_qdisc_dev. If
+ * the lock isn't immediately available, record stats on the waiting time.
+ * @qdev:     Acquire the defer_lock for this struct.
+ */
+static inline void homa_qdisc_lock_qdev(struct homa_qdisc_dev *qdev)
+	__acquires(qdev->defer_lock)
+{
+	if (!spin_trylock_bh(&qdev->defer_lock))
+		homa_qdisc_lock_qdev_slow(qdev);
+}
+
+/**
+ * homa_qdisc_unlock_qdev() - Release the defer_lock for a homa_qdisc_dev.
+ * @qdev:   Release the defer_lock for this struct.
+ */
+static inline void homa_qdisc_unlock_qdev(struct homa_qdisc_dev *qdev)
+	__releases(qdev->defer_lock)
+{
+	spin_unlock_bh(&qdev->defer_lock);
 }
 
 #endif /* _HOMA_QDISC_H */

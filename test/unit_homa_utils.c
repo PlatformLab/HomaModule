@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 #include "homa_impl.h"
 #include "homa_peer.h"
@@ -57,16 +57,6 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 	homa->unsched_cutoffs[7] = c7;
 }
 
-TEST_F(homa_utils, homa_init__pacer_alloc_failure)
-{
-	struct homa homa2;
-
-	mock_kmalloc_errors = 1;
-	unit_log_clear();
-	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_EQ(NULL, homa2.pacer);
-	homa_destroy(&homa2);
-}
 TEST_F(homa_utils, homa_init__grant_alloc_failure)
 {
 	struct homa homa2;
@@ -75,7 +65,6 @@ TEST_F(homa_utils, homa_init__grant_alloc_failure)
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.grant);
-	homa_destroy(&homa2);
 }
 #endif /* See strip.py */
 TEST_F(homa_utils, homa_init__peertab_alloc_failure)
@@ -90,7 +79,6 @@ TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.peertab);
-	homa_destroy(&homa2);
 }
 TEST_F(homa_utils, homa_init__cant_allocate_port_map)
 {
@@ -104,20 +92,20 @@ TEST_F(homa_utils, homa_init__cant_allocate_port_map)
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.socktab);
-	homa_destroy(&homa2);
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_utils, homa_init__homa_skb_init_failure)
+TEST_F(homa_utils, homa_init__cant_initialize_tx_pool)
 {
 	struct homa homa2;
 
+#ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 0x40;
+#else /* See strip.py */
+	mock_kmalloc_errors = 8;
+#endif/* See strip.py */
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_SUBSTR("Couldn't initialize skb management (errno 12)",
+	EXPECT_SUBSTR("Couldn't initialize homa_tx_pool (errno 12)",
 		      mock_printk_output);
-	homa_destroy(&homa2);
 }
-#endif /* See strip.py */
 
 TEST_F(homa_utils, homa_destroy)
 {

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 /* This file consists mostly of "glue" that hooks Homa into the rest of
  * the Linux kernel. The guts of the protocol are in other files.
@@ -12,7 +12,6 @@
 #include "homa_grant.h"
 #include "homa_hijack.h"
 #include "homa_offload.h"
-#include "homa_pacer.h"
 #include "homa_qdisc.h"
 #endif /* See strip.py */
 
@@ -196,8 +195,8 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "dead_buffs_limit",
-		.data		= OFFSET(dead_buffs_limit),
+		.procname	= "dead_frags_limit",
+		.data		= OFFSET(dead_frags_limit),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -205,13 +204,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "drop_bits",
 		.data		= OFFSET(drop_bits),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "flags",
-		.data		= OFFSET(flags),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -266,8 +258,8 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "max_dead_buffs",
-		.data		= OFFSET(max_dead_buffs),
+		.procname	= "max_dead_frags",
+		.data		= OFFSET(max_dead_frags),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -322,13 +314,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "reap_limit",
-		.data		= OFFSET(reap_limit),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "request_ack_ticks",
 		.data		= OFFSET(request_ack_ticks),
 		.maxlen		= sizeof(int),
@@ -350,20 +335,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "skb_page_frees_per_sec",
-		.data		= OFFSET(skb_page_frees_per_sec),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "skb_page_pool_min_kb",
-		.data		= OFFSET(skb_page_pool_min_kb),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "temp",
 		.data		= OFFSET(temp[0]),
 		.maxlen		= sizeof(((struct homa *)0)->temp),
@@ -380,6 +351,20 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "timeout_ticks",
 		.data		= OFFSET(timeout_ticks),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "tx_page_frees_per_sec",
+		.data		= OFFSET(tx_page_frees_per_sec),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "tx_page_pool_min_kb",
+		.data		= OFFSET(tx_page_pool_min_kb),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -450,13 +435,9 @@ static struct ctl_table_header *homa_ctl_header;
 
 /* Thread that runs timer code to detect lost packets and crashed peers. */
 static struct task_struct *timer_kthread;
-static DECLARE_COMPLETION(timer_thread_done);
 
 /* Used to wakeup timer_kthread at regular intervals. */
 static struct hrtimer hrtimer;
-
-/* Nonzero is an indication to the timer thread that it should exit. */
-static int timer_thread_exit;
 
 /**
  * homa_load() - invoked when this module is loaded into the Linux kernel
@@ -553,6 +534,14 @@ int __init homa_load(void)
 		goto error;
 	init_homa = true;
 
+	status = register_pernet_subsys(&homa_net_ops);
+	if (status != 0) {
+		pr_err("Homa got error from register_pernet_subsys: %d\n",
+		       status);
+		goto error;
+	}
+	init_net_ops = true;
+
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		pr_err("proto_register failed for homa_prot: %d\n", status);
@@ -624,14 +613,6 @@ int __init homa_load(void)
 	init_qdisc = true;
 #endif /* See strip.py */
 
-	status = register_pernet_subsys(&homa_net_ops);
-	if (status != 0) {
-		pr_err("Homa got error from register_pernet_subsys: %d\n",
-		       status);
-		goto error;
-	}
-	init_net_ops = true;
-
 	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
 	if (IS_ERR(timer_kthread)) {
 		status = PTR_ERR(timer_kthread);
@@ -651,11 +632,8 @@ int __init homa_load(void)
 	return 0;
 
 error:
-	if (timer_kthread) {
-		timer_thread_exit = 1;
-		wake_up_process(timer_kthread);
-		wait_for_completion(&timer_thread_done);
-	}
+	if (timer_kthread)
+		kthread_stop(timer_kthread);
 #ifndef __STRIP__ /* See strip.py */
 	if (init_qdisc)
 		homa_qdisc_unregister();
@@ -666,8 +644,6 @@ error:
 	if (init_metrics)
 		homa_metrics_end();
 #endif /* See strip.py */
-	if (init_net_ops)
-		unregister_pernet_subsys(&homa_net_ops);
 	if (init_homa)
 		homa_destroy(homa);
 	if (init_protocol)
@@ -682,6 +658,8 @@ error:
 		proto_unregister(&homa_prot);
 	if (init_proto6)
 		proto_unregister(&homav6_prot);
+	if (init_net_ops)
+		unregister_pernet_subsys(&homa_net_ops);
 	return status;
 }
 
@@ -697,11 +675,8 @@ void __exit homa_unload(void)
 #ifndef __STRIP__ /* See strip.py */
 	homa_hijack_end();
 #endif /* See strip.py */
-	if (timer_kthread) {
-		timer_thread_exit = 1;
-		wake_up_process(timer_kthread);
-		wait_for_completion(&timer_thread_done);
-	}
+	if (timer_kthread)
+		kthread_stop(timer_kthread);
 #ifndef __STRIP__ /* See strip.py */
 	homa_qdisc_unregister();
 	if (homa_offload_end() != 0)
@@ -709,13 +684,13 @@ void __exit homa_unload(void)
 	unregister_net_sysctl_table(homa_ctl_header);
 	homa_metrics_end();
 #endif /* See strip.py */
-	unregister_pernet_subsys(&homa_net_ops);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
 	inet6_unregister_protosw(&homav6_protosw);
 	proto_unregister(&homa_prot);
 	proto_unregister(&homav6_prot);
+	unregister_pernet_subsys(&homa_net_ops);
 	homa_destroy(homa);
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_destroy();
@@ -733,7 +708,7 @@ module_exit(homa_unload);
 int homa_net_start(struct net *net)
 {
 	pr_notice("Homa attaching to net namespace\n");
-	return homa_net_init(homa_net(net), net, &homa_data);
+	return homa_net_init(homa_net(net), &homa_data);
 }
 
 /**
@@ -773,13 +748,13 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 			hsk->error_msg = "ipv6 address too short";
 			return -EINVAL;
 		}
-		port = ntohs(addr_in->in4.sin_port);
+		port = ntohs(addr_in->in6.sin6_port);
 	} else if (addr_in->in4.sin_family == AF_INET) {
 		if (addr_len < sizeof(struct sockaddr_in)) {
 			hsk->error_msg = "ipv4 address too short";
 			return -EINVAL;
 		}
-		port = ntohs(addr_in->in6.sin6_port);
+		port = ntohs(addr_in->in4.sin_port);
 	}
 	return homa_sock_bind(hsk->hnet, hsk, port);
 }
@@ -917,7 +892,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		 * Must release the RCU lock temporarily while allocating.
 		 */
 		rcu_read_unlock();
-		rpcs = kmalloc(num_rpcs * sizeof(*rpcs), GFP_KERNEL);
+		rpcs = kmalloc_array(num_rpcs, sizeof(*rpcs), GFP_KERNEL);
 		if (!rpcs) {
 			homa_unprotect_rpcs(hsk);
 			return -ENOMEM;
@@ -955,6 +930,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 			continue;
 		}
 		homa_rpc_get_info(rpc, &rinfo);
+		homa_rpc_unlock(rpc);
 		if (dst && bytes_avl >= sizeof(rinfo) && result == 0) {
 			if (copy_to_user((void __user *)dst, &rinfo,
 					 sizeof(rinfo))) {
@@ -964,7 +940,6 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 			dst += sizeof(rinfo);
 			bytes_avl -= sizeof(rinfo);
 		}
-		homa_rpc_unlock(rpc);
 		hinfo.num_rpcs++;
 	}
 	kfree(rpcs);
@@ -1238,6 +1213,17 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		goto error;
 	}
 
+	if (unlikely(msg->msg_iter.count == 0)) {
+		hsk->error_msg = "message has length zero";
+		result = -EINVAL;
+		goto error;
+	}
+	if (unlikely(msg->msg_iter.count > HOMA_MAX_MESSAGE_LENGTH)) {
+		hsk->error_msg = "message length exceeded HOMA_MAX_MESSAGE_LENGTH";
+		result = -EINVAL;
+		goto error;
+	}
+
 	if (!args.id) {
 		/* This is a request message. */
 		rpc = homa_rpc_alloc_client(hsk, addr);
@@ -1256,7 +1242,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			   : tt_addr(addr->in6.sin6_addr),
 			   ntohs(addr->in6.sin6_port), rpc->id, length);
 		rpc->completion_cookie = args.completion_cookie;
-		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
+		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result)
 			goto error;
 		args.id = rpc->id;
@@ -1311,9 +1297,11 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		rpc->state = RPC_OUTGOING;
 
-		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
-		if (result && rpc->state != RPC_DEAD)
+		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
+		if (result && rpc->state != RPC_DEAD) {
+			hsk->error_msg = "error copying reponse message data from user space";
 			goto error;
+		}
 		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 #ifndef __STRIP__ /* See strip.py */
@@ -1474,6 +1462,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		memcpy(control.bpage_offsets, rpc->msgin.bpage_offsets,
 		       sizeof(rpc->msgin.bpage_offsets));
 	}
+	memset(msg->msg_name, 0, msg->msg_namelen);
 	if (sk->sk_family == AF_INET6) {
 		struct sockaddr_in6 *in6 = msg->msg_name;
 
@@ -1516,11 +1505,12 @@ done:
 		homa_rpc_unlock(rpc);
 	}
 
-	if (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags)) {
+	while (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags)) {
 		/* There are tasks waiting for tx memory, so reap
 		 * immediately.
 		 */
-		homa_rpc_reap(hsk, true);
+		if (!homa_rpc_reap(hsk))
+			break;
 	}
 
 	if (unlikely(copy_to_user((__force void __user *)msg->msg_control,
@@ -1868,7 +1858,6 @@ int homa_dointvec(struct ctl_table *table, int write,
 		 * dependent information).
 		 */
 		homa_incoming_sysctl_changed(homa);
-		homa_pacer_update_sysctl_deps(homa->pacer);
 		homa_qdisc_update_sysctl_deps(homa->qshared);
 
 		/* For this value, only call the method when this
@@ -1894,8 +1883,6 @@ int homa_dointvec(struct ctl_table *table, int write,
 			} else if (homa->sysctl_action == 3) {
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
-			} else if (homa->sysctl_action == 4) {
-				homa_pacer_log_throttled(homa->pacer);
 			} else if (homa->sysctl_action == 5) {
 				tt_printk();
 			} else if (homa->sysctl_action == 6) {
@@ -2036,18 +2023,17 @@ int homa_timer_main(void *transport)
 	tick_interval = ns_to_ktime(nsec);
 	while (1) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
-		if (!timer_thread_exit) {
+		if (!kthread_should_stop()) {
 			hrtimer_start(&hrtimer, tick_interval,
 				      HRTIMER_MODE_REL);
 			schedule();
 		}
 		__set_current_state(TASK_RUNNING);
-		if (timer_thread_exit)
+		if (kthread_should_stop())
 			break;
 		homa_timer(homa);
 	}
 	hrtimer_cancel(&hrtimer);
-	kthread_complete_and_exit(&timer_thread_done, 0);
 	return 0;
 }
 

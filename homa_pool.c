@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 #include "homa_impl.h"
 #ifndef __STRIP__ /* See strip.py */
@@ -7,11 +7,6 @@
 #include "homa_pool.h"
 
 /* This file contains functions that manage user-space buffer pools. */
-
-/* Pools must always have at least this many bpages (no particular
- * reasoning behind this value).
- */
-#define MIN_POOL_SIZE 2
 
 /* Used when determining how many bpages to consider for allocation. */
 #define MIN_EXTRA 4
@@ -65,18 +60,41 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 	struct homa_bpage *descriptors;
 	int i, result, num_bpages;
 	struct homa_pool *pool;
+	u64 min_size;
 
-	if (((uintptr_t)region) & ~PAGE_MASK)
+	if (((uintptr_t)region) & ~PAGE_MASK) {
+		hsk->error_msg = "buffer pool is not page aligned";
 		return -EINVAL;
+	}
+
+	/* The region must be large enough to hold a private bpage for
+	 * each core, plus enough additional space for a couple of
+	 * full-size messages. Otherwise we could deadlock over allocation
+	 * (no free pages available, so no attempt is made to steal back
+	 * private pages).
+	 */
+	min_size = nr_cpu_ids;
+	min_size = min_size * HOMA_BPAGE_SIZE + 2 * HOMA_MAX_MESSAGE_LENGTH;
+	if (region_size < min_size) {
+		hsk->error_msg = "buffer pool is not large enough";
+		return -EINVAL;
+	}
+
+	/* The region must not be so large that offsets into the region
+	 * overflow the 32-bit values used in bpage_offsets in
+	 * homa_recvmsg_args.
+	 */
+	if (region_size > 0x100000000ULL) {
+		hsk->error_msg = "buffer pool cannot be larger than 4 GB";
+		return -EINVAL;
+	}
 
 	/* Allocate memory before locking the socket, so we can allocate
 	 * without GFP_ATOMIC.
 	 */
 	num_bpages = region_size >> HOMA_BPAGE_SHIFT;
-	if (num_bpages < MIN_POOL_SIZE)
-		return -EINVAL;
 	descriptors = kmalloc_array(num_bpages, sizeof(struct homa_bpage),
-				    GFP_KERNEL | __GFP_ZERO);
+				    GFP_KERNEL | __GFP_ZERO | __GFP_ACCOUNT);
 	if (!descriptors)
 		return -ENOMEM;
 	cores = alloc_percpu_gfp(struct homa_pool_core, __GFP_ZERO);
@@ -93,7 +111,6 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 		goto error;
 	}
 
-	pool->region = (char __user *)region;
 	pool->num_bpages = num_bpages;
 	pool->descriptors = descriptors;
 	atomic_set(&pool->free_bpages, pool->num_bpages);
@@ -108,6 +125,7 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 		bp->owner = -1;
 	}
 
+	smp_store_release(&pool->region, (char __user *)region);
 	homa_sock_unlock(hsk);
 	return 0;
 
@@ -127,7 +145,7 @@ void homa_pool_free(struct homa_pool *pool)
 #ifdef __UNIT_TEST__
 	mock_free_pool(pool);
 #endif /* __UNIT_TEST__ */
-	if (pool->region) {
+	if (smp_load_acquire(&pool->region)) {
 		kfree(pool->descriptors);
 		free_percpu(pool->cores);
 		pool->region = NULL;
@@ -145,7 +163,7 @@ void homa_pool_get_rcvbuf(struct homa_pool *pool,
 			  struct homa_rcvbuf_args *args)
 {
 	args->start = (uintptr_t)pool->region;
-	args->length = pool->num_bpages << HOMA_BPAGE_SHIFT;
+	args->length = (u64)pool->num_bpages << HOMA_BPAGE_SHIFT;
 }
 
 /**
@@ -157,10 +175,8 @@ void homa_pool_get_rcvbuf(struct homa_pool *pool,
  */
 bool homa_bpage_available(struct homa_bpage *bpage, u64 now)
 {
-	int ref_count = atomic_read(&bpage->refs);
-
-	return ref_count == 0 || (ref_count == 1 && bpage->owner >= 0 &&
-			bpage->expiration <= now);
+	return bpage->refs == 0 || (bpage->refs == 1 && bpage->owner >= 0 &&
+				    bpage->expiration <= now);
 }
 
 /**
@@ -184,12 +200,21 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 	u64 now = homa_clock();
 	int alloced = 0;
 	int limit = 0;
+	int free;
 
 	core = this_cpu_ptr(pool->cores);
-	if (atomic_sub_return(num_pages, &pool->free_bpages) < 0) {
-		atomic_add(num_pages, &pool->free_bpages);
-		return -1;
-	}
+
+	/* Atomically check for available space and decrement the
+	 * free page counter.
+	 */
+	free = atomic_read_acquire(&pool->free_bpages);
+	while (1) {
+		if (free < num_pages)
+			return -1;
+		if (atomic_try_cmpxchg(&pool->free_bpages, &free,
+				       free - num_pages))
+			break;
+        }
 
 	/* Once we get to this point we know we will be able to find
 	 * enough free pages; now we just have to find them.
@@ -251,14 +276,14 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 			continue;
 		}
 		if (bpage->owner >= 0)
-			atomic_inc(&pool->free_bpages);
+			atomic_fetch_inc_release(&pool->free_bpages);
 		if (set_owner) {
-			atomic_set(&bpage->refs, 2);
+			bpage->refs = 2;
 			bpage->owner = core_num;
 			bpage->expiration = now +
 					    pool->hsk->homa->bpage_lease_cycles;
 		} else {
-			atomic_set(&bpage->refs, 1);
+			bpage->refs = 1;
 			bpage->owner = -1;
 		}
 		spin_unlock_bh(&bpage->lock);
@@ -288,7 +313,7 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	struct homa_bpage *bpage;
 	struct homa_rpc *other;
 
-	if (!pool->region)
+	if (!smp_load_acquire(&pool->region))
 		return -ENOMEM;
 	if (rpc->state == RPC_DEAD)
 		return 0;
@@ -313,27 +338,19 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	core_id = smp_processor_id();
 	core = this_cpu_ptr(pool->cores);
 	bpage = &pool->descriptors[core->page_hint];
-#ifndef __STRIP__ /* See strip.py */
-	if (!spin_trylock_bh(&bpage->lock)) {
-		tt_record("beginning wait for bpage lock");
-		spin_lock_bh(&bpage->lock);
-		tt_record("ending wait for bpage lock");
-	}
-#else /* See strip.py */
 	spin_lock_bh(&bpage->lock);
-#endif /* See strip.py */
 	if (bpage->owner != core_id) {
 		spin_unlock_bh(&bpage->lock);
 		goto new_page;
 	}
 	if ((core->allocated + partial) > HOMA_BPAGE_SIZE) {
 #ifndef __STRIP__ /* See strip.py */
-		if (atomic_read(&bpage->refs) == 1) {
+		if (bpage->refs == 1) {
 			/* Bpage is totally free, so we can reuse it. */
 			core->allocated = 0;
 			INC_METRIC(bpage_reuses, 1);
 #else /* See strip.py */
-		if (atomic_read(&bpage->refs) == 1) {
+		if (bpage->refs == 1) {
 			/* Bpage is totally free, so we can reuse it. */
 			core->allocated = 0;
 #endif /* See strip.py */
@@ -344,14 +361,14 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 			 * because of check above, so we won't have to decrement
 			 * pool->free_bpages.
 			 */
-			atomic_dec_return(&bpage->refs);
+			bpage->refs--;
 			spin_unlock_bh(&bpage->lock);
 			goto new_page;
 		}
 	}
 	bpage->expiration = homa_clock() +
 			    pool->hsk->homa->bpage_lease_cycles;
-	atomic_inc(&bpage->refs);
+	bpage->refs++;
 	spin_unlock_bh(&bpage->lock);
 	goto allocate_partial;
 
@@ -447,26 +464,36 @@ void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
  */
 int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 {
-	int result = 0;
 	int i;
 
-	if (!pool->region)
-		return result;
+	if (!smp_load_acquire(&pool->region))
+		return -EINVAL;
 	for (i = 0; i < num_buffers; i++) {
 		u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
-		struct homa_bpage *bpage = &pool->descriptors[bpage_index];
+		struct homa_bpage *bpage;
 
-		if (bpage_index < pool->num_bpages) {
-			if (atomic_dec_return(&bpage->refs) == 0)
-				atomic_inc(&pool->free_bpages);
-		} else {
-			result = -EINVAL;
+		if (bpage_index >= pool->num_bpages)
+			return -EINVAL;
+		bpage = &pool->descriptors[bpage_index];
+
+		spin_lock_bh(&bpage->lock);
+		if (bpage->refs == 0 || (bpage->refs == 1 &&
+					 bpage->owner >= 0)) {
+			/* This bpage is already free; looks like the app
+			 * has misbehaved and freed an offset multiple times.
+			 */
+			spin_unlock_bh(&bpage->lock);
+			return -EINVAL;
 		}
+		bpage->refs--;
+		if (bpage->refs == 0)
+			atomic_fetch_inc(&pool->free_bpages);
+		spin_unlock_bh(&bpage->lock);
 	}
 	tt_record3("Released %d bpages, free_bpages for port %d now %d",
 		   num_buffers, pool->hsk->port,
 		   atomic_read(&pool->free_bpages));
-	return result;
+	return 0;
 }
 
 /**
@@ -483,9 +510,9 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 #ifdef __UNIT_TEST__
 	pool->check_waiting_invoked += 1;
 #endif /* __UNIT_TEST__ */
-	if (!pool->region)
+	if (!smp_load_acquire(&pool->region))
 		return;
-	while (atomic_read(&pool->free_bpages) >= pool->bpages_needed) {
+	while (atomic_read_acquire(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
 
 		homa_sock_lock(pool->hsk);
@@ -505,6 +532,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			 */
 			homa_sock_unlock(pool->hsk);
 			UNIT_LOG("; ", "rpc lock unavailable in %s", __func__);
+			cpu_relax();
 			continue;
 		}
 		list_del_init(&rpc->buf_links);
@@ -518,6 +546,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			   atomic_read(&pool->free_bpages),
 			   pool->bpages_needed);
 		homa_pool_alloc_msg(rpc);
+		homa_rpc_unlock(rpc);
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgin.num_bpages > 0) {
 			struct homa_resend_hdr resend;
@@ -534,7 +563,6 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 		}
 #endif /* See strip.py */
-		homa_rpc_unlock(rpc);
 	}
 }
 
@@ -551,7 +579,7 @@ u64 homa_pool_avail_bytes(struct homa_pool *pool)
 	u64 avail;
 	int cpu;
 
-	if (!pool->region)
+	if (!smp_load_acquire(&pool->region))
 		return 0;
 	avail = atomic_read(&pool->free_bpages);
 	avail *= HOMA_BPAGE_SIZE;
@@ -559,7 +587,7 @@ u64 homa_pool_avail_bytes(struct homa_pool *pool)
 		core = per_cpu_ptr(pool->cores, cpu);
 		bpage = &pool->descriptors[core->page_hint];
 		if (bpage->owner == cpu) {
-			if (atomic_read(&bpage->refs) > 1)
+			if (bpage->refs > 1)
 				avail += HOMA_BPAGE_SIZE - core->allocated;
 			else
 				avail += HOMA_BPAGE_SIZE;

@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # Copyright (c) 2023 Homa Developers
-# SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+# SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 """
 Compare two .rtts files to identify differences between them.

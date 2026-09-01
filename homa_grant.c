@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 /* This file contains functions related to issuing grants for incoming
  * messages.
@@ -6,7 +6,6 @@
 
 #include "homa_impl.h"
 #include "homa_grant.h"
-#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #include "homa_wire.h"
@@ -58,15 +57,14 @@
  *    cleanups performed by homa_rpc_end.
  *
  *    Unfortunately there are quite a few places in this module where RPC
- *    locks get released and reacquired. Rather than trying to deal with
- *    dead RPCs everywhere an RPC lock is acquired, we assume that an RPC
- *    could be dead at any point. Any state change that is disallowed for
- *    dead RPCs (such as adding to @active_rpcs or the priority queues, or
- *    updating @rec_incoming in an RPC) must skip its updates if that is the
- *    case. This code can be found by searching for places whrere the
- *    RPC_GRANTABLE flag is tested; this flag gets turned off when an
- *    RPC is ended. Note that code that removes an RPC from the granting
- *    structures is safe even after death, so no checks are needed there.
+ *    locks get released and reacquired, which means that RPCs may suddenly
+ *    become dead. Any state change that is disallowed for dead RPCs (such as
+ *    adding to @active_rpcs or the priority queues, or updating @rec_incoming
+ *    in an RPC) must skip its updates if that is the case. This code can be
+ *    found by searching for places whrere the RPC_GRANTABLE flag is tested;
+ *    this flag gets turned off when an RPC is ended. Note that code that
+ *    removes an RPC from the granting structures is safe even after death,
+ *    so no checks are needed there.
  */
 
 #ifndef __STRIP__ /* See strip.py */
@@ -500,9 +498,7 @@ void homa_grant_remove_grantable(struct homa_grant *grant, struct homa_rpc *rpc)
  * structures for managing grantable RPCs (active_rpcs or grantable_peers).
  * Ensures that the RPC will eventually be sent grants.
  * @grant:  Overall grant management information.
- * @rpc:    The RPC to add. Must be locked and referenced by caller. The
- *          RPC is temporarily unlocked by this function, so it may be
- *          dead on return.
+ * @rpc:    The RPC to add. Must be locked and referenced by caller.
  */
 void homa_grant_manage_rpc(struct homa_grant *grant, struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
@@ -581,8 +577,7 @@ void homa_grant_manage_rpc(struct homa_grant *grant, struct homa_rpc *rpc)
  * grantable_rpcs). The RPC will no longer receive grants. If a slot in
  * @active_rpcs is opened up, this function will try to promote an RPC
  * from the grantable lists.
- * @rpc:     RPC to unlink. Gets unlocked temporarily by this function,
- *           so may be dead on return.
+ * @rpc:     RPC to unlink.  Must be locked by caller.
  */
 void homa_grant_unmanage_rpc(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
@@ -768,13 +763,12 @@ void homa_grant_update_incoming(struct homa_grant *grant, struct homa_rpc *rpc)
 /**
  * homa_grant_send() - Issue a GRANT packet for the current grant offset
  * of an incoming RPC.
- * @rpc:      RPC for which to issue GRANT. Should not be locked (to
- *            minimize lock contention, since sending a packet is slow),
- *            but caller must hold a reference to keep it from being reaped.
- *            The msgin.resend_all field will be cleared.
+ * @rpc:      RPC for which to issue GRANT. Must not be locked; caller must
+ *            not hold *any* locks. The msgin.resend_all field will be cleared.
  * @priority: Priority level to use for the grant.
  */
 void homa_grant_send(struct homa_rpc *rpc, int priority)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_grant_hdr grant;
 
@@ -854,10 +848,6 @@ void homa_grant_try_send(struct homa_grant *grant, struct homa_rpc *rpc,
 		rank++;
 	}
 
-	/* Sending a grant takes a long time, so release the RPC lock to
-	 * allow others to use the RPC. This is also a convenient time to check
-	 * for FIFO grants, since that requires us to release the lock also.
-	 */
 	homa_rpc_unlock(rpc);
 	homa_grant_send(rpc, homa_grant_priority(grant->homa, rank));
 	homa_grant_check_fifo(grant);
@@ -939,9 +929,7 @@ void homa_grant_check_needy(struct homa_grant *grant)
  * grant packets.  It is invoked when the state of an RPC has changed in
  * ways that might permit grants to be issued (either to this RPC or other
  * RPCs), such as the arrival of a DATA packet.
- * @rpc:    RPC to check. Must be locked by the caller. The lock may get
- *          released and reacquired, which means it's possible that the
- *          RPC will be dead on return.
+ * @rpc:    RPC to check. Must be locked by the caller.
  */
 void homa_grant_check_rpc(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)

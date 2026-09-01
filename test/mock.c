@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause or GPL-2.0+
+// SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 /* This file provides simplified substitutes for many Linux variables and
  * functions in order to allow Homa unit tests to be run outside a Linux
@@ -7,9 +7,9 @@
 
 #include "homa_impl.h"
 #include "homa_pool.h"
+#include "homa_tx_pool.h"
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_qdisc.h"
-#include "homa_skb.h"
 #endif /* See strip.py */
 #include "ccutils.h"
 #include "utils.h"
@@ -39,6 +39,7 @@ int mock_alloc_page_errors;
 int mock_alloc_skb_errors;
 int mock_cmpxchg_errors;
 int mock_copy_data_errors;
+int mock_copy_to_frags_errors;
 int mock_copy_to_iter_errors;
 int mock_copy_to_user_errors;
 int mock_cpu_idle;
@@ -92,6 +93,11 @@ int mock_log_wakeups;
  */
 int mock_log_rcu_sched;
 
+/* True means copy_from_iter should not log anything; false means
+ * it will log info about what it has copied.
+ */
+bool mock_copy_from_iter_no_log;
+
 /* A zero value means that copy_to_user will actually copy bytes to
  * the destination address; if nonzero, then 0 bits determine which
  * copies actually occur (bit 0 for the first copy, etc., just like
@@ -104,6 +110,11 @@ int mock_bpage_size = 0x10000;
 
 /* HOMA_BPAGE_SHIFT will evaluate to this. */
 int mock_bpage_shift = 16;
+
+/* True means that mock_alloc_pages will refuse any allocation request
+ * for pages larger than PAGE_SIZE.
+ */
+bool mock_no_high_order_pages = false;
 
 /* Keeps track of all the spinlocks that have been locked but not unlocked.
  * Reset for each test.
@@ -163,6 +174,15 @@ int mock_total_spin_locks;
  */
 static int mock_active_rcu_locks;
 
+/* Pointers to memory blocks that need to be freed when mock_active_rcu_locks
+ * becomes zero.
+ */
+#define MAX_RCU_FREES 100
+static void *rcu_frees[MAX_RCU_FREES];
+
+/* The number of entries in rcu_frees that are currently occupied. */
+static int num_rcu_frees;
+
 /* Number of calls to sock_hold that haven't been matched with calls
  * to sock_put.
  */
@@ -209,7 +229,7 @@ bool mock_ipv6_default;
 char mock_xmit_prios[1000];
 int mock_xmit_prios_offset;
 
-/* Maximum packet size allowed by "network" (see homa_message_out_fill;
+/* Maximum packet size allowed by "network" (see homa_tx_copy_from_user);
  * chosen so that data packets will have UNIT_TEST_DATA_PER_PACKET bytes
  * of payload. The variable can be modified if useful in some tests.
  * Set by mock_sock_init.
@@ -217,7 +237,7 @@ int mock_xmit_prios_offset;
 int mock_mtu;
 
 /* Used instead of MAX_SKB_FRAGS when running some unit tests. */
-int mock_max_skb_frags = MAX_SKB_FRAGS;
+int mock_max_skb_frags = 10;
 
 /* Each bit gives the NUMA node (0 or 1) for a particular core.*/
 int mock_numa_mask = 5;
@@ -279,6 +299,18 @@ int mock_netif_schedule_calls;
  * space still allocated in a homa_pool.
  */
 bool mock_check_bpool_leaks = true;
+
+/* Keeps track of all of the sockets created during the current test.
+ * Used to attribute calls to refcount_inc_not_zero to a socket (or not).
+ */
+#define MOCK_MAX_SOCKS 100
+struct homa_sock *mock_socks[MOCK_MAX_SOCKS];
+int mock_num_socks;
+
+/* Keeps track of the reasons given for freeing skbs. */
+#define MAX_DROP_REASONS 10
+enum skb_drop_reason mock_drop_reasons[MAX_DROP_REASONS];
+int mock_num_drop_reasons;
 
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
@@ -397,8 +429,17 @@ size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 
 		if (chunk_bytes > bytes_left)
 			chunk_bytes = bytes_left;
-		unit_log_printf("; ", "_copy_from_iter %lu bytes at %llu",
-				chunk_bytes, int_base);
+		if (!mock_copy_from_iter_no_log)
+			unit_log_printf("; ",
+					"_copy_from_iter %lu bytes at %llu",
+					chunk_bytes, int_base);
+		/* Copy actual data unless it the iterator address is
+		 * obviously bogus (e.g. created by passing NULL to
+		 * unit_iov_iter).
+		 */
+		if (int_base > 1000000)
+			memcpy(addr, iov->iov_base, chunk_bytes);
+		addr = (u8 *)addr + chunk_bytes;
 		bytes_left -= chunk_bytes;
 		iter->count -= chunk_bytes;
 		iov->iov_base = (void *) (int_base + chunk_bytes);
@@ -476,6 +517,17 @@ int debug_lockdep_rcu_enabled(void)
 	return 0;
 }
 #endif
+
+int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
+{
+	struct homa_data_hdr *h;
+
+	h = (struct homa_data_hdr *)skb_transport_header(skb);
+	unit_log_printf("; ", "__dev_queue_xmit invoked for id %llu, offset %d",
+			be64_to_cpu(h->common.sender_id), ntohl(h->seg.offset));
+	kfree_skb(skb);
+	return 0;
+}
 
 int do_wait_intr_irq(wait_queue_head_t *head, wait_queue_entry_t *entry)
 {
@@ -762,6 +814,10 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 	char buffer[200];
 	const char *prefix = " ";
 
+	if (unit_hash_size(spinlocks_held)  > 0)
+		FAIL("ip6_xmit invoked with %d spinlocks held; this isn't safe because homa_qdisc_enqueue may acquire an RPC lock",
+		     unit_hash_size(spinlocks_held));
+
 	if (mock_check_error(&mock_ip6_xmit_errors)) {
 		kfree_skb(skb);
 		return -ENETDOWN;
@@ -795,6 +851,9 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 	const char *prefix = " ";
 	char buffer[200];
 
+	if (unit_hash_size(spinlocks_held)  > 0)
+		FAIL("ip_queue_xmit invoked with %d spinlocks held; this isn't safe because homa_qdisc_enqueue may acquire an RPC lock",
+		     unit_hash_size(spinlocks_held));
 	if (mock_check_error(&mock_ip_queue_xmit_errors)) {
 		/* Latest data (as of 1/2019) suggests that ip_queue_xmit
 		 * frees packets after errors.
@@ -929,6 +988,26 @@ void kfree(const void *block)
 void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 {
 	return kmalloc(size, gfpflags);
+}
+
+
+void kvfree_call_rcu(struct rcu_head *head, void *block)
+{
+	if (block == NULL)
+		return;
+	UNIT_HOOK("kfree");
+	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
+		FAIL(" %s on unknown block %p", __func__, block);
+		return;
+	}
+	unit_hash_erase(kmallocs_in_use, block);
+	if (num_rcu_frees >= MAX_RCU_FREES) {
+		FAIL(" num_rcu_frees exceeded MAX_RCU_FREES (%d)",
+		     MAX_RCU_FREES);
+	} else {
+		rcu_frees[num_rcu_frees] = block;
+		num_rcu_frees++;
+	}
 }
 
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
@@ -1242,6 +1321,8 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 	UNIT_HOOK("spin_lock");
 	if (mock_check_error(&mock_trylock_errors))
 		return 0;
+	if (mock_is_locked(lock))
+		return 0;
 	mock_record_locked(lock);
 	mock_total_spin_locks++;
 	return 1;
@@ -1406,6 +1487,11 @@ void  __fix_address sk_skb_reason_drop(struct sock *sk, struct sk_buff *skb,
 	int i;
 	struct skb_shared_info *shinfo = skb_shinfo(skb);
 
+	if (mock_num_drop_reasons < MAX_DROP_REASONS) {
+		mock_drop_reasons[mock_num_drop_reasons] = reason;
+		mock_num_drop_reasons++;
+	}
+
 	skb->users.refs.counter--;
 	if (skb->users.refs.counter > 0)
 		return;
@@ -1429,6 +1515,45 @@ void  __fix_address sk_skb_reason_drop(struct sock *sk, struct sk_buff *skb,
 
 __wsum skb_checksum(const struct sk_buff *skb, int offset, int len, __wsum csum)
 {
+	return 0;
+}
+
+int skb_copy_bits(const struct sk_buff *skb, int offset, void *dest, int length)
+{
+	int chunk_size, frags_left, frag_offset, head_len;
+	struct skb_shared_info *shinfo = skb_shinfo(skb);
+	char *dst = dest;
+	skb_frag_t *frag;
+
+	/* Copy bytes from the linear part of the skb, if any. */
+	head_len = skb_tail_pointer(skb) - skb_transport_header(skb);
+	if (offset < head_len) {
+		chunk_size = length;
+		if (chunk_size > (head_len - offset))
+			chunk_size = head_len - offset;
+		memcpy(dst, skb_transport_header(skb) + offset, chunk_size);
+		offset += chunk_size;
+		length -= chunk_size;
+		dst += chunk_size;
+	}
+
+	frag_offset = head_len;
+	for (frags_left = shinfo->nr_frags, frag = &shinfo->frags[0];
+			(frags_left > 0) && (length > 0);
+			frags_left--,
+			frag_offset += skb_frag_size(frag), frag++) {
+		if (offset >= (frag_offset + skb_frag_size(frag)))
+			continue;
+		chunk_size = skb_frag_size(frag) - (offset - frag_offset);
+		if (chunk_size > length)
+			chunk_size = length;
+		memcpy(dst, page_address(skb_frag_page(frag)) + frag->bv_offset
+				+ (offset - frag_offset),
+				chunk_size);
+		offset += chunk_size;
+		length -= chunk_size;
+		dst += chunk_size;
+	}
 	return 0;
 }
 
@@ -1511,12 +1636,14 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 	memcpy(&h, skb_transport_header(head_skb), sizeof(h));
 	offset = ntohl(h.seg.offset);
 	length = homa_data_len(head_skb);
-	skb1 = mock_skb_alloc(&ipv6_hdr(head_skb)->saddr, &h.common, length/2,
-			offset);
+	skb1 = mock_skb_alloc(&ipv6_hdr(head_skb)->saddr,
+			      &ipv6_hdr(head_skb)->daddr, &h.common, length/2,
+			      offset);
 	offset += length/2;
 	h.seg.offset = htonl(offset);
-	skb2 = mock_skb_alloc(&ipv6_hdr(head_skb)->saddr, &h.common, length/2,
-			offset);
+	skb2 = mock_skb_alloc(&ipv6_hdr(head_skb)->saddr,
+			      &ipv6_hdr(head_skb)->daddr, &h.common, length/2,
+			      offset);
 	skb2->next = NULL;
 	skb1->next = skb2;
 	return skb1;
@@ -1665,6 +1792,8 @@ struct page *mock_alloc_pages(gfp_t gfp, unsigned int order)
 {
 	struct page *page;
 
+	if (order > 0 && mock_no_high_order_pages)
+		return NULL;
 	if (mock_check_error(&mock_alloc_page_errors))
 		return NULL;
 	page = (struct page *)malloc(PAGE_SIZE << order);
@@ -1732,7 +1861,6 @@ void mock_clear_xmit_prios(void)
 	mock_xmit_prios[0] = 0;
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * mock_compound_order() - Replacement for compound_order function.
  */
@@ -1743,11 +1871,15 @@ unsigned int mock_compound_order(struct page *page)
 	if (mock_compound_order_mask & 1)
 		result = 0;
 	else
-		result = HOMA_SKB_PAGE_ORDER;
+		result = HOMA_TX_PAGE_ORDER;
 	mock_compound_order_mask >>= 1;
 	return result;
 }
-#endif /* See strip.py */
+
+void mock_cpu_relax(void)
+{
+	UNIT_HOOK("cpu_relax");
+}
 
 /**
  * mock_cpu_to_node() - Replaces cpu_to_node to determine NUMA node for
@@ -1792,8 +1924,8 @@ struct net_device *mock_dev(int index, struct homa *homa)
 	}
 	dev = &mock_devices[index];
 	if (!dev->ethtool_ops) {
-		dev->gso_max_segs = 1000;
 		dev->gso_max_size = mock_mtu;
+		dev->gso_max_segs = 1;
 		dev->_tx = &mock_net_queue;
 		dev->nd_net.net = &mock_nets[0];
 		dev->ethtool_ops = &mock_ethtool_ops;
@@ -1892,11 +2024,18 @@ struct homa_net *mock_hnet(int index, struct homa *homa)
 	if (!hnet) {
 		hnet = malloc(sizeof(*hnet));
 		mock_hnets[index] = hnet;
-		homa_net_init(hnet, &mock_nets[index], homa);
+		homa_net_init(hnet, homa);
 		if (index == 0)
 			mock_dev(0, homa);
 	}
 	return hnet;
+}
+
+bool mock_is_locked(void *lock)
+{
+	if (!spinlocks_held)
+		spinlocks_held = unit_hash_new();
+	return unit_hash_get(spinlocks_held, lock) != NULL;
 }
 
 /**
@@ -1992,6 +2131,8 @@ void mock_put_page(struct page *page)
  * mock_tcp_skb. Allocates and initializes an skb.
  * @saddr:        IPv6 address to use as the sender of the packet, in
  *                network byte order.
+ * @daddr:        IPv6 address to use as the destination of the packet, in
+ *                network byte order.
  * @protocol:     Protocol to use in the IP header, such as IPPROTO_HOMA.
  * @length:       How many bytes of space to allocated after the IP header.
  * Return:        The new packet buffer, initialized as if the packet just
@@ -2001,7 +2142,8 @@ void mock_put_page(struct page *page)
  *                but they have not yet been allocated with skb_put(). The
  *                caller must eventually free the skb.
  */
-struct sk_buff *mock_raw_skb(struct in6_addr *saddr, int protocol, int length)
+struct sk_buff *mock_raw_skb(struct in6_addr *saddr, struct in6_addr *daddr,
+			     int protocol, int length)
 {
 	int ip_size, data_size, shinfo_size;
 	struct sk_buff *skb;
@@ -2036,11 +2178,13 @@ struct sk_buff *mock_raw_skb(struct in6_addr *saddr, int protocol, int length)
 	if (mock_ipv6) {
 		ipv6_hdr(skb)->version = 6;
 		ipv6_hdr(skb)->saddr = *saddr;
+		ipv6_hdr(skb)->daddr = *daddr;
 		ipv6_hdr(skb)->nexthdr = protocol;
 		skb->protocol = htons(ETH_P_IPV6);
 	} else {
 		ip_hdr(skb)->version = 4;
 		ip_hdr(skb)->saddr = saddr->in6_u.u6_addr32[3];
+		ip_hdr(skb)->daddr = daddr->in6_u.u6_addr32[3];
 		ip_hdr(skb)->protocol = protocol;
 		ip_hdr(skb)->check = 0;
 		skb->protocol = htons(ETH_P_IP);
@@ -2053,6 +2197,18 @@ struct sk_buff *mock_raw_skb(struct in6_addr *saddr, int protocol, int length)
 	skb_set_queue_mapping(skb, mock_queue_index);
 	qdisc_skb_cb(skb)->pkt_len = length + 100;
 	return skb;
+}
+
+/**
+ * mock_rcu_free() - Called to simulate RCU's cleanup after the grace period.
+ * Frees objects previously passed to .
+ */
+void mock_rcu_free(void)
+{
+	while (num_rcu_frees > 0) {
+		num_rcu_frees--;
+		free(rcu_frees[num_rcu_frees]);
+	}
 }
 
 /**
@@ -2092,6 +2248,29 @@ void mock_record_unlocked(void *lock)
 		return;
 	}
 	unit_hash_erase(spinlocks_held, lock);
+}
+
+/**
+ * mock_refcount_inc_not_zero() - Called instead of refcount_inc_not_zero;
+ * behaves the same, except records information used to track socket
+ * reference counts.
+ */
+bool mock_refcount_inc_not_zero(refcount_t *r)
+{
+	int i;
+
+	if (atomic_read(&r->refs) == 0)
+		return false;
+	atomic_inc(&r->refs);
+
+	/* See if this is a socket reference count. */
+	for (i = 0; i < mock_num_socks; i++) {
+		if (r == &mock_socks[i]->sock.sk_refcnt) {
+			mock_sock_holds++;
+			break;
+		}
+	}
+	return true;
 }
 
 /**
@@ -2204,6 +2383,8 @@ void mock_set_ipv6(struct homa_sock *hsk)
  * initialized as if it just arrived from the network.
  * @saddr:        IPv6 address to use as the sender of the packet, in
  *                network byte order.
+ * @daddr:        IPv6 address to use as the destination for the packet, in
+ *                network byte order.
  * @h:            Header for the buffer; actual length and contents depend
  *                on the type. If NULL then no Homa header is added;
  *                extra_bytes of total space will be allocated for the
@@ -2216,10 +2397,11 @@ void mock_set_ipv6(struct homa_sock *hsk)
  * Return:        A packet buffer containing the information described above.
  *                The caller owns this buffer and is responsible for freeing it.
  */
-struct sk_buff *mock_skb_alloc(struct in6_addr *saddr,
+struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 			       struct homa_common_hdr *h, int extra_bytes,
 			       int first_value)
 {
+	struct homa_skb_info *info;
 	struct sk_buff *skb;
 	unsigned char *p;
 	int header_size;
@@ -2269,7 +2451,9 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr,
 	} else {
 		header_size = 0;
 	}
-	skb = mock_raw_skb(saddr, IPPROTO_HOMA, header_size + extra_bytes);
+	skb = mock_raw_skb(saddr, daddr, IPPROTO_HOMA,
+			   header_size + extra_bytes +
+			   sizeof(struct homa_skb_info));
 	p = skb_transport_header(skb);
 	if (header_size != 0) {
 		p = skb_put(skb, header_size);
@@ -2278,6 +2462,11 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr,
 	if (h && extra_bytes != 0) {
 		p = skb_put(skb, extra_bytes);
 		unit_fill_data(p, extra_bytes, first_value);
+	}
+	if (h && h->type == DATA) {
+		info = homa_get_skb_info(skb);
+		info->data_bytes = extra_bytes;
+		info->dont_defer = 0;
 	}
 	qdisc_skb_cb(skb)->pkt_len = extra_bytes + 100;
 	return skb;
@@ -2288,6 +2477,8 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr,
  * initialized as if it just arrived from the network.
  * @saddr:        IPv6 address to use as the sender of the packet, in
  *                network byte order.
+ * @daddr:        IPv6 address to use as the destination for the packet, in
+ *                network byte order.
  * @sequence:     Sequence number to store in the TCP header.
  * @extra_bytes:  How much additional data to add to the buffer after
  *                the TCP header.
@@ -2295,13 +2486,13 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr,
  * Return:        A packet buffer containing the information described above.
  *                The caller owns this buffer and is responsible for freeing it.
  */
-struct sk_buff *mock_tcp_skb(struct in6_addr *saddr, int sequence,
-			     int extra_bytes)
+struct sk_buff *mock_tcp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
+			     int sequence, int extra_bytes)
 {
 	struct sk_buff *skb;
 	struct tcphdr *tcp;
 
-	skb = mock_raw_skb(saddr, IPPROTO_TCP,
+	skb = mock_raw_skb(saddr, daddr, IPPROTO_TCP,
 			   sizeof(struct tcphdr) + extra_bytes);
 	tcp = (struct tcphdr *)skb_put(skb, sizeof(struct tcphdr));
 	tcp->seq = htonl(sequence);
@@ -2321,11 +2512,13 @@ int mock_skb_count(void)
 
 void mock_sock_hold(struct sock *sk)
 {
+	atomic_inc(&sk->sk_refcnt.refs);
 	mock_sock_holds++;
 }
 
 void mock_sock_put(struct sock *sk)
 {
+	atomic_dec(&sk->sk_refcnt.refs);
 	if (mock_sock_holds == 0)
 		FAIL(" sock_put invoked when there were no active sock_holds");
 	mock_sock_holds--;
@@ -2347,8 +2540,16 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	int saved_port;
 	int err = 0;
 
+	if (mock_num_socks < MOCK_MAX_SOCKS) {
+		mock_socks[mock_num_socks] = hsk;
+		mock_num_socks++;
+	} else {
+		FAIL("ran out of space in mock_socks; need to increase MOCK_MAX_SOCKS");
+	}
+
 	saved_port = hnet->prev_default_port;
 	memset(hsk, 0, sizeof(*hsk));
+	atomic_set(&sk->sk_refcnt.refs, 1);
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	sk->sk_socket = &mock_socket;
@@ -2400,12 +2601,14 @@ void mock_teardown(void)
 {
 	int count, i;
 
+	mock_rcu_free();
 	pcpu_hot.cpu_number = 1;
 	current_task = &mock_task;
 	mock_alloc_page_errors = 0;
 	mock_alloc_skb_errors = 0;
 	mock_cmpxchg_errors = 0;
 	mock_copy_data_errors = 0;
+	mock_copy_to_frags_errors = 0;
 	mock_copy_to_iter_errors = 0;
 	mock_copy_to_user_errors = 0;
 	mock_cpu_idle = 0;
@@ -2432,9 +2635,11 @@ void mock_teardown(void)
 	mock_rht_init_errors = 0;
 	mock_rht_insert_errors = 0;
 	mock_wait_intr_irq_errors = 0;
+	mock_copy_from_iter_no_log = false;
 	mock_copy_to_user_dont_copy = 0;
 	mock_bpage_size = 0x10000;
 	mock_bpage_shift = 16;
+	mock_no_high_order_pages = false;
 	mock_xmit_prios_offset = 0;
 	mock_xmit_prios[0] = 0;
 	mock_log_rcu_sched = 0;
@@ -2448,7 +2653,7 @@ void mock_teardown(void)
 	mock_xmit_log_hijack = 0;
 	mock_log_wakeups = 0;
 	mock_mtu = 0;
-	mock_max_skb_frags = MAX_SKB_FRAGS;
+	mock_max_skb_frags = 10;
 	mock_numa_mask = 5;
 	mock_compound_order_mask = 0;
 	mock_page_nid_mask = 0;
@@ -2470,6 +2675,10 @@ void mock_teardown(void)
 	mock_queue_index = 0;
 	mock_netif_schedule_calls = 0;
 	mock_check_bpool_leaks = true;
+	mock_num_socks = 0;
+	mock_num_drop_reasons = 0;
+	for (i = 0; i < MAX_DROP_REASONS; i++)
+		mock_drop_reasons[i] = -1;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));
