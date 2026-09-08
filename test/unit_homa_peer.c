@@ -153,6 +153,7 @@ TEST_F(homa_peer, homa_peer_release_fn)
 	homa_peer_release(peer);
 
 	homa_peer_release_fn(peer, NULL);
+	mock_rcu_free();
 	EXPECT_EQ(1, rcuref_read(&dst->__rcuref));
 	dst_release(dst);
 }
@@ -502,6 +503,7 @@ TEST_F(homa_peer, homa_peer_free)
 	ASSERT_EQ(2, rcuref_read(&dst->__rcuref));
 
 	homa_peer_release(peer);
+	mock_rcu_free();
 	ASSERT_EQ(1, rcuref_read(&dst->__rcuref));
 	dst_release(dst);
 }

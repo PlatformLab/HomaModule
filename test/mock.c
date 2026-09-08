@@ -172,14 +172,19 @@ int mock_total_spin_locks;
  */
 static int mock_active_rcu_locks;
 
-/* Pointers to memory blocks that need to be freed when mock_active_rcu_locks
- * becomes zero.
+/* Pointers to memory blocks that were passed to kfree_rcu; they will
+ * be freed by mock_rcu_free.
  */
 #define MAX_RCU_FREES 100
 static void *rcu_frees[MAX_RCU_FREES];
 
 /* The number of entries in rcu_frees that are currently occupied. */
 static int num_rcu_frees;
+
+/* Used to queue up RCU requests made by calls to call_rcu.  They will
+ * be free by mock_rcu_free.
+ */
+struct rcu_head *mock_first_rcu, *mock_last_rcu;
 
 /* Number of calls to sock_hold that haven't been matched with calls
  * to sock_put.
@@ -409,7 +414,13 @@ void BUG_func(void)
 void call_rcu(struct rcu_head *head, void free_func(struct rcu_head *head))
 {
 	unit_log_printf("; ", "call_rcu invoked");
-	free_func(head);
+	head->func = free_func;
+	head->next = NULL;
+	if (!mock_first_rcu)
+		mock_first_rcu = head;
+	else
+		mock_last_rcu->next = head;
+	mock_last_rcu = head;
 }
 
 bool cancel_work_sync(struct work_struct *work)
@@ -1042,7 +1053,6 @@ void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 	return mock_kmalloc(size, gfpflags);
 }
 
-
 void kvfree_call_rcu(struct rcu_head *head, void *block)
 {
 	if (block == NULL)
@@ -1417,6 +1427,11 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 		return 0;
 	mock_record_locked(lock);
 	return 1;
+}
+
+void rcu_barrier(void)
+{
+	mock_rcu_free();
 }
 
 bool rcu_is_watching(void)
@@ -1992,20 +2007,6 @@ struct dst_entry *mock_dst_check(struct dst_entry *dst, __u32 cookie)
 }
 
 /**
- * mock_get_clock() - Replacement for homa_clock; allows time to be
- * controlled by unit tests.
- */
-u64 mock_get_clock(void)
-{
-	if (mock_next_clock_val < mock_num_clock_vals) {
-		mock_next_clock_val++;
-		return mock_clock_vals[mock_next_clock_val - 1];
-	}
-	mock_clock += mock_clock_tick;
-	return mock_clock;
-}
-
-/**
  * mock_free_pool() - Invoked by homa_pool_free during unit tests;
  * checks for leaks of pool memory.
  * @pool:       Structure to check.
@@ -2018,6 +2019,20 @@ void mock_free_pool(struct homa_pool *pool)
 	if (mock_check_bpool_leaks && avail != size)
 		FAIL(" homa_pool freed with %d bytes still in use",
 		     size - avail);
+}
+
+/**
+ * mock_get_clock() - Replacement for homa_clock; allows time to be
+ * controlled by unit tests.
+ */
+u64 mock_get_clock(void)
+{
+	if (mock_next_clock_val < mock_num_clock_vals) {
+		mock_next_clock_val++;
+		return mock_clock_vals[mock_next_clock_val - 1];
+	}
+	mock_clock += mock_clock_tick;
+	return mock_clock;
 }
 
 /**
@@ -2254,10 +2269,19 @@ struct sk_buff *mock_raw_skb(struct in6_addr *saddr, struct in6_addr *daddr,
 
 /**
  * mock_rcu_free() - Called to simulate RCU's cleanup after the grace period.
- * Frees objects previously passed to .
+ * Frees objects previously passed to call_rcu or kfree_rcu.
  */
 void mock_rcu_free(void)
 {
+	struct rcu_head *head;
+
+	while (mock_first_rcu) {
+		head = mock_first_rcu;
+		mock_first_rcu = head->next;
+		head->func(head);
+	}
+	mock_last_rcu = NULL;
+
 	while (num_rcu_frees > 0) {
 		num_rcu_frees--;
 		free(rcu_frees[num_rcu_frees]);
