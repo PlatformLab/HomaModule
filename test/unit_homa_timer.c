@@ -261,9 +261,6 @@ TEST_F(homa_timer, homa_timer__basics)
 
 	/* Timeout the peer. */
 	unit_log_clear();
-#ifndef __STRIP__ /* See strip.py */
-	crpc->route->peer->outstanding_resends = self->homa.timeout_resends;
-#endif /* See strip.py */
 	homa_timer(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->rpc_timeouts);

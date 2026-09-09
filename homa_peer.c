@@ -252,7 +252,6 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&peer->grantable_rpcs);
 	INIT_LIST_HEAD(&peer->grantable_links);
 #endif /* See strip.py */
-	peer->current_ticks = -1;
 
 	tt_record1("Allocated new homa_peer for node 0x%x",
 		   tt_addr(peer->addr));

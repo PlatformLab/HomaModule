@@ -1414,19 +1414,15 @@ TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
 	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 	crpc->silent_ticks = 5;
-	crpc->route->peer->outstanding_resends = 2;
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0));
 	EXPECT_EQ(0, crpc->silent_ticks);
-	EXPECT_EQ(0, crpc->route->peer->outstanding_resends);
 
 	/* Don't reset silent_ticks for some packet types. */
 	crpc->silent_ticks = 5;
-	crpc->route->peer->outstanding_resends = 2;
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &cutoffs.common, 0, 0));
 	EXPECT_EQ(5, crpc->silent_ticks);
-	EXPECT_EQ(0, crpc->route->peer->outstanding_resends);
 }
 #endif /* See strip.py */
 TEST_F(homa_incoming, homa_dispatch_pkts__dont_reset_silent_ticks_on_NEED_ACK)
@@ -1449,11 +1445,9 @@ TEST_F(homa_incoming, homa_dispatch_pkts__dont_reset_silent_ticks_on_NEED_ACK)
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	crpc->silent_ticks = 2;
-	crpc->route->peer->outstanding_resends = 3;
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0));
 	EXPECT_EQ(2, crpc->silent_ticks);
-	EXPECT_EQ(0, crpc->route->peer->outstanding_resends);
 }
 TEST_F(homa_incoming, homa_dispatch_pkts__multiple_ack_packets)
 {

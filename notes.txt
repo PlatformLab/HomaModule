@@ -5,15 +5,6 @@ Notes for Homa implementation in Linux:
   Homa: is it possible to trigger everything from callbacks without a
   thread?
 
-* By sharing peers across sockets, Homa doesn't account for information
-  in the flows such as sk_uid, sk_mark, tos, and sk_bound_dev_if, which
-  could vary from socket to socket. This means a socket for one user could
-  use security or routing information from another socket. Maybe peers
-  need to be divided into two levels: the top level contains the flow and
-  dst and may be socket-specific, and the lower level contains stuff that must
-  be shared, such as priorities.
-  * See if peer fields like "least_recent_rpc" can be removed.
-
 * Need to do cgroup accounting (using __GRP_ACCOUNT or GFP_KERNEL_ACCOUNT)
   for memory allocations made on behalf of applications. Places are affected:
   homa_rpc_alloc_client
