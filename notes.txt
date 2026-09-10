@@ -5,16 +5,6 @@ Notes for Homa implementation in Linux:
   Homa: is it possible to trigger everything from callbacks without a
   thread?
 
-* Need to do cgroup accounting (using __GRP_ACCOUNT or GFP_KERNEL_ACCOUNT)
-  for memory allocations made on behalf of applications. Places are affected:
-  homa_rpc_alloc_client
-  homa_rpc_alloc_server
-  homa_gap_alloc
-  homa_ioc_info
-  homa_pool_alloc?
-  homa_sock_init
-  tx sk_buffs (homa_skb.c)
-
 * Homa's bipartite matching algorithm is failing under very high loads
   in large clusters where there are large backlogs of messages waiting to
   be sent:

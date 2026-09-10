@@ -893,7 +893,8 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		 * Must release the RCU lock temporarily while allocating.
 		 */
 		rcu_read_unlock();
-		rpcs = kmalloc_array(num_rpcs, sizeof(*rpcs), GFP_KERNEL);
+		rpcs = kmalloc_array(num_rpcs, sizeof(*rpcs),
+				     GFP_KERNEL_ACCOUNT);
 		if (!rpcs) {
 			homa_unprotect_rpcs(hsk);
 			return -ENOMEM;
@@ -1943,7 +1944,7 @@ int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
 	int result, i;
 
 	max_values = (NUM_GEN3_SOFTIRQ_CORES + 1) * nr_cpu_ids;
-	values = kmalloc_array(max_values, sizeof(int), GFP_KERNEL);
+	values = kmalloc_array(max_values, sizeof(int), GFP_KERNEL_ACCOUNT);
 	if (!values)
 		return -ENOMEM;
 

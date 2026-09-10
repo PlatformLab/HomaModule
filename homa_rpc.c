@@ -33,7 +33,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	struct homa_rpc *crpc;
 	int err;
 
-	crpc = kzalloc(sizeof(*crpc), GFP_KERNEL);
+	crpc = kzalloc(sizeof(*crpc), GFP_KERNEL_ACCOUNT);
 	if (unlikely(!crpc)) {
 		hsk->error_msg = "couldn't allocate memory for client RPC";
 		return ERR_PTR(-ENOMEM);
@@ -139,7 +139,13 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	}
 
 	/* Initialize fields that don't require the socket lock. */
-	srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC);
+	if (hsk->sock.sk_memcg) {
+		struct mem_cgroup *old = set_active_memcg(hsk->sock.sk_memcg);
+		srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC | __GFP_ACCOUNT);
+    		set_active_memcg(old);
+	} else {
+		srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC);
+	}
 	if (!srpc) {
 		err = -ENOMEM;
 		goto error;

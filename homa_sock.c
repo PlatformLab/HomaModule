@@ -300,7 +300,7 @@ int homa_sock_link(struct homa_sock *hsk, int port)
 	struct homa_socktab *socktab = hsk->homa->socktab;
 	struct homa_sock_link *slink;
 
-	slink = kmalloc(sizeof(*slink), GFP_ATOMIC);
+	slink = kmalloc(sizeof(*slink), GFP_ATOMIC | __GFP_ACCOUNT);
 	if (!slink)
 		return -ENOMEM;
 	homa_sock_unlink(hsk);

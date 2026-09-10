@@ -1087,7 +1087,7 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 	if (mock_check_error(&mock_kmalloc_errors))
 		return NULL;
 	if (unit_hash_size(spinlocks_held)  > 0 &&
-	    (flags & ~__GFP_ZERO) != GFP_ATOMIC)
+	    !(flags & GFP_ATOMIC))
 		FAIL(" incorrect flags 0x%x passed to mock_kmalloc; expected GFP_ATOMIC (0x%x)",
 		     flags, GFP_ATOMIC);
 	block = malloc(size);
@@ -2430,6 +2430,11 @@ void mock_rpc_put(struct homa_rpc *rpc)
 		FAIL(" homa_rpc_put invoked when RPC has no active holds");
 	mock_rpc_holds--;
 	refcount_dec(&rpc->refs);
+}
+
+struct mem_cgroup *mock_set_active_memcg(struct mem_cgroup *memcg)
+{
+	return NULL;
 }
 
 /**
