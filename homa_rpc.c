@@ -324,7 +324,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	__list_del_entry(&rpc->ready_links);
 	homa_pool_unlink(rpc);
 	homa_interest_notify_private(rpc);
-	homa_qdisc_flush_rpc(rpc);
+	IF_NO_STRIP(homa_qdisc_flush_rpc(rpc));
 
 	rpc->hsk->dead_frags += rpc->msgout.num_frags + 1;
 	if (rpc->hsk->dead_frags > rpc->hsk->homa->max_dead_frags)
@@ -569,6 +569,8 @@ release:
 				kfree(gap);
 			}
 		}
+
+#ifndef __STRIP__ /* See strip.py */
 		if (skb_queue_len(&rpc->qrpc.packets) > 0) {
 			tt_record2("Freezing because homa_rpc_reap found %d packets in qdisc queue for id %d",
 				   skb_queue_len(&rpc->qrpc.packets), rpc->id);
@@ -580,6 +582,7 @@ release:
 			       skb_queue_len(&rpc->qrpc.packets), rpc->id);
 			homa_qdisc_flush_rpc(rpc);
 		}
+#endif /* See strip.py */
 
 		if (rpc->route) {
 			homa_route_release(rpc->route);

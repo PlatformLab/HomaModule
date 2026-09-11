@@ -378,10 +378,14 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 {
 	struct homa_route *route;
 	struct sk_buff *skb;
+	int err;
 
-	IF_NO_STRIP(int err);
-	IF_NO_STRIP(int priority, skb_offset, data_bytes, queue);
-	IF_NO_STRIP(struct homa_data_hdr *h);
+	IF_NO_STRIP(int priority);
+
+#ifndef __UPSTREAM__ /* See strip.py */
+	int skb_offset, data_bytes, queue;
+	struct homa_data_hdr *h;
+#endif /* See strip.py */
 
 	skb = homa_tx_skb_alloc(rpc, offset, end);
 	if (IS_ERR(skb))
@@ -399,6 +403,8 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 	else
 		priority = rpc->msgout.sched_priority;
 	priority = rpc->hsk->homa->priority_map[priority];
+#endif /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 	h = (struct homa_data_hdr *)skb_transport_header(skb);
 	skb_offset = ntohl(h->seg.offset);
 	data_bytes = homa_get_skb_info(skb)->data_bytes;
@@ -433,6 +439,8 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 			data_bytes);
 #ifndef __STRIP__ /* See strip.py */
 	err = homa_route_xmit(skb, rpc->hsk, route, priority);
+	if (err)
+		INC_METRIC(data_xmit_errors, 1);
 #else /* See strip.py */
 	err = homa_route_xmit(skb, rpc->hsk, route, 0);
 #endif /* See strip.py */
@@ -440,8 +448,6 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 	homa_rpc_lock(rpc);
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, qid %d",
 		   rpc->id, skb_offset, data_bytes, queue);
-	if (err)
-		INC_METRIC(data_xmit_errors, 1);
 	return err;
 }
 
@@ -534,11 +540,11 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_route *route,
 	INC_METRIC(priority_packets[priority], 1);
 #ifndef __STRIP__ /* See strip.py */
 	err = homa_route_xmit(skb, hsk, route, priority);
+	if (unlikely(err != 0))
+		INC_METRIC(control_xmit_errors, 1);
 #else /* See strip.py */
 	err = homa_route_xmit(skb, hsk, route, 0);
 #endif /* See strip.py */
-	if (unlikely(err != 0))
-		INC_METRIC(control_xmit_errors, 1);
 	return err;
 }
 

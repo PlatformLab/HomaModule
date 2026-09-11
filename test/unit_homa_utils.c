@@ -80,14 +80,14 @@ TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.peertab);
 }
-TEST_F(homa_utils, homa_init__cant_allocate_port_map)
+TEST_F(homa_utils, homa_init__cant_allocate_socktab)
 {
 	struct homa homa2;
 
 #ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 0x20;
 #else /* See strip.py */
-	mock_kmalloc_errors = 4;
+	mock_kmalloc_errors = 8;
 #endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
@@ -100,7 +100,7 @@ TEST_F(homa_utils, homa_init__cant_initialize_tx_pool)
 #ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 0x40;
 #else /* See strip.py */
-	mock_kmalloc_errors = 8;
+	mock_kmalloc_errors = 0x10;
 #endif/* See strip.py */
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_SUBSTR("Couldn't initialize homa_tx_pool (errno 12)",

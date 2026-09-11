@@ -32,6 +32,9 @@ matplotlib.rcParams['ps.fonttype'] = 42
 if platform.system() != "Windows":
     import fcntl
 
+# Command-line options provided by the main program to init.
+options = None
+
 # If a server's id appears as a key in this dictionary, it means we
 # have started cp_node running on that node. The value of each entry is
 # a Popen object that can be used to communicate with the node.
@@ -65,9 +68,6 @@ delete_rtts = False
 
 # The CloudLab node type for this node (e.g. xl170)
 node_type = None
-
-# Value of the "--stripped" option.
-stripped = False
 
 # Speed of host uplinks.
 link_mbps = None
@@ -330,10 +330,10 @@ def get_parser(description, usage, defaults = {}):
             metavar='nodes',
             help='List of node numbers not to use in the experiment; can '
             ' contain ranges, such as "3,5-8,12"')
-    parser.add_argument('--stripped', dest='stripped', type=boolean,
-            default=False, metavar="T/F", help='Boolean value: true means '
-            'Homa has been stripped for upstreaming, which means some '
-            'facilities are not available (default: false)')
+    parser.add_argument('--stripped', dest='stripped', action="store_true",
+            default=False, help='If specified, it means '
+            'Homa has been stripped for upstreaming, so some '
+            'facilities are not available')
     parser.add_argument('--tcp-client-max', dest='tcp_client_max', type=int,
             metavar='count', default=0, help="Maximum number of TCP requests "
             "that can be outstanding from a client node at once (divided evenly "
@@ -409,12 +409,13 @@ def choose_nodes(options):
     options.servers = options.nodes
     options.clients = options.nodes
 
-def init(options):
+def init(opts):
     """
     Initialize various global state, such as the log file.
+    opts:  Command-line options
     """
-    global log_dir, log_file, verbose, delete_rtts, link_mbps
-    global stripped
+    global log_dir, log_file, verbose, delete_rtts, link_mbps, options
+    options = opts
     log_dir = options.log_dir
     if not options.plot_only:
         if os.path.exists(log_dir):
@@ -536,7 +537,7 @@ def start_nodes(ids, options):
             active_nodes[id] = node
             started.append(id)
         if options.protocol == "homa":
-            if options.set_ids:
+            if options.set_ids and not options.stripped:
                 set_sysctl_parameter(".net.homa.next_id",
                         str(10000000*(id+1)), [id])
             if not options.no_homa_prio:
@@ -648,8 +649,8 @@ def set_sysctl_parameter(name, value, nodes):
     nodes:    specifies ids of the nodes on which to execute the command:
               should be a range, list, or other object that supports "in"
     """
-    global stripped
-    if stripped:
+    global options
+    if options.stripped:
         vlog("Skipping set of Homa %s parameter to %s on nodes %s (Homa is stripped)"
                 % (name, value, str(nodes)))
         return
@@ -711,8 +712,7 @@ def start_servers(exp, ids, options):
                  port_threads
                  protocol
     """
-    global server_nodes, stripped
-    stripped = options.stripped
+    global server_nodes
     log("Starting servers for %s experiment on nodes %s" % (exp, ids))
     if len(server_nodes) > 0:
         do_cmd("stop servers", server_nodes)
@@ -753,7 +753,8 @@ def run_experiment(name, clients, options):
                   workload
     """
 
-    global active_nodes, stripped
+    global active_nodes
+    log("Stripped is %s" % (options.stripped))
     exp_nodes = list(set(options.servers + list(clients)))
     start_nodes(clients, options)
     nodes = []
@@ -808,7 +809,7 @@ def run_experiment(name, clients, options):
     if options.protocol == "homa":
         # Wait a bit so that homa_prio can set priorities appropriately
         time.sleep(2)
-        if stripped:
+        if options.stripped:
             vlog("Skipping initial read of metrics (Homa is stripped)")
         else:
             vlog("Recording initial metrics")
@@ -819,7 +820,7 @@ def run_experiment(name, clients, options):
         time.sleep(10)
     if not "no_rtt_files" in options:
         do_cmd("dump_times /dev/null %s" % (name), clients)
-    if options.protocol == "homa" and options.tt_freeze:
+    if options.protocol == "homa" and options.tt_freeze and not options.stripped:
         log("Unfreezing timetraces on %s" % (nodes))
         set_sysctl_parameter(".net.homa.action", "10", nodes)
     do_cmd("log Starting measurements for %s experiment" % (name),
@@ -833,7 +834,7 @@ def run_experiment(name, clients, options):
         do_cmd("debug 2000 3000", clients)
         log("Finished setting debug info")
     time.sleep(options.seconds - debug_delay)
-    if options.protocol == "homa" and options.tt_freeze:
+    if options.protocol == "homa" and options.tt_freeze and not options.stripped:
         log("Freezing timetraces via node%d" % nodes[0])
         set_sysctl_parameter(".net.homa.action", "7", nodes[0:1])
     do_cmd("log Ending measurements for %s experiment" % (name),
@@ -842,7 +843,7 @@ def run_experiment(name, clients, options):
     if not "no_rtt_files" in options:
         do_cmd("dump_times rtts %s" % (name), clients)
     if (options.protocol == "homa"):
-        if stripped:
+        if options.stripped:
                 vlog("Skipping final read of metrics (Homa is stripped)")
         else:
             vlog("Recording final metrics from nodes %s" % (exp_nodes))
@@ -904,7 +905,7 @@ def run_experiments(*args):
              There may be additional optional values that used if present.
     """
 
-    global active_nodes, stripped
+    global active_nodes, options
 
     homa_nodes = []
     homa_clients = []
@@ -1000,13 +1001,13 @@ def run_experiments(*args):
         log("Waiting for TCP to warm up...")
         time.sleep(10)
     if metrics_name:
-        if stripped:
+        if options.stripped:
             vlog("Skipping metrics initialization (Homa is stripped)")
         else:
             vlog("Initializing metrics")
             do_ssh(["metrics.py > /dev/null"], homa_nodes)
     do_cmd("dump_times /dev/null", all_nodes)
-    if homa_nodes and exp.tt_freeze:
+    if homa_nodes and exp.tt_freeze and not options.stripped:
         log("Unfreezing timetraces on %s" % (all_nodes))
         set_sysctl_parameter(".net.homa.action", "10", all_nodes)
     do_cmd("log Starting measurements", all_nodes)
@@ -1015,7 +1016,7 @@ def run_experiments(*args):
     time.sleep(exp.seconds)
 
     # Collect results
-    if homa_nodes and exp.tt_freeze:
+    if homa_nodes and exp.tt_freeze and not options.stripped:
         log("Freezing timetraces via node%d" % all_nodes[0])
         set_sysctl_parameter(".net.homa.action", "7", all_nodes[0:1])
     do_cmd("log Ending measurements", all_nodes)
@@ -1023,7 +1024,7 @@ def run_experiments(*args):
     for exp in args:
         do_cmd("dump_times %s.rtts %s" % (exp.name, exp.name), exp.clients)
     if metrics_name:
-        if stripped:
+        if options.stripped:
                 vlog("Skipping final read of metrics (Homa is stripped)")
         else:
             vlog("Recording final metrics from nodes %s" % (homa_nodes))

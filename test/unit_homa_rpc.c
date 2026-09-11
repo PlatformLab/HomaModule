@@ -479,6 +479,7 @@ TEST_F(homa_rpc, homa_rpc_end__state_ready)
 	homa_rpc_end(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_end__delete_deferred_skbs_in_homa_qdisc)
 {
 	struct homa_qdisc_dev *qdev;
@@ -505,6 +506,7 @@ TEST_F(homa_rpc, homa_rpc_end__delete_deferred_skbs_in_homa_qdisc)
 	EXPECT_STREQ("", unit_log_deferred(qdev));
 	homa_qdisc_qdev_put(qdev);
 }
+#endif /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_end__dead_frags)
 {
 	struct homa_rpc *crpc1, *crpc2;

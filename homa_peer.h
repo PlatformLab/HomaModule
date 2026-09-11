@@ -7,9 +7,12 @@
 #ifndef _HOMA_PEER_H
 #define _HOMA_PEER_H
 
-#include "homa_hijack.h"
 #include "homa_wire.h"
 #include "homa_sock.h"
+
+#ifndef __STRIP__ /* See strip.py */
+#include "homa_hijack.h"
+#endif /* See strip.py */
 
 #include <linux/rhashtable.h>
 
@@ -454,15 +457,15 @@ static inline int homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
 {
 	dst_hold(route->dst);
 	skb_dst_set(skb, route->dst);
+	IF_NO_STRIP(priority = hsk->homa->priority_map[priority]);
 	if (ipv6_addr_v4mapped(&route->peer->addr)) {
-		homa_hijack_set_hdr(skb, route, false);
-		hsk->inet.tos = hsk->homa->priority_map[priority] << 5;
+		IF_NO_STRIP(homa_hijack_set_hdr(skb, route, false));
+		hsk->inet.tos = priority << 5;
 		return ip_queue_xmit(&hsk->inet.sk, skb, &route->flow);
 	} else {
-		homa_hijack_set_hdr(skb, route, true);
+		IF_NO_STRIP(homa_hijack_set_hdr(skb, route, true));
 		return ip6_xmit(&hsk->inet.sk, skb, &route->flow.u.ip6, 0,
-			        NULL, hsk->homa->priority_map[priority] << 5,
-				0);
+			        NULL, priority << 5, 0);
 	}
 }
 

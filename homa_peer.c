@@ -131,11 +131,9 @@ struct homa_peertab *homa_peer_alloc_peertab(void)
 	homa_peer_update_sysctl_deps(peertab);
 	return peertab;
 
-#ifndef __STRIP__ /* See strip.py */
 error:
 	homa_peer_free_peertab(peertab);
 	return ERR_PTR(err);
-#endif /* See strip.py */
 }
 
 /**
