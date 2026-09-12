@@ -82,7 +82,9 @@ struct homa_pool {
 	/**
 	 * @region: beginning of the pool's region (in the app's virtual
 	 * memory). Divided into bpages. 0 means the pool hasn't yet been
-	 * initialized.
+	 * initialized. This pointer is used for lock-free synchronization
+	 * between a core creating the region and other cores attempting
+	 * to use it.
 	 */
 	char __user *region;
 

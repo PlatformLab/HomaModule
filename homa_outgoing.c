@@ -122,6 +122,10 @@ int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
 		if (unlikely(err != 0))
 			goto done;
 		offset += seg_size;
+
+		/* Make sure that anyone seeing a change in copied_from_user
+		 * also sees related chagnes to rpc->msgout.
+		 */
 		smp_store_release(&rpc->msgout.copied_from_user, offset);
 
 #ifndef __STRIP__ /* See strip.py */
@@ -139,7 +143,7 @@ int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
 		if (xmit && rpc->msgout.next_xmit_offset <
 			    rpc->msgout.unscheduled &&
 		    offset >= rpc->msgout.next_xmit_offset +
-		              rpc->msgout.max_gso_data) {
+			      rpc->msgout.max_gso_data) {
 			homa_rpc_lock(rpc);
 			homa_xmit_data(rpc);
 			homa_rpc_unlock(rpc);
@@ -334,7 +338,7 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 		}
 	}
 	*end = min_t(u32, offset + num_segs * rpc->msgout.max_seg_data,
-		   rpc->msgout.length);
+		     rpc->msgout.length);
 
 	/* Fill in fields in shinfo. */
 	if (num_segs > 1) {
@@ -435,8 +439,8 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 	INC_METRIC(priority_bytes[priority], skb->len);
 	INC_METRIC(priority_packets[priority], 1);
 	tt_record4("calling ip*_xmit: peer 0x%x, id %d, offset %d, length %d",
-			tt_addr(route->peer->addr), rpc->id, skb_offset,
-			data_bytes);
+		   tt_addr(route->peer->addr), rpc->id, skb_offset,
+		   data_bytes);
 #ifndef __STRIP__ /* See strip.py */
 	err = homa_route_xmit(skb, rpc->hsk, route, priority);
 	if (err)

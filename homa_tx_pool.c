@@ -3,7 +3,7 @@
 /* This file manages a reusable pools of pages (one per NUMA node), that
  * are used to hold the data of outgoing Homa messages. Homa uses these
  * custom pools rather than, say, page_pools because Homa can free pages
- * from its pools more agressively than in page_pool. And, this module
+ * from its pools more aggressively than in page_pool. And, this module
  * also implements a one-page cache page per core to use for allocating
  * smaller chunks of tx memory.
  */
@@ -27,8 +27,8 @@ static void frag_page_set(skb_frag_t *frag, struct page *page)
  */
 int homa_tx_pool_init(struct homa *homa)
 {
-	int i;
 	u64 min_kb;
+	int i;
 
 	homa->tx_page_pool_min_kb = 1000;
 	min_kb = 3 * HOMA_MAX_MESSAGE_LENGTH;
@@ -108,7 +108,7 @@ void homa_tx_pool_cleanup(struct homa *homa)
  * homa_tx_pool_alloc() - Allocate a block of memory in one or more
  * fragments.
  * @homa:        Shared information about the Homa transport.
- * @lenth:       Total number of bytes to allocate.
+ * @length:       Total number of bytes to allocate.
  * @num_frags:   Number of fragments of storage initially available at **frags;
  *               modified to hold the total number of fragments
  *               allocated.
@@ -119,7 +119,7 @@ void homa_tx_pool_cleanup(struct homa *homa)
  * Return:       0 for success, negative errno on error.
  */
 int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
-			skb_frag_t **frags)
+		       skb_frag_t **frags)
 {
 	struct homa_tx_pool_core *tx_core;
 	skb_frag_t *cur_frags = *frags;
@@ -142,8 +142,8 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 			int num_new;
 
 			num_new = ((bytes_left + HOMA_TX_PAGE_SIZE - 1) >>
-			            (PAGE_SHIFT + HOMA_TX_PAGE_ORDER)) +
-				    frags_allocated;
+			           (PAGE_SHIFT + HOMA_TX_PAGE_ORDER)) +
+				  frags_allocated;
 			new_frags = kvmalloc_array(num_new, sizeof(*new_frags),
 						   GFP_ATOMIC);
 			if (!new_frags) {
@@ -191,7 +191,7 @@ error:
  * Return:     0 for success, otherwise a negative errno.
  */
 int __homa_tx_pool_alloc_frag(struct homa_tx_pool_core *tx_core, int length,
-			     skb_frag_t *frag)
+			      skb_frag_t *frag)
 {
 	struct page *page;
 	int page_size;
@@ -223,9 +223,8 @@ int __homa_tx_pool_alloc_frag(struct homa_tx_pool_core *tx_core, int length,
 	/* Retain the leftover part of the page as the core's cached page,
 	 * if it has more space available than the current cached page.
 	 */
-	if (tx_core->page == NULL ||
-	    (tx_core->page_size - tx_core->allocated) <
-	    (page_size - skb_frag_size(frag))) {
+	if (!tx_core->page || (tx_core->page_size - tx_core->allocated) <
+			       (page_size - skb_frag_size(frag))) {
 		if (tx_core->page)
 			put_page(tx_core->page);
 		get_page(page);
@@ -261,13 +260,13 @@ int homa_tx_pool_alloc_frag(struct homa *homa, int length, skb_frag_t *frag)
 /**
  * homa_tx_pool_alloc_page() - Allocate a new page for skb allocation for a
  * given core. Any existing page is released.
- * @txb_core:   Core-specific info; the page will be allocated in this core.
+ * @tx_core:    Core-specific info; the page will be allocated in this core.
  * @length:     The length of the allocated page (if any) will be stored here.
  * Return:      The allocated page (with reference count 1) or NULL if
  *              no page could be allocated.
  */
 struct page *homa_tx_pool_alloc_page(struct homa_tx_pool_core *tx_core,
-				      int *length)
+				     int *length)
 {
 	struct homa_tx_pool *pool;
 	struct page *page;

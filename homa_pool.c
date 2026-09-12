@@ -125,6 +125,9 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 		bp->owner = -1;
 	}
 
+	/* Barrier ensures that concurrent cores trying to access
+	 * newly-created region will see all the region's data.
+	 */
 	smp_store_release(&pool->region, (char __user *)region);
 	homa_sock_unlock(hsk);
 	return 0;
@@ -214,7 +217,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 		if (atomic_try_cmpxchg(&pool->free_bpages, &free,
 				       free - num_pages))
 			break;
-        }
+	}
 
 	/* Once we get to this point we know we will be able to find
 	 * enough free pages; now we just have to find them.
@@ -313,6 +316,9 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	struct homa_bpage *bpage;
 	struct homa_rpc *other;
 
+	/* This barrier allows lock-free synchronization between one
+	 * core allocating the region and another core using it.
+	 */
 	if (!smp_load_acquire(&pool->region))
 		return -ENOMEM;
 	if (rpc->state == RPC_DEAD)
@@ -466,6 +472,9 @@ int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 {
 	int i;
 
+	/* This barrier allows lock-free synchronization between one
+	 * core allocating the region and another core using it.
+	 */
 	if (!smp_load_acquire(&pool->region))
 		return -EINVAL;
 	for (i = 0; i < num_buffers; i++) {
@@ -579,6 +588,9 @@ u64 homa_pool_avail_bytes(struct homa_pool *pool)
 	u64 avail;
 	int cpu;
 
+	/* This barrier allows lock-free synchronization between one
+	 * core allocating the region and another core using it.
+	 */
 	if (!smp_load_acquire(&pool->region))
 		return 0;
 	avail = atomic_read(&pool->free_bpages);

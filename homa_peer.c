@@ -30,7 +30,7 @@
 /* Wrapper to allow xxhash to be used as rhashtable hash function. */
 static u32 xxh32_hash(const void *data, u32 len, u32 seed)
 {
-    return xxh32(data, len, seed);
+	return xxh32(data, len, seed);
 }
 
 const struct rhashtable_params peer_ht_params = {
@@ -301,9 +301,8 @@ struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 
 	/* No existing entry, so we have to create a new one. */
 	peer = homa_peer_alloc(hsk, addr);
-	if (IS_ERR(peer)) {
+	if (IS_ERR(peer))
 		return peer;
-	}
 	status = rhashtable_lookup_insert_fast(&peertab->peer_ht,
 					       &peer->ht_linkage,
 					       peer_ht_params);
@@ -376,9 +375,9 @@ struct homa_route *homa_route_alloc(struct homa_sock *hsk,
 		route->flow.u.ip6.fl6_sport = 0;
 		route->flow.u.ip6.flowi6_uid = key->uid;
 		route->dst = ip6_dst_lookup_flow(sock_net(&hsk->sock),
-							  &hsk->sock,
-							  &route->flow.u.ip6,
-							  NULL);
+						 &hsk->sock,
+						 &route->flow.u.ip6,
+						 NULL);
 		if (IS_ERR(route->dst)) {
 			err = PTR_ERR(route->dst);
 			goto error;
@@ -395,12 +394,12 @@ error:
 }
 
 /**
- * homa_peer_route_free() - Release any resources in a homa_route and
+ * homa_route_free() - Release any resources in a homa_route and
  * free the object's memory. May be invoked either as an RCU callback
  * or directly (if invoked directly, caller must ensure exclusive
  * access to the object, e.g. it was never actually published in
  * route_ht).
- * head:     @rcu_head field  in the route to free.
+ * @head:     @rcu_head field  in the route to free.
  */
 void homa_route_free(struct rcu_head *head)
 {
@@ -425,7 +424,7 @@ void homa_route_free(struct rcu_head *head)
  * Return:      The homa_route associated with @addr, or a negative
  *              errno if an error occurred. On a successful return the
  *              reference count will be incremented for the returned object.
- * 		The caller must eventually call homa_peer_route_release to
+ *              The caller must eventually call homa_peer_route_release to
  *              release the reference.
  */
 struct homa_route *homa_route_get(struct homa_sock *hsk,
@@ -451,7 +450,7 @@ struct homa_route *homa_route_get(struct homa_sock *hsk,
 	/* No existing entry, so we have to create a new one. Switch from
 	 * RCU to real locking for this.
 	 */
-        rcu_read_unlock();
+	rcu_read_unlock();
 	route = homa_route_alloc(hsk, &route_key);
 	if (IS_ERR(route))
 		return route;
@@ -467,7 +466,7 @@ struct homa_route *homa_route_get(struct homa_sock *hsk,
 	route->peer = peer;
 
 	/* Insert the new entry in the flow table. It's possible that
-	 * someone else already created the entry concurently.
+	 * someone else already created the entry concurrently.
 	 */
 	other = rhashtable_lookup_get_insert_fast(&peertab->route_ht,
 						  &route->ht_linkage,
@@ -526,7 +525,7 @@ int homa_route_validate(struct homa_rpc *rpc)
 			peertab->num_routes--;
 			old->key.hnet->num_routes--;
 			tt_record1("homa_route_validate removed invalid route for 0x%x",
-				tt_addr(rpc->route->peer->addr));
+				   tt_addr(rpc->route->peer->addr));
 		}
 		spin_unlock_bh(&peertab->lock);
 		route = homa_route_get(rpc->hsk, &rpc->route->peer->addr);
@@ -663,8 +662,8 @@ int homa_route_pick_victims(struct homa_peertab *peertab,
  * Return:      True if @route1 is a better candidate for eviction than @route2.
  */
 int homa_route_prefer_evict(struct homa_peertab *peertab,
-			   struct homa_route *route1,
-			   struct homa_route *route2)
+			    struct homa_route *route1,
+			    struct homa_route *route2)
 {
 	/* Prefer a route whose homa_net is over its limit; if both are either
 	 * over or under, then prefer the route with the longest idle time.

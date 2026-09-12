@@ -29,7 +29,7 @@ struct homa_peertab {
 	 */
 	spinlock_t lock;
 
-	/** @ht: Hash table that stores struct peers. */
+	/** @peer_ht: Hash table that stores struct peers. */
 	struct rhashtable peer_ht;
 
 	/**
@@ -39,7 +39,7 @@ struct homa_peertab {
 	struct rhashtable route_ht;
 
 	/**
-	 * @ht_iter: Used to scan route_ht to find routes to garbage
+	 * @route_ht_iter: Used to scan route_ht to find routes to garbage
 	 * collect.
 	 */
 	struct rhashtable_iter route_ht_iter;
@@ -227,7 +227,7 @@ struct homa_peer {
 /**
  * struct homa_route_key - Used to look up homa_route structs in
  * homa_peertab_route_ht. These fields represent all of the information
- * tha could impact the choice of a particular struct dst_entry.
+ * that could impact the choice of a particular struct dst_entry.
  */
 struct homa_route_key {
 	/**
@@ -236,7 +236,7 @@ struct homa_route_key {
 	 */
 	struct in6_addr saddr;
 	/**
-	 * @dst: Destination network address. IPv4 addresses are represented
+	 * @daddr: Destination network address. IPv4 addresses are represented
 	 * with IPv4-mapped IPv6 addresses.
 	 */
 	struct in6_addr daddr;
@@ -260,7 +260,7 @@ struct homa_route_key {
 	/** @mark: sock->sk_mark */
 	u32 mark;
 
-	/** @secid flowic.secid produced by security_sk_classify_flow. */
+	/** @secid: flowic.secid produced by security_sk_classify_flow. */
 	u32 secid;
 
 	/** @bound_dev_if: sock->sk_bound_dev_if */
@@ -354,13 +354,13 @@ void     homa_peer_update_sysctl_deps(struct homa_peertab *peertab);
 void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
 			       int c2, int c3, int c4, int c5, int c6, int c7);
 struct homa_route
-        *homa_route_alloc(struct homa_sock *hsk,
+	*homa_route_alloc(struct homa_sock *hsk,
 			  const struct homa_route_key *key);
 void     homa_route_delete_fn(void *object, void *dummy);
 void     homa_route_free(struct rcu_head *head);
 void     homa_route_gc(struct homa_peertab *peertab);
 struct homa_route
-        *homa_route_get(struct homa_sock *hsk,
+	*homa_route_get(struct homa_sock *hsk,
 				    const struct in6_addr *addr);
 u32      homa_route_hash(const void *data, u32 len, u32 seed);
 int      homa_route_pick_victims(struct homa_peertab *peertab,
@@ -420,7 +420,7 @@ static inline void homa_route_hold(struct homa_route *route)
  * homa_route_release() - Release a reference on a route (cancels the effect of
  * a previous call to homa_route_hold). If the reference count becomes zero
  * then the route may be deleted at any time.
- * @peer:      Object to release.
+ * @route:      Object to release.
  */
 static inline void homa_route_release(struct homa_route *route)
 {
@@ -462,11 +462,10 @@ static inline int homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
 		IF_NO_STRIP(homa_hijack_set_hdr(skb, route, false));
 		hsk->inet.tos = priority << 5;
 		return ip_queue_xmit(&hsk->inet.sk, skb, &route->flow);
-	} else {
-		IF_NO_STRIP(homa_hijack_set_hdr(skb, route, true));
-		return ip6_xmit(&hsk->inet.sk, skb, &route->flow.u.ip6, 0,
-			        NULL, priority << 5, 0);
 	}
+	IF_NO_STRIP(homa_hijack_set_hdr(skb, route, true));
+	return ip6_xmit(&hsk->inet.sk, skb, &route->flow.u.ip6, 0,
+			NULL, priority << 5, 0);
 }
 
 /**
@@ -477,8 +476,8 @@ static inline int homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
 static inline void homa_peer_unlink(struct homa_route *route)
 	__must_hold(route->hnet->homa->peertab->lock)
 {
-	struct homa_peertab *peertab;
 	extern const struct rhashtable_params peer_ht_params;
+	struct homa_peertab *peertab;
 
 	if (!route->peer)
 		return;
@@ -526,7 +525,6 @@ static inline void homa_route_key_init(struct homa_route_key *key,
 	security_sk_classify_flow(&hsk->sock, &flowic);
 	key->secid = flowic.flowic_secid;
 	key->bound_dev_if = hsk->sock.sk_bound_dev_if;
-
 }
 
 #endif /* _HOMA_PEER_H */

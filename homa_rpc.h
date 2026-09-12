@@ -58,8 +58,9 @@ struct homa_message_out {
 	 */
 	int max_seg_data;
 
-	/* Maximum number of segments that can be present in a single GSO
-	 * packet.
+	/**
+	 * @max_gso_segs: Maximum number of segments that can be present in a
+	 * single GSO packet.
 	 */
 	int max_gso_segs;
 
@@ -71,7 +72,9 @@ struct homa_message_out {
 
 	/**
 	 * @copied_from_user: Number of bytes of the message that have
-	 * been copied from user space into @frags.
+	 * been copied from user space into @frags. Used for lockless
+	 * communication between one core copying in data and another
+	 * core transmitting the data in skbs.
 	 */
 	int copied_from_user;
 

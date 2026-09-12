@@ -123,6 +123,7 @@ void homa_timer(struct homa *homa)
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc;
 	int rpc_count = 0;
+
 #ifndef __STRIP__ /* See strip.py */
 	static u64 prev_grant_count;
 	int total_incoming_rpcs = 0;

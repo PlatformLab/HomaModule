@@ -141,8 +141,9 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	/* Initialize fields that don't require the socket lock. */
 	if (hsk->sock.sk_memcg) {
 		struct mem_cgroup *old = set_active_memcg(hsk->sock.sk_memcg);
+
 		srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC | __GFP_ACCOUNT);
-    		set_active_memcg(old);
+		set_active_memcg(old);
 	} else {
 		srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC);
 	}
@@ -225,7 +226,7 @@ error:
  * @rpc:      RPC for which caller holds lock (NULL if none).
  * @saddr:    Source address from which the ack was received (the client
  *            node for the RPC)
- * @num_acks: Number of acknowlegments in @acks
+ * @num_acks: Number of acknowledgments in @acks
  * @acks:     Information about one or more RPCs from @saddr that may now be
  *            deleted safely.
  */
@@ -509,7 +510,7 @@ int homa_rpc_reap(struct homa_sock *hsk)
 		int refs;
 
 		if (num_rpcs >= BATCH_MAX_RPCS ||
-			total_dead_frags >= BATCH_MAX_FRAGS)
+		    total_dead_frags >= BATCH_MAX_FRAGS)
 			goto release;
 
 		/* Make sure that all outstanding uses of the RPC have
@@ -590,34 +591,31 @@ release:
 		}
 		homa_pool_release(rpc);
 		homa_tx_pool_free(hsk->homa, rpc->msgout.num_frags,
-					rpc->msgout.frags);
+				  rpc->msgout.frags);
 		WARN_ON(refcount_sub_and_test(rpc->msgout.frag_bytes,
-						&hsk->sock.sk_wmem_alloc));
+					      &hsk->sock.sk_wmem_alloc));
 		if (rpc->msgout.frags != &rpc->msgout.frag)
 			kfree(rpc->msgout.frags);
 		tt_record2("homa_rpc_reap finished reaping id %d, port %d",
 				rpc->id, rpc->hsk->port);
 #ifndef __STRIP__ /* See strip.py */
-		tx_left = rpc->msgout.length -
-			rpc->msgout.next_xmit_offset;
+		tx_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
 		if (homa_is_client(rpc->id)) {
 			INC_METRIC(client_response_bytes_done,
-					rpc->msgin.bytes_remaining);
+				   rpc->msgin.bytes_remaining);
 			INC_METRIC(client_responses_done,
-					rpc->msgin.bytes_remaining != 0);
+				   rpc->msgin.bytes_remaining != 0);
 			if (tx_left > 0) {
-				INC_METRIC(client_request_bytes_done,
-						tx_left);
+				INC_METRIC(client_request_bytes_done, tx_left);
 				INC_METRIC(client_requests_done, 1);
 			}
 		} else {
 			INC_METRIC(server_request_bytes_done,
-					rpc->msgin.bytes_remaining);
+				   rpc->msgin.bytes_remaining);
 			INC_METRIC(server_requests_done,
 					rpc->msgin.bytes_remaining != 0);
 			if (tx_left > 0) {
-				INC_METRIC(server_response_bytes_done,
-						tx_left);
+				INC_METRIC(server_response_bytes_done, tx_left);
 				INC_METRIC(server_responses_done, 1);
 			}
 		}
@@ -628,7 +626,7 @@ release:
 	}
 	homa_sock_wakeup_wmem(hsk);
 	tt_record3("reaped %d rpcs; %d dead frags remain for port %d",
-			num_rpcs, hsk->dead_frags, hsk->port);
+		   num_rpcs, hsk->dead_frags, hsk->port);
 	if (hsk->buffer_pool)
 		homa_pool_check_waiting(hsk->buffer_pool);
 	return !checked_all_rpcs;
@@ -739,11 +737,11 @@ struct homa_rpc *homa_rpc_find_server(struct homa_sock *hsk,
 struct homa_rpc *homa_rpc_find_from_skb(struct sk_buff *skb, bool incoming)
 {
 	struct homa_common_hdr *h;
-	u64 id;
-	int port;
-	struct homa_rpc *rpc;
 	struct homa_sock *hsk;
 	struct homa_net *hnet;
+	struct homa_rpc *rpc;
+	int port;
+	u64 id;
 
 	/* Find the appropriate socket.*/
 	h = (struct homa_common_hdr *)skb_transport_header(skb);

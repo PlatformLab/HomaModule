@@ -45,11 +45,10 @@
  *    happen is for a suboptimal priority to be used in a grant.
  *
  * 3. Locking issues. Several operations require both the grant lock and
- *    and an RPC lock. The locking order requires that the grant lock
- *    be acquired first, but it is often the case that an RPC lock
- *    is already held when a need for the grant lock arises. When this
- *    happens the RPC lock may have to be temporarily dropped while
- *    acquiring the grant lock.
+ *    an RPC lock. The locking order requires that the grant lock be
+ *    acquired first, but it is often the case that an RPC lock is already
+ *    held when a need for the grant lock arises. When this happens the RPC
+ *    lock may have to be temporarily dropped while acquiring the grant lock.
  *
  *    Anytime that the lock on an RPC is not held, some other entity could
  *    acquire the lock and end the RPC. Once that has happened, we must
@@ -309,7 +308,7 @@ int homa_grant_priority(struct homa *homa, int rank)
  * @grant:      Overall information about grants
  * @rpc:        RPC that is being proposed for insertion into @active_rpcs
  * Return:      Index of a slot to replace (which may be empty), or -1 if
- *              all slots are in use and all have prioritiy greater than @rpc.
+ *              all slots are in use and all have priority greater than @rpc.
  */
 int homa_grant_find_victim(struct homa_grant *grant, struct homa_rpc *rpc)
 	__must_hold(grant->lock)
@@ -349,9 +348,9 @@ int homa_grant_find_victim(struct homa_grant *grant, struct homa_rpc *rpc)
 		}
 		if (lp_remaining > cand_remaining)
 			continue;
-		if ((lp_remaining == cand_remaining) &&
-		    (grant->active_rpcs[lp].birth >
-		     grant->active_rpcs[i].birth))
+		if (lp_remaining == cand_remaining &&
+		    grant->active_rpcs[lp].birth >
+		     grant->active_rpcs[i].birth)
 			continue;
 		lp = i;
 		lp_peer_active = cand_peer_active;
@@ -365,11 +364,11 @@ int homa_grant_find_victim(struct homa_grant *grant, struct homa_rpc *rpc)
 	 */
 	if (lp_peer_active > (rpc->route->peer->active_rpcs + 1))
 		return lp;
-	if ((grant->active_remaining[lp] > rpc->msgin.bytes_remaining))
+	if (grant->active_remaining[lp] > rpc->msgin.bytes_remaining)
 		return lp;
 	if (grant->active_remaining[lp] < rpc->msgin.bytes_remaining)
 		return -1;
-	if ((grant->active_rpcs[lp].birth > rpc->msgin.birth))
+	if (grant->active_rpcs[lp].birth > rpc->msgin.birth)
 		return lp;
 	return -1;
 }
@@ -805,7 +804,7 @@ void homa_grant_try_send(struct homa_grant *grant, struct homa_rpc *rpc,
 	received = rpc->msgin.length - rpc->msgin.bytes_remaining;
 	delta = received + grant->window - rpc->msgin.granted;
 	if (delta <= 0)
-	        /* The RPC already has a full window of grant. */
+		/* The RPC already has a full window of grant. */
 		return;
 	if (delta > (rpc->msgin.length - rpc->msgin.granted))
 		delta = rpc->msgin.length - rpc->msgin.granted;
@@ -813,7 +812,7 @@ void homa_grant_try_send(struct homa_grant *grant, struct homa_rpc *rpc,
 		       atomic_read(&grant->total_incoming);
 	if (avl_incoming <= 0 ||
 	    (check_needy && grant->needy_active != 0))
-	        /* Can't grant to this RPC: either no headroom in incoming
+		/* Can't grant to this RPC: either no headroom in incoming
 		 * or needy RPCs might have priority.
 		 */
 		goto needy;

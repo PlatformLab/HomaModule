@@ -339,16 +339,17 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 #define MAX_SKBS 20
 #endif /* __UNIT_TEST__ */
 	struct sk_buff *skbs[MAX_SKBS];
+	int error = 0;
+	int n = 0;             /* Number of filled entries in skbs. */
+	int i;
+
 #ifndef __UPSTREAM__ /* See strip.py */
 	int start_offset = 0;
 	int end_offset = 0;
 #endif /* See strip.py */
-	int error = 0;
-	int n = 0;             /* Number of filled entries in skbs. */
 #ifndef __STRIP__ /* See strip.py */
 	u64 start;
 #endif /* See strip.py */
-	int i;
 
 	/* Tricky note: we can't hold the RPC lock while we're actually
 	 * copying to user space, because (a) it's illegal to hold a spinlock
@@ -658,7 +659,7 @@ discard:
 	 */
 	if (hsk->dead_frags > 0) {
 		while (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags) ||
-		    hsk->dead_frags >= 2 * hsk->homa->dead_frags_limit) {
+		       hsk->dead_frags >= 2 * hsk->homa->dead_frags_limit) {
 			int more;
 
 			IF_NO_STRIP(u64 start = homa_clock());
@@ -685,7 +686,8 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	enum skb_drop_reason drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
-        IF_NO_STRIP(struct homa *homa = rpc->hsk->homa);
+
+	IF_NO_STRIP(struct homa *homa = rpc->hsk->homa);
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 		   homa_local_id(h->common.sender_id),

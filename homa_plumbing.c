@@ -1303,7 +1303,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 
 		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result && rpc->state != RPC_DEAD) {
-			hsk->error_msg = "error copying reponse message data from user space";
+			hsk->error_msg = "error copying response message data from user space";
 			goto error;
 		}
 		homa_rpc_put(rpc);

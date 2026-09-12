@@ -981,7 +981,7 @@ TEST_F(homa_plumbing, homa_sendmsg__homa_tx_copy_from_user_returns_error)
 	mock_copy_data_errors = 2;
 	EXPECT_EQ(EFAULT, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_STREQ("error copying reponse message data from user space",
+	EXPECT_STREQ("error copying response message data from user space",
 		     self->hsk.error_msg);
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));

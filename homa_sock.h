@@ -102,7 +102,7 @@ struct homa_socktab_scan {
 	int avail;
 
 	/**
-	 * @links: Used to collect a bunch of sockets by scanning hash table
+	 * @socks: Used to collect a bunch of sockets by scanning hash table
 	 * bucket chains. Sockets are then returned from here by
 	 * homa_socktab_next. We own a reference for each of these sockets.
 	 */
