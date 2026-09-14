@@ -339,6 +339,14 @@ kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
 #endif
 int __preempt_count;
 int cpu_number = 1;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+/* Storage for the kernel's per-cpu "hot" fields (task, preempt count,
+ * cpu number, etc.); real per-cpu semantics don't matter for unit tests,
+ * which are single-threaded, but the symbol must exist to satisfy the
+ * linker for inline kernel functions that reference it directly.
+ */
+struct pcpu_hot pcpu_hot;
+#endif
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
 struct net_hotdata net_hotdata = {
 	.rps_cpu_mask = 0x1f,
@@ -1129,26 +1137,16 @@ int kthread_stop(struct task_struct *k)
 	return 0;
 }
 
-#ifdef CONFIG_DEBUG_LIST
-bool __list_add_valid(struct list_head *new, struct list_head *prev,
-		      struct list_head *next)
-{
-	return true;
-}
-#endif
-
+/* __list_add_valid/__list_del_entry_valid are now provided by the
+ * kernel's own linux/list.h (unconditionally, regardless of
+ * CONFIG_DEBUG_LIST) - only the _or_report reporting hooks still need
+ * a definition here.
+ */
 bool __list_add_valid_or_report(struct list_head *new, struct list_head *prev,
 				struct list_head *next)
 {
 	return true;
 }
-
-#ifdef CONFIG_DEBUG_LIST
-bool __list_del_entry_valid(struct list_head *entry)
-{
-	return true;
-}
-#endif
 
 bool __list_del_entry_valid_or_report(struct list_head *entry)
 {
@@ -1183,7 +1181,7 @@ void lock_sock_nested(struct sock *sk, int subclass)
 	sk->sk_lock.owned = 1;
 }
 
-ssize_t __modver_version_show(const struct module_attribute *a,
+ssize_t __modver_version_show(struct module_attribute *a,
 		struct module_kobject *b, char *c)
 {
 	return 0;
@@ -1226,20 +1224,21 @@ int netif_receive_skb(struct sk_buff *skb)
 void __netif_schedule(struct Qdisc *q)
 {}
 
-void preempt_count_add(int val)
+void mock_preempt_count_add(int val)
 {
-	int i;
-
-	for (i = 0; i < val; i++)
-		preempt_disable();
+	/* Just adjust the mock backing-store counter directly; don't
+	 * route through mock_preempt_disable(), since preempt_count_add()
+	 * is used by callers (e.g. local_bh_disable()) that don't pair up
+	 * 1-for-1 with preempt_disable()/preempt_enable(), so looping
+	 * through the disable/enable leak-detector here would produce
+	 * false "preempt_disables still active" failures.
+	 */
+	__preempt_count += val;
 }
 
-void preempt_count_sub(int val)
+void mock_preempt_count_sub(int val)
 {
-	int i;
-
-	for (i = 0; i < val; i++)
-		preempt_enable();
+	__preempt_count -= val;
 }
 
 long prepare_to_wait_event(struct wait_queue_head *wq_head,
@@ -1452,9 +1451,9 @@ bool rcuref_get_slowpath(rcuref_t *ref)
 	return true;
 }
 
-bool rcuref_put_slowpath(rcuref_t *ref, unsigned int cnt)
+bool rcuref_put_slowpath(rcuref_t *ref)
 {
-	return cnt == RCUREF_NOREF;
+	return true;
 }
 
 void refcount_warn_saturate(refcount_t *r, enum refcount_saturation_type t) {}
