@@ -332,6 +332,7 @@ struct homa_route *homa_route_alloc(struct homa_sock *hsk,
 				    const struct homa_route_key *key)
 {
 	struct homa_route *route;
+	struct dst_entry *dst;
 	int err;
 
 	route = kzalloc(sizeof(*route), GFP_ATOMIC);
@@ -362,7 +363,7 @@ struct homa_route *homa_route_alloc(struct homa_sock *hsk,
 			err = PTR_ERR(rt);
 			goto error;
 		}
-		route->dst = &rt->dst;
+		rcu_assign_pointer(route->dst, &rt->dst);
 	} else {
 		/* This code is derived from code in tcp_v6_connect. */
 		route->flow.u.ip6.flowi6_proto = IPPROTO_HOMA;
@@ -374,15 +375,15 @@ struct homa_route *homa_route_alloc(struct homa_sock *hsk,
 		route->flow.u.ip6.fl6_dport = 0;
 		route->flow.u.ip6.fl6_sport = 0;
 		route->flow.u.ip6.flowi6_uid = key->uid;
-		route->dst = ip6_dst_lookup_flow(sock_net(&hsk->sock),
-						 &hsk->sock,
-						 &route->flow.u.ip6,
-						 NULL);
+		dst = ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
+						   &route->flow.u.ip6, NULL);
+		rcu_assign_pointer(route->dst, dst);
+
 		if (IS_ERR(route->dst)) {
 			err = PTR_ERR(route->dst);
 			goto error;
 		}
-		route->dst_cookie = rt6_get_cookie(dst_rt6_info(route->dst));
+		route->dst_cookie = rt6_get_cookie(dst_rt6_info(dst));
 	}
 	INC_METRIC(route_allocs, 1);
 	return route;
@@ -510,9 +511,13 @@ int homa_route_validate(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_route *route, *old;
+	struct dst_entry *dst;
 
 	old = rpc->route;
-	if (!dst_check(old->dst, rpc->route->dst_cookie)) {
+	rcu_read_lock();
+	dst = rcu_dereference_protected(old->dst, 1);
+	rcu_read_unlock();
+	if (!dst_check(dst, rpc->route->dst_cookie)) {
 		struct homa_peertab *peertab = rpc->hsk->homa->peertab;
 
 		/* Existing route is no longer valid; remove it from

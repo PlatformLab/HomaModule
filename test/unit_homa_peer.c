@@ -430,8 +430,6 @@ struct homa_peertab *hook_peertab;
 /* Hook function that removes a route from the hash table and frees it. */
 static void free_hook(char *id)
 {
-	extern struct rhashtable_params route_ht_params;
-
 	if (strcmp(id, "spin_lock") != 0 || !hook_route)
 		return;
 

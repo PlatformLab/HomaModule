@@ -370,6 +370,9 @@ int      homa_route_prefer_evict(struct homa_peertab *peertab,
 				 struct homa_route *route2);
 int      homa_route_validate(struct homa_rpc *rpc);
 
+extern const struct rhashtable_params peer_ht_params;
+extern const struct rhashtable_params route_ht_params;
+
 #ifndef __STRIP__ /* See strip.py */
 /**
  * homa_peer_lock() - Acquire the lock for a peer. If the lock isn't
@@ -455,8 +458,10 @@ static inline int homa_peer_compare(struct rhashtable_compare_arg *arg,
 static inline int homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
 				  struct homa_route *route, int priority)
 {
-	dst_hold(route->dst);
-	skb_dst_set(skb, route->dst);
+	rcu_read_lock();
+	dst_hold(rcu_dereference(route->dst));
+	skb_dst_set(skb, rcu_dereference(route->dst));
+	rcu_read_unlock();
 	IF_NO_STRIP(priority = hsk->homa->priority_map[priority]);
 	if (ipv6_addr_v4mapped(&route->peer->addr)) {
 		IF_NO_STRIP(homa_hijack_set_hdr(skb, route, false));
@@ -476,7 +481,6 @@ static inline int homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
 static inline void homa_peer_unlink(struct homa_route *route)
 	__must_hold(route->hnet->homa->peertab->lock)
 {
-	extern const struct rhashtable_params peer_ht_params;
 	struct homa_peertab *peertab;
 
 	if (!route->peer)
