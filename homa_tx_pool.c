@@ -142,7 +142,7 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 			int num_new;
 
 			num_new = ((bytes_left + HOMA_TX_PAGE_SIZE - 1) >>
-			           (PAGE_SHIFT + HOMA_TX_PAGE_ORDER)) +
+				   (PAGE_SHIFT + HOMA_TX_PAGE_ORDER)) +
 				  frags_allocated;
 			new_frags = kvmalloc_array(num_new, sizeof(*new_frags),
 						   GFP_ATOMIC);

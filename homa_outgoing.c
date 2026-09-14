@@ -124,7 +124,7 @@ int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
 		offset += seg_size;
 
 		/* Make sure that anyone seeing a change in copied_from_user
-		 * also sees related chagnes to rpc->msgout.
+		 * also sees related changes to rpc->msgout.
 		 */
 		smp_store_release(&rpc->msgout.copied_from_user, offset);
 

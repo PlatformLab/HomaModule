@@ -148,7 +148,7 @@ void homa_pool_free(struct homa_pool *pool)
 #ifdef __UNIT_TEST__
 	mock_free_pool(pool);
 #endif /* __UNIT_TEST__ */
-	if (smp_load_acquire(&pool->region)) {
+	if (homa_pool_exists(pool)) {
 		kfree(pool->descriptors);
 		free_percpu(pool->cores);
 		pool->region = NULL;
@@ -316,10 +316,7 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	struct homa_bpage *bpage;
 	struct homa_rpc *other;
 
-	/* This barrier allows lock-free synchronization between one
-	 * core allocating the region and another core using it.
-	 */
-	if (!smp_load_acquire(&pool->region))
+	if (!homa_pool_exists(pool))
 		return -ENOMEM;
 	if (rpc->state == RPC_DEAD)
 		return 0;
@@ -472,10 +469,7 @@ int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 {
 	int i;
 
-	/* This barrier allows lock-free synchronization between one
-	 * core allocating the region and another core using it.
-	 */
-	if (!smp_load_acquire(&pool->region))
+	if (!homa_pool_exists(pool))
 		return -EINVAL;
 	for (i = 0; i < num_buffers; i++) {
 		u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
@@ -519,7 +513,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 #ifdef __UNIT_TEST__
 	pool->check_waiting_invoked += 1;
 #endif /* __UNIT_TEST__ */
-	if (!smp_load_acquire(&pool->region))
+	if (!homa_pool_exists(pool))
 		return;
 	while (atomic_read_acquire(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
@@ -588,10 +582,7 @@ u64 homa_pool_avail_bytes(struct homa_pool *pool)
 	u64 avail;
 	int cpu;
 
-	/* This barrier allows lock-free synchronization between one
-	 * core allocating the region and another core using it.
-	 */
-	if (!smp_load_acquire(&pool->region))
+	if (!homa_pool_exists(pool))
 		return 0;
 	avail = atomic_read(&pool->free_bpages);
 	avail *= HOMA_BPAGE_SIZE;

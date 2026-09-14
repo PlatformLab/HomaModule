@@ -165,4 +165,20 @@ static inline void homa_pool_release(struct homa_rpc *rpc)
 	}
 }
 
+/**
+ * homa_pool_exists() - Determine whether a pool has been fully initialized
+ * with a memory region.
+ * @pool:     Pool to check.
+ * Return:    True if there is a memory region associated with the pool,
+ *            false if SO_HOMA_RCVBUF hasn't been invoked for the socket.
+ */
+static inline bool homa_pool_exists(struct homa_pool *pool)
+{
+	/* This barrier allows lockless concurrent allocation of the pool:
+	 * it ensures that if the pool exists we'll see all of the initialized
+	 * values related to the pool.
+	 */
+	return smp_load_acquire(&pool->region) != NULL;
+}
+
 #endif /* _HOMA_POOL_H */

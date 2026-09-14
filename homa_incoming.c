@@ -565,33 +565,42 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 			if (rpc)
 				homa_rpc_hold(rpc);
 		}
-		if (unlikely(!rpc)) {
 #ifndef __STRIP__ /* See strip.py */
+		if (unlikely(!rpc)) {
 			if (h->common.type != CUTOFFS &&
 			    h->common.type != NEED_ACK &&
-#else /* See strip.py */
-			if (h->common.type != NEED_ACK &&
-#endif /* See strip.py */
 			    h->common.type != ACK &&
 			    h->common.type != RESEND) {
 				tt_record4("Discarding packet for unknown RPC, id %u, type %d, peer 0x%x:%d",
 					   id, h->common.type, tt_addr(saddr),
 					   ntohs(h->common.sport));
-#ifndef __STRIP__ /* See strip.py */
 				if (h->common.type != GRANT ||
 				    homa_is_client(id))
 					INC_METRIC(unknown_rpcs, 1);
-#endif /* See strip.py */
 				goto discard;
 			}
 		} else {
 			if (h->common.type == DATA ||
-#ifndef __STRIP__ /* See strip.py */
 			    h->common.type == GRANT ||
-#endif /* See strip.py */
 			    h->common.type == BUSY)
 				rpc->silent_ticks = 0;
 		}
+#else /* See strip.py */
+		if (unlikely(!rpc)) {
+			if (h->common.type != NEED_ACK &&
+			    h->common.type != ACK &&
+			    h->common.type != RESEND) {
+				tt_record4("Discarding packet for unknown RPC, id %u, type %d, peer 0x%x:%d",
+					   id, h->common.type, tt_addr(saddr),
+					   ntohs(h->common.sport));
+				goto discard;
+			}
+		} else {
+			if (h->common.type == DATA ||
+			    h->common.type == BUSY)
+				rpc->silent_ticks = 0;
+		}
+#endif /* See strip.py */
 
 		switch (h->common.type) {
 		case DATA:

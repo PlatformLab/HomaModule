@@ -585,7 +585,7 @@ done:
  * Return:        The number of routes stored in @victims; may be zero.
  */
 int homa_route_pick_victims(struct homa_peertab *peertab,
-			   struct homa_route *victims[], int max_victims)
+			    struct homa_route *victims[], int max_victims)
 {
 	struct homa_route *route;
 	int num_victims = 0;
