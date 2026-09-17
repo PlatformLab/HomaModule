@@ -154,6 +154,56 @@ TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
 	EXPECT_EQ(EINVAL, -homa_load());
 }
 
+TEST_F(homa_plumbing, homa_load__destroy_after_unregister)
+{
+	const char *events[] = {
+		"inet_del_protocol",
+		"inet6_del_protocol",
+		"inet_unregister_protosw",
+		"inet6_unregister_protosw",
+		"proto_unregister HOMA",
+		"proto_unregister HOMAv6",
+		"unregister_pernet_subsys"
+	};
+	const char *log;
+	const char *destroy;
+	int result;
+
+	homa_destroy(&self->homa);
+
+	/* Exclude destruction of the fixture's Homa instance. */
+	unit_log_clear();
+
+	/* Fail after all registrations have succeeded, so loading must
+	 * unwind them before destroying the shared Homa state.
+	 */
+	mock_kthread_create_errors = 1;
+	result = homa_load();
+	EXPECT_EQ(-EACCES, result);
+
+	log = unit_log_get();
+	EXPECT_SUBSTR("homa_destroy", log);
+	destroy = strstr(log, "homa_destroy");
+
+	/* Require each unregistration to precede destruction, without
+	 * constraining the order of the unregistrations themselves.
+	 */
+	for (int i = 0; i < ARRAY_SIZE(events); i++) {
+		const char *event = strstr(log, events[i]);
+
+		EXPECT_NE(NULL, event);
+		EXPECT_SUBSTR(events[i], log);
+		if (event && destroy && event > destroy)
+			FAIL("Expected '%s' to precede 'homa_destroy' in '%s'",
+			     events[i], log);
+	}
+
+	/* The global Homa instance must be destroyed exactly once. */
+	if (destroy)
+		EXPECT_NOSUBSTR("homa_destroy",
+				destroy + strlen("homa_destroy"));
+}
+
 TEST_F(homa_plumbing, homa_net_exit__free_route)
 {
 	struct in6_addr addr1 = unit_get_in_addr("1.2.3.4");

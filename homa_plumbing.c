@@ -652,8 +652,6 @@ error:
 	if (init_metrics)
 		homa_metrics_end();
 #endif /* See strip.py */
-	if (init_homa)
-		homa_destroy(homa);
 	if (init_protocol)
 		inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	if (init_protocol6)
@@ -668,6 +666,11 @@ error:
 		proto_unregister(&homav6_prot);
 	if (init_net_ops)
 		unregister_pernet_subsys(&homa_net_ops);
+	/* Must not destroy homa until after namespace cleanup: it will
+	 * access info in homa.
+	 */
+	if (init_homa)
+		homa_destroy(homa);
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_destroy();
 #endif /* See strip.py */
