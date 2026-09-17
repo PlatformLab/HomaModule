@@ -328,7 +328,6 @@ TEST_F(homa_rpc, homa_rpc_ack__multiple_acks)
 TEST_F(homa_rpc, homa_rpc_ack__release_rpc_lock)
 {
 	struct homa_rpc *srpc;
-	struct homa_sock hsk;
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
@@ -345,8 +344,6 @@ TEST_F(homa_rpc, homa_rpc_ack__release_rpc_lock)
 	homa_rpc_ack(&self->hsk, NULL, self->client_ip, 0, NULL);
 	EXPECT_EQ(1, mock_total_spin_locks);
 	homa_rpc_unlock(srpc);
-
-	unit_sock_destroy(&hsk);
 }
 TEST_F(homa_rpc, homa_rpc_ack__lookup_socket)
 {
