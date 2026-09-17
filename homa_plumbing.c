@@ -660,6 +660,10 @@ error:
 		proto_unregister(&homav6_prot);
 	if (init_net_ops)
 		unregister_pernet_subsys(&homa_net_ops);
+#ifndef __UPSTREAM__ /* See strip.py */
+	/* Remove proc callbacks before a failed load releases module memory. */
+	tt_destroy();
+#endif /* See strip.py */
 	return status;
 }
 

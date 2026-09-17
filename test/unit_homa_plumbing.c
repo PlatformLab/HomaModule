@@ -142,8 +142,15 @@ TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
 	mock_register_protosw_errors = 1;
 	EXPECT_EQ(EINVAL, -homa_load());
 
+	/* Failed loading must release every timetrace buffer before
+	 * another load is attempted. A successful retry followed by
+	 * unload could otherwise hide missing failure-path cleanup.
+	 */
+	for (int i = 0; i < nr_cpu_ids; i++)
+		EXPECT_EQ(NULL, tt_buffers[i]);
+
 	/* Second attempt succeeds. */
-	EXPECT_EQ(0, -homa_load());
+	ASSERT_EQ(0, homa_load());
 
 	homa_unload();
 }
