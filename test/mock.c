@@ -147,6 +147,10 @@ static int registered_qdiscs;
 /* Registered by most recent call to register_qdisc. */
 static struct Qdisc_ops *qdisc_ops;
 
+/* Arguments from the most recent inet_add_protocol call. Reset for each test. */
+const struct net_protocol *mock_inet_protocol;
+unsigned char mock_inet_protocol_num;
+
 /* Keeps track of all the results returned by ip_route_output_flow that
  * have not yet been freed. Reset for each test.
  */
@@ -703,6 +707,8 @@ int inet_add_offload(const struct net_offload *prot, unsigned char protocol)
 
 int inet_add_protocol(const struct net_protocol *prot, unsigned char num)
 {
+	mock_inet_protocol = prot;
+	mock_inet_protocol_num = num;
 	return 0;
 }
 
@@ -2599,6 +2605,8 @@ void mock_teardown(void)
 	mock_dst_check_errors = 0;
 	mock_import_ubuf_errors = 0;
 	mock_import_iovec_errors = 0;
+	mock_inet_protocol = NULL;
+	mock_inet_protocol_num = 0;
 	mock_ip6_xmit_errors = 0;
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;

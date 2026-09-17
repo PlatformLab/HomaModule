@@ -182,6 +182,9 @@ extern int         mock_ethtool_ksettings_errors;
 extern bool        mock_exit_thread;
 extern int         mock_import_iovec_errors;
 extern int         mock_import_ubuf_errors;
+extern const struct net_protocol
+		  *mock_inet_protocol;
+extern unsigned char mock_inet_protocol_num;
 extern int         mock_ip6_xmit_errors;
 extern int         mock_ip_queue_xmit_errors;
 extern bool        mock_ipv6;

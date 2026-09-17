@@ -8,6 +8,7 @@
 #include "ccutils.h"
 #include "mock.h"
 #include "utils.h"
+#include <linux/version.h>
 
 FIXTURE(homa_plumbing) {
 	struct in6_addr client_ip[1];
@@ -1692,3 +1693,36 @@ TEST_F(homa_plumbing, homa_poll__socket_readable)
 	EXPECT_EQ(POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM,
 		  homa_poll(NULL, &sock, NULL));
 }
+
+/* Older kernels require netns_ok to be registered on kernel modules
+ * Regression check that .netns_ok does not get accidentally removed
+ * from homa_plumbing.c
+ * Linux 5.14 removed this field entirely
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
+TEST_F(homa_plumbing, homa_load__ipv4_netns_enabled)
+{
+	int result;
+
+	/* Release the fixture's Homa instance before loading the global one. */
+	homa_destroy(&self->homa);
+
+	/* Require this load to supply the captured registration. */
+	mock_inet_protocol = NULL;
+	mock_inet_protocol_num = 0;
+
+	result = homa_load();
+	ASSERT_EQ(0, result);
+
+	/* Inspect the protocol handed to inet_add_protocol. Use nonfatal
+	 * expectations and a null check -> run homa_unload on failure.
+	 */
+	EXPECT_NE(NULL, mock_inet_protocol);
+	EXPECT_EQ(IPPROTO_HOMA, mock_inet_protocol_num);
+	/* Cast the bit-field for the assertion macro's type inference. */
+	if (mock_inet_protocol)
+		EXPECT_EQ(1, (int)mock_inet_protocol->netns_ok);
+
+	homa_unload();
+}
+#endif
