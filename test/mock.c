@@ -675,6 +675,7 @@ int inet6_del_offload(const struct net_offload *prot, unsigned char protocol)
 
 int inet6_del_protocol(const struct inet6_protocol *prot, unsigned char num)
 {
+	UNIT_LOG("; ", "inet6_del_protocol %u", num);
 	return 0;
 }
 
@@ -700,7 +701,10 @@ int inet6_release(struct socket *sock)
 	return 0;
 }
 
-void inet6_unregister_protosw(struct inet_protosw *p) {}
+void inet6_unregister_protosw(struct inet_protosw *p)
+{
+	UNIT_LOG("; ", "inet6_unregister_protosw %u", p->protocol);
+}
 
 int inet_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
@@ -719,6 +723,7 @@ int inet_del_offload(const struct net_offload *prot, unsigned char protocol)
 
 int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
 {
+	UNIT_LOG("; ", "inet_del_protocol %u", num);
 	return 0;
 }
 
@@ -758,7 +763,9 @@ int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 }
 
 void inet_unregister_protosw(struct inet_protosw *p)
-{}
+{
+	UNIT_LOG("; ", "inet_unregister_protosw %u", p->protocol);
+}
 
 void __init_swait_queue_head(struct swait_queue_head *q, const char *name,
 		struct lock_class_key *key)
@@ -1328,7 +1335,10 @@ int proto_register(struct proto *prot, int alloc_slab)
 	return 0;
 }
 
-void proto_unregister(struct proto *prot) {}
+void proto_unregister(struct proto *prot)
+{
+	UNIT_LOG("; ", "proto_unregister %s", prot->name);
+}
 
 void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 {
@@ -1767,7 +1777,9 @@ void unregister_net_sysctl_table(struct ctl_table_header *header)
 }
 
 void unregister_pernet_subsys(struct pernet_operations *)
-{}
+{
+	UNIT_LOG("; ", "unregister_pernet_subsys");
+}
 
 void unregister_qdisc(struct Qdisc_ops *qops)
 {
