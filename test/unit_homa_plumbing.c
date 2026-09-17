@@ -148,7 +148,7 @@ TEST_F(homa_plumbing, homa_load__error_in_tt_init)
 	result = homa_load();
 	EXPECT_EQ(-1, result);
 
-    /* Validate tt_buffers are cleaned up downstream by tt_destroy */
+	/* tt_init cleans up its own partial initialization on failure. */
 	for (int i = 0; i < nr_cpu_ids; i++)
 		EXPECT_EQ(NULL, tt_buffers[i]);
 
@@ -177,6 +177,58 @@ TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
 	ASSERT_EQ(0, homa_load());
 
 	homa_unload();
+}
+
+TEST_F(homa_plumbing, homa_load__destroy_after_unregister)
+{
+	const char *events[] = {
+		"inet_del_protocol ",
+		"inet6_del_protocol ",
+		"inet_unregister_protosw ",
+		"inet6_unregister_protosw ",
+		"proto_unregister HOMA;",
+		"proto_unregister HOMAv6;",
+		"unregister_pernet_subsys;"
+	};
+	const char *log;
+	const char *destroy;
+	int result;
+
+	homa_destroy(&self->homa);
+
+	/* Exclude destruction of the fixture's Homa instance. */
+	unit_log_clear();
+
+	/* Fail after all registrations have succeeded, so loading must
+	 * unwind them before destroying the shared Homa state.
+	 */
+	mock_kthread_create_errors = 1;
+	result = homa_load();
+	EXPECT_EQ(-EACCES, result);
+
+	log = unit_log_get();
+	destroy = strstr(log, "homa_destroy");
+	EXPECT_NE(NULL, destroy);
+
+	/* Require each unregistration to precede destruction, without
+	 * constraining the order of the unregistrations themselves.
+	 */
+	for (int i = 0; i < ARRAY_SIZE(events); i++) {
+		const char *event = strstr(log, events[i]);
+
+		EXPECT_NE(NULL, event);
+		if (event && destroy)
+			EXPECT_TRUE(event < destroy);
+	}
+
+	/* The global Homa instance must be destroyed exactly once. */
+	if (destroy)
+		EXPECT_EQ(NULL, strstr(destroy + strlen("homa_destroy"),
+				       "homa_destroy"));
+
+	/* Clean up if a regression allowed loading to succeed. */
+	if (result == 0)
+		homa_unload();
 }
 
 TEST_F(homa_plumbing, homa_net_exit__free_peers)
