@@ -131,6 +131,21 @@ static void create_rpcs_hook(char *id)
 	saved_self = NULL;
 }
 
+#ifndef __UPSTREAM__ /* See strip.py */
+TEST_F(homa_plumbing, homa_load__error_in_tt_init)
+{
+	int result;
+
+	homa_destroy(&self->homa);
+
+	/* Fail the first timetrace-buffer allocation. homa_load must
+	 * propagate tt_init's error instead of continuing initialization.
+	 */
+	mock_kmalloc_errors = 1;
+	result = homa_load();
+	EXPECT_EQ(-1, result);
+}
+#endif /* See strip.py */
 TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
 {
 	homa_destroy(&self->homa);
