@@ -526,7 +526,10 @@ int __init homa_load(void)
 #endif /* See strip.py */
 
 #ifndef __UPSTREAM__ /* See strip.py */
-	tt_init("timetrace");
+	status = tt_init("timetrace");
+	/* tt_init cleans up its own partial initialization on failure. */
+	if (status)
+		return status;
 #endif /* See strip.py */
 
 	status = homa_init(homa);
