@@ -9,7 +9,6 @@ the first argument, if given) and prints it out in a different form,
 with times in microseconds instead of clock cycles.
 """
 
-from __future__ import division, print_function
 from glob import glob
 from optparse import OptionParser
 import math

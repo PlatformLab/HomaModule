@@ -13,7 +13,8 @@ saves current metrics each time it is run, so that the next run can determine
 what has changed. File defaults to ~/.homa_metrics.
 """
 
-from __future__ import division, print_function
+from __future__ import annotations
+from typing import TextIO
 from glob import glob
 from optparse import OptionParser
 import math
@@ -42,7 +43,7 @@ docs = {}
 # Read in metrics, parse the results for internal use, and, optionally
 # copy the raw metrics to an output file. Also reinitialize symbols
 
-def read_metrics(metrics_file, out):
+def read_metrics(metrics_file: str, out: TextIO | None) -> list[dict[str, int]]:
     """
     Read metrics from the file whose name is "metrics_file" and generate
     a data structure in the format described above for "prev". In
@@ -80,7 +81,7 @@ def read_metrics(metrics_file, out):
     f.close()
     return metrics
 
-def scale_number(number):
+def scale_number(number: float) -> str:
     """
     Return a string describing a number, but with a "K", "M", or "G"
     suffix to keep the number small and readable

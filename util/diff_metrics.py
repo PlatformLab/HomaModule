@@ -12,7 +12,7 @@ Usage:
 diff_metrics file1 file2
 """
 
-from __future__ import division, print_function
+from __future__ import annotations
 from glob import glob
 from optparse import OptionParser
 import math
@@ -25,7 +25,7 @@ import sys
 # metric names, values are metric values.
 metrics = {}
 
-def scan_first(name):
+def scan_first(name: str) -> None:
     """
     Scan the metrics file given by 'name' and record its metrics.
     """
@@ -37,10 +37,10 @@ def scan_first(name):
         if not match:
             print("Didn't match: %s\n" % (line))
             continue
-        metrics[match.group(1)] = long(match.group(2))
+        metrics[match.group(1)] = int(match.group(2))
     f.close()
 
-def scan_second(name):
+def scan_second(name: str) -> None:
     """
     Scan the metrics file given by 'name', compare its metrics to
     those that have been recorded, and print an output line with
@@ -55,7 +55,7 @@ def scan_second(name):
             print("Didn't match: %s\n" % (line))
             continue
         name = match.group(1)
-        value = long(match.group(2))
+        value = int(match.group(2))
         comment = match.group(3)
         if not name in metrics:
             print("No metric for %s\n" % (name))
@@ -68,7 +68,7 @@ def scan_second(name):
     f.close()
 
 if len(sys.argv) != 3:
-    printf("Usage: %s file file2\n" % sys.argv[0])
+    print("Usage: %s file file2\n" % sys.argv[0])
     exit(1)
 
 scan_first(sys.argv[1])

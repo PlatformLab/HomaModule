@@ -22,7 +22,7 @@ or more timetraces. For each such line found, it will output information
 about the RPC described by that line.
 """
 
-from __future__ import division, print_function
+from __future__ import annotations
 from glob import glob
 from optparse import OptionParser
 import math
@@ -54,7 +54,7 @@ stats = {}
 
 rpcs_analyzed = 0
 
-def track_nic_queue(line, time):
+def track_nic_queue(line: str, time: float) -> None:
     """
     Update info about the NIC queue length to reflect the transmission
     of a new packet (or several packets if there is TSO)
@@ -83,7 +83,7 @@ def track_nic_queue(line, time):
     # print("NIC queue: bytes %d, usecs %.3f, time %.3f empty_time %.3f" %
     #         (bytes, usecs, time, nic_empty_time))
 
-def add_stat(name, value):
+def add_stat(name: str, value: float) -> None:
     """
     Record a statistic with a given name and value (either appends to an
     existing list in stats or starts a new one).
@@ -95,13 +95,13 @@ def add_stat(name, value):
     else:
         stats[name].append(value)
 
-def avg_stat(name):
+def avg_stat(name: str) -> float:
     global stats
     if not name in stats:
         return 0.0
     return sum(stats[name]) / len(stats[name])
 
-def analyze_rpc(id, client_num, server_num):
+def analyze_rpc(id: str, client_num: int | str, server_num: str) -> None:
     """
     Analyze the client and server timetraces for a given RPC and output
     a latency breakdown for the RPC.

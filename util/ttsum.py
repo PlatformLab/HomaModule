@@ -8,6 +8,8 @@ This program reads one or more timetrace logs and generates summary
 information. Use the --help option to print usage information.
 """
 
+from __future__ import annotations
+from typing import TextIO
 from collections import defaultdict
 from glob import glob
 from optparse import OptionParser
@@ -64,7 +66,7 @@ startTimes = defaultdict(lambda : None)
 # event.
 eventCounts = defaultdict(lambda: defaultdict(lambda: 0))
 
-def scan(f, startingEvent):
+def scan(f: TextIO, startingEvent: str | None) -> None:
     """
     Scan the log file given by 'f' (handle for an open file) and collect
     information from time trace records as described by the arguments.
