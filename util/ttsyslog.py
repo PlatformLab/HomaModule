@@ -16,7 +16,6 @@ If "--extra file2" is specified, all of the lines that are *not* valid
 timetrace records are output to file file2.
 """
 
-from __future__ import division, print_function
 from glob import glob
 from optparse import OptionParser
 import math

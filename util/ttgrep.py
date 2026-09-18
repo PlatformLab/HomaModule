@@ -11,7 +11,8 @@ is at time 0. If the file is omitted, standard input is used.
 Usage: ttgrep.py [--rebase] regex [file]
 """
 
-from __future__ import division, print_function
+from __future__ import annotations
+from typing import TextIO
 from glob import glob
 from optparse import OptionParser
 import math
@@ -22,7 +23,7 @@ import sys
 
 rebase = False
 
-def scan(f, pattern):
+def scan(f: TextIO, pattern: str) -> None:
     """
     Scan the log file given by 'f' (handle for an open file) and output
     all-time trace records that match pattern.

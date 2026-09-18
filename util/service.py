@@ -10,7 +10,8 @@ Usage: service.py [tt_file]
 The existing timetrace is in tt_file (or stdin in tt_file is omitted).
 """
 
-from __future__ import division, print_function
+from __future__ import annotations
+from typing import Any
 from glob import glob
 from optparse import OptionParser
 import math
@@ -73,7 +74,7 @@ min_id = ""
 max = 0
 max_id = ""
 
-def average(dict, key):
+def average(dict: list[dict[str, Any]], key: str) -> float:
     sum = 0.0
     if len(dict) == 0:
         return 0.0
@@ -84,7 +85,7 @@ def average(dict, key):
             sum += record[key]
     return sum/len(dict)
 
-def largest(dict, key):
+def largest(dict: list[dict[str, Any]], key: str) -> dict[str, Any] | float | None:
     max = None
     if len(dict) == 0:
         return 0.0
@@ -93,7 +94,7 @@ def largest(dict, key):
             max = record
     return max
 
-def smallest(dict, key):
+def smallest(dict: list[dict[str, Any]], key: str) -> dict[str, Any] | float | None:
     min = None
     if len(dict) == 0:
         return 0.0
@@ -102,7 +103,7 @@ def smallest(dict, key):
             min = record
     return min
 
-def collect(dict, key):
+def collect(dict: list[dict[str, Any]], key: str) -> list[float]:
     result = []
     for record in dict:
         if key in record:

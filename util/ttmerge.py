@@ -9,7 +9,8 @@ must use the same time source.
 Usage: ttmerge.py file file file ...
 """
 
-from __future__ import division, print_function
+from __future__ import annotations
+from typing import Any
 from glob import glob
 import math
 from optparse import OptionParser
@@ -39,7 +40,7 @@ first = 0
 # ticks to microseconds.
 ghz = 0.0
 
-def next_line(info):
+def next_line(info: dict[str, Any]) -> None:
     """
     Read information from a file. The info argument is one of the
     entries in files.
