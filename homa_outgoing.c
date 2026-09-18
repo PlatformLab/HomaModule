@@ -289,10 +289,14 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 	       msg_frags_left > 0) {
 		skb_frag_t *skb_frag = &shinfo->frags[shinfo->nr_frags];
 		struct page *page;
-		int frag_bytes;
+		int frag_avail, frag_bytes;
 
-		frag_bytes = min(skb_frag_size(msg_frag) - bytes_to_skip,
-				 bytes_left);
+		/* skb_frag_size() is unsigned; keep the min() operands signed
+		 * (matching bytes_left and frag_bytes) so a mixed-sign compare
+		 * can't turn an underflow into a huge positive length.
+		 */
+		frag_avail = (int)skb_frag_size(msg_frag) - bytes_to_skip;
+		frag_bytes = min(frag_avail, bytes_left);
 		page = skb_frag_page(msg_frag);
 		get_page(page);
 		skb_frag->netmem = page_to_netmem(page);
