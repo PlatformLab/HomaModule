@@ -806,17 +806,15 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_grant_hdr *h = (struct homa_grant_hdr *)skb->data;
-	int new_offset = ntohl(h->offset);
+	u32 new_offset = ntohl(h->offset);
 
 	tt_record4("processing grant for id %llu, offset %d, priority %d, increment %d",
 		   homa_local_id(h->common.sender_id), ntohl(h->offset),
 		   h->priority, new_offset - rpc->msgout.granted);
 	if (rpc->state == RPC_OUTGOING) {
-		if (new_offset > rpc->msgout.granted) {
-			rpc->msgout.granted = new_offset;
-			if (new_offset > rpc->msgout.length)
-				rpc->msgout.granted = rpc->msgout.length;
-		}
+		if (new_offset > rpc->msgout.granted)
+			rpc->msgout.granted = min_t(u32, new_offset,
+						    rpc->msgout.length);
 		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(rpc);
 	}

@@ -1874,6 +1874,50 @@ TEST_F(homa_incoming, homa_grant_pkt__grant_past_end_of_message)
 					  &h.common, 0, 0));
 	EXPECT_EQ(20000, crpc->msgout.granted);
 }
+TEST_F(homa_incoming, homa_grant_pkt__offset_is_unsigned)
+{
+	/* A GRANT's offset is an unsigned wire field. Reading it into a signed
+	 * int makes an offset with the top bit set (>= 2GB) negative, so the
+	 * "new_offset > granted" test fails and the grant is silently dropped
+	 * instead of being clamped to the message length. Treat it as u32 so
+	 * the existing >granted / clamp-to-length logic bounds it correctly.
+	 *
+	 * Table-driven: each row is a grant offset and the granted value it
+	 * should produce for a 20000-byte outgoing message.
+	 */
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 20000, 1600);
+	static const struct {
+		const char *name;
+		u32 offset;
+		int exp_granted;
+	} cases[] = {
+		{"normal_grant_advances",             12000,      12000},
+		{"grant_past_end_clamps_to_length",   25000,      20000},
+		{"high_bit_offset_clamps_not_ignored", 0x80000000, 20000},
+	};
+	int i;
+
+	ASSERT_NE(NULL, crpc);
+	for (i = 0; i < (int)ARRAY_SIZE(cases); i++) {
+		struct homa_grant_hdr h = {{.sport = htons(self->server_port),
+				.dport = htons(self->hsk.port),
+				.sender_id = cpu_to_be64(self->server_id),
+				.type = GRANT},
+				.offset = htonl(cases[i].offset),
+				.priority = 3};
+
+		TH_LOG("case: %s", cases[i].name);
+		crpc->state = RPC_OUTGOING;
+		crpc->msgout.granted = 5000;
+		unit_log_clear();
+		homa_dispatch_pkts(mock_skb_alloc(self->client_ip,
+						  self->server_ip,
+						  &h.common, 0, 0));
+		EXPECT_EQ(cases[i].exp_granted, crpc->msgout.granted);
+	}
+}
 #endif /* See strip.py */
 
 TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc)
