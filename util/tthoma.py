@@ -1736,7 +1736,7 @@ class Dispatcher:
         global traces
         start_ns = time.time_ns()
         self.__build_parse_table()
-        prefix_matcher = re.compile(' *([-0-9.]+) us .* \[C([0-9]+)\] (.*)')
+        prefix_matcher = re.compile(r' *([-0-9.]+) us .* \[C([0-9]+)\] (.*)')
 
         trace = {}
         trace['file'] = file
@@ -1838,7 +1838,7 @@ class Dispatcher:
         # and 'cregexp' elements of pattern entries.
         self.prefix_length = 1000
         for pattern in self.patterns:
-            meta_matcher = re.compile('[()[\].+*?\\^${}]')
+            meta_matcher = re.compile(r'[()[\].+*?\^${}]')
             pattern['parser'] = getattr(self, '_Dispatcher__' + pattern['name'])
             pattern['cregexp'] = re.compile(pattern['regexp'])
             if pattern['name'] in self.interests:
@@ -2014,7 +2014,7 @@ class Dispatcher:
     patterns.append({
         'name': 'qdisc_queue_data',
         'regexp': '__dev_xmit_skb queueing homa data packet for '
-                  'id ([0-9]+), offset ([0-9]+), qid ([0-9]+) \(([^)]+)\)'
+                  r'id ([0-9]+), offset ([0-9]+), qid ([0-9]+) \(([^)]+)\)'
     })
 
     def __nic_data(self, trace, time, core, match, interests):
@@ -2355,7 +2355,7 @@ class Dispatcher:
 
     patterns.append({
         'name': 'grant_check_unlock',
-        'regexp': 'homa_grant_check_rpc released grant lock \(id ([0-9]+)\)'
+        'regexp': r'homa_grant_check_rpc released grant lock \(id ([0-9]+)\)'
     })
 
     def __rpc_incoming(self, trace, time, core, match, interests):
@@ -12401,7 +12401,7 @@ class AnalyzeSync:
                 dst = tempfile.NamedTemporaryFile(dir=os.path.dirname(file),
                         mode='w', delete=False)
                 for line in src:
-                    match = re.match(' *([-0-9.]+) us (\(\+ *[-0-9.]+ us\) \[C[0-9]+\].*)',
+                    match = re.match(r' *([-0-9.]+) us (\(\+ *[-0-9.]+ us\) \[C[0-9]+\].*)',
                             line)
                     if not match:
                         print(line, file=dst)

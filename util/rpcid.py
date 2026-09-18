@@ -141,7 +141,7 @@ def analyze_rpc(id, client_num, server_num):
     server_info = ""
 
     for line in tt.stdout:
-        match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\]', line)
+        match = re.match(r' *([-0-9.]+) us .* \[C([0-9]+)\]', line)
         if not match:
             continue
         time = float(match.group(1))
@@ -239,7 +239,7 @@ def analyze_rpc(id, client_num, server_num):
     rpcs_analyzed += 1
     print("Client (%s, id %s):" % (client, id))
     for line in tt.stdout:
-        match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\]', line)
+        match = re.match(r' *([-0-9.]+) us .* \[C([0-9]+)\]', line)
         if not match:
             continue
         time = float(match.group(1))

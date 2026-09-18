@@ -29,7 +29,7 @@ prev_time = 0
 printed = 0
 
 for line in f:
-    match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\]', line)
+    match = re.match(r' *([-0-9.]+) us .* \[C([0-9]+)\]', line)
     if not match:
         continue
     time = float(match.group(1))
