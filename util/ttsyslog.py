@@ -59,7 +59,7 @@ for line in f:
     lines.append(line)
 
 for line in reversed(lines):
-    match = re.match('.* ([0-9.]+) (\[C..\] .+)', line)
+    match = re.match(r'.* ([0-9.]+) (\[C..\] .+)', line)
     if not match:
         continue
     this_time = float(match.group(1))
@@ -76,7 +76,7 @@ for line in reversed(lines):
 
 if extra:
     for line in lines:
-        if not re.match('.* ([0-9.]+) (\[C..\] .+)', line):
+        if not re.match(r'.* ([0-9.]+) (\[C..\] .+)', line):
             extra.write(line)
             extra.write('\n')
     extra.close()
