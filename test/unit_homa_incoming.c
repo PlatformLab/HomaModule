@@ -1926,6 +1926,29 @@ TEST_F(homa_incoming, homa_grant_pkt__grant_past_end_of_message)
 					  &h.common, 0, 0));
 	EXPECT_EQ(20000, crpc->msgout.granted);
 }
+TEST_F(homa_incoming, homa_grant_pkt__offset_has_sign_bit_set)
+{
+	/* This tests to be sure that offsets are processed as unsigned
+	 * values (they were not originally).
+	 */
+	struct homa_grant_hdr h = {{.sport = htons(self->server_port),
+			.dport = htons(self->hsk.port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.type = GRANT},
+			.offset = htonl(0x80000000), .priority = 3};
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 20000, 1600);
+	EXPECT_NE(NULL, crpc);
+	crpc->msgout.granted = 5000;
+	unit_log_clear();
+	homa_dispatch_pkts(mock_skb_alloc(self->client_ip,
+						self->server_ip,
+						&h.common, 0, 0));
+	EXPECT_EQ(20000, crpc->msgout.granted);
+}
 #endif /* See strip.py */
 
 TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc)
