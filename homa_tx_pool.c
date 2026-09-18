@@ -417,8 +417,8 @@ void homa_tx_pool_gc(struct homa *homa)
 	 * releasing the lock, since freeing is expensive).
 	 */
 	spin_lock_bh(&max_pool->mutex);
-	min_pages = ((homa->tx_page_pool_min_kb * 1000)
-			+ (HOMA_TX_PAGE_SIZE - 1)) >> HOMA_TX_PAGE_SHIFT;
+	min_pages = (int)((((u64)homa->tx_page_pool_min_kb * 1000)
+			+ (HOMA_TX_PAGE_SIZE - 1)) >> HOMA_TX_PAGE_SHIFT);
 
 	/* Note: may need to adjust max_low_mark to reflect changes made
 	 * while lock wasn't held.

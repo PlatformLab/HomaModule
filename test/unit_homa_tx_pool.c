@@ -575,6 +575,53 @@ TEST_F(homa_tx_pool, homa_tx_pool_gc__empty_pool)
 	homa_tx_pool_gc(&self->homa);
 	EXPECT_EQ(0, get_tx_pool_core(0)->pool->avail);
 }
+TEST_F(homa_tx_pool, homa_tx_pool_gc__min_kb_floor_no_overflow)
+{
+	/* homa_tx_pool_gc() converts the tx_page_pool_min_kb floor (an int, in
+	 * KB) into a page count. Computing it as `min_kb * 1000` in 32-bit int
+	 * overflows for large floors, yielding a bogus (often negative)
+	 * min_pages and freeing pages that should have been kept. The floor
+	 * must be computed in 64-bit.
+	 *
+	 * Table-driven: each row sets a floor and the resulting post-gc avail.
+	 * The corner row's floor overflows a 32-bit `* 1000` but is harmless in
+	 * 64-bit, so the pool must be left intact.
+	 */
+	static const struct {
+		const char *name;
+		int min_kb;		/* tx_page_pool_min_kb (floor, in KB) */
+		int pages;		/* pages loaded into core 0's pool */
+		int low_mark;
+		int exp_avail;		/* expected avail after gc */
+	} cases[] = {
+		{"modest_floor_frees_down_to_floor",
+			(5 * HOMA_TX_PAGE_SIZE) / 1000, 10, 9, 6},
+		{"floor_exceeds_pool_frees_none",
+			(50 * HOMA_TX_PAGE_SIZE) / 1000, 10, 10, 10},
+		{"huge_floor_no_int_overflow",
+			3000000, 10, 10, 10},
+	};
+	int i;
+
+	for (i = 0; i < (int)ARRAY_SIZE(cases); i++) {
+		TH_LOG("case: %s", cases[i].name);
+
+		homa_tx_pool_cleanup(&self->homa);
+		EXPECT_EQ(0, homa_tx_pool_init(&self->homa));
+
+		mock_clock = 1000000;
+		self->homa.tx_page_free_time = 0;
+		self->homa.tx_page_frees_per_sec = 20;
+		self->homa.tx_page_pool_min_kb = cases[i].min_kb;
+
+		add_to_pool(&self->homa, cases[i].pages, 0);
+		get_tx_pool_core(0)->pool->low_mark = cases[i].low_mark;
+
+		homa_tx_pool_gc(&self->homa);
+		EXPECT_EQ(cases[i].exp_avail,
+			  get_tx_pool_core(0)->pool->avail);
+	}
+}
 
 TEST_F(homa_tx_pool, homa_copy_to_frags)
 {
