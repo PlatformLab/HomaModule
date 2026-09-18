@@ -529,7 +529,7 @@ int homa_copy_iter_to_frags(struct homa_frag_filler *filler,
 				      filler->offset, bytes_this_frag, p,
 				      p_off, p_len, copied) {
 			int result;
-			void *vaddr = kmap_local_page(p);
+			u8 *vaddr = kmap_local_page(p);
 
 			result = copy_from_iter(vaddr + p_off, p_len, iter);
 			kunmap_local(vaddr);
