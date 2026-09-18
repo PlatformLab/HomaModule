@@ -484,12 +484,12 @@ int homa_snprintf(char *buffer, int size, int used, const char *format, ...)
 	int new_chars;
 	va_list ap;
 
-	va_start(ap, format);
-
 	if (used >= (size - 1))
 		return used;
 
+	va_start(ap, format);
 	new_chars = vsnprintf(buffer + used, size - used, format, ap);
+	va_end(ap);
 	if (new_chars < 0)
 		return used;
 	if (new_chars >= (size - used))
