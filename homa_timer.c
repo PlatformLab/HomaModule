@@ -90,7 +90,7 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 		} else {
 			/* >= comparison that handles tick wrap-around. */
 			if ((rpc->done_timer_ticks + homa->request_ack_ticks
-					- 1 - homa->timer_ticks) & 1 << 31) {
+					- 1 - homa->timer_ticks) & 1U << 31) {
 				struct homa_need_ack_hdr h;
 
 				homa_xmit_control(NEED_ACK, &h, sizeof(h), rpc);
