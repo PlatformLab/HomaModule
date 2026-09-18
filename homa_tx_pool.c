@@ -366,7 +366,7 @@ void homa_tx_pool_free(struct homa *homa, int num_frags, skb_frag_t *frags)
 void homa_tx_pool_gc(struct homa *homa)
 {
 	int i, max_low_mark, min_pages, release, release_max;
-	struct homa_tx_pool *max_pool;
+	struct homa_tx_pool *max_pool = NULL;
 	u64 now = homa_clock();
 
 	if (now < homa->tx_page_free_time)
@@ -412,6 +412,12 @@ void homa_tx_pool_gc(struct homa *homa)
 		pool->low_mark = pool->avail;
 		spin_unlock_bh(&pool->mutex);
 	}
+
+	/* No pool was eligible (e.g. every tx_pools[] entry is NULL, so the
+	 * loop above never set max_pool); nothing to free and no lock to take.
+	 */
+	if (!max_pool)
+		return;
 
 	/* Collect pages to free (but don't free them until after
 	 * releasing the lock, since freeing is expensive).

@@ -575,6 +575,70 @@ TEST_F(homa_tx_pool, homa_tx_pool_gc__empty_pool)
 	homa_tx_pool_gc(&self->homa);
 	EXPECT_EQ(0, get_tx_pool_core(0)->pool->avail);
 }
+TEST_F(homa_tx_pool, homa_tx_pool_gc__eligible_pool_selection)
+{
+	/* homa_tx_pool_gc() picks the pool with the largest low_mark to free
+	 * pages from. When no pool is eligible (e.g. every tx_pools[] entry is
+	 * NULL after cleanup, while max_numa is still set) the "max_pool"
+	 * local must stay NULL and the routine must bail out -- rather than
+	 * dereferencing an uninitialised pointer at spin_lock_bh(&max_pool...).
+	 *
+	 * Table-driven: each row is an independent pool configuration and the
+	 * expected post-gc state; TH_LOG names the row so a failure is
+	 * identifiable, and EXPECT_* (not ASSERT_*) lets every row run.
+	 */
+	static const struct {
+		const char *name;
+		int pages;		/* pages loaded into core 0's pool */
+		int low_mark;		/* low_mark set on core 0's pool */
+		int frees_per_sec;
+		bool clear_pools;	/* corner: drop every pool before gc */
+		int exp_core0_avail;
+	} cases[] = {
+		{"single_pool_frees_down_to_release_max",
+			10, 8, 10, false, 5},
+		{"pools_present_but_nothing_to_free",
+			0, 0, 10, false, 0},
+		{"no_eligible_pool_must_not_deref",
+			0, 0, 10, true, 0},
+	};
+	int i;
+
+	for (i = 0; i < (int)ARRAY_SIZE(cases); i++) {
+		TH_LOG("case: %s", cases[i].name);
+
+		/* Start each row from a clean slate: cleanup releases the
+		 * previous row's pages, and (for the non-corner rows) init
+		 * reallocates empty pools. The corner row deliberately skips
+		 * init so every tx_pools[] entry stays NULL.
+		 */
+		homa_tx_pool_cleanup(&self->homa);
+		if (!cases[i].clear_pools)
+			EXPECT_EQ(0, homa_tx_pool_init(&self->homa));
+
+		mock_clock = 1000000;
+		self->homa.tx_page_free_time = 0;
+		self->homa.tx_page_frees_per_sec = cases[i].frees_per_sec;
+		self->homa.tx_page_pool_min_kb = 0;
+
+		if (cases[i].clear_pools) {
+			homa_tx_pool_gc(&self->homa);
+			/* Reaching here (advancing the free time) proves gc ran
+			 * to completion instead of faulting on max_pool.
+			 */
+			EXPECT_NE(0UL, self->homa.tx_page_free_time);
+			continue;
+		}
+
+		if (cases[i].pages)
+			add_to_pool(&self->homa, cases[i].pages, 0);
+		get_tx_pool_core(0)->pool->low_mark = cases[i].low_mark;
+
+		homa_tx_pool_gc(&self->homa);
+		EXPECT_EQ(cases[i].exp_core0_avail,
+			  get_tx_pool_core(0)->pool->avail);
+	}
+}
 
 TEST_F(homa_tx_pool, homa_copy_to_frags)
 {
