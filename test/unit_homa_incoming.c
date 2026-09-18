@@ -1754,6 +1754,30 @@ TEST_F(homa_incoming, homa_data_pkt__homa_add_packet_returns_error)
 	EXPECT_EQ(1, mock_num_drop_reasons);
 	EXPECT_EQ(SKB_DROP_REASON_PKT_TOO_BIG, mock_drop_reasons[0]);
 }
+TEST_F(homa_incoming, homa_data_pkt__seg_offset_is_unsigned)
+{
+	/* A DATA seg.offset is an unsigned wire field. homa_add_packet()
+	 * validates it as u32 before the packet is queued, so an offset with
+	 * the top bit set is rejected as PKT_TOO_BIG (it is >= msgin.length,
+	 * which is capped at HOMA_MAX_MESSAGE_LENGTH) and never reaches the
+	 * copy-out path. This characterizes that boundary and guards the u32
+	 * handling in homa_copy_to_user's offset.
+	 */
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 1000, 1600);
+
+	ASSERT_NE(NULL, crpc);
+	unit_log_clear();
+	crpc->msgout.next_xmit_offset = crpc->msgout.length;
+	self->data.message_length = htonl(1600);
+	self->data.seg.offset = htonl(0x80000000);
+	homa_data_pkt(mock_skb_alloc(self->server_ip, self->client_ip,
+				     &self->data.common, 1400, 0), crpc);
+	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
+	EXPECT_EQ(1, mock_num_drop_reasons);
+	EXPECT_EQ(SKB_DROP_REASON_PKT_TOO_BIG, mock_drop_reasons[0]);
+}
 TEST_F(homa_incoming, homa_data_pkt__handoff)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

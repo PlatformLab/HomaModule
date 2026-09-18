@@ -395,7 +395,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 			struct homa_data_hdr *h = (struct homa_data_hdr *)
 					skbs[i]->data;
 			int pkt_length = homa_data_len(skbs[i]);
-			int offset = ntohl(h->seg.offset);
+			u32 offset = ntohl(h->seg.offset);
 			int buf_bytes, chunk_size;
 			struct iov_iter iter;
 			int copied = 0;
