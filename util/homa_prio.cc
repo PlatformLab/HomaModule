@@ -591,6 +591,8 @@ bool parse_int(const char **argv, int i, int *value)
 
 int main(int argc, const char** argv)
 {
+	setlinebuf(stdout);
+
 	/* Parse arguments. */
 	for (int i = 1; i < argc; i++) {
 		const char *option = argv[i];
