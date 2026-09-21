@@ -536,19 +536,21 @@ def start_nodes(ids, options):
             fcntl.fcntl(node.stdout, fcntl.F_SETFL, fl | os.O_NONBLOCK)
             active_nodes[id] = node
             started.append(id)
-        if options.protocol == "homa":
-            if options.set_ids and not options.stripped:
-                set_sysctl_parameter(".net.homa.next_id",
-                        str(10000000*(id+1)), [id])
-            if not options.no_homa_prio:
-                f = open("%s/homa_prio-%d.log" % (log_dir,id), "w")
-                homa_prios[id] = subprocess.Popen(["ssh", "-o",
-                        "StrictHostKeyChecking=no", "node%d" % (id), "sudo",
-                        "bin/homa_prio", "--interval", "500", "--unsched",
-                        str(options.unsched), "--unsched-boost",
-                        str(options.unsched_boost)], universal_newlines=True,
-                        stdout=f, stderr=subprocess.STDOUT)
-                f.close
+            if options.protocol == "homa":
+                if options.set_ids and not options.stripped:
+                    set_sysctl_parameter(".net.homa.next_id",
+                            str(10000000*(id+1)), [id])
+                if not options.no_homa_prio:
+                    log("Starting homa_prio on node%d with log file %s/homa_prio-%d.log" %
+                            (id, log_dir, id))
+                    f = open("%s/homa_prio-%d.log" % (log_dir,id), "w")
+                    homa_prios[id] = subprocess.Popen(["ssh", "-o",
+                            "StrictHostKeyChecking=no", "node%d" % (id), "sudo",
+                            "bin/homa_prio", "--interval", "500", "--unsched",
+                            str(options.unsched), "--unsched-boost",
+                            str(options.unsched_boost)], universal_newlines=True,
+                            stdout=f, stderr=subprocess.STDOUT)
+                    f.close
     wait_output("% ", started, "ssh")
     log_level = "verbose" if verbose else "normal"
     command = "log --file node.log --level %s" % (log_level)
