@@ -865,7 +865,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 #endif /* See strip.py */
 
 	tx_end = homa_rpc_tx_end(rpc);
-	if (!homa_is_client(rpc->id) && rpc->state != RPC_OUTGOING) {
+	if (!homa_is_client(rpc->id) && !homa_rpc_msgout_complete(rpc)) {
 		/* We are the server for this RPC and don't yet have a
 		 * response message, so send BUSY to keep the client
 		 * waiting.

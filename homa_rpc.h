@@ -660,4 +660,15 @@ static inline bool homa_rpc_needs_attention(struct homa_rpc *rpc)
 	return (rpc->error != 0 || test_bit(RPC_PKTS_READY, &rpc->flags));
 }
 
+/**
+ * homa_rpc_msgout_complete() - Return true if the outgoing message for
+ * an RPC has been fully initialized, false otherwise.
+ * @rpc:     RPC to check
+ */
+static inline bool homa_rpc_msgout_complete(struct homa_rpc *rpc)
+{
+	return rpc->msgout.length >= 0 &&
+	       rpc->msgout.copied_from_user == rpc->msgout.length;
+}
+
 #endif /* _HOMA_RPC_H */
