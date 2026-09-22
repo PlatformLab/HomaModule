@@ -125,7 +125,7 @@ def analyze_rpc(id, client_num, server_num):
     start_irq = {}
 
     tt = subprocess.Popen(["ssh", "-o", "StrictHostKeyChecking=no",
-            server, "cat", "node.tt"], encoding="utf-8",
+            server, "cat", "node.tt"], universal_newlines=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
     last = 0.0
@@ -221,7 +221,7 @@ def analyze_rpc(id, client_num, server_num):
     tt.wait()
 
     tt = subprocess.Popen(["ssh", "-o", "StrictHostKeyChecking=no",
-            client, "cat", "node.tt"], encoding="utf-8",
+            client, "cat", "node.tt"], universal_newlines=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     last = 0.0
     done = False

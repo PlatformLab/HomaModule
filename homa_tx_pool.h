@@ -105,7 +105,7 @@ struct homa_frag_filler {
 };
 
 /**
- * homa_init_frag_filler() - Initialize a frag filler.
+ * homa_frag_filler_init() - Initialize a frag filler.
  * @filler:     Struct to initialize.
  * @num_frags:  Number of fragments available to fill.
  * @frags:      First in array of @num_frags fragments.
@@ -123,7 +123,7 @@ int          homa_copy_iter_to_frags(struct homa_frag_filler *filler,
 int          homa_copy_to_frags(struct homa_frag_filler *filler, void *src,
 				int num_bytes);
 int          homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
-			        skb_frag_t **frags);
+				skb_frag_t **frags);
 int          __homa_tx_pool_alloc_frag(struct homa_tx_pool_core *tx_core,
 				       int length, skb_frag_t *frag);
 int          homa_tx_pool_alloc_frag(struct homa *homa, int length,

@@ -58,8 +58,9 @@ struct homa_message_out {
 	 */
 	int max_seg_data;
 
-	/* Maximum number of segments that can be present in a single GSO
-	 * packet.
+	/**
+	 * @max_gso_segs: Maximum number of segments that can be present in a
+	 * single GSO packet.
 	 */
 	int max_gso_segs;
 
@@ -71,7 +72,9 @@ struct homa_message_out {
 
 	/**
 	 * @copied_from_user: Number of bytes of the message that have
-	 * been copied from user space into @frags.
+	 * been copied from user space into @frags. Used for lockless
+	 * communication between one core copying in data and another
+	 * core transmitting the data in skbs.
 	 */
 	int copied_from_user;
 
@@ -84,26 +87,17 @@ struct homa_message_out {
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
-	 * @unscheduled: Initial bytes of message that we'll send
-	 * without waiting for grants.
-	 */
-	int unscheduled;
-#endif /* See strip.py */
-
-#ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @granted: Total number of bytes we are currently permitted to
-	 * send, including unscheduled bytes; must wait for grants before
-	 * sending bytes at or beyond this position. Never larger than
-	 * @length.
+	 * @granted: Total number of initial bytes we are currently permitted
+	 * to send; must wait for grants before sending bytes at or beyond
+	 * this position. For unscheduled messages, equals @length. Never
+	 * larger than @length.
 	 */
 	int granted;
 
 	/**
-	 * @sched_priority: Priority level to use for future scheduled
-	 * packets.
+	 * @priority: Priority level to use for transmitted packets.
 	 */
-	u8 sched_priority;
+	u8 priority;
 
 	/**
 	 * @retrans_priority: Priority level to use for retransmitted
@@ -201,14 +195,16 @@ struct homa_message_in {
 
 	/**
 	 * @granted: Total # of bytes (starting from offset 0) that the sender
-	 * will transmit without additional grants, including unscheduled bytes.
+	 * will transmit without additional grants. If nonzero, then either
+	 * the message is entirely unscheduled (in which case @granted equals
+	 * @length) or it is the offset sent in the most recent grant packet.
 	 * Never larger than @length. Managed by homa_grant.c.
 	 */
 	int granted;
 
 	/**
 	 * @prev_grant: Offset in the last GRANT packet sent for this RPC
-	 * (initially set to unscheduled bytes). Managed by homa_grant.c.
+	 * (initially 0).
 	 */
 	int prev_grant;
 
@@ -365,11 +361,11 @@ struct homa_rpc {
 	refcount_t refs;
 
 	/**
-	 * @peer: Information about the other machine (the server, if
-	 * this is a client RPC, or the client, if this is a server RPC).
-	 * If non-NULL then we own a reference on the object.
+	 * @route: Holds a dst_entry that can be used to route to the peer;
+	 * also provides indirect access to a homa_peer for the peer. This
+	 * value can change due to route invalidations, if RPC lock not held.
 	 */
-	struct homa_peer *peer;
+	struct homa_route *route;
 
 	/** @dport: Port number on @peer that will handle packets. */
 	u16 dport;
@@ -508,7 +504,7 @@ struct homa_rpc
 struct homa_rpc
 	*homa_rpc_alloc_server(struct homa_sock *hsk,
 			       const struct in6_addr *source,
-			       struct homa_data_hdr *h);
+			       struct homa_common_hdr *h);
 void     homa_rpc_end(struct homa_rpc *rpc);
 struct homa_rpc
 	*homa_rpc_find_client(struct homa_sock *hsk, u64 id);
@@ -655,6 +651,17 @@ static inline bool homa_is_client(u64 id)
 static inline bool homa_rpc_needs_attention(struct homa_rpc *rpc)
 {
 	return (rpc->error != 0 || test_bit(RPC_PKTS_READY, &rpc->flags));
+}
+
+/**
+ * homa_rpc_msgout_complete() - Return true if the outgoing message for
+ * an RPC has been fully initialized, false otherwise.
+ * @rpc:     RPC to check
+ */
+static inline bool homa_rpc_msgout_complete(struct homa_rpc *rpc)
+{
+	return rpc->msgout.length >= 0 &&
+	       rpc->msgout.copied_from_user == rpc->msgout.length;
 }
 
 #endif /* _HOMA_RPC_H */

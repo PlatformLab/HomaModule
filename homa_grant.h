@@ -109,11 +109,11 @@ struct homa_grant {
 	 * incoming RPCs across peers, so that each peer gets at least one
 	 * RPC in this list before any peer gets a second active RPC. Only
 	 * RPCs in this array are eligible to receive grants. Information in
-	 * this arry is immutable except when RPCs are moved into or out of
+	 * this array is immutable except when RPCs are moved into or out of
 	 * the array.
 	 *
 	 * The entries in this array are not kept in priority order, which
-	 * means the array must be scanned to to determine an RPC's priority.
+	 * means the array must be scanned to determine an RPC's priority.
 	 * A previous implementation tried to maintain an order, but it is
 	 * hard to maintain a precise order without frequent acquisitions of
 	 * the global lock. Scanning the array is cheaper than contending for
@@ -147,7 +147,7 @@ struct homa_grant {
 	 */
 	unsigned long needy_active;
 
-        /**
+	/**
 	 * @active_remaining: For each RPC in @active_rpcs, this keeps a
 	 * copy of @msgin->bytes_remaining for that RPC. We keep copies here
 	 * so that all of the active RPCs can be scanned quickly with at
@@ -240,7 +240,8 @@ struct homa_grant
 	*homa_grant_alloc(struct homa *homa);
 void     homa_grant_adjust_peer(struct homa_grant *grant,
 				struct homa_peer *peer);
-void     homa_grant_check_fifo(struct homa_grant *grant);
+void     homa_grant_check_fifo(struct homa_grant *grant,
+			       struct homa_rpc *locked_rpc);
 void     homa_grant_check_needy(struct homa_grant *grant);
 void     homa_grant_check_rpc(struct homa_rpc *rpc);
 int      homa_grant_dointvec(struct ctl_table *table, int write,
@@ -291,6 +292,8 @@ static inline void homa_grant_lock(struct homa_grant *grant)
  * grant lock. Because of the locking order rules, we can't block on the
  * grant lock while holding an RPC lock. So, if the grant lock is busy
  * we release the RPC lock, get the grant lock, then relock the RPC.
+ * @grant:    Object to lock
+ * @rpc:      RPC whose lock is already held.
  */
 static inline void homa_grant_add_lock(struct homa_grant *grant,
 				       struct homa_rpc *rpc)

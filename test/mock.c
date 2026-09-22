@@ -176,14 +176,19 @@ int mock_total_spin_locks;
  */
 static int mock_active_rcu_locks;
 
-/* Pointers to memory blocks that need to be freed when mock_active_rcu_locks
- * becomes zero.
+/* Pointers to memory blocks that were passed to kfree_rcu; they will
+ * be freed by mock_rcu_free.
  */
 #define MAX_RCU_FREES 100
 static void *rcu_frees[MAX_RCU_FREES];
 
 /* The number of entries in rcu_frees that are currently occupied. */
 static int num_rcu_frees;
+
+/* Used to queue up RCU requests made by calls to call_rcu.  They will
+ * be free by mock_rcu_free.
+ */
+struct rcu_head *mock_first_rcu, *mock_last_rcu;
 
 /* Number of calls to sock_hold that haven't been matched with calls
  * to sock_put.
@@ -227,7 +232,9 @@ bool mock_ipv6 = true;
 /* The value to use for mock_ipv6 in each test unless overridden. */
 bool mock_ipv6_default;
 
-/* List of priorities for all outbound packets. */
+/* Information about priorities for outbound packets is appended to
+ * this string.
+ */
 char mock_xmit_prios[1000];
 int mock_xmit_prios_offset;
 
@@ -407,7 +414,13 @@ void BUG_func(void)
 void call_rcu(struct rcu_head *head, void free_func(struct rcu_head *head))
 {
 	unit_log_printf("; ", "call_rcu invoked");
-	free_func(head);
+	head->func = free_func;
+	head->next = NULL;
+	if (!mock_first_rcu)
+		mock_first_rcu = head;
+	else
+		mock_last_rcu->next = head;
+	mock_last_rcu = head;
 }
 
 bool cancel_work_sync(struct work_struct *work)
@@ -669,6 +682,7 @@ int inet6_del_offload(const struct net_offload *prot, unsigned char protocol)
 
 int inet6_del_protocol(const struct inet6_protocol *prot, unsigned char num)
 {
+	UNIT_LOG("; ", "inet6_del_protocol %u", num);
 	return 0;
 }
 
@@ -694,7 +708,10 @@ int inet6_release(struct socket *sock)
 	return 0;
 }
 
-void inet6_unregister_protosw(struct inet_protosw *p) {}
+void inet6_unregister_protosw(struct inet_protosw *p)
+{
+	UNIT_LOG("; ", "inet6_unregister_protosw %u", p->protocol);
+}
 
 int inet_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
@@ -713,6 +730,7 @@ int inet_del_offload(const struct net_offload *prot, unsigned char protocol)
 
 int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
 {
+	UNIT_LOG("; ", "inet_del_protocol %u", num);
 	return 0;
 }
 
@@ -752,7 +770,9 @@ int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 }
 
 void inet_unregister_protosw(struct inet_protosw *p)
-{}
+{
+	UNIT_LOG("; ", "inet_unregister_protosw %u", p->protocol);
+}
 
 void __init_swait_queue_head(struct swait_queue_head *q, const char *name,
 		struct lock_class_key *key)
@@ -1054,7 +1074,7 @@ void *__kmalloc(size_t size, gfp_t flags)
 	if (mock_check_error(&mock_kmalloc_errors))
 		return NULL;
 	if (unit_hash_size(spinlocks_held)  > 0 &&
-	    (flags & ~__GFP_ZERO) != GFP_ATOMIC)
+	    !(flags & GFP_ATOMIC))
 		FAIL(" incorrect flags 0x%x passed to mock_kmalloc; expected GFP_ATOMIC (0x%x)",
 		     flags, GFP_ATOMIC);
 	block = malloc(size);
@@ -1304,7 +1324,10 @@ int proto_register(struct proto *prot, int alloc_slab)
 	return 0;
 }
 
-void proto_unregister(struct proto *prot) {}
+void proto_unregister(struct proto *prot)
+{
+	UNIT_LOG("; ", "proto_unregister %s", prot->name);
+}
 
 void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 {
@@ -1382,6 +1405,11 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 		return 0;
 	mock_record_locked(lock);
 	return 1;
+}
+
+void rcu_barrier(void)
+{
+	mock_rcu_free();
 }
 
 bool rcu_is_watching(void)
@@ -1696,7 +1724,9 @@ void unregister_net_sysctl_table(struct ctl_table_header *header)
 }
 
 void unregister_pernet_subsys(struct pernet_operations *ops)
-{}
+{
+	UNIT_LOG("; ", "unregister_pernet_subsys");
+}
 
 void unregister_qdisc(struct Qdisc_ops *qops)
 {
@@ -1919,20 +1949,6 @@ struct dst_entry *mock_dst_check(struct dst_entry *dst, __u32 cookie)
 }
 
 /**
- * mock_get_clock() - Replacement for homa_clock; allows time to be
- * controlled by unit tests.
- */
-u64 mock_get_clock(void)
-{
-	if (mock_next_clock_val < mock_num_clock_vals) {
-		mock_next_clock_val++;
-		return mock_clock_vals[mock_next_clock_val - 1];
-	}
-	mock_clock += mock_clock_tick;
-	return mock_clock;
-}
-
-/**
  * mock_free_pool() - Invoked by homa_pool_free during unit tests;
  * checks for leaks of pool memory.
  * @pool:       Structure to check.
@@ -1945,6 +1961,20 @@ void mock_free_pool(struct homa_pool *pool)
 	if (mock_check_bpool_leaks && avail != size)
 		FAIL(" homa_pool freed with %d bytes still in use",
 		     size - avail);
+}
+
+/**
+ * mock_get_clock() - Replacement for homa_clock; allows time to be
+ * controlled by unit tests.
+ */
+u64 mock_get_clock(void)
+{
+	if (mock_next_clock_val < mock_num_clock_vals) {
+		mock_next_clock_val++;
+		return mock_clock_vals[mock_next_clock_val - 1];
+	}
+	mock_clock += mock_clock_tick;
+	return mock_clock;
 }
 
 /**
@@ -2109,7 +2139,7 @@ void mock_put_page(struct page *page)
  * @daddr:        IPv6 address to use as the destination of the packet, in
  *                network byte order.
  * @protocol:     Protocol to use in the IP header, such as IPPROTO_HOMA.
- * @length:       How many bytes of space to allocated after the IP header.
+ * @length:       How many bytes of space to allocate after the IP header.
  * Return:        The new packet buffer, initialized as if the packet just
  *                arrived from the network and is about to be processed at
  *                transport level (e.g. there will be an IP header before
@@ -2176,10 +2206,19 @@ struct sk_buff *mock_raw_skb(struct in6_addr *saddr, struct in6_addr *daddr,
 
 /**
  * mock_rcu_free() - Called to simulate RCU's cleanup after the grace period.
- * Frees objects previously passed to .
+ * Frees objects previously passed to call_rcu or kfree_rcu.
  */
 void mock_rcu_free(void)
 {
+	struct rcu_head *head;
+
+	while (mock_first_rcu) {
+		head = mock_first_rcu;
+		mock_first_rcu = head->next;
+		head->func(head);
+	}
+	mock_last_rcu = NULL;
+
 	while (num_rcu_frees > 0) {
 		num_rcu_frees--;
 		free(rcu_frees[num_rcu_frees]);
@@ -2277,6 +2316,24 @@ void *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
 	return rhashtable_lookup_get_insert_fast(ht, obj, params);
 }
 
+void *mock_rht_lookup_get_insert_key(struct rhashtable *ht, void *key,
+				      struct rhash_head *obj,
+				      const struct rhashtable_params params)
+{
+	if (mock_check_error(&mock_rht_insert_errors))
+		return ERR_PTR(-EINVAL);
+	return rhashtable_lookup_get_insert_key(ht, key, obj, params);
+}
+
+int mock_rht_lookup_insert_fast(struct rhashtable *ht,
+				struct rhash_head *obj,
+				const struct rhashtable_params params)
+{
+	if (mock_check_error(&mock_rht_insert_errors))
+		return -EINVAL;
+	return rhashtable_lookup_insert_fast(ht, obj, params);
+}
+
 void *mock_rht_walk_next(struct rhashtable_iter *iter)
 {
 	void *result;
@@ -2303,6 +2360,11 @@ void mock_rpc_put(struct homa_rpc *rpc)
 		FAIL(" homa_rpc_put invoked when RPC has no active holds");
 	mock_rpc_holds--;
 	refcount_dec(&rpc->refs);
+}
+
+struct mem_cgroup *mock_set_active_memcg(struct mem_cgroup *memcg)
+{
+	return NULL;
 }
 
 /**
@@ -2419,6 +2481,11 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		case ACK:
 			header_size = sizeof(struct homa_ack_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
+		case START_MSG:
+			header_size = sizeof(struct homa_start_msg_hdr);
+			break;
+#endif /* See strip.py */
 		default:
 			header_size = sizeof(struct homa_common_hdr);
 			break;
@@ -2547,6 +2614,8 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	if (port != 0 && port < mock_min_default_port)
 		homa_sock_bind(hnet, hsk, port);
 	hsk->inet.pinet6 = &hsk_pinfo;
+	hsk->inet.inet_saddr = ipv6_to_ipv4(unit_get_in_addr("2.4.6.8"));
+	hsk->inet.pinet6->saddr = unit_get_in_addr("6::7:8:9");
 	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
 		+ sizeof(struct homa_data_hdr);
 	mock_devices[0].gso_max_size = mock_mtu;

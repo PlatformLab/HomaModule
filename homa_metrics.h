@@ -219,8 +219,8 @@ struct homa_metrics {
 	 */
 	u64 responses_received;
 
-	/*
-	 * @gapcs_created: total number of homa_gaps created because of
+	/**
+	 * @gaps_created: total number of homa_gaps created because of
 	 * out-of-order arrival of packets in a message.
 	 */
 	u64 gaps_created;
@@ -460,7 +460,7 @@ struct homa_metrics {
 	u64 nic_congest_cycles;
 
 	/**
-	 * @pacer_help_checks: total number of times that homa_qdisc_pacer_check
+	 * @pacer_checks: total number of times that homa_qdisc_pacer_check
 	 * was invoked.
 	 */
 	u64 pacer_checks;
@@ -513,11 +513,10 @@ struct homa_metrics {
 	u64 resent_packets;
 
 	/**
-	 * @peer_allocs: total # of new entries created in Homa's
-	 * peer table (this value doesn't increment if the desired peer is
-	 * found in the entry in its hash chain).
+	 * @route_allocs: total # of new entries created in Homa's route
+	 * table.
 	 */
-	u64 peer_allocs;
+	u64 route_allocs;
 
 	/**
 	 * @peer_kmalloc_errors: total number of times homa_peer_get

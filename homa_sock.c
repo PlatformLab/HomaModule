@@ -84,7 +84,6 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
 	return homa_socktab_next(scan);
 }
 
-
 /**
  * homa_socktab_fill_scan() - Refill the @socks array for a homa_socktab_scan.
  * On return, if its @avail member is zero it means all of the sockets in
@@ -102,7 +101,7 @@ void homa_socktab_fill_scan(struct homa_socktab_scan *scan)
 	bucket = &scan->socktab->buckets[scan->current_bucket];
 	next = rcu_dereference(hlist_first_rcu(bucket));
 	while (scan->avail < HOMA_MAX_SCANNED_SOCKS) {
-		if (next == NULL) {
+		if (!next) {
 			if (scan->current_bucket >= HOMA_SOCKTAB_BUCKETS - 1)
 				break;
 			scan->current_bucket++;
@@ -116,7 +115,7 @@ void homa_socktab_fill_scan(struct homa_socktab_scan *scan)
 		if (slink->sequence < scan->sequence) {
 			scan->sequence = slink->sequence;
 			scan->socks[scan->avail] = slink->hsk;
-		    	if (refcount_inc_not_zero(&slink->hsk->sock.sk_refcnt))
+			if (refcount_inc_not_zero(&slink->hsk->sock.sk_refcnt))
 				scan->avail++;
 		}
 	}
@@ -213,6 +212,7 @@ int homa_sock_init(struct homa_sock *hsk)
 	hsk->shutdown = false;
 	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET) ?
 				sizeof(struct iphdr) : sizeof(struct ipv6hdr);
+	hsk->error_msg = "no error";
 	spin_lock_init(&hsk->lock);
 	atomic_set(&hsk->protect_count, 0);
 	INIT_LIST_HEAD(&hsk->active_rpcs);
@@ -299,7 +299,7 @@ int homa_sock_link(struct homa_sock *hsk, int port)
 	struct homa_socktab *socktab = hsk->homa->socktab;
 	struct homa_sock_link *slink;
 
-	slink = kmalloc(sizeof(*slink), GFP_ATOMIC);
+	slink = kmalloc(sizeof(*slink), GFP_ATOMIC | __GFP_ACCOUNT);
 	if (!slink)
 		return -ENOMEM;
 	homa_sock_unlink(hsk);

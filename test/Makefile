@@ -84,7 +84,7 @@ HOMA_SRCS +=  homa_grant.c \
 	      homa_offload.c \
 	      homa_qdisc.c
 endif
-HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS)) rbtree.o rhashtable.o
+HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS)) rbtree.o rhashtable.o xxhash.o
 
 OTHER_SRCS := ccutils.cc \
 	      main.c \
@@ -124,6 +124,9 @@ dummyFile:
 # Note: Without -O2 there will be strange compiler errors such as
 # 'asm operand 2 probably does not match constraints'.
 rhashtable.o: rhashtable.c
+	$(CC) -c $(CFLAGS) -O2 -fno-sanitize=address $< -o $@
+
+xxhash.o: xxhash.c
 	$(CC) -c $(CFLAGS) -O2 -fno-sanitize=address $< -o $@
 
 unit: $(OBJS)

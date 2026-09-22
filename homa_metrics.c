@@ -73,7 +73,8 @@ void homa_metric_append(const char *name, u64 value, const char *format, ...)
 #else
 		homa_mout.capacity =  4096;
 #endif
-		homa_mout.output =  kmalloc(homa_mout.capacity, GFP_KERNEL);
+		homa_mout.output =  kmalloc(homa_mout.capacity,
+					    GFP_KERNEL_ACCOUNT);
 		if (!homa_mout.output)
 			return;
 		homa_mout.length = 0;
@@ -82,7 +83,7 @@ void homa_metric_append(const char *name, u64 value, const char *format, ...)
 	while (homa_mout.capacity < homa_mout.length + 200) {
 		/* Not enough room; expand buffer capacity. */
 		homa_mout.capacity *= 2;
-		new_buffer = kmalloc(homa_mout.capacity, GFP_KERNEL);
+		new_buffer = kmalloc(homa_mout.capacity, GFP_KERNEL_ACCOUNT);
 		if (!new_buffer)
 			return;
 		memcpy(new_buffer, homa_mout.output, homa_mout.length);
@@ -331,7 +332,7 @@ char *homa_metrics_print(void)
 		  "Total time in all Homa-related functions\n");
 		M("resent_packets", m->resent_packets,
 		  "DATA packets sent in response to RESENDs\n");
-		M("peer_allocs", m->peer_allocs,
+		M("route_allocs", m->route_allocs,
 		  "New entries created in peer table\n");
 		M("peer_kmalloc_errors", m->peer_kmalloc_errors,
 		  "kmalloc failures creating peer table entries\n");

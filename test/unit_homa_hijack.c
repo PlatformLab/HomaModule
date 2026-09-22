@@ -3,6 +3,7 @@
 #include "homa_impl.h"
 #include "homa_hijack.h"
 #include "homa_offload.h"
+#include "homa_peer.h"
 #include "homa_rpc.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
@@ -53,8 +54,7 @@ FIXTURE_SETUP(homa_hijack)
 		.urgent = HOMA_HIJACK_URGENT,
 		.sender_id = cpu_to_be64(1002)
 	};
-	self->header.message_length = htonl(10000);
-	self->header.incoming = htonl(10000);
+	self->header.msg_length = htonl(10000);
 	self->header.seg.offset = htonl(4000);
 	INIT_LIST_HEAD(&self->empty_list);
 	self->tcp_offloads.callbacks.gro_receive = test_tcp_gro_receive;
@@ -170,21 +170,21 @@ TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_homa_ipv4)
 
 TEST_F(homa_hijack, homa_hijack_set_hdr)
 {
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &self->src_ip);
+	struct homa_route *route = homa_route_get(&self->hsk, &self->src_ip);
 	struct homa_common_hdr *h;
 	struct sk_buff *skb;
 	int summed;
 
 	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
 			     &self->header.common, 1400, 0);
-	homa_hijack_set_hdr(skb, peer, true);
+	homa_hijack_set_hdr(skb, route, true);
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	EXPECT_EQ(HOMA_HIJACK_FLAGS, h->flags);
 	EXPECT_EQ(HOMA_HIJACK_URGENT, ntohs(h->urgent));
 	summed = skb->ip_summed;
 	EXPECT_EQ(CHECKSUM_PARTIAL, summed);
 
-	homa_peer_release(peer);
+	homa_route_release(route);
 	kfree_skb(skb);
 }
 
@@ -213,15 +213,15 @@ TEST_F(homa_hijack, homa_sock_hijacked)
 
 TEST_F(homa_hijack, homa_skb_hijacked)
 {
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &self->src_ip);
+	struct homa_route *route = homa_route_get(&self->hsk, &self->src_ip);
 	struct sk_buff *skb;
 
 	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
 			     &self->header.common, 1400, 0);
 	EXPECT_EQ(0, homa_skb_hijacked(skb));
-	homa_hijack_set_hdr(skb, peer, true);
+	homa_hijack_set_hdr(skb, route, true);
 	EXPECT_EQ(1, homa_skb_hijacked(skb));
 
-	homa_peer_release(peer);
+	homa_route_release(route);
 	kfree_skb(skb);
 }
