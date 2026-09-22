@@ -144,6 +144,7 @@ static struct net_protocol homa_protocol = {
 	.handler =	homa_softirq,
 	.err_handler =	homa_err_handler_v4,
 	.no_policy =     1,
+	.netns_ok =      1
 };
 
 static struct inet6_protocol homav6_protocol = {
