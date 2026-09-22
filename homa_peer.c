@@ -703,7 +703,7 @@ int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 {
 	int i;
 
-	for (i = homa->num_priorities - 1; ; i--) {
+	for (i = HOMA_MAX_PRIORITIES - 1; ; i--) {
 		if (peer->unsched_cutoffs[i] >= length)
 			return i;
 	}
