@@ -22,7 +22,6 @@
 #define _HOMA_HIJACK_H
 
 #include "homa_impl.h"
-#include "homa_peer.h"
 #include "homa_sock.h"
 #include "homa_wire.h"
 
@@ -38,39 +37,6 @@
  * set even though the URG flag is not set).
  */
 #define HOMA_HIJACK_URGENT 0xb97d
-
-/**
- * homa_hijack_set_hdr() - Set all of the header fields in an outgoing Homa
- * packet that are needed for TCP hijacking to work properly except doff (use
- * homa_set_doff for that). This function doesn't actually cause the packet
- * to be sent via TCP (that is determined by hsk->sock.sk_protocol, which is
- * set elsewhere). The modifications made here are safe even if the packet
- * isn't actually sent via TCP.
- * @skb:    Packet buffer in which to set fields.
- * @peer:   Peer that contains source and destination addresses for the packet.
- * @ipv6:   True means the packet is going to be sent via IPv6; false means
- *          IPv4.
- */
-static inline void homa_hijack_set_hdr(struct sk_buff *skb,
-				       struct homa_peer *peer,
-				       bool ipv6)
-{
-	struct homa_common_hdr *h;
-
-	h = (struct homa_common_hdr *)skb_transport_header(skb);
-	h->flags = HOMA_HIJACK_FLAGS;
-	h->urgent = htons(HOMA_HIJACK_URGENT);
-	/* Arrange for proper TCP checksumming. */
-	skb->ip_summed = CHECKSUM_PARTIAL;
-	skb->csum_start = skb_transport_header(skb) - skb->head;
-	skb->csum_offset = offsetof(struct homa_common_hdr, checksum);
-	if (ipv6)
-		h->checksum = ~tcp_v6_check(skb->len, &peer->flow.u.ip6.saddr,
-					    &peer->flow.u.ip6.daddr, 0);
-	else
-		h->checksum = ~tcp_v4_check(skb->len, peer->flow.u.ip4.saddr,
-					    peer->flow.u.ip4.daddr, 0);
-}
 
 /**
  * homa_hijack_sock_init() - Perform socket initialization related to
@@ -113,5 +79,7 @@ struct sk_buff *
 	 homa_hijack_gro_receive(struct list_head *held_list,
 				 struct sk_buff *skb);
 void     homa_hijack_init(void);
+void     homa_hijack_set_hdr(struct sk_buff *skb, struct homa_route *route,
+			     bool ipv6);
 
 #endif /* _HOMA_HIJACK_H */

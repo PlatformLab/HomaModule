@@ -33,7 +33,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	struct homa_rpc *crpc;
 	int err;
 
-	crpc = kzalloc(sizeof(*crpc), GFP_KERNEL);
+	crpc = kzalloc(sizeof(*crpc), GFP_KERNEL_ACCOUNT);
 	if (unlikely(!crpc)) {
 		hsk->error_msg = "couldn't allocate memory for client RPC";
 		return ERR_PTR(-ENOMEM);
@@ -46,10 +46,10 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	crpc->bucket = bucket;
 	crpc->state = RPC_OUTGOING;
 	refcount_set(&crpc->refs, 1);
-	crpc->peer = homa_peer_get(hsk, &dest_addr_as_ipv6);
-	if (IS_ERR(crpc->peer)) {
-		err = PTR_ERR(crpc->peer);
-		crpc->peer = NULL;
+	crpc->route = homa_route_get(hsk, &dest_addr_as_ipv6);
+	if (IS_ERR(crpc->route)) {
+		err = PTR_ERR(crpc->route);
+		crpc->route = NULL;
 		goto error;
 	}
 	crpc->dport = ntohs(dest->in6.sin6_port);
@@ -89,8 +89,8 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	return crpc;
 
 error:
-	if (crpc->peer)
-		homa_peer_release(crpc->peer);
+	if (crpc->route)
+		homa_route_release(crpc->route);
 	kfree(crpc);
 	return ERR_PTR(err);
 }
@@ -103,7 +103,7 @@ error:
  * @hsk:      Socket that owns this RPC.
  * @source:   IP address (network byte order) of the RPC's client.
  * @h:        Header for the first data packet received for this RPC; used
- *            to initialize the RPC.
+ *            to initialize the RPC. Must have type DATA or START_MSG.
  *
  * Return:  A pointer to a new RPC, which is locked, or a negative errno
  *          if an error occurred. If there is already an RPC corresponding
@@ -111,12 +111,13 @@ error:
  */
 struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 				       const struct in6_addr *source,
-				       struct homa_data_hdr *h)
+				       struct homa_common_hdr *h)
 	__cond_acquires(srpc->bucket->lock)
 {
-	u64 id = homa_local_id(h->common.sender_id);
+	u64 id = homa_local_id(h->sender_id);
 	struct homa_rpc_bucket *bucket;
 	struct homa_rpc *srpc = NULL;
+	int msg_length;
 	int err;
 
 	if (!hsk->buffer_pool)
@@ -129,8 +130,8 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	homa_bucket_lock(bucket, id);
 	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
 		if (srpc->id == id &&
-		    srpc->dport == ntohs(h->common.sport) &&
-		    ipv6_addr_equal(&srpc->peer->addr, source)) {
+		    srpc->dport == ntohs(h->sport) &&
+		    ipv6_addr_equal(&srpc->route->peer->addr, source)) {
 			/* RPC already exists; just return it instead
 			 * of creating a new RPC.
 			 */
@@ -139,7 +140,14 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	}
 
 	/* Initialize fields that don't require the socket lock. */
-	srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC);
+	if (hsk->sock.sk_memcg) {
+		struct mem_cgroup *old = set_active_memcg(hsk->sock.sk_memcg);
+
+		srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC | __GFP_ACCOUNT);
+		set_active_memcg(old);
+	} else {
+		srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC);
+	}
 	if (!srpc) {
 		err = -ENOMEM;
 		goto error;
@@ -152,13 +160,13 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->bucket = bucket;
 	srpc->state = RPC_INCOMING;
 	refcount_set(&srpc->refs, 1);
-	srpc->peer = homa_peer_get(hsk, source);
-	if (IS_ERR(srpc->peer)) {
-		err = PTR_ERR(srpc->peer);
-		srpc->peer = NULL;
+	srpc->route = homa_route_get(hsk, source);
+	if (IS_ERR(srpc->route)) {
+		err = PTR_ERR(srpc->route);
+		srpc->route = NULL;
 		goto error;
 	}
-	srpc->dport = ntohs(h->common.sport);
+	srpc->dport = ntohs(h->sport);
 	srpc->id = id;
 	srpc->msgin.length = -1;
 	srpc->msgout.length = -1;
@@ -172,14 +180,16 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_time = homa_clock();
 #ifndef __STRIP__ /* See strip.py */
-	tt_record2("Incoming message for id %d has %d unscheduled bytes",
-		   srpc->id, ntohl(h->incoming));
-#endif /* See strip.py */
-#ifndef __STRIP__ /* See strip.py */
-	err = homa_message_in_init(srpc, ntohl(h->message_length),
-				   ntohl(h->incoming));
+	if (h->type == DATA) {
+		msg_length = ntohl(((struct homa_data_hdr *)h)->msg_length);
+		err = homa_message_in_init(srpc, msg_length, msg_length);
+	} else {
+		msg_length = ntohl(((struct homa_start_msg_hdr *)h)->msg_length);
+		err = homa_message_in_init(srpc, msg_length, 0);
+	}
 #else /* See strip.py */
-	err = homa_message_in_init(srpc, ntohl(h->message_length));
+	msg_length = ntohl(((struct homa_data_hdr *)h)->msg_length);
+	err = homa_message_in_init(srpc, msg_length);
 #endif /* See strip.py */
 	if (err != 0)
 		goto error;
@@ -194,7 +204,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
 	homa_sock_unlock(hsk);
-	if (ntohl(h->seg.offset) == 0 && srpc->msgin.num_bpages > 0) {
+	if (h->type == DATA && srpc->msgin.num_bpages > 0) {
 		set_bit(RPC_PKTS_READY, &srpc->flags);
 		homa_rpc_handoff(srpc);
 	}
@@ -204,8 +214,8 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 error:
 	if (srpc) {
 		homa_pool_release(srpc);
-		if (srpc->peer)
-			homa_peer_release(srpc->peer);
+		if (srpc->route)
+			homa_route_release(srpc->route);
 	}
 	homa_bucket_unlock(bucket, id);
 	kfree(srpc);
@@ -219,7 +229,7 @@ error:
  * @rpc:      RPC for which caller holds lock (NULL if none).
  * @saddr:    Source address from which the ack was received (the client
  *            node for the RPC)
- * @num_acks: Number of acknowlegments in @acks
+ * @num_acks: Number of acknowledgments in @acks
  * @acks:     Information about one or more RPCs from @saddr that may now be
  *            deleted safely.
  */
@@ -318,7 +328,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	__list_del_entry(&rpc->ready_links);
 	homa_pool_unlink(rpc);
 	homa_interest_notify_private(rpc);
-	homa_qdisc_flush_rpc(rpc);
+	IF_NO_STRIP(homa_qdisc_flush_rpc(rpc));
 
 	rpc->hsk->dead_frags += rpc->msgout.num_frags + 1;
 	if (rpc->hsk->dead_frags > rpc->hsk->homa->max_dead_frags)
@@ -345,12 +355,12 @@ void homa_rpc_abort(struct homa_rpc *rpc, int error)
 	if (!homa_is_client(rpc->id)) {
 		INC_METRIC(server_rpc_discards, 1);
 		tt_record3("aborting server RPC: peer 0x%x, id %d, error %d",
-			   tt_addr(rpc->peer->addr), rpc->id, error);
+			   tt_addr(rpc->route->peer->addr), rpc->id, error);
 		homa_rpc_end(rpc);
 		return;
 	}
 	tt_record3("aborting client RPC: peer 0x%x, id %d, error %d",
-		   tt_addr(rpc->peer->addr), rpc->id, error);
+		   tt_addr(rpc->route->peer->addr), rpc->id, error);
 	rpc->error = error;
 	homa_rpc_handoff(rpc);
 }
@@ -382,7 +392,7 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			continue;
 		rcu_read_lock();
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-			if (!ipv6_addr_equal(&rpc->peer->addr, addr))
+			if (!ipv6_addr_equal(&rpc->route->peer->addr, addr))
 				continue;
 			if (port && rpc->dport != port)
 				continue;
@@ -503,7 +513,7 @@ int homa_rpc_reap(struct homa_sock *hsk)
 		int refs;
 
 		if (num_rpcs >= BATCH_MAX_RPCS ||
-			total_dead_frags >= BATCH_MAX_FRAGS)
+		    total_dead_frags >= BATCH_MAX_FRAGS)
 			goto release;
 
 		/* Make sure that all outstanding uses of the RPC have
@@ -563,6 +573,8 @@ release:
 				kfree(gap);
 			}
 		}
+
+#ifndef __STRIP__ /* See strip.py */
 		if (skb_queue_len(&rpc->qrpc.packets) > 0) {
 			tt_record2("Freezing because homa_rpc_reap found %d packets in qdisc queue for id %d",
 				   skb_queue_len(&rpc->qrpc.packets), rpc->id);
@@ -574,41 +586,39 @@ release:
 			       skb_queue_len(&rpc->qrpc.packets), rpc->id);
 			homa_qdisc_flush_rpc(rpc);
 		}
+#endif /* See strip.py */
 
-		if (rpc->peer) {
-			homa_peer_release(rpc->peer);
-			rpc->peer = NULL;
+		if (rpc->route) {
+			homa_route_release(rpc->route);
+			rpc->route = NULL;
 		}
 		homa_pool_release(rpc);
 		homa_tx_pool_free(hsk->homa, rpc->msgout.num_frags,
-					rpc->msgout.frags);
+				  rpc->msgout.frags);
 		WARN_ON(refcount_sub_and_test(rpc->msgout.frag_bytes,
-						&hsk->sock.sk_wmem_alloc));
+					      &hsk->sock.sk_wmem_alloc));
 		if (rpc->msgout.frags != &rpc->msgout.frag)
 			kfree(rpc->msgout.frags);
 		tt_record2("homa_rpc_reap finished reaping id %d, port %d",
 				rpc->id, rpc->hsk->port);
 #ifndef __STRIP__ /* See strip.py */
-		tx_left = rpc->msgout.length -
-			rpc->msgout.next_xmit_offset;
+		tx_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
 		if (homa_is_client(rpc->id)) {
 			INC_METRIC(client_response_bytes_done,
-					rpc->msgin.bytes_remaining);
+				   rpc->msgin.bytes_remaining);
 			INC_METRIC(client_responses_done,
-					rpc->msgin.bytes_remaining != 0);
+				   rpc->msgin.bytes_remaining != 0);
 			if (tx_left > 0) {
-				INC_METRIC(client_request_bytes_done,
-						tx_left);
+				INC_METRIC(client_request_bytes_done, tx_left);
 				INC_METRIC(client_requests_done, 1);
 			}
 		} else {
 			INC_METRIC(server_request_bytes_done,
-					rpc->msgin.bytes_remaining);
+				   rpc->msgin.bytes_remaining);
 			INC_METRIC(server_requests_done,
 					rpc->msgin.bytes_remaining != 0);
 			if (tx_left > 0) {
-				INC_METRIC(server_response_bytes_done,
-						tx_left);
+				INC_METRIC(server_response_bytes_done, tx_left);
 				INC_METRIC(server_responses_done, 1);
 			}
 		}
@@ -619,7 +629,7 @@ release:
 	}
 	homa_sock_wakeup_wmem(hsk);
 	tt_record3("reaped %d rpcs; %d dead frags remain for port %d",
-			num_rpcs, hsk->dead_frags, hsk->port);
+		   num_rpcs, hsk->dead_frags, hsk->port);
 	if (hsk->buffer_pool)
 		homa_pool_check_waiting(hsk->buffer_pool);
 	return !checked_all_rpcs;
@@ -654,7 +664,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 		}
 		tt_record4("homa_abort_sock_rpcs aborting id %u on port %d, peer 0x%x, error %d",
 			   rpc->id, hsk->port,
-			   tt_addr(rpc->peer->addr), error);
+			   tt_addr(rpc->route->peer->addr), error);
 		if (error)
 			homa_rpc_abort(rpc, error);
 		else
@@ -710,7 +720,8 @@ struct homa_rpc *homa_rpc_find_server(struct homa_sock *hsk,
 
 	homa_bucket_lock(bucket, id);
 	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
-		if (srpc->id == id && ipv6_addr_equal(&srpc->peer->addr, saddr))
+		if (srpc->id == id && ipv6_addr_equal(&srpc->route->peer->addr,
+						      saddr))
 			return srpc;
 	}
 	homa_bucket_unlock(bucket, id);
@@ -729,11 +740,11 @@ struct homa_rpc *homa_rpc_find_server(struct homa_sock *hsk,
 struct homa_rpc *homa_rpc_find_from_skb(struct sk_buff *skb, bool incoming)
 {
 	struct homa_common_hdr *h;
-	u64 id;
-	int port;
-	struct homa_rpc *rpc;
 	struct homa_sock *hsk;
 	struct homa_net *hnet;
+	struct homa_rpc *rpc;
+	int port;
+	u64 id;
 
 	/* Find the appropriate socket.*/
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
@@ -790,11 +801,11 @@ void homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info)
 	info->id = rpc->id;
 	if (rpc->hsk->inet.sk.sk_family == AF_INET6) {
 		info->peer.in6.sin6_family = AF_INET6;
-		info->peer.in6.sin6_addr = rpc->peer->addr;
+		info->peer.in6.sin6_addr = rpc->route->peer->addr;
 		info->peer.in6.sin6_port = htons(rpc->dport);
 	} else {
 		info->peer.in6.sin6_family = AF_INET;
-		info->peer.in4.sin_addr.s_addr = ipv6_to_ipv4(rpc->peer->addr);
+		info->peer.in4.sin_addr.s_addr = ipv6_to_ipv4(rpc->route->peer->addr);
 		info->peer.in4.sin_port = htons(rpc->dport);
 	}
 	info->completion_cookie = rpc->completion_cookie;
@@ -803,7 +814,7 @@ void homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info)
 		info->tx_sent = rpc->msgout.next_xmit_offset;
 #ifndef __STRIP__ /* See strip.py */
 		info->tx_granted = rpc->msgout.granted;
-		info->tx_prio = rpc->msgout.sched_priority;
+		info->tx_prio = rpc->msgout.priority;
 #else /* See strip.py */
 		info->tx_granted = rpc->msgout.length;
 #endif /* See strip.py */

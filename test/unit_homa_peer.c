@@ -41,6 +41,7 @@ FIXTURE_SETUP(homa_peer)
 }
 FIXTURE_TEARDOWN(homa_peer)
 {
+	mock_rcu_free();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
@@ -55,21 +56,21 @@ static void peer_spinlock_hook(char *id)
 #endif /* See strip.py */
 
 static struct _test_data_homa_peer *test_data;
-static struct homa_peer *conflicting_peer;
-static int peer_race_hook_invocations;
-static void peer_race_hook(char *id)
+static struct homa_route *conflicting_route;
+static int route_race_hook_invocations;
+static void route_race_hook(char *id)
 {
-	if (strcmp(id, "kmalloc") != 0)
+	if (strcmp(id, "spin_lock") != 0)
 		return;
-	if (peer_race_hook_invocations > 0)
+	route_race_hook_invocations--;
+	if (route_race_hook_invocations != 0)
 		return;
-	peer_race_hook_invocations++;
 
-	/* Create a peer with the same address as the one being created
+	/* Create a route with the same address as the one being created
 	 * by the current test.
 	 */
-	conflicting_peer = homa_peer_get(&test_data->hsk, ip3333);
-	homa_peer_release(conflicting_peer);
+	conflicting_route = homa_route_get(&test_data->hsk, ip3333);
+	homa_route_release(conflicting_route);
 	jiffies += 10;
 }
 
@@ -91,11 +92,20 @@ TEST_F(homa_peer, homa_peer_alloc_peertab__cant_alloc_peertab)
 	EXPECT_TRUE(IS_ERR(peertab));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(peertab));
 }
-TEST_F(homa_peer, homa_peer_alloc_peertab__rhashtable_init_fails)
+TEST_F(homa_peer, homa_peer_alloc_peertab__rhashtable_init_fails_for_peer_ht)
 {
 	struct homa_peertab *peertab;
 
 	mock_rht_init_errors = 1;
+	peertab = homa_peer_alloc_peertab();
+	EXPECT_TRUE(IS_ERR(peertab));
+	EXPECT_EQ(EINVAL, -PTR_ERR(peertab));
+}
+TEST_F(homa_peer, homa_peer_alloc_peertab__rhashtable_init_fails_for_route_ht)
+{
+	struct homa_peertab *peertab;
+
+	mock_rht_init_errors = 2;
 	peertab = homa_peer_alloc_peertab();
 	EXPECT_TRUE(IS_ERR(peertab));
 	EXPECT_EQ(EINVAL, -PTR_ERR(peertab));
@@ -118,53 +128,48 @@ TEST_F(homa_peer, homa_peer_free_net__basics)
 {
 	/* Create peers from two different netns's, make sure only
 	 * those from one get freed. */
-	struct homa_peer *peer;
+	struct homa_route *route;
 	struct homa_sock hsk2;
 	struct homa_net *hnet2;
 
 	hnet2 = mock_hnet(1, &self->homa);
 	mock_sock_init(&hsk2, hnet2, 44);
 
-	peer = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peer);
-	peer = homa_peer_get(&self->hsk, ip2222);
-	homa_peer_release(peer);
-	peer = homa_peer_get(&hsk2, ip3333);
-	homa_peer_release(peer);
-	EXPECT_EQ(3, unit_count_peers(&self->homa));
-	EXPECT_EQ(3, self->homa.peertab->num_peers);
-	EXPECT_EQ(2, self->hnet->num_peers);
+	route = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(route);
+	route = homa_route_get(&self->hsk, ip2222);
+	homa_route_release(route);
+	route = homa_route_get(&hsk2, ip3333);
+	homa_route_release(route);
+	EXPECT_EQ(3, unit_count_routes(&self->homa));
+	EXPECT_EQ(3, self->homa.peertab->num_routes);
+	EXPECT_EQ(2, self->hnet->num_routes);
 
 	homa_peer_free_net(self->hnet);
-	EXPECT_EQ(1, unit_count_peers(&self->homa));
-	EXPECT_EQ(1, self->homa.peertab->num_peers);
+	EXPECT_EQ(1, unit_count_routes(&self->homa));
+	EXPECT_EQ(1, self->homa.peertab->num_routes);
 	unit_sock_destroy(&hsk2);
 }
 
-TEST_F(homa_peer, homa_peer_release_fn)
+TEST_F(homa_peer, homa_route_delete_fn)
 {
-	struct homa_peer *peer;
-	struct dst_entry *dst;
+	struct homa_route *route;
 
-	peer = homa_peer_alloc(&self->hsk, ip3333);
-	dst = peer->dst;
-	dst_hold(dst);
-	EXPECT_EQ(2, rcuref_read(&dst->__rcuref));
-
-	homa_peer_release_fn(peer, NULL);
-	EXPECT_EQ(1, rcuref_read(&dst->__rcuref));
-	dst_release(dst);
+	route = homa_route_get(&self->hsk, ip3333);
+	homa_route_delete_fn(route, NULL);
+	EXPECT_EQ(1, refcount_read(&route->refs));
+	EXPECT_EQ(NULL, route->peer);
 }
 
 TEST_F(homa_peer, homa_peer_free_peertab) {
-	struct homa_peer *peer;
+	struct homa_route *route;
 
 	/* Create two peers, release one before destroying the table, the
 	 * other after (test infrastructure will detect improper freeing).
 	 */
-	peer = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peer);
-	peer = homa_peer_get(&self->hsk, ip2222);
+	route = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(route);
+	route = homa_route_get(&self->hsk, ip2222);
 
 	unit_log_clear();
 	homa_peer_free_peertab(self->homa.peertab);
@@ -172,296 +177,23 @@ TEST_F(homa_peer, homa_peer_free_peertab) {
 	EXPECT_SUBSTR("unregister_net_sysctl_table", unit_log_get());
 #endif /* See strip.py */
 
-	homa_peer_release(peer);
+	homa_route_release(route);
 	self->homa.peertab = homa_peer_alloc_peertab();
-}
-
-TEST_F(homa_peer, homa_peer_prefer_evict)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peer1, *peer2, *peer3, *peer4;
-	struct homa_net *hnet2;
-	struct homa_sock hsk2;
-
-	hnet2 = mock_hnet(1, &self->homa);
-	mock_sock_init(&hsk2, hnet2, 44);
-
-	peer1 = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peer1);
-	peer1->access_jiffies = 100;
-
-	peer2 = homa_peer_get(&self->hsk, ip2222);
-	homa_peer_release(peer2);
-	peer2->access_jiffies = 1000;
-
-	peer3 = homa_peer_get(&hsk2, ip3333);
-	homa_peer_release(peer3);
-	peer3->access_jiffies = 500;
-
-	peer4 = homa_peer_get(&hsk2, ip1111);
-	homa_peer_release(peer4);
-	peer4->access_jiffies = 300;
-	hnet2->num_peers = peertab->net_max + 1;
-
-	EXPECT_EQ(1, homa_peer_prefer_evict(peertab, peer3, peer1));
-	EXPECT_EQ(0, homa_peer_prefer_evict(peertab, peer3, peer4));
-	EXPECT_EQ(0, homa_peer_prefer_evict(peertab, peer1, peer4));
-	EXPECT_EQ(1, homa_peer_prefer_evict(peertab, peer1, peer2));
-
-	unit_sock_destroy(&hsk2);
-	homa_peer_free_net(hnet2);
-}
-
-TEST_F(homa_peer, homa_peer_pick_victims__hash_table_wraparound)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peers[3], *victims[5];
-
-	jiffies = 50;
-	peers[0] = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peers[0]);
-
-	peers[1] = NULL;
-
-	peers[2] = homa_peer_get(&self->hsk, ip2222);
-	homa_peer_release(peers[2]);
-
-	mock_rht_walk_results = (void **)peers;
-	mock_rht_num_walk_results = 3;
-	jiffies = peertab->idle_jiffies_max + 100;
-
-	EXPECT_EQ(2, homa_peer_pick_victims(peertab, victims, 5));
-	EXPECT_EQ(peers[0], victims[0]);
-	EXPECT_EQ(peers[2], victims[1]);
-}
-TEST_F(homa_peer, homa_peer_pick_victims__EAGAIN_from_rht_walk)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peers[5], *victims[5];
-
-	jiffies = 50;
-	peers[0] = ERR_PTR(-EAGAIN);
-
-	peers[1] = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peers[1]);
-
-	peers[2] = ERR_PTR(-EAGAIN);
-
-	peers[3] = ERR_PTR(-EAGAIN);
-
-	peers[4] = homa_peer_get(&self->hsk, ip2222);
-	homa_peer_release(peers[4]);
-
-	mock_rht_walk_results = (void **)peers;
-	mock_rht_num_walk_results = 5;
-	jiffies = peertab->idle_jiffies_max + 100;
-
-	EXPECT_EQ(1, homa_peer_pick_victims(peertab, victims, 5));
-	EXPECT_EQ(peers[1], victims[0]);
-}
-TEST_F(homa_peer, homa_peer_pick_victims__filter_idle_jiffies_min)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peers[2], *victims[5];
-
-	jiffies = 100;
-	peers[1] = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peers[1]);
-
-	jiffies = 200;
-	peers[0] = homa_peer_get(&self->hsk, ip2222);
-	homa_peer_release(peers[0]);
-
-	mock_rht_walk_results = (void **)peers;
-	mock_rht_num_walk_results = 2;
-	jiffies = peertab->idle_jiffies_min + 150;
-	self->hnet->num_peers = peertab->net_max + 1000;
-	memset(victims, 0, sizeof(victims));
-
-	/* First call selects one victim */
-	EXPECT_EQ(1, homa_peer_pick_victims(peertab, victims, 5));
-	EXPECT_EQ(peers[1], victims[0]);
-
-	/* Second call tests whether the comparison with idle_jiffies_min
-	 * is robust if somehow jiffies < peer->access_jiffies.
-	 */
-	mock_rht_walk_results = (void **)peers;
-	mock_rht_num_walk_results = 2;
-	peers[1]->access_jiffies = 500;
-	jiffies = 400;
-	memset(victims, 0, sizeof(victims));
-	EXPECT_EQ(0, homa_peer_pick_victims(peertab, victims, 5));
-	EXPECT_EQ(NULL, victims[0]);
-}
-TEST_F(homa_peer, homa_peer_pick_victims__filter_idle_jiffies_max)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peers[4], *victims[5];
-	struct homa_net *hnet2;
-	struct homa_sock hsk2;
-
-	hnet2 = mock_hnet(1, &self->homa);
-	mock_sock_init(&hsk2, hnet2, 44);
-	hnet2->num_peers = peertab->net_max + 1;
-
-	/* First peer: net below limit, idle < max. */
-	jiffies = 150;
-	peers[0] = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peers[0]);
-
-	/* Second peer: net above limit, idle > max. */
-	jiffies = 50;
-	peers[1] = homa_peer_get(&hsk2, ip2222);
-	homa_peer_release(peers[1]);
-
-	/* Third peer: net below limit, idle > max. */
-	jiffies = 50;
-	peers[2] = homa_peer_get(&self->hsk, ip3333);
-	homa_peer_release(peers[2]);
-
-	/* Fourth peer: net below limit, idle negative (to test robustness). */
-	jiffies = peertab->idle_jiffies_max + 200;
-	peers[3] = homa_peer_get(&self->hsk, ip4444);
-	homa_peer_release(peers[3]);
-
-	/* Make sure idle_jiffies_min test is a no-op. */
-	peertab->idle_jiffies_min = -10000;
-
-	mock_rht_walk_results = (void **)peers;
-	mock_rht_num_walk_results = 4;
-	jiffies = peertab->idle_jiffies_max + 100;
-
-	EXPECT_EQ(2, homa_peer_pick_victims(peertab, victims, 5));
-	EXPECT_EQ(peers[1], victims[0]);
-	EXPECT_EQ(peers[2], victims[1]);
-	unit_sock_destroy(&hsk2);
-}
-TEST_F(homa_peer, homa_peer_pick_victims__duplicate_peer)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peers[3], *victims[3];
-
-	jiffies = 300;
-	peers[0] = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peers[0]);
-
-	peers[1] = peers[0];
-	peers[2] = peers[0];
-
-	mock_rht_walk_results = (void **)peers;
-	mock_rht_num_walk_results = 3;
-	jiffies = peertab->idle_jiffies_max + 1000;
-
-	EXPECT_EQ(1, homa_peer_pick_victims(peertab, victims, 3));
-	EXPECT_EQ(peers[0], victims[0]);
-}
-TEST_F(homa_peer, homa_peer_pick_victims__select_best_candidates)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peers[6], *victims[3];
-
-	jiffies = 300;
-	peers[0] = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peers[0]);
-
-	jiffies = 400;
-	peers[1] = homa_peer_get(&self->hsk, ip2222);
-	homa_peer_release(peers[1]);
-
-	jiffies = 500;
-	peers[2] = homa_peer_get(&self->hsk, ip3333);
-	homa_peer_release(peers[2]);
-
-	jiffies = 200;
-	peers[3] = homa_peer_get(&self->hsk, ip4444);
-	homa_peer_release(peers[3]);
-
-	jiffies = 350;
-	peers[4] = homa_peer_get(&self->hsk, ip5555);
-	homa_peer_release(peers[4]);
-
-	jiffies = 600;
-	peers[5] = homa_peer_get(&self->hsk, ip6666);
-	homa_peer_release(peers[5]);
-
-	mock_rht_walk_results = (void **)peers;
-	mock_rht_num_walk_results = 6;
-	jiffies = peertab->idle_jiffies_max + 1000;
-
-	EXPECT_EQ(3, homa_peer_pick_victims(peertab, victims, 3));
-	EXPECT_EQ(peers[3], victims[0]);
-	EXPECT_EQ(peers[0], victims[1]);
-	EXPECT_EQ(peers[4], victims[2]);
-}
-
-TEST_F(homa_peer, homa_peer_gc__basics)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peer;
-
-	jiffies = 300;
-	peer = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peer);
-	EXPECT_EQ(1, self->hnet->num_peers);
-
-	jiffies = peertab->idle_jiffies_max + 1000;
-	peertab->num_peers = peertab->gc_threshold;
-
-	unit_log_clear();
-	homa_peer_gc(peertab);
-	EXPECT_STREQ("call_rcu invoked", unit_log_get());
-	EXPECT_EQ(0, self->hnet->num_peers);
-	EXPECT_EQ(peertab->gc_threshold - 1, peertab->num_peers);
-}
-TEST_F(homa_peer, homa_peer_gc__peers_below_gc_threshold)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peer;
-
-	jiffies = 300;
-	peer = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peer);
-
-	jiffies = peertab->idle_jiffies_max + 1000;
-	peertab->num_peers = peertab->gc_threshold - 1;
-
-	unit_log_clear();
-	homa_peer_gc(peertab);
-	EXPECT_STREQ("", unit_log_get());
-}
-TEST_F(homa_peer, homa_peer_gc__no_suitable_candidates)
-{
-	struct homa_peertab *peertab = self->homa.peertab;
-	struct homa_peer *peer;
-
-	jiffies = 100;
-	peer = homa_peer_get(&self->hsk, ip1111);
-	homa_peer_release(peer);
-
-	jiffies = peertab->idle_jiffies_min;
-	peertab->num_peers = peertab->gc_threshold - 1;
-
-	unit_log_clear();
-	homa_peer_gc(peertab);
-	EXPECT_STREQ("", unit_log_get());
 }
 
 TEST_F(homa_peer, homa_peer_alloc__success)
 {
 	struct homa_peer *peer;
 
-	jiffies = 999;
 	peer = homa_peer_alloc(&self->hsk, ip1111);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ_IP(*ip1111, peer->addr);
-	EXPECT_EQ(999, peer->access_jiffies);
+	EXPECT_EQ(1, refcount_read(&peer->refs));
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(INT_MAX, peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2]);
 	EXPECT_EQ(0, peer->cutoff_version);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_allocs);
 #endif /* See strip.py */
-	EXPECT_EQ(1, rcuref_read(&peer->dst->__rcuref));
-	homa_peer_release(peer);
+	homa_peer_free(peer);
 }
 TEST_F(homa_peer, homa_peer_alloc__kmalloc_error)
 {
@@ -475,34 +207,18 @@ TEST_F(homa_peer, homa_peer_alloc__kmalloc_error)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_kmalloc_errors);
 #endif /* See strip.py */
 }
-TEST_F(homa_peer, homa_peer_alloc__route_error)
-{
-	struct homa_peer *peer;
-
-	mock_route_errors = 1;
-	peer = homa_peer_alloc(&self->hsk, ip3333);
-	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(peer));
-
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_allocs);
-#endif /* See strip.py */
-}
 
 TEST_F(homa_peer, homa_peer_free)
 {
 	struct homa_peer *peer;
-	struct dst_entry *dst;
 
 	peer = homa_peer_alloc(&self->hsk, ip1111);
 	ASSERT_FALSE(IS_ERR(peer));
-	dst = peer->dst;
-	dst_hold(dst);
-	ASSERT_EQ(2, rcuref_read(&dst->__rcuref));
+	homa_peer_free(peer);
 
-	homa_peer_release(peer);
-	ASSERT_EQ(1, rcuref_read(&dst->__rcuref));
-	dst_release(dst);
+	/* Nothing to check here; test infrastructure will complain if
+	 * peer's memory isn't freed.
+	 */
 }
 
 TEST_F(homa_peer, homa_peer_get__basics)
@@ -510,96 +226,36 @@ TEST_F(homa_peer, homa_peer_get__basics)
 	struct homa_peer *peer, *peer2;
 
 	/* First call: create new peer. */
-	jiffies = 456;
 	peer = homa_peer_get(&self->hsk, ip1111);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ_IP(*ip1111, peer->addr);
-	EXPECT_EQ(456, peer->access_jiffies);
-	EXPECT_EQ(2, refcount_read(&peer->refs));
+	EXPECT_EQ(1, refcount_read(&peer->refs));
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(INT_MAX, peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2]);
 	EXPECT_EQ(0, peer->cutoff_version);
 #endif /* See strip.py */
-	EXPECT_EQ(1, self->homa.peertab->num_peers);
-	EXPECT_EQ(1, self->hnet->num_peers);
 
 	/* Second call: lookup existing peer. */
 	peer2 = homa_peer_get(&self->hsk, ip1111);
 	EXPECT_EQ(peer, peer2);
-	EXPECT_EQ(3, refcount_read(&peer->refs));
-	EXPECT_EQ(1, self->homa.peertab->num_peers);
-	EXPECT_EQ(1, self->hnet->num_peers);
+	EXPECT_EQ(2, refcount_read(&peer->refs));
 
 	/* Third call: lookup new peer. */
 	peer2 = homa_peer_get(&self->hsk, ip2222);
 	EXPECT_NE(peer, peer2);
 	ASSERT_FALSE(IS_ERR(peer2));
-	EXPECT_EQ(2, refcount_read(&peer2->refs));
-	EXPECT_EQ(2, self->homa.peertab->num_peers);
-	EXPECT_EQ(2, self->hnet->num_peers);
+	EXPECT_EQ(1, refcount_read(&peer2->refs));
 
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(2, homa_metrics_per_cpu()->peer_allocs);
-#endif /* See strip.py */
-	homa_peer_release(peer);
-	homa_peer_release(peer);
-	homa_peer_release(peer2);
-}
-
-struct homa_peer *hook_peer;
-struct homa_peertab *hook_peertab;
-static void gc_hook(char *id)
-{
-	if (strcmp(id, "spin_lock") != 0 || !hook_peer)
-		return;
-
-	/* Restore the peer's refererence count to 1. */
-	refcount_inc(&hook_peer->refs);
-
-	/* Make sure the peer will be garbage-collected. */
-	hook_peertab->gc_threshold = 0;
-	hook_peertab->idle_jiffies_min = 0;
-	hook_peertab->idle_jiffies_max = 0;
-	homa_peer_gc(hook_peertab);
-	hook_peer = NULL;
-}
-TEST_F(homa_peer, homa_peer_get__race_with_homa_peer_release)
-{
-	struct homa_peer *peer, *peer2;
-
-	/* Create peer, then release so refcount is 1. */
-	peer = homa_peer_get(&self->hsk, ip1111);
-	ASSERT_FALSE(IS_ERR(peer));
-	homa_peer_release(peer);
-	EXPECT_EQ(1, refcount_read(&peer->refs));
-
-	/* Artificially reduce reference count to 0 so refcount_inc_not_zero
-	 * will fail in homa_peer_get, and arrange for gc to remove the peer
-	 * when homa_peer_get acquires the spinlock.
-	 */
-	atomic_dec(&peer->refs.refs);
-	unit_hook_register(gc_hook);
-	hook_peer = peer;
-	hook_peertab = self->homa.peertab;
-
-	/* Try to get the same peer; make sure that a different peer is
-	 * returned.
-	 */
-	peer2 = homa_peer_get(&self->hsk, ip1111);
-	EXPECT_NE(peer, peer2);
-	homa_peer_release(peer2);
+	homa_peer_free(peer);
+	homa_peer_free(peer2);
 }
 TEST_F(homa_peer, homa_peer_get__error_in_homa_peer_alloc)
 {
 	struct homa_peer *peer;
 
-	mock_route_errors = 1;
+	mock_kmalloc_errors = 1;
 	peer = homa_peer_get(&self->hsk, ip3333);
-	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(peer));
-
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
-#endif /* See strip.py */
+	EXPECT_EQ(ENOMEM, -PTR_ERR(peer));
 }
 TEST_F(homa_peer, homa_peer_get__insert_error)
 {
@@ -610,163 +266,573 @@ TEST_F(homa_peer, homa_peer_get__insert_error)
 	EXPECT_TRUE(IS_ERR(peer));
 	EXPECT_EQ(EINVAL, -PTR_ERR(peer));
 }
-TEST_F(homa_peer, homa_peer_get__conflicting_create)
+
+TEST_F(homa_peer, homa_route_alloc__success)
 {
+	struct homa_route_key key;
+	struct homa_route *route;
+
+	jiffies = 12345;
+	homa_route_key_init(&key, &self->hsk, ip1111);
+	route = homa_route_alloc(&self->hsk, &key);
+	ASSERT_FALSE(IS_ERR(route));
+	EXPECT_EQ_IP(*ip1111, route->flow.u.ip6.daddr);
+	EXPECT_EQ(1, refcount_read(&route->refs));
+	EXPECT_EQ(12345, route->access_jiffies);
+	EXPECT_EQ(1, rcuref_read(&route->dst->__rcuref));
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(1, homa_metrics_per_cpu()->route_allocs);
+#endif /* See strip.py */
+	homa_route_free(&route->rcu_head);
+}
+TEST_F(homa_peer, homa_route_alloc__kmalloc_error)
+{
+	struct homa_route_key key;
+	struct homa_route *route;
+
+	mock_kmalloc_errors = 1;
+	homa_route_key_init(&key, &self->hsk, ip3333);
+	route = homa_route_alloc(&self->hsk, &key);
+	EXPECT_EQ(ENOMEM, -PTR_ERR(route));
+
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_kmalloc_errors);
+#endif /* See strip.py */
+}
+TEST_F(homa_peer, homa_route_alloc__set_saddr_from_socket)
+{
+	struct homa_route_key key;
+	struct homa_route *route;
+
+	/* First try: use IPv4 address. */
+	self->hsk.sock.sk_family = AF_INET;
+	homa_route_key_init(&key, &self->hsk, ip1111);
+	route = homa_route_alloc(&self->hsk, &key);
+	EXPECT_STREQ("2.4.6.8", homa_print_ipv6_addr(&route->key.saddr));
+	homa_route_free(&route->rcu_head);
+
+	/* Second try: use IPv4 address. */
+	self->hsk.sock.sk_family = AF_INET6;
+	homa_route_key_init(&key, &self->hsk, ip1111);
+	route = homa_route_alloc(&self->hsk, &key);
+	EXPECT_STREQ("[6::7:8:9]", homa_print_ipv6_addr(&route->key.saddr));
+	homa_route_free(&route->rcu_head);
+}
+TEST_F(homa_peer, homa_route_alloc__route_error_ipv4)
+{
+	struct homa_route_key key;
+	struct homa_route *route;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, 0);
+
+	mock_route_errors = 1;
+
+	homa_route_key_init(&key, &self->hsk, &self->client_ip[0]);
+	route = homa_route_alloc(&self->hsk, &key);
+	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(route));
+	EXPECT_STREQ("couldn't find route for peer", self->hsk.error_msg);
+
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
+#endif /* See strip.py */
+}
+TEST_F(homa_peer, homa_route_alloc__route_error_ipv6)
+{
+	struct homa_route_key key;
+	struct homa_route *route;
+
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, 0);
+
+	mock_route_errors = 1;
+
+	homa_route_key_init(&key, &self->hsk, ip3333);
+	route = homa_route_alloc(&self->hsk, &key);
+	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(route));
+	EXPECT_STREQ("couldn't find route for peer", self->hsk.error_msg);
+
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
+#endif /* See strip.py */
+}
+
+TEST_F(homa_peer, homa_route_free)
+{
+	struct homa_route_key key;
+	struct homa_route *route;
 	struct homa_peer *peer;
+	struct dst_entry *dst;
+
+	homa_route_key_init(&key, &self->hsk, ip1111);
+	route = homa_route_alloc(&self->hsk, &key);
+	EXPECT_EQ(NULL, route->peer);
+	peer = homa_peer_alloc(&self->hsk, ip1111);
+	route->peer = peer;
+	refcount_inc(&peer->refs);
+	EXPECT_EQ(2, refcount_read(&peer->refs));
+
+	dst = route->dst;
+	dst_hold(dst);
+	EXPECT_EQ(2, rcuref_read(&dst->__rcuref));
+
+	homa_route_free(&route->rcu_head);
+	EXPECT_EQ(1, rcuref_read(&dst->__rcuref));
+	EXPECT_EQ(1, refcount_read(&peer->refs));
+	dst_release(dst);
+	homa_peer_free(peer);
+}
+
+TEST_F(homa_peer, homa_route_get__basics)
+{
+	struct homa_route *route, *route2;
+
+	/* First call: create new route. */
+	jiffies = 456;
+	route = homa_route_get(&self->hsk, ip1111);
+	ASSERT_FALSE(IS_ERR(route));
+	EXPECT_EQ_IP(*ip1111, route->peer->addr);
+	EXPECT_EQ(456, route->access_jiffies);
+	EXPECT_EQ(2, refcount_read(&route->refs));
+	EXPECT_EQ(1, self->homa.peertab->num_routes);
+	EXPECT_EQ(1, self->hnet->num_routes);
+
+	/* Second call: lookup existing route. */
+	jiffies = 700;
+	route2 = homa_route_get(&self->hsk, ip1111);
+	EXPECT_EQ(route, route2);
+	EXPECT_EQ(3, refcount_read(&route->refs));
+	EXPECT_EQ(700, route->access_jiffies);
+	EXPECT_EQ(1, self->homa.peertab->num_routes);
+	EXPECT_EQ(1, self->hnet->num_routes);
+
+	/* Third call: lookup new route. */
+	route2 = homa_route_get(&self->hsk, ip2222);
+	EXPECT_NE(route, route2);
+	ASSERT_FALSE(IS_ERR(route2));
+	EXPECT_EQ(2, refcount_read(&route2->refs));
+	EXPECT_EQ(2, self->homa.peertab->num_routes);
+	EXPECT_EQ(2, self->hnet->num_routes);
+
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(2, homa_metrics_per_cpu()->route_allocs);
+#endif /* See strip.py */
+	homa_route_release(route);
+	homa_route_release(route);
+	homa_route_release(route2);
+}
+struct homa_route *hook_route;
+struct homa_peertab *hook_peertab;
+/* Hook function that removes a route from the hash table and frees it. */
+static void free_hook(char *id)
+{
+	if (strcmp(id, "spin_lock") != 0 || !hook_route)
+		return;
+
+	if (rhashtable_remove_fast(&hook_peertab->route_ht,
+				   &hook_route->ht_linkage,
+			           route_ht_params) == 0)
+		homa_route_free(&hook_route->rcu_head);
+	else
+		FAIL("hook_route wasn't in hash table");
+	hook_route = NULL;
+}
+TEST_F(homa_peer, homa_route_get__race_with_homa_route_release)
+{
+	struct homa_route *route, *route2;
+
+	/* Create route, then release so refcount is 1. */
+	route = homa_route_get(&self->hsk, ip1111);
+	ASSERT_FALSE(IS_ERR(route));
+	homa_route_release(route);
+	EXPECT_EQ(1, refcount_read(&route->refs));
+
+	/* Artificially set reference count to 0 so refcount_inc_not_zero
+	 * will fail in homa_route_get, and arrange for gc to remove the route
+	 * when homa_route_get acquires the spinlock.
+	 */
+	refcount_set(&route->refs, 0);
+	unit_hook_register(free_hook);
+	hook_route = route;
+	hook_peertab = self->homa.peertab;
+
+	/* Try to get the same route; make sure that a different route is
+	 * returned.
+	 */
+	route2 = homa_route_get(&self->hsk, ip1111);
+	EXPECT_NE(route, route2);
+	homa_route_release(route2);
+}
+TEST_F(homa_peer, homa_route_get__homa_route_alloc_fails)
+{
+	struct homa_route *route;
+
+	mock_kmalloc_errors = 1;
+	route = homa_route_get(&self->hsk, ip1111);
+	EXPECT_TRUE(IS_ERR(route));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(route));
+	EXPECT_STREQ("couldn't allocate memory for homa_route",
+		     self->hsk.error_msg);
+}
+TEST_F(homa_peer, homa_route_get__homa_peer_get_fails)
+{
+	struct homa_route *route;
+
+	mock_rht_insert_errors = 1;
+	route = homa_route_get(&self->hsk, ip1111);
+	EXPECT_TRUE(IS_ERR(route));
+	EXPECT_EQ(EINVAL, -PTR_ERR(route));
+	EXPECT_STREQ("unexpected error return from rhashtable_lookup_insert_fast",
+		     self->hsk.error_msg);
+}
+TEST_F(homa_peer, homa_route_get__cant_insert_new_key)
+{
+	struct homa_route *route;
+
+	mock_rht_insert_errors = 2;
+	route = homa_route_get(&self->hsk, ip1111);
+	EXPECT_TRUE(IS_ERR(route));
+	EXPECT_EQ(EINVAL, -PTR_ERR(route));
+	EXPECT_STREQ("rhashtable_lookup_get_insert_key failed in homa_route_get",
+		     self->hsk.error_msg);
+}
+TEST_F(homa_peer, homa_route_get__conflicting_create)
+{
+	struct homa_route *route;
 
 	test_data = self;
-	peer_race_hook_invocations = 0;
-	unit_hook_register(peer_race_hook);
+	route_race_hook_invocations = 1;
+	unit_hook_register(route_race_hook);
 	jiffies = 100;
-	peer = homa_peer_get(&self->hsk, ip3333);
-	EXPECT_FALSE(IS_ERR(conflicting_peer));
-	EXPECT_EQ(conflicting_peer, peer);
-	EXPECT_EQ(2, refcount_read(&peer->refs));
-	EXPECT_EQ(110, peer->access_jiffies);
-	homa_peer_release(peer);
-	EXPECT_EQ(1, self->homa.peertab->num_peers);
-	EXPECT_EQ(1, self->hnet->num_peers);
+	route = homa_route_get(&self->hsk, ip3333);
+	EXPECT_FALSE(IS_ERR(conflicting_route));
+	EXPECT_EQ(conflicting_route, route);
+	EXPECT_EQ(2, refcount_read(&route->refs));
+	EXPECT_EQ(110, route->access_jiffies);
+	homa_route_release(route);
+	EXPECT_EQ(1, self->homa.peertab->num_routes);
+	EXPECT_EQ(1, self->hnet->num_routes);
 }
 
-TEST_F(homa_peer, homa_get_dst__normal)
+TEST_F(homa_peer, homa_route_validate)
 {
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
-	struct dst_entry *dst;
+	struct homa_route *route;
+	struct homa_rpc *crpc;
 
-	dst = homa_get_dst(peer, &self->hsk);
-	EXPECT_EQ(2, rcuref_read(&dst->__rcuref));
-	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->peer_dst_refreshes));
-	dst_release(dst);
-	homa_peer_release(peer);
-}
-TEST_F(homa_peer, homa_get_dst__must_refresh_obsolete)
-{
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
-	struct dst_entry *old, *dst;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port, 101, 100,
+			       100);
+	ASSERT_NE(NULL, crpc);
 
-	old = peer->dst;
-	peer->dst->obsolete = 1;
+	route = crpc->route;
+
+	/* First call: existing route is valid. */
+	EXPECT_EQ(0, -homa_route_validate(crpc));
+	EXPECT_EQ(route, crpc->route);
+
+	/* Second call: route is invalid. */
+	route->dst->obsolete = 1;
 	mock_dst_check_errors = 1;
-	dst = homa_get_dst(peer, &self->hsk);
-	EXPECT_EQ(2, rcuref_read(&dst->__rcuref));
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes));
-	EXPECT_NE(old, dst);
-	dst_release(dst);
-	homa_peer_release(peer);
-}
-TEST_F(homa_peer, homa_get_dst__multiple_refresh_failures)
-{
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
-	struct dst_entry *old, *dst;
+	EXPECT_EQ(0, -homa_route_validate(crpc));
+	EXPECT_NE(route, crpc->route);
+	EXPECT_EQ(1, self->homa.peertab->num_routes);
+	EXPECT_EQ(1, crpc->hsk->hnet->num_routes);
+	EXPECT_EQ(1, unit_count_routes(&self->homa));
 
-	old = peer->dst;
-	peer->dst->obsolete = 1;
-	mock_dst_check_errors = 0xf;
-	mock_route_errors = 0xf;
-	dst = homa_get_dst(peer, &self->hsk);
-	EXPECT_EQ(2, rcuref_read(&dst->__rcuref));
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes));
-	EXPECT_EQ(old, dst);
-	EXPECT_EQ(3, mock_dst_check_errors);
-	dst_release(dst);
-	homa_peer_release(peer);
-}
-TEST_F(homa_peer, homa_get_dst__update_flowi_proto)
-{
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
-	struct dst_entry *dst;
+	/* Third call: route is invalid but can't create replacement. */
+	route = crpc->route;
+	route->dst->obsolete = 1;
+	mock_dst_check_errors = 1;
+	mock_kmalloc_errors = 1;
+	EXPECT_EQ(ENOMEM, -homa_route_validate(crpc));
+	EXPECT_EQ(route, crpc->route);
+	EXPECT_EQ(0, self->homa.peertab->num_routes);
+	EXPECT_EQ(0, crpc->hsk->hnet->num_routes);
+	EXPECT_EQ(0, unit_count_routes(&self->homa));
 
-	self->hsk.sock.sk_protocol = IPPROTO_TCP;
-	peer->flow.flowi_proto = IPPROTO_HOMA;
-	dst = homa_get_dst(peer, &self->hsk);
-	EXPECT_EQ(IPPROTO_TCP, peer->flow.flowi_proto);
-	dst_release(dst);
-	homa_peer_release(peer);
+	/* Fourth call: route is still invalid and is not in the hash
+	 * table at the time of the call. Replacement succeeds this time.
+	 */
+	mock_dst_check_errors = 1;
+	EXPECT_EQ(0, -homa_route_validate(crpc));
+	EXPECT_NE(route, crpc->route);
+	EXPECT_EQ(1, self->homa.peertab->num_routes);
+	EXPECT_EQ(1, crpc->hsk->hnet->num_routes);
+	EXPECT_EQ(1, unit_count_routes(&self->homa));
 }
 
-TEST_F(homa_peer, homa_peer_reset_dst__ipv4)
+TEST_F(homa_peer, homa_route_gc__basics)
 {
-	int status;
+	struct homa_peertab *peertab = self->homa.peertab;
+	struct homa_route *route;
 
-	// Make sure the test uses IPv4.
-	mock_ipv6 = false;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, 0);
+	jiffies = 300;
+	route = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(route);
+	EXPECT_EQ(1, self->hnet->num_routes);
 
-	struct homa_peer *peer = homa_peer_get(&self->hsk,
-						&self->client_ip[0]);
-	ASSERT_NE(NULL, peer);
+	jiffies = peertab->idle_jiffies_max + 1000;
+	peertab->num_routes = peertab->gc_threshold;
 
-	status = homa_peer_reset_dst(peer, &self->hsk);
-	ASSERT_EQ(0, -status);
-	ASSERT_NE(NULL, peer->dst);
-	EXPECT_STREQ("196.168.0.1",
-				homa_print_ipv4_addr(peer->flow.u.ip4.daddr));
-	homa_peer_release(peer);
+	unit_log_clear();
+	homa_route_gc(peertab);
+	EXPECT_STREQ("call_rcu invoked", unit_log_get());
+	EXPECT_EQ(0, self->hnet->num_routes);
+	EXPECT_EQ(peertab->gc_threshold - 1, peertab->num_routes);
 }
-TEST_F(homa_peer, homa_peer_reset_dst__ipv4_route_error)
+TEST_F(homa_peer, homa_route_gc__routes_below_gc_threshold)
 {
-	struct dst_entry *old;
-	int status;
+	struct homa_peertab *peertab = self->homa.peertab;
+	struct homa_route *route;
 
-	// Make sure the test uses IPv4.
-	mock_ipv6 = false;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, 0);
+	jiffies = 300;
+	route = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(route);
 
-	struct homa_peer *peer = homa_peer_get(&self->hsk,
-						&self->client_ip[0]);
-	ASSERT_NE(NULL, peer);
-	old = peer->dst;
+	jiffies = peertab->idle_jiffies_max + 1000;
+	peertab->num_routes = peertab->gc_threshold - 1;
 
-	mock_route_errors = 1;
-	status = homa_peer_reset_dst(peer, &self->hsk);
-	EXPECT_EQ(EHOSTUNREACH, -status);
-	EXPECT_EQ(old, peer->dst);
-	homa_peer_release(peer);
+	unit_log_clear();
+	homa_route_gc(peertab);
+	EXPECT_STREQ("", unit_log_get());
 }
-TEST_F(homa_peer, homa_peer_reset_dst__ipv6)
+TEST_F(homa_peer, homa_route_gc__no_suitable_candidates)
 {
-	char buffer[30];
-	int status;
-	u32 addr;
+	struct homa_peertab *peertab = self->homa.peertab;
+	struct homa_route *route;
 
-	// Make sure the test uses IPv6.
-	mock_ipv6 = true;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, 0);
+	jiffies = 100;
+	route = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(route);
 
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
-	ASSERT_NE(NULL, peer);
+	jiffies = peertab->idle_jiffies_min;
+	peertab->num_routes = peertab->gc_threshold - 1;
 
-	status = homa_peer_reset_dst(peer, &self->hsk);
-	ASSERT_EQ(0, -status);
-	addr = ntohl(peer->flow.u.ip4.daddr);
-	snprintf(buffer, sizeof(buffer), "%u.%u.%u.%u", (addr >> 24) & 0xff,
-			(addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
-	EXPECT_STREQ("[1::1:1:1]",
-			homa_print_ipv6_addr(&peer->flow.u.ip6.daddr));
-	homa_peer_release(peer);
+	unit_log_clear();
+	homa_route_gc(peertab);
+	EXPECT_STREQ("", unit_log_get());
 }
-TEST_F(homa_peer, homa_peer_reset_dst__ipv6_route_error)
+
+TEST_F(homa_peer, homa_route_pick_victims__hash_table_wraparound)
 {
-	struct dst_entry *old;
-	int status;
+	struct homa_peertab *peertab = self->homa.peertab;
+	struct homa_route *routes[3], *victims[5];
 
-	// Make sure the test uses IPv6.
-	mock_ipv6 = true;
-	unit_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, self->hnet, 0);
+	jiffies = 50;
+	routes[0] = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(routes[0]);
 
-	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
-	ASSERT_NE(NULL, peer);
-	old = peer->dst;
+	routes[1] = NULL;
 
-	mock_route_errors = 1;
-	status = homa_peer_reset_dst(peer, &self->hsk);
-	EXPECT_EQ(EHOSTUNREACH, -status);
-	EXPECT_EQ(old, peer->dst);
-	homa_peer_release(peer);
+	routes[2] = homa_route_get(&self->hsk, ip2222);
+	homa_route_release(routes[2]);
+
+	mock_rht_walk_results = (void **)routes;
+	mock_rht_num_walk_results = 3;
+	jiffies = peertab->idle_jiffies_max + 100;
+
+	EXPECT_EQ(2, homa_route_pick_victims(peertab, victims, 5));
+	EXPECT_EQ(routes[0], victims[0]);
+	EXPECT_EQ(routes[2], victims[1]);
+}
+TEST_F(homa_peer, homa_route_pick_victims__EAGAIN_from_rht_walk)
+{
+	struct homa_peertab *peertab = self->homa.peertab;
+	struct homa_route *routes[5], *victims[5];
+
+	jiffies = 50;
+	routes[0] = ERR_PTR(-EAGAIN);
+
+	routes[1] = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(routes[1]);
+
+	routes[2] = ERR_PTR(-EAGAIN);
+
+	routes[3] = ERR_PTR(-EAGAIN);
+
+	routes[4] = homa_route_get(&self->hsk, ip2222);
+	homa_route_release(routes[4]);
+
+	mock_rht_walk_results = (void **)routes;
+	mock_rht_num_walk_results = 5;
+	jiffies = peertab->idle_jiffies_max + 100;
+
+	EXPECT_EQ(1, homa_route_pick_victims(peertab, victims, 5));
+	EXPECT_EQ(routes[1], victims[0]);
+}
+TEST_F(homa_peer, homa_route_pick_victims__filter_idle_jiffies_min)
+{
+	struct homa_peertab *peertab = self->homa.peertab;
+	struct homa_route *routes[2], *victims[5];
+
+	jiffies = 100;
+	routes[1] = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(routes[1]);
+
+	jiffies = 200;
+	routes[0] = homa_route_get(&self->hsk, ip2222);
+	homa_route_release(routes[0]);
+
+	mock_rht_walk_results = (void **)routes;
+	mock_rht_num_walk_results = 2;
+	jiffies = peertab->idle_jiffies_min + 150;
+	self->hnet->num_routes = peertab->net_max + 1000;
+	memset(victims, 0, sizeof(victims));
+
+	/* First call selects one victim */
+	EXPECT_EQ(1, homa_route_pick_victims(peertab, victims, 5));
+	EXPECT_EQ(routes[1], victims[0]);
+
+	/* Second call tests whether the comparison with idle_jiffies_min
+	 * is robust if somehow jiffies < route->access_jiffies.
+	 */
+	mock_rht_walk_results = (void **)routes;
+	mock_rht_num_walk_results = 2;
+	routes[1]->access_jiffies = 500;
+	jiffies = 400;
+	memset(victims, 0, sizeof(victims));
+	EXPECT_EQ(0, homa_route_pick_victims(peertab, victims, 5));
+	EXPECT_EQ(NULL, victims[0]);
+}
+TEST_F(homa_peer, homa_route_pick_victims__filter_idle_jiffies_max)
+{
+	struct homa_peertab *peertab = self->homa.peertab;
+	struct homa_route *routes[4], *victims[5];
+	struct homa_net *hnet2;
+	struct homa_sock hsk2;
+
+	hnet2 = mock_hnet(1, &self->homa);
+	mock_sock_init(&hsk2, hnet2, 44);
+	hnet2->num_routes = peertab->net_max + 1;
+
+	/* First route: net below limit, idle < max. */
+	jiffies = 150;
+	routes[0] = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(routes[0]);
+
+	/* Second route: net above limit, idle > max. */
+	jiffies = 50;
+	routes[1] = homa_route_get(&hsk2, ip2222);
+	homa_route_release(routes[1]);
+
+	/* Third route: net below limit, idle > max. */
+	jiffies = 50;
+	routes[2] = homa_route_get(&self->hsk, ip3333);
+	homa_route_release(routes[2]);
+
+	/* Fourth route: net below limit, idle negative (to test robustness). */
+	jiffies = peertab->idle_jiffies_max + 200;
+	routes[3] = homa_route_get(&self->hsk, ip4444);
+	homa_route_release(routes[3]);
+
+	/* Make sure idle_jiffies_min test is a no-op. */
+	peertab->idle_jiffies_min = -10000;
+
+	mock_rht_walk_results = (void **)routes;
+	mock_rht_num_walk_results = 4;
+	jiffies = peertab->idle_jiffies_max + 100;
+
+	EXPECT_EQ(2, homa_route_pick_victims(peertab, victims, 5));
+	EXPECT_EQ(routes[1], victims[0]);
+	EXPECT_EQ(routes[2], victims[1]);
+	unit_sock_destroy(&hsk2);
+}
+TEST_F(homa_peer, homa_route_pick_victims__duplicate_route)
+{
+	struct homa_peertab *peertab = self->homa.peertab;
+	struct homa_route *routes[3], *victims[3];
+
+	jiffies = 300;
+	routes[0] = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(routes[0]);
+
+	routes[1] = routes[0];
+	routes[2] = routes[0];
+
+	mock_rht_walk_results = (void **)routes;
+	mock_rht_num_walk_results = 3;
+	jiffies = peertab->idle_jiffies_max + 1000;
+
+	EXPECT_EQ(1, homa_route_pick_victims(peertab, victims, 3));
+	EXPECT_EQ(routes[0], victims[0]);
+}
+TEST_F(homa_peer, homa_route_pick_victims__select_best_candidates)
+{
+	struct homa_peertab *peertab = self->homa.peertab;
+	struct homa_route *routes[6], *victims[3];
+
+	jiffies = 300;
+	routes[0] = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(routes[0]);
+
+	jiffies = 400;
+	routes[1] = homa_route_get(&self->hsk, ip2222);
+	homa_route_release(routes[1]);
+
+	jiffies = 500;
+	routes[2] = homa_route_get(&self->hsk, ip3333);
+	homa_route_release(routes[2]);
+
+	jiffies = 200;
+	routes[3] = homa_route_get(&self->hsk, ip4444);
+	homa_route_release(routes[3]);
+
+	jiffies = 350;
+	routes[4] = homa_route_get(&self->hsk, ip5555);
+	homa_route_release(routes[4]);
+
+	jiffies = 600;
+	routes[5] = homa_route_get(&self->hsk, ip6666);
+	homa_route_release(routes[5]);
+
+	mock_rht_walk_results = (void **)routes;
+	mock_rht_num_walk_results = 6;
+	jiffies = peertab->idle_jiffies_max + 1000;
+
+	EXPECT_EQ(3, homa_route_pick_victims(peertab, victims, 3));
+	EXPECT_EQ(routes[3], victims[0]);
+	EXPECT_EQ(routes[0], victims[1]);
+	EXPECT_EQ(routes[4], victims[2]);
+}
+
+TEST_F(homa_peer, homa_route_prefer_evict)
+{
+	struct homa_peertab *peertab = self->homa.peertab;
+	struct homa_route *route1, *route2, *route3, *route4;
+	struct homa_net *hnet2;
+	struct homa_sock hsk2;
+
+	hnet2 = mock_hnet(1, &self->homa);
+	mock_sock_init(&hsk2, hnet2, 44);
+
+	route1 = homa_route_get(&self->hsk, ip1111);
+	homa_route_release(route1);
+	route1->access_jiffies = 100;
+
+	route2 = homa_route_get(&self->hsk, ip2222);
+	homa_route_release(route2);
+	route2->access_jiffies = 1000;
+
+	route3 = homa_route_get(&hsk2, ip3333);
+	homa_route_release(route3);
+	route3->access_jiffies = 500;
+
+	route4 = homa_route_get(&hsk2, ip1111);
+	homa_route_release(route4);
+	route4->access_jiffies = 300;
+	hnet2->num_routes = peertab->net_max + 1;
+
+	EXPECT_EQ(1, homa_route_prefer_evict(peertab, route3, route1));
+	EXPECT_EQ(0, homa_route_prefer_evict(peertab, route3, route4));
+	EXPECT_EQ(0, homa_route_prefer_evict(peertab, route1, route4));
+	EXPECT_EQ(1, homa_route_prefer_evict(peertab, route1, route2));
+
+	unit_sock_destroy(&hsk2);
+	homa_peer_free_net(hnet2);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -783,22 +849,22 @@ TEST_F(homa_peer, homa_unsched_priority)
 
 TEST_F(homa_peer, homa_peer_lock_slow)
 {
-	struct homa_peer *peer = homa_peer_get(&self->hsk, ip3333);
+	struct homa_route *route = homa_route_get(&self->hsk, ip3333);
 
-	ASSERT_NE(NULL, peer);
+	ASSERT_NE(NULL, route);
 	mock_clock = 10000;
-	homa_peer_lock(peer);
+	homa_peer_lock(route->peer);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_ack_lock_misses);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_ack_lock_miss_cycles);
-	homa_peer_unlock(peer);
+	homa_peer_unlock(route->peer);
 
 	mock_trylock_errors = 1;
 	unit_hook_register(peer_spinlock_hook);
-	homa_peer_lock(peer);
+	homa_peer_lock(route->peer);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_ack_lock_misses);
 	EXPECT_EQ(1000, homa_metrics_per_cpu()->peer_ack_lock_miss_cycles);
-	homa_peer_unlock(peer);
-	homa_peer_release(peer);
+	homa_peer_unlock(route->peer);
+	homa_route_release(route);
 }
 #endif /* See strip.py */
 
@@ -813,7 +879,7 @@ TEST_F(homa_peer, homa_peer_add_ack)
 	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 		self->client_ip, self->server_ip, self->server_port,
 		103, 100, 100);
-	struct homa_peer *peer = crpc1->peer;
+	struct homa_peer *peer = crpc1->route->peer;
 
 	EXPECT_EQ(0, peer->num_acks);
 
@@ -858,7 +924,8 @@ TEST_F(homa_peer, homa_peer_add_ack)
 
 TEST_F(homa_peer, homa_peer_get_acks)
 {
-	struct homa_peer *peer = homa_peer_get(&self->hsk, ip3333);
+	struct homa_route *route = homa_route_get(&self->hsk, ip3333);
+	struct homa_peer *peer = route->peer;
 	struct homa_ack acks[2];
 
 	ASSERT_NE(NULL, peer);
@@ -889,7 +956,7 @@ TEST_F(homa_peer, homa_peer_get_acks)
 	EXPECT_EQ(1, homa_peer_get_acks(peer, 2, acks));
 	EXPECT_STREQ("server_port 5000, client_id 100",
 			unit_ack_string(&acks[0]));
-	homa_peer_release(peer);
+	homa_route_release(route);
 }
 
 TEST_F(homa_peer, homa_peer_update_sysctl_deps)
@@ -901,4 +968,52 @@ TEST_F(homa_peer, homa_peer_update_sysctl_deps)
 	homa_peer_update_sysctl_deps(peertab);
 	EXPECT_EQ(10*HZ, peertab->idle_jiffies_min);
 	EXPECT_EQ(100*HZ, peertab->idle_jiffies_max);
+}
+
+/*--------------------------------------
+ * Functions in homa_peer.h
+ *--------------------------------------
+ */
+
+TEST_F(homa_peer, homa_peer_unlink__basics)
+{
+	struct homa_route *route, *route2;
+	struct homa_route_key key;
+	struct homa_peer *peer;
+
+	/* Create 2 routes referencing the same peer (only one is
+	 * in route_ht).
+	 */
+	route = homa_route_get(&self->hsk, ip3333);
+	EXPECT_FALSE(IS_ERR(route));
+	peer = route->peer;
+	EXPECT_EQ(1, unit_count_peers(&self->homa));
+	EXPECT_EQ(1, refcount_read(&peer->refs));
+
+	homa_route_key_init(&key, &self->hsk, ip3333);
+	route2 = homa_route_alloc(&self->hsk, &key);
+	route2->peer = peer;
+	refcount_inc(&peer->refs);
+	EXPECT_EQ(1, unit_count_peers(&self->homa));
+	EXPECT_EQ(2, refcount_read(&peer->refs));
+
+	/* First unlink: peer refcount still > 0, so not removed from
+	 * peer_ht.
+	 */
+	homa_peer_unlink(route2);
+	EXPECT_EQ(1, unit_count_peers(&self->homa));
+	EXPECT_EQ(1, refcount_read(&peer->refs));
+	EXPECT_EQ(NULL, route2->peer);
+
+	/* Second unlink: peer refcount becomes 0. */
+	homa_peer_unlink(route);
+	EXPECT_EQ(0, unit_count_peers(&self->homa));
+	EXPECT_EQ(NULL, route->peer);
+
+	/* Third unlink: peer already unlinked. */
+	homa_peer_unlink(route);
+	EXPECT_EQ(0, unit_count_peers(&self->homa));
+
+	homa_route_free(&route2->rcu_head);
+	homa_route_release(route);
 }

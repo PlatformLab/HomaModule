@@ -63,10 +63,7 @@ FIXTURE_SETUP(homa_plumbing)
 		.dport = htons(self->server_port),
 		.type = DATA,
 		.sender_id = cpu_to_be64(self->client_id)},
-		.message_length = htonl(10000),
-#ifndef __STRIP__ /* See strip.py */
-		.incoming = htonl(10000),
-#endif /* See strip.py */
+		.msg_length = htonl(10000),
 	};
 	memset(&self->recvmsg_args, 0, sizeof(self->recvmsg_args));
 	self->recvmsg_hdr.msg_name = &self->addr;
@@ -130,33 +127,92 @@ static void create_rpcs_hook(char *id)
 	saved_self = NULL;
 }
 
+#ifndef __UPSTREAM__ /* See strip.py */
+TEST_F(homa_plumbing, homa_load__error_in_tt_init)
+{
+	int result;
+
+	homa_destroy(&self->homa);
+
+	/* Fail the first timetrace-buffer allocation. homa_load must
+	 * propagate tt_init's error instead of continuing initialization.
+	 */
+	mock_kmalloc_errors = 1;
+	result = homa_load();
+	EXPECT_EQ(-1, result);
+}
+#endif /* See strip.py */
 TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
 {
 	homa_destroy(&self->homa);
 
-	/* First attempt fails. */
 	mock_register_protosw_errors = 1;
 	EXPECT_EQ(EINVAL, -homa_load());
-
-	/* Second attempt succeeds. */
-	EXPECT_EQ(0, -homa_load());
-
-	homa_unload();
 }
 
-TEST_F(homa_plumbing, homa_net_exit__free_peers)
+TEST_F(homa_plumbing, homa_load__destroy_after_unregister)
+{
+	const char *events[] = {
+		"inet_del_protocol",
+		"inet6_del_protocol",
+		"inet_unregister_protosw",
+		"inet6_unregister_protosw",
+		"proto_unregister HOMA",
+		"proto_unregister HOMAv6",
+		"unregister_pernet_subsys"
+	};
+	const char *log;
+	const char *destroy;
+	int result;
+
+	homa_destroy(&self->homa);
+
+	/* Exclude destruction of the fixture's Homa instance. */
+	unit_log_clear();
+
+	/* Fail after all registrations have succeeded, so loading must
+	 * unwind them before destroying the shared Homa state.
+	 */
+	mock_kthread_create_errors = 1;
+	result = homa_load();
+	EXPECT_EQ(-EACCES, result);
+
+	log = unit_log_get();
+	EXPECT_SUBSTR("homa_destroy", log);
+	destroy = strstr(log, "homa_destroy");
+
+	/* Require each unregistration to precede destruction, without
+	 * constraining the order of the unregistrations themselves.
+	 */
+	for (int i = 0; i < ARRAY_SIZE(events); i++) {
+		const char *event = strstr(log, events[i]);
+
+		EXPECT_NE(NULL, event);
+		EXPECT_SUBSTR(events[i], log);
+		if (event && destroy && event > destroy)
+			FAIL("Expected '%s' to precede 'homa_destroy' in '%s'",
+			     events[i], log);
+	}
+
+	/* The global Homa instance must be destroyed exactly once. */
+	if (destroy)
+		EXPECT_NOSUBSTR("homa_destroy",
+				destroy + strlen("homa_destroy"));
+}
+
+TEST_F(homa_plumbing, homa_net_exit__free_route)
 {
 	struct in6_addr addr1 = unit_get_in_addr("1.2.3.4");
 	struct in6_addr addr2 = unit_get_in_addr("1.2.3.5");
 	struct in6_addr addr3 = unit_get_in_addr("1.2.3.6");
 
-	homa_peer_release(homa_peer_get(&self->hsk, &addr1));
-	homa_peer_release(homa_peer_get(&self->hsk, &addr2));
-	homa_peer_release(homa_peer_get(&self->hsk, &addr3));
+	homa_route_release(homa_route_get(&self->hsk, &addr1));
+	homa_route_release(homa_route_get(&self->hsk, &addr2));
+	homa_route_release(homa_route_get(&self->hsk, &addr3));
 
-	EXPECT_EQ(3, unit_count_peers(&self->homa));
+	EXPECT_EQ(3, unit_count_routes(&self->homa));
 	homa_net_exit(mock_net_for_hnet(self->hsk.hnet));
-	EXPECT_EQ(0, unit_count_peers(&self->homa));
+	EXPECT_EQ(0, unit_count_routes(&self->homa));
 }
 
 TEST_F(homa_plumbing, homa_bind__version_mismatch)
@@ -505,7 +561,7 @@ TEST_F(homa_plumbing, homa_ioc_info__error_msg)
 	strcpy(hinfo.error_msg, "Bogus message");
 	EXPECT_EQ(0, -homa_ioc_info(self->hsk.sock.sk_socket,
 				    (unsigned long) &hinfo));
-	EXPECT_STREQ("", hinfo.error_msg);
+	EXPECT_STREQ("no error", hinfo.error_msg);
 
 	/* Second call: there is a message. */
 	self->hsk.error_msg = "Sample error message";
@@ -841,21 +897,29 @@ TEST_F(homa_plumbing, homa_sendmsg__address_too_short)
 	EXPECT_STREQ("msg_namelen too short", self->hsk.error_msg);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_alloc_client)
+TEST_F(homa_plumbing, homa_sendmsg__zero_length_message)
 {
-	mock_kmalloc_errors = 2;
-	EXPECT_EQ(ENOMEM, -homa_sendmsg(&self->hsk.inet.sk,
+	self->sendmsg_hdr.msg_iter.count = 0;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_STREQ("couldn't allocate memory for homa_peer",
-		     self->hsk.error_msg);
+	EXPECT_STREQ("message has length zero", self->hsk.error_msg);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_tx_copy_from_user)
+TEST_F(homa_plumbing, homa_sendmsg__message_too_long)
 {
 	self->sendmsg_hdr.msg_iter.count = HOMA_MAX_MESSAGE_LENGTH+1;
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_STREQ("message length exceeded HOMA_MAX_MESSAGE_LENGTH",
+		     self->hsk.error_msg);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_alloc_client)
+{
+	mock_kmalloc_errors = 2;
+	EXPECT_EQ(ENOMEM, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_STREQ("couldn't allocate memory for homa_route",
 		     self->hsk.error_msg);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -885,6 +949,14 @@ TEST_F(homa_plumbing, homa_sendmsg__request_sent_successfully)
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(88888, crpc->completion_cookie);
 	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_packet_for_scheduled_msg)
+{
+	self->homa.unsched_bytes = 100;
+	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_SUBSTR("xmit START_MSG 200", unit_log_get());
+	ASSERT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__request_metrics)
@@ -951,6 +1023,18 @@ TEST_F(homa_plumbing, homa_sendmsg__response_wrong_state)
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_for_scheduled_response)
+{
+	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
+			self->server_ip, self->client_port, self->server_id,
+			2000, 100);
+	self->sendmsg_args.id = self->server_id;
+	self->homa.unsched_bytes = 100;
+	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_SUBSTR("xmit START_MSG 200", unit_log_get());
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_sendmsg__homa_tx_copy_from_user_returns_error)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
@@ -961,7 +1045,7 @@ TEST_F(homa_plumbing, homa_sendmsg__homa_tx_copy_from_user_returns_error)
 	mock_copy_data_errors = 2;
 	EXPECT_EQ(EFAULT, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_STREQ("error copying reponse message data from user space",
+	EXPECT_STREQ("error copying response message data from user space",
 		     self->hsk.error_msg);
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -989,6 +1073,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_succeeds)
 	self->sendmsg_args.id = self->server_id;
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_SUBSTR("xmit DATA 200@0", unit_log_get());
 	EXPECT_EQ(RPC_OUTGOING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -1260,7 +1345,7 @@ TEST_F(homa_plumbing, homa_recvmsg__add_ack)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
 
-	peer = crpc->peer;
+	peer = crpc->route->peer;
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(1, peer->num_acks);
@@ -1276,7 +1361,7 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-	EXPECT_EQ(0, srpc->peer->num_acks);
+	EXPECT_EQ(0, srpc->route->peer->num_acks);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
@@ -1410,20 +1495,20 @@ TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 	struct sk_buff *skb, *skb2, *skb3, *skb4;
 
 	self->data.common.sender_id = cpu_to_be64(2000);
-	self->data.message_length = htonl(2000);
+	self->data.msg_length = htonl(2000);
 	skb = mock_skb_alloc(self->client_ip, self->server_ip,
 			     &self->data.common, 1400, 0);
 	self->data.common.sender_id = cpu_to_be64(300);
-	self->data.message_length = htonl(300);
+	self->data.msg_length = htonl(300);
 	skb2 = mock_skb_alloc(self->client_ip, self->server_ip,
 			      &self->data.common, 300, 0);
 	self->data.common.sender_id = cpu_to_be64(200);
-	self->data.message_length = htonl(1600);
+	self->data.msg_length = htonl(1600);
 	self->data.seg.offset = htonl(1400);
 	skb3 = mock_skb_alloc(self->client_ip, self->server_ip,
 			      &self->data.common, 200, 0);
 	self->data.common.sender_id = cpu_to_be64(5000);
-	self->data.message_length = htonl(5000);
+	self->data.msg_length = htonl(5000);
 	self->data.seg.offset = 0;
 	skb4 = mock_skb_alloc(self->client_ip, self->server_ip,
 			      &self->data.common, 1400, 0);
@@ -1447,7 +1532,7 @@ TEST_F(homa_plumbing, homa_softirq__process_control_first)
 	struct sk_buff *skb, *skb2;
 
 	self->data.common.sender_id = cpu_to_be64(2000);
-	self->data.message_length = htonl(2000);
+	self->data.msg_length = htonl(2000);
 	skb = mock_skb_alloc(self->client_ip, self->server_ip,
 			     &self->data.common, 1400, 0);
 	skb2 = mock_skb_alloc(self->client_ip, self->server_ip,
@@ -1464,15 +1549,15 @@ TEST_F(homa_plumbing, homa_softirq__nothing_to_reorder)
 	struct sk_buff *skb, *skb2, *skb3;
 
 	self->data.common.sender_id = cpu_to_be64(2000);
-	self->data.message_length = htonl(2000);
+	self->data.msg_length = htonl(2000);
 	skb = mock_skb_alloc(self->client_ip, self->server_ip,
 			     &self->data.common, 1400, 0);
 	self->data.common.sender_id = cpu_to_be64(3000);
-	self->data.message_length = htonl(3000);
+	self->data.msg_length = htonl(3000);
 	skb2 = mock_skb_alloc(self->client_ip, self->server_ip,
 			      &self->data.common, 1400, 0);
 	self->data.common.sender_id = cpu_to_be64(5000);
-	self->data.message_length = htonl(5000);
+	self->data.msg_length = htonl(5000);
 	skb3 = mock_skb_alloc(self->client_ip, self->server_ip,
 			      &self->data.common, 1400, 0);
 	skb_shinfo(skb)->frag_list = skb2;
@@ -1488,7 +1573,7 @@ TEST_F(homa_plumbing, homa_softirq__per_rpc_batching)
 	struct sk_buff *skb, *tail;
 
 	self->data.common.sender_id = cpu_to_be64(2000);
-	self->data.message_length = htonl(10000);
+	self->data.msg_length = htonl(10000);
 	skb = mock_skb_alloc(self->client_ip, self->server_ip,
 			     &self->data.common, 1400, 0);
 	tail = skb;
@@ -1542,11 +1627,11 @@ TEST_F(homa_plumbing, homa_softirq__per_rpc_batching)
 	skb->next = NULL;
 	unit_log_clear();
 	homa_softirq(skb);
-	EXPECT_STREQ("id 2001, offsets 0; "
+	EXPECT_STREQ("homa_softirq id 2001, offsets 0; "
 			"sk->sk_data_ready invoked; "
-			"id 2003, offsets 0 1400 4200 2800 7000; "
+			"homa_softirq id 2003, offsets 0 1400 4200 2800 7000; "
 			"sk->sk_data_ready invoked; "
-			"id 2005, offsets 0 1400 5600; "
+			"homa_softirq id 2005, offsets 0 1400 5600; "
 			"sk->sk_data_ready invoked",
 			unit_log_get());
 }

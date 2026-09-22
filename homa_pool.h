@@ -82,7 +82,9 @@ struct homa_pool {
 	/**
 	 * @region: beginning of the pool's region (in the app's virtual
 	 * memory). Divided into bpages. 0 means the pool hasn't yet been
-	 * initialized.
+	 * initialized. This pointer is used for lock-free synchronization
+	 * between a core creating the region and other cores attempting
+	 * to use it.
 	 */
 	char __user *region;
 
@@ -133,6 +135,7 @@ int      homa_pool_free_bufs(struct homa_pool *pool, int num_buffers,
 			     u32 *buffers);
 int      homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 			      u64 region_size);
+void     homa_pool_wakeup_rpc(struct homa_rpc *rpc);
 
 /**
  * homa_pool_unlink() - Remove an RPC from any lists related to buffer
@@ -161,6 +164,22 @@ static inline void homa_pool_release(struct homa_rpc *rpc)
 				    rpc->msgin.bpage_offsets);
 		rpc->msgin.num_bpages = 0;
 	}
+}
+
+/**
+ * homa_pool_exists() - Determine whether a pool has been fully initialized
+ * with a memory region.
+ * @pool:     Pool to check.
+ * Return:    True if there is a memory region associated with the pool,
+ *            false if SO_HOMA_RCVBUF hasn't been invoked for the socket.
+ */
+static inline bool homa_pool_exists(struct homa_pool *pool)
+{
+	/* This barrier allows lockless concurrent allocation of the pool:
+	 * it ensures that if the pool exists we'll see all of the initialized
+	 * values related to the pool.
+	 */
+	return smp_load_acquire(&pool->region) != NULL;
 }
 
 #endif /* _HOMA_POOL_H */

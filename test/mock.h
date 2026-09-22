@@ -112,6 +112,9 @@
 
 #define signal_pending(...) mock_signal_pending
 
+#undef set_active_memcg
+#define set_active_memcg mock_set_active_memcg
+
 /* Must redefine skb_frag_foreach_page because page pointers are different
  * when unit testing (a page point points to an actual page, rather than
  * a descriptor)
@@ -283,9 +286,17 @@ int         mock_rht_init(struct rhashtable *ht,
 void       *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
 					    struct rhash_head *obj,
 					    const struct rhashtable_params params);
+void       *mock_rht_lookup_get_insert_key(struct rhashtable *ht, void *key,
+					   struct rhash_head *obj,
+					   const struct rhashtable_params params);
+int         mock_rht_lookup_insert_fast(struct rhashtable *ht,
+					struct rhash_head *obj,
+					const struct rhashtable_params params);
 void       *mock_rht_walk_next(struct rhashtable_iter *iter);
 void        mock_rpc_hold(struct homa_rpc *rpc);
 void        mock_rpc_put(struct homa_rpc *rpc);
+struct mem_cgroup *
+            mock_set_active_memcg(struct mem_cgroup *memcg);
 void        mock_set_clock_vals(u64 t, ...);
 void        mock_set_core(int num);
 void        mock_set_ipv6(struct homa_sock *hsk);

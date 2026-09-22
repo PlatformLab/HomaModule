@@ -36,7 +36,7 @@ struct homa_pool *homa_pool_alloc(struct homa_sock *hsk)
 {
 	struct homa_pool *pool;
 
-	pool = kzalloc(sizeof(*pool), GFP_KERNEL);
+	pool = kzalloc(sizeof(*pool), GFP_KERNEL_ACCOUNT);
 	if (!pool)
 		return ERR_PTR(-ENOMEM);
 	pool->hsk = hsk;
@@ -125,6 +125,9 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 		bp->owner = -1;
 	}
 
+	/* Barrier ensures that concurrent cores trying to access
+	 * newly-created region will see all the region's data.
+	 */
 	smp_store_release(&pool->region, (char __user *)region);
 	homa_sock_unlock(hsk);
 	return 0;
@@ -145,7 +148,7 @@ void homa_pool_free(struct homa_pool *pool)
 #ifdef __UNIT_TEST__
 	mock_free_pool(pool);
 #endif /* __UNIT_TEST__ */
-	if (smp_load_acquire(&pool->region)) {
+	if (homa_pool_exists(pool)) {
 		kfree(pool->descriptors);
 		free_percpu(pool->cores);
 		pool->region = NULL;
@@ -214,7 +217,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 		if (atomic_try_cmpxchg(&pool->free_bpages, &free,
 				       free - num_pages))
 			break;
-        }
+	}
 
 	/* Once we get to this point we know we will be able to find
 	 * enough free pages; now we just have to find them.
@@ -313,7 +316,7 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	struct homa_bpage *bpage;
 	struct homa_rpc *other;
 
-	if (!smp_load_acquire(&pool->region))
+	if (!homa_pool_exists(pool))
 		return -ENOMEM;
 	if (rpc->state == RPC_DEAD)
 		return 0;
@@ -466,7 +469,7 @@ int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 {
 	int i;
 
-	if (!smp_load_acquire(&pool->region))
+	if (!homa_pool_exists(pool))
 		return -EINVAL;
 	for (i = 0; i < num_buffers; i++) {
 		u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
@@ -510,7 +513,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 #ifdef __UNIT_TEST__
 	pool->check_waiting_invoked += 1;
 #endif /* __UNIT_TEST__ */
-	if (!smp_load_acquire(&pool->region))
+	if (!homa_pool_exists(pool))
 		return;
 	while (atomic_read_acquire(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
@@ -546,24 +549,40 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			   atomic_read(&pool->free_bpages),
 			   pool->bpages_needed);
 		homa_pool_alloc_msg(rpc);
+		if (rpc->msgin.num_bpages > 0)
+			homa_pool_wakeup_rpc(rpc);
 		homa_rpc_unlock(rpc);
-#ifndef __STRIP__ /* See strip.py */
-		if (rpc->msgin.num_bpages > 0) {
-			struct homa_resend_hdr resend;
-
-			/* To "wake up" the RPC, request retransmission of
-			 * all the packets that were dropped. Use the
-			 * next-to-highest priority level to provide a priority
-			 * boost without interfering with the highest priority
-			 * traffic such as control packets.
-			 */
-			resend.offset = htonl(0);
-			resend.length = htonl(-1);
-			resend.priority = homa_high_priority(rpc->hsk->homa);
-			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
-		}
-#endif /* See strip.py */
 	}
+}
+
+/**
+ * homa_pool_wakeup_rpc() - This function is invoked when an RPC that had
+ * blocked waiting for buffer space finally gets the space it needs. It
+ * arranges for transmission of the RPC's data to resume.
+ * @rpc:    RPC to wake up
+ */
+void homa_pool_wakeup_rpc(struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
+{
+	struct homa_resend_hdr resend;
+
+#ifndef __STRIP__ /* See strip.py */
+	/* If the RPC is scheduled, all we have to do is issue a grant. */
+	if (test_bit(RPC_GRANTABLE, &rpc->flags)) {
+		homa_grant_check_rpc(rpc);
+		return;
+	}
+#endif /* See strip.py */
+
+	/* Unscheduled: must ask for the message to be retransmitted. Use
+	 * the next-to-highest priority level to provide a priority boost
+	 * without interfering with the highest priority traffic such as
+	 * control packets.
+	 */
+	resend.offset = htonl(0);
+	resend.length = htonl(rpc->msgin.length);
+	resend.priority = homa_high_priority(rpc->hsk->homa);
+	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 }
 
 /**
@@ -579,7 +598,7 @@ u64 homa_pool_avail_bytes(struct homa_pool *pool)
 	u64 avail;
 	int cpu;
 
-	if (!smp_load_acquire(&pool->region))
+	if (!homa_pool_exists(pool))
 		return 0;
 	avail = atomic_read(&pool->free_bpages);
 	avail *= HOMA_BPAGE_SIZE;

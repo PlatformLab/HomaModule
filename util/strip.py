@@ -395,6 +395,11 @@ def scan(file):
 
         # The current line needs to be retained in the output.
         slines.append(line)
+
+    # If we ended up with extraneous blank lines at the end of the file,
+    # remove them.
+    while slines and slines[-1] == '\n':
+        del slines[-1]
     f.close()
     return slines
 

@@ -3,30 +3,26 @@ Notes for Homa implementation in Linux:
 * Merge-related changes:
   * Are mock_lock_bh_disables and mock_preempt_disables correct in mock.c?
 
+* Notes for new granting mechanism:
+  * Update homa_prio.cc
+  * Compile with __STRIP__
+  * Reduce tt_record calls in homa_grant.c?
+  * Remove grant->prev_grant?
+  * Review behavior of homa_pool_check_waiting when RPC restarts (only request
+    retransmission for unscheduled?)
+  * Why does homa_xmit_data check xmit_offset >= rpc->msgout.length?
+  * What is the difference between granted and prev_grant in homa_message_in?
+  * Make copied_from_user an atomic_t?
+  * Remove "end" argument for homa_tx_skb_send? At the least, fix its
+    documentation
+
 * Finish exploring how to provide pacer helpers when TCP is running wihout
   Homa: is it possible to trigger everything from callbacks without a
   thread?
 
-* By sharing peers across sockets, Homa doesn't account for information
-  in the flows such as sk_uid, sk_mark, tos, and sk_bound_dev_if, which
-  could vary from socket to socket. This means a socket for one user could
-  use security or routing information from another socket. Maybe peers
-  need to be divided into two levels: the top level contains the flow and
-  dst and may be socket-specific, and the lower level contains stuff that must
-  be shared, such as priorities.
-
-* Need to do cgroup accounting (using __GRP_ACCOUNT or GFP_KERNEL_ACCOUNT)
-  for memory allocations made on behalf of applications. Places are affected:
-  homa_rpc_alloc_client
-  homa_rpc_alloc_server
-  homa_gap_alloc
-  homa_ioc_info
-  homa_pool_alloc?
-  homa_sock_init
-  tx sk_buffs (homa_skb.c)
-
 * Homa's bipartite matching algorithm is failing under very high loads
-  where there are large backlogs of messages waiting to be sent:
+  in large clusters where there are large backlogs of messages waiting to
+  be sent:
   * Some nodes will send unscheduled packets for a hundred or more
     long messages (they aren't getting grants for any of them).
   * Later on, they get simultaneous grants for more than they can handle,
@@ -107,7 +103,7 @@ Notes for Homa implementation in Linux:
   then send again, etc. Hmmm, I believe there is a reason why this won't
   work, but I have forgotten what it is.
 
-* (July 2024) Found throughput problem in 2-node "--workload 50000 --one-way"
+* (July 2024) Found throughput problem in 2-node "--workload 500000 --one-way"
   benchmark. The first packet for message N doesn't get sent until message
   N-1 has been completely transmitted. This results in a gap between the
   completion of message N and the arrival of a grant for message N+1, which

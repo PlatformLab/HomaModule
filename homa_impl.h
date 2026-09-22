@@ -80,6 +80,7 @@
 struct homa;
 struct homa_peer;
 struct homa_rpc;
+struct homa_route;
 struct homa_sock;
 
 /* Features not present in all kernels: */
@@ -503,10 +504,10 @@ struct homa_net {
 	u16 prev_default_port;
 
 	/**
-	 * @num_peers: The total number of struct homa_peers that exist
+	 * @num_routes: The total number of struct homa_peers that exist
 	 * for this namespace. Managed by homa_peer.c under the peertab lock.
 	 */
-	int num_peers;
+	int num_routes;
 };
 
 /**
@@ -647,8 +648,7 @@ extern unsigned int homa_net_id;
 
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);
-enum skb_drop_reason
-         homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
+enum skb_drop_reason homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 int      homa_bind(struct socket *sk, struct sockaddr *addr,
 		   int addr_len);
 void     homa_close(struct sock *sock, long timeout);
@@ -709,7 +709,7 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking);
 int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			   size_t length, struct homa_rpc *rpc);
 int      __homa_xmit_control(void *contents, size_t length,
-			     struct homa_peer *peer, struct homa_sock *hsk);
+			     struct homa_route *route, struct homa_sock *hsk);
 void     homa_xmit_data(struct homa_rpc *rpc);
 void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
@@ -719,14 +719,15 @@ int      homa_dointvec(struct ctl_table *table, int write,
 		       void *buffer, size_t *lenp, loff_t *ppos);
 void     homa_incoming_sysctl_changed(struct homa *homa);
 int      homa_ioc_abort(struct socket *sock, unsigned long arg);
-int      homa_message_in_init(struct homa_rpc *rpc, int length,
-			      int unsched);
+int      homa_message_in_init(struct homa_rpc *rpc, int length, int unsched);
 void     homa_prios_changed(struct homa *homa);
+void     homa_start_msg_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 int      homa_sysctl_softirq_cores(struct ctl_table *table,
 				   int write, void *buffer, size_t *lenp,
 				   loff_t *ppos);
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			       int length);
+void     homa_xmit_start_msg(struct homa_rpc *rpc, int length);
 #else /* See strip.py */
 int      homa_message_in_init(struct homa_rpc *rpc, int length);
 #endif /* See strip.py */

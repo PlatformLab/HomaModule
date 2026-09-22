@@ -412,7 +412,8 @@ static u16 header_lengths[] = {
 	sizeof(struct homa_cutoffs_hdr),
 	sizeof(struct homa_freeze_hdr),
 	sizeof(struct homa_need_ack_hdr),
-	sizeof(struct homa_ack_hdr)
+	sizeof(struct homa_ack_hdr),
+	sizeof(struct homa_start_msg_hdr)
 };
 #else /* See strip.py */
 static u16 header_lengths[] = {
@@ -424,7 +425,8 @@ static u16 header_lengths[] = {
 	0,
 	0,
 	sizeof(struct homa_need_ack_hdr),
-	sizeof(struct homa_ack_hdr)
+	sizeof(struct homa_ack_hdr),
+	0
 };
 #endif /* See strip.py */
 
@@ -479,6 +481,9 @@ int __init homa_load(void)
 #endif /* See strip.py */
 	BUILD_BUG_ON(sizeof(struct homa_need_ack_hdr) > HOMA_MAX_HEADER);
 	BUILD_BUG_ON(sizeof(struct homa_ack_hdr) > HOMA_MAX_HEADER);
+#ifndef __STRIP__ /* See strip.py */
+	BUILD_BUG_ON(sizeof(struct homa_start_msg_hdr) > HOMA_MAX_HEADER);
+#endif /* See strip.py */
 
 	/* Extra constraints on data packets:
 	 * - Ensure minimum header length so Homa doesn't have to worry about
@@ -504,10 +509,11 @@ int __init homa_load(void)
 
 #ifndef __UPSTREAM__ /* See strip.py */
 	pr_err("Homa module loading\n");
-	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu skb_shared_info %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
+	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, route %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu skb_shared_info %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
 		  sizeof(struct homa_data_hdr),
 		  sizeof(struct homa_seg_hdr),
 		  sizeof(struct homa_ack),
+		  sizeof(struct homa_route),
 		  sizeof(struct homa_peer),
 		  sizeof(struct iphdr),
 		  sizeof(struct flowi),
@@ -526,7 +532,9 @@ int __init homa_load(void)
 #endif /* See strip.py */
 
 #ifndef __UPSTREAM__ /* See strip.py */
-	tt_init("timetrace");
+	status = tt_init("timetrace");
+	if (status)
+		return status;
 #endif /* See strip.py */
 
 	status = homa_init(homa);
@@ -644,8 +652,6 @@ error:
 	if (init_metrics)
 		homa_metrics_end();
 #endif /* See strip.py */
-	if (init_homa)
-		homa_destroy(homa);
 	if (init_protocol)
 		inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	if (init_protocol6)
@@ -660,6 +666,14 @@ error:
 		proto_unregister(&homav6_prot);
 	if (init_net_ops)
 		unregister_pernet_subsys(&homa_net_ops);
+	/* Must not destroy homa until after namespace cleanup: it will
+	 * access info in homa.
+	 */
+	if (init_homa)
+		homa_destroy(homa);
+#ifndef __UPSTREAM__ /* See strip.py */
+	tt_destroy();
+#endif /* See strip.py */
 	return status;
 }
 
@@ -892,7 +906,8 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		 * Must release the RCU lock temporarily while allocating.
 		 */
 		rcu_read_unlock();
-		rpcs = kmalloc_array(num_rpcs, sizeof(*rpcs), GFP_KERNEL);
+		rpcs = kmalloc_array(num_rpcs, sizeof(*rpcs),
+				     GFP_KERNEL_ACCOUNT);
 		if (!rpcs) {
 			homa_unprotect_rpcs(hsk);
 			return -ENOMEM;
@@ -944,11 +959,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 	}
 	kfree(rpcs);
 
-	if (hsk->error_msg)
-		snprintf(hinfo.error_msg, HOMA_ERROR_MSG_SIZE, "%s",
-			 hsk->error_msg);
-	else
-		hinfo.error_msg[0] = 0;
+	snprintf(hinfo.error_msg, HOMA_ERROR_MSG_SIZE, "%s", hsk->error_msg);
 
 	if (copy_to_user((void __user *)arg, &hinfo, sizeof(hinfo))) {
 		hsk->error_msg = "couldn't copy homa_info to user space: read-only address?";
@@ -1242,9 +1253,15 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			   : tt_addr(addr->in6.sin6_addr),
 			   ntohs(addr->in6.sin6_port), rpc->id, length);
 		rpc->completion_cookie = args.completion_cookie;
+		homa_message_out_init(rpc, msg->msg_iter.count);
+#ifndef __STRIP__ /* See strip.py */
+		if (rpc->msgout.granted == 0)
+			homa_xmit_start_msg(rpc, msg->msg_iter.count);
+#endif /* See strip.py */
 		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result)
 			goto error;
+		homa_xmit_data(rpc);
 		args.id = rpc->id;
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_alloc_client. */
 
@@ -1297,11 +1314,17 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		rpc->state = RPC_OUTGOING;
 
+		homa_message_out_init(rpc, msg->msg_iter.count);
+#ifndef __STRIP__ /* See strip.py */
+		if (rpc->msgout.granted == 0)
+			homa_xmit_start_msg(rpc, msg->msg_iter.count);
+#endif /* See strip.py */
 		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result && rpc->state != RPC_DEAD) {
-			hsk->error_msg = "error copying reponse message data from user space";
+			hsk->error_msg = "error copying response message data from user space";
 			goto error;
 		}
+		homa_xmit_data(rpc);
 		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 #ifndef __STRIP__ /* See strip.py */
@@ -1446,7 +1469,8 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		    rpc->msgin.length >= hsk->homa->temp[2] &&
 		    rpc->msgin.length < hsk->homa->temp[3]) {
 			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, length %d",
-				   elapsed, rpc->id, tt_addr(rpc->peer->addr),
+				   elapsed, rpc->id,
+				   tt_addr(rpc->route->peer->addr),
 				   rpc->msgin.length);
 			homa_freeze(rpc, SLOW_RPC,
 				    "Freezing because of long elapsed time for RPC id %d, peer 0x%x");
@@ -1468,14 +1492,14 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 
 		in6->sin6_family = AF_INET6;
 		in6->sin6_port = htons(rpc->dport);
-		in6->sin6_addr = rpc->peer->addr;
+		in6->sin6_addr = rpc->route->peer->addr;
 		*addr_len = sizeof(*in6);
 	} else {
 		struct sockaddr_in *in4 = msg->msg_name;
 
 		in4->sin_family = AF_INET;
 		in4->sin_port = htons(rpc->dport);
-		in4->sin_addr.s_addr = ipv6_to_ipv4(rpc->peer->addr);
+		in4->sin_addr.s_addr = ipv6_to_ipv4(rpc->route->peer->addr);
 		*addr_len = sizeof(*in4);
 	}
 
@@ -1640,7 +1664,7 @@ int homa_softirq(struct sk_buff *skb)
 		 * if it contains an entire short message.
 		 */
 		if (h->type != DATA || ntohl(((struct homa_data_hdr *)h)
-				->message_length) < 1400) {
+				->msg_length) < 1400) {
 			UNIT_LOG("; ", "homa_softirq shortcut type 0x%x",
 				 h->type);
 			*prev_link = skb->next;
@@ -1689,7 +1713,8 @@ discard:
 		*prev_link = NULL;
 		*other_link = NULL;
 #ifdef __UNIT_TEST__
-		UNIT_LOG("; ", "id %lld, offsets", homa_local_id(h->sender_id));
+		UNIT_LOG("; ", "homa_softirq id %lld, offsets",
+			 homa_local_id(h->sender_id));
 		for (skb2 = packets; skb2; skb2 = skb2->next) {
 			struct homa_data_hdr *h3 = (struct homa_data_hdr *)
 					skb2->data;
@@ -1903,6 +1928,9 @@ int homa_dointvec(struct ctl_table *table, int write,
 				homa_rpc_stats_log();
 			} else if (homa->sysctl_action == 10) {
 				tt_unfreeze();
+			} else if (homa->sysctl_action == 11) {
+				pr_notice("Number of live routes: %d\n",
+					  homa->peertab->num_routes);
 			} else {
 				homa_rpc_log_active(homa, homa->sysctl_action);
 			}
@@ -1933,7 +1961,7 @@ int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
 	int result, i;
 
 	max_values = (NUM_GEN3_SOFTIRQ_CORES + 1) * nr_cpu_ids;
-	values = kmalloc_array(max_values, sizeof(int), GFP_KERNEL);
+	values = kmalloc_array(max_values, sizeof(int), GFP_KERNEL_ACCOUNT);
 	if (!values)
 		return -ENOMEM;
 

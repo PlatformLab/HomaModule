@@ -121,8 +121,7 @@ FIXTURE_SETUP(homa_grant)
 		.type = DATA,
 		.sender_id = cpu_to_be64(self->client_id)
 	};
-	self->data.message_length = htonl(10000);
-	self->data.incoming = htonl(10000);
+	self->data.msg_length = htonl(10000);
 	unit_log_clear();
 	self->incoming_delta = 0;
 }
@@ -256,7 +255,7 @@ TEST_F(homa_grant, homa_grant_add_active)
 		     unit_log_grantables(&self->homa));
 	EXPECT_EQ(3, rpc->msgin.active_ix);
 	EXPECT_EQ(20000, grant->active_remaining[3]);
-	EXPECT_EQ(1, rpc->peer->active_rpcs);
+	EXPECT_EQ(1, rpc->route->peer->active_rpcs);
 	EXPECT_EQ(1, grant->num_active);
 	EXPECT_EQ(44444, grant->window);
 }
@@ -297,7 +296,7 @@ TEST_F(homa_grant, homa_grant_remove_active)
 	homa_grant_remove_active(grant, 3);
 	EXPECT_EQ(-1, rpc->msgin.active_ix);
 	EXPECT_EQ(-1, grant->active_remaining[3]);
-	EXPECT_EQ(0, rpc->peer->active_rpcs);
+	EXPECT_EQ(0, rpc->route->peer->active_rpcs);
 	EXPECT_EQ(0, grant->num_active);
 	EXPECT_EQ(55555, grant->window);
 }
@@ -502,7 +501,7 @@ TEST_F(homa_grant, homa_grant_find_victim__replace_rpc_from_same_peer)
 TEST_F(homa_grant, homa_grant_adjust_peer__remove_peer_from_grantable_peers)
 {
 	struct homa_rpc *rpc = test_rpc(self, 200, self->server_ip, 100000);
-	struct homa_peer *peer = rpc->peer;
+	struct homa_peer *peer = rpc->route->peer;
 
 	list_add_tail(&peer->grantable_links,
 		      &self->homa.grant->grantable_peers);
@@ -524,8 +523,8 @@ TEST_F(homa_grant, homa_grant_adjust_peer__insert_in_grantable_peers)
 	homa_grant_insert_grantable(self->homa.grant,
 				    test_rpc(self, 300, self->server_ip + 2,
 					     50000));
-	list_add_tail(&rpc->grantable_links, &rpc->peer->grantable_rpcs);
-	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+	list_add_tail(&rpc->grantable_links, &rpc->route->peer->grantable_rpcs);
+	homa_grant_adjust_peer(self->homa.grant, rpc->route->peer);
 
 	EXPECT_STREQ("peer 3.2.3.4: id 300 remaining 50000; "
 		     "peer 1.2.3.4: id 100 remaining 70000; "
@@ -542,8 +541,8 @@ TEST_F(homa_grant, homa_grant_adjust_peer__append_to_grantable_peers)
 	homa_grant_insert_grantable(self->homa.grant,
 				    test_rpc(self, 300, self->server_ip + 2,
 					     50000));
-	list_add_tail(&rpc->grantable_links, &rpc->peer->grantable_rpcs);
-	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+	list_add_tail(&rpc->grantable_links, &rpc->route->peer->grantable_rpcs);
+	homa_grant_adjust_peer(self->homa.grant, rpc->route->peer);
 
 	EXPECT_STREQ("peer 3.2.3.4: id 300 remaining 50000; "
 		     "peer 2.2.3.4: id 200 remaining 100000; "
@@ -565,7 +564,7 @@ TEST_F(homa_grant, homa_grant_adjust_peer__move_peer_upwards)
 				    test_rpc(self, 400, self->server_ip + 3,
 					     80000));
 	rpc->msgin.bytes_remaining -= 45000;
-	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+	homa_grant_adjust_peer(self->homa.grant, rpc->route->peer);
 
 	EXPECT_STREQ("peer 3.2.3.4: id 300 remaining 50000; "
 		     "peer 1.2.3.4: id 100 remaining 75000; "
@@ -582,7 +581,7 @@ TEST_F(homa_grant, homa_grant_adjust_peer__move_peer_to_front)
 				    test_rpc(self, 200, self->server_ip + 1,
 					     50000));
 	rpc->msgin.bytes_remaining -= 55000;
-	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+	homa_grant_adjust_peer(self->homa.grant, rpc->route->peer);
 
 	EXPECT_STREQ("peer 1.2.3.4: id 100 remaining 45000; "
 		     "peer 2.2.3.4: id 200 remaining 50000",
@@ -604,7 +603,7 @@ TEST_F(homa_grant, homa_grant_adjust_peer__move_peer_downwards)
 					     80000));
 	rpc->msgin.length += 41000;
 	rpc->msgin.bytes_remaining += 41000;
-	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+	homa_grant_adjust_peer(self->homa.grant, rpc->route->peer);
 
 	EXPECT_STREQ("peer 3.2.3.4: id 300 remaining 50000; "
 		     "peer 4.2.3.4: id 400 remaining 80000; "
@@ -622,7 +621,7 @@ TEST_F(homa_grant, homa_grant_adjust_peer__move_peer_to_back)
 					     100000));
 	rpc->msgin.length += 55000;
 	rpc->msgin.bytes_remaining += 55000;
-	homa_grant_adjust_peer(self->homa.grant, rpc->peer);
+	homa_grant_adjust_peer(self->homa.grant, rpc->route->peer);
 
 	EXPECT_STREQ("peer 2.2.3.4: id 200 remaining 100000; "
 		     "peer 1.2.3.4: id 100 remaining 105000",
@@ -1233,8 +1232,10 @@ TEST_F(homa_grant, homa_grant_send)
 	mock_xmit_log_verbose = 1;
 	rpc->msgin.granted = 2600;
 	unit_log_clear();
+	homa_rpc_lock(rpc);
 	homa_grant_send(rpc, 3);
 	EXPECT_SUBSTR("id 100, offset 2600, grant_prio 3", unit_log_get());
+	homa_rpc_unlock(rpc);
 }
 
 TEST_F(homa_grant, homa_grant_try_send__basics)
@@ -1277,28 +1278,6 @@ TEST_F(homa_grant, homa_grant_try_send__rpc_not_grantable)
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, atomic_read(&grant->total_incoming));
 }
-TEST_F(homa_grant, homa_grant_try_send__rpc_fully_granted)
-{
-	struct homa_grant *grant = self->homa.grant;
-	struct homa_rpc *rpc;
-
-	rpc = test_rpc_mngd(self, 100, self->server_ip, 20000);
-	rpc->msgin.bytes_remaining = 19900;
-	rpc->msgin.granted = 1300;
-	rpc->msgin.rec_incoming = 200;
-	grant->max_incoming = 100000;
-	grant->window = 1200;
-	atomic_set(&grant->total_incoming, 500);
-	unit_log_clear();
-
-	homa_rpc_lock(rpc);
-	homa_grant_try_send(grant, rpc, true);
-	homa_rpc_unlock(rpc);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1300, rpc->msgin.granted);
-	EXPECT_EQ(200, rpc->msgin.rec_incoming);
-	EXPECT_EQ(500, atomic_read(&grant->total_incoming));
-}
 TEST_F(homa_grant, homa_grant_try_send__reduce_grant_because_of_message_end)
 {
 	struct homa_grant *grant = self->homa.grant;
@@ -1320,6 +1299,28 @@ TEST_F(homa_grant, homa_grant_try_send__reduce_grant_because_of_message_end)
 	EXPECT_EQ(20000, rpc->msgin.granted);
 	EXPECT_EQ(900, rpc->msgin.rec_incoming);
 	EXPECT_EQ(1200, atomic_read(&grant->total_incoming));
+}
+TEST_F(homa_grant, homa_grant_try_send__rpc_fully_granted)
+{
+	struct homa_grant *grant = self->homa.grant;
+	struct homa_rpc *rpc;
+
+	rpc = test_rpc_mngd(self, 100, self->server_ip, 20000);
+	rpc->msgin.bytes_remaining = 19900;
+	rpc->msgin.granted = 1300;
+	rpc->msgin.rec_incoming = 200;
+	grant->max_incoming = 100000;
+	grant->window = 1200;
+	atomic_set(&grant->total_incoming, 500);
+	unit_log_clear();
+
+	homa_rpc_lock(rpc);
+	homa_grant_try_send(grant, rpc, true);
+	homa_rpc_unlock(rpc);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1300, rpc->msgin.granted);
+	EXPECT_EQ(200, rpc->msgin.rec_incoming);
+	EXPECT_EQ(500, atomic_read(&grant->total_incoming));
 }
 TEST_F(homa_grant, homa_grant_try_send__max_incoming_exceeded)
 {
@@ -1923,7 +1924,7 @@ TEST_F(homa_grant, homa_grant_check_fifo__basics)
 	EXPECT_EQ(0, rpc->msgin.granted);
 
 	unit_log_clear();
-	homa_grant_check_fifo(self->homa.grant);
+	homa_grant_check_fifo(self->homa.grant, NULL);
 	EXPECT_EQ(20000, rpc->msgin.granted);
 	EXPECT_STREQ("xmit GRANT 20000@3", unit_log_get());
 	EXPECT_EQ(rpc, self->homa.grant->oldest_rpc);
@@ -1946,7 +1947,7 @@ TEST_F(homa_grant, homa_grant_check_fifo__not_yet_time_for_a_fifo_grant)
 	EXPECT_EQ(0, rpc->msgin.granted);
 
 	unit_log_clear();
-	homa_grant_check_fifo(self->homa.grant);
+	homa_grant_check_fifo(self->homa.grant, NULL);
 	EXPECT_EQ(0, rpc->msgin.granted);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(NULL, self->homa.grant->oldest_rpc);
@@ -1968,7 +1969,7 @@ TEST_F(homa_grant, homa_grant_check_fifo__fifo_grants_disabled)
 	EXPECT_EQ(0, rpc->msgin.granted);
 
 	unit_log_clear();
-	homa_grant_check_fifo(self->homa.grant);
+	homa_grant_check_fifo(self->homa.grant, NULL);
 	EXPECT_EQ(0, rpc->msgin.granted);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(NULL, self->homa.grant->oldest_rpc);
@@ -1993,7 +1994,7 @@ TEST_F(homa_grant, homa_grant_check_fifo__oldest_rpc_not_responsive)
 	rpc1->msgin.rec_incoming = 40000 + self->homa.grant->window;
 
 	unit_log_clear();
-	homa_grant_check_fifo(self->homa.grant);
+	homa_grant_check_fifo(self->homa.grant, NULL);
 	EXPECT_EQ(0, rpc1->msgin.granted);
 	EXPECT_EQ(20000, rpc2->msgin.granted);
 	EXPECT_STREQ("xmit GRANT 20000@0", unit_log_get());
@@ -2017,7 +2018,7 @@ TEST_F(homa_grant, homa_grant_check_fifo__oldest_is_fully_granted_so_pick_anothe
 	rpc1->msgin.granted = rpc1->msgin.length;
 
 	unit_log_clear();
-	homa_grant_check_fifo(self->homa.grant);
+	homa_grant_check_fifo(self->homa.grant, NULL);
 	EXPECT_EQ(400000, rpc1->msgin.granted);
 	EXPECT_EQ(20000, rpc2->msgin.granted);
 	EXPECT_STREQ("xmit GRANT 20000@0", unit_log_get());
@@ -2037,7 +2038,7 @@ TEST_F(homa_grant, homa_grant_check_fifo__no_suitable_rpc)
 	rpc1->msgin.rec_incoming = 40000 + self->homa.grant->window;
 
 	unit_log_clear();
-	homa_grant_check_fifo(self->homa.grant);
+	homa_grant_check_fifo(self->homa.grant, NULL);
 	EXPECT_EQ(NULL, self->homa.grant->oldest_rpc);
 	EXPECT_STREQ("", unit_log_get());
 }
@@ -2062,7 +2063,7 @@ TEST_F(homa_grant, homa_grant_check_fifo__rpc_dead)
 	unit_log_clear();
 	saved_state = rpc->state;
 	rpc->state = RPC_DEAD;
-	homa_grant_check_fifo(self->homa.grant);
+	homa_grant_check_fifo(self->homa.grant, NULL);
 	rpc->state = saved_state;
 	EXPECT_EQ(0, rpc->msgin.granted);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->fifo_grant_bytes);
