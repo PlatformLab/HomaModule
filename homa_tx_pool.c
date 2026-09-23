@@ -66,7 +66,8 @@ error:
 /**
  * homa_tx_pool_cleanup() - Invoked when a struct homa is deleted; cleans
  * up information related to this module.
- * @homa:  Overall information about the Homa transport.
+ * @homa:  Overall information about the Homa transport. Once this module
+ *         returns, the APIs in this file must not be used with @homa.
  */
 void homa_tx_pool_cleanup(struct homa *homa)
 {
