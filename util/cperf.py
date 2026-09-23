@@ -8,6 +8,7 @@
 
 import argparse
 from collections import defaultdict
+from collections.abc import Collection
 import copy
 import datetime
 import glob
@@ -24,6 +25,11 @@ import subprocess
 import sys
 import time
 import traceback
+from typing import Any
+
+# Placeholder type for things with complex structure such that the type
+# specification is a TODO.
+TypeToDo = Any
 
 # Avoid Type 3 fonts (conferences don't tend to like them).
 matplotlib.rcParams['pdf.fonttype'] = 42
@@ -58,7 +64,7 @@ log_nodes = {}
 log_dir = ''
 
 # Open file (in the log directory) where log messages should be written.
-log_file = 0
+log_file = None
 
 # Indicates whether we should generate additional log messages for debugging
 verbose = False
@@ -184,7 +190,7 @@ load_info = [["w1", 1.4], ["w2", 3.2], ["w3", 14], ["w4", 20], ["w5", 20]]
 pyplot_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
         '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
 
-def boolean(s):
+def boolean(s: str) -> bool:
     """
     Used as a "type" in argparse specs; accepts Boolean-looking things.
     """
@@ -196,7 +202,7 @@ def boolean(s):
         raise ValueError("Expected boolean value, got %s" % (s))
     return map[lc]
 
-def log(message):
+def log(message: str) -> None:
     """
     Write the a log message both to stdout and to the cperf log file.
 
@@ -208,7 +214,7 @@ def log(message):
     log_file.write(message)
     log_file.write("\n")
 
-def vlog(message):
+def vlog(message: str) -> None:
     """
     Log a message, like log, but if verbose logging isn't enabled, then
     log only to the cperf log file, not to stdout.
@@ -222,7 +228,8 @@ def vlog(message):
     log_file.write(message)
     log_file.write("\n")
 
-def get_parser(description, usage, defaults = {}):
+def get_parser(description: str, usage: str,
+        defaults: dict[str, str] = {}) -> argparse.ArgumentParser:
     """
     Returns an ArgumentParser for options that are commonly used in
     performance tests.
@@ -367,7 +374,7 @@ def get_parser(description, usage, defaults = {}):
             'unscheduled priorities, rather than computing from workload'
             '(default: %d)'% (defaults['unsched']))
     parser.add_argument('--unsched-boost', type=float, dest='unsched_boost',
-            metavar='float', default=defaults['unsched'],
+            metavar='float', default=defaults['unsched_boost'],
             help='Increase the number of unscheduled priorities that homa_prio '
             'assigns by this (possibly fractional) amount (default: %.2f)'
             % (defaults['unsched_boost']))
@@ -380,7 +387,7 @@ def get_parser(description, usage, defaults = {}):
             % (defaults['workload']))
     return parser
 
-def choose_nodes(options):
+def choose_nodes(options: argparse.Namespace) -> None:
     """
     Select which nodes to use for clients and servers in the experiment.
     options:   Contains command-line options that control the node
@@ -409,7 +416,7 @@ def choose_nodes(options):
     options.servers = options.nodes
     options.clients = options.nodes
 
-def init(opts):
+def init(opts: argparse.Namespace) -> None:
     """
     Initialize various global state, such as the log file.
     opts:  Command-line options
@@ -462,7 +469,8 @@ def init(opts):
     if options.delete_rtts:
         delete_rtts = True
 
-def wait_output(string, nodes, cmd, time_limit=10.0):
+def wait_output(string: str, nodes: list[int], cmd: str,
+        time_limit: float =10.0) -> None:
     """
     This method waits until a particular string has appeared on the stdout of
     each of the nodes in the list given by nodes. If a long time goes by without
@@ -512,7 +520,7 @@ def wait_output(string, nodes, cmd, time_limit=10.0):
             "expected '%s', got '%s'"
             % (bad_node, cmd, string, outputs[bad_node]))
 
-def start_nodes(ids, options):
+def start_nodes(ids: list[int], options: argparse.Namespace) -> None:
     """
     Start up cp_node on a group of nodes. Also starts homa_prio on the
     nodes, if protocol is "homa".
@@ -561,7 +569,7 @@ def start_nodes(ids, options):
         active_nodes[id].stdin.flush()
     wait_output("% ", started, command)
 
-def stop_nodes():
+def stop_nodes() -> None:
     """
     Exit all of the nodes that are currently active.
     """
@@ -588,7 +596,7 @@ def stop_nodes():
     active_nodes.clear()
     server_nodes = range(0,0)
 
-def do_cmd(command, ids, ids2 = []):
+def do_cmd(command: str, ids: list[int], ids2: list[int] = []) -> None:
     """
     Execute a cp_node command on a given group of nodes.
 
@@ -614,7 +622,7 @@ def do_cmd(command, ids, ids2 = []):
             log("Broken pipe to node%d" % (id))
     wait_output("% ", nodes, command)
 
-def do_ssh(command, nodes):
+def do_ssh(command: str, nodes: list[int]) -> None:
     """
     Use ssh to execute a particular shell command on a group of nodes.
 
@@ -626,7 +634,7 @@ def do_ssh(command, nodes):
     for id in nodes:
         do_subprocess(["ssh", "node%d" % id] + command)
 
-def get_sysctl_parameter(name, node):
+def get_sysctl_parameter(name: str, node: int) -> str:
     """
     Retrieve the value of a particular system parameter using sysctl on
     the given node, and return the value as a string.
@@ -640,7 +648,7 @@ def get_sysctl_parameter(name, node):
          raise Exception("Couldn't parse sysctl output: %s" % output)
     return match.group(1)
 
-def set_sysctl_parameter(name, value, nodes):
+def set_sysctl_parameter(name: str, value: Any, nodes: list[int]) -> None:
     """
     Modify the value of a system parameter on a group of nodes.
 
@@ -660,7 +668,7 @@ def set_sysctl_parameter(name, value, nodes):
         do_subprocess(["ssh", "node%d" % id, "sudo", "sysctl",
                 "%s=%s" % (name, value)])
 
-def get_baseline_rtt():
+def get_baseline_rtt() -> None:
     """
     Return the "best possible" RTT for short messages, for use in computing
     slowdowns.
@@ -672,7 +680,7 @@ def get_baseline_rtt():
         return baseline_rtts[node_type]
     return baseline_rtts["default"]
 
-def get_node_type():
+def get_node_type() -> str:
     """
     Returns the node type for this machine.
     """
@@ -685,7 +693,7 @@ def get_node_type():
     f.close()
     return node_type
 
-def do_subprocess(words):
+def do_subprocess(words: list[str]) -> str:
     """
     Invoke subprocess.run to run args in a child process and then
     check the results. Log any errors that are detected. Returns
@@ -700,7 +708,7 @@ def do_subprocess(words):
         log("Error output from %s: %s" % (words, result.stderr.rstrip()))
     return result.stdout.rstrip()
 
-def start_servers(exp, ids, options):
+def start_servers(exp: str, ids: list[int], options: argparse.Namespace) -> None:
     """
     Starts cp_node servers running on a group of nodes
 
@@ -730,7 +738,7 @@ def start_servers(exp, ids, options):
     if options.debug:
         input("Pausing for debug setup, type <Enter> to continue: ")
 
-def run_experiment(name, clients, options):
+def run_experiment(name: str, clients: list[int], options: argparse.Namespace) -> None:
     """
     Starts cp_node clients running on a group of nodes, lets the clients run
     for an amount of time given by options.seconds, and gathers statistics.
@@ -871,7 +879,7 @@ def run_experiment(name, clients, options):
             do_subprocess(["rsync", "-rtvq", "node%d:rtts" % (id),
                     "%s/%s-%d.rtts" % (options.log_dir, name, id)])
 
-def run_experiments(*args):
+def run_experiments(*args: argparse.Namespace) -> None:
     """
     Run multiple experiments simultaneously and collect statistics.
 
@@ -1048,7 +1056,7 @@ def run_experiments(*args):
             do_subprocess(["rsync", "-rtvq", "node%d:%s.rtts" % (id, exp.name),
                     "%s/%s-%d.rtts" % (exp.log_dir, exp.name, id)])
 
-def scan_log(file, node, experiments):
+def scan_log(file: str, node:str , experiments) -> None:
     """
     Read a log file and extract various useful information, such as fatal
     error messages or interesting statistics.
@@ -1150,7 +1158,7 @@ def scan_log(file, node, experiments):
     if timeouts > 1:
         log("%s: %d additional Homa RPC timeouts" % (file, timeouts-1))
 
-def scan_logs():
+def scan_logs() -> None:
     """
     Read all of the node-specific log files produced by a run, and
     extract useful information.
@@ -1248,7 +1256,7 @@ def scan_logs():
                     % (100.0*sum(backups)/len(backups)))
     log("")
 
-def scan_metrics(experiment):
+def scan_metrics(experiment: TypeToDo) -> None:
     """
     Reads in all of the .metrics files generated by an experiment,
     extracts a few interesting statistics, and logs message if some
@@ -1305,7 +1313,8 @@ def scan_metrics(experiment):
                         % (docs[name], file, scale_number(value, units[name]),
                         scale_number(median, units[name])))
 
-def read_rtts(file, rtts, min_rtt = 0.0, link_mbps = 0.0):
+def read_rtts(file: str, rtts: dict[int, list[float]], min_rtt: float = 0.0,
+        link_mbps: float = 0.0) -> tuple[int, float]:
     """
     Read a file generated by cp_node's "dump_times" command and add its
     data to the information present in rtts. Also computes average slowdown
@@ -1349,7 +1358,7 @@ def read_rtts(file, rtts, min_rtt = 0.0, link_mbps = 0.0):
         return 0, 0
     return num_rtts, slowdown_sum/num_rtts
 
-def get_buckets(rtts, total):
+def get_buckets(rtts: Collection[float], total: int) -> list[list[int | float]]:
     """
     Generates buckets for histogramming the information in rtts.
 
@@ -1366,7 +1375,7 @@ def get_buckets(rtts, total):
         buckets.append([length, cumulative/total])
     return buckets
 
-def get_digest(experiment):
+def get_digest(experiment: TypeToDo) -> TypeToDo:
     """
     Returns an element of digests that contains data for a particular
     experiment; if this is the first request for a given experiment, the
@@ -1499,7 +1508,7 @@ def get_digest(experiment):
     digests[experiment] = digest
     return digest
 
-def read_digest(file):
+def read_digest(file: str) -> dict[str, Any]:
     """
     Read digest data from a file return the parsed digest. All digest fields
     are populated except rtts.
@@ -1545,9 +1554,10 @@ def read_digest(file):
     f.close()
     return digest
 
-def start_plot_vs_msg_length(title, y_range, x_experiment, size=10,
-        show_top_label=True, show_bot_label=True, figsize=[6,4],
-        y_label="Slowdown", show_upper_x_axis=True):
+def start_plot_vs_msg_length(title: str, y_range: float | list[float],
+        x_experiment: str, size: int = 10, show_top_label: bool = True,
+        show_bot_label: bool = True, figsize: list[int] = [6,4],
+        y_label: str = "Slowdown", show_upper_x_axis: bool = True) -> None:
     """
     Create a pyplot graph that will be used to display some value as a
     function of message size, with the x-axis scaled so that distance
@@ -1637,7 +1647,8 @@ def start_plot_vs_msg_length(title, y_range, x_experiment, size=10,
         ax.set_xticklabels(labels, size=size)
     return ax
 
-def cdf_xaxis(ax, x_values, counts, num_ticks, size=10):
+def cdf_xaxis(ax: matplotlib.axes.Axes, x_values: list[float],
+        counts: list[int], num_ticks: int, size: int = 10) -> None:
     """
     Generate labels for an x-axis that is scaled nonlinearly to reflect
     a particular distribution of samples.
@@ -1673,7 +1684,9 @@ def cdf_xaxis(ax, x_values, counts, num_ticks, size=10):
     ax.set_xticklabels(labels, size=size)
 
 
-def make_histogram(x, y, init=None, after=True):
+def make_histogram(x: list[float], y: list[float], init:
+        list[float] | None = None,
+        after: bool = True) -> tuple[list[int], list[int]]:
     """
     Given x and y coordinates, return new lists of coordinates that describe
     a histogram (transform (x1,y1) and (x2,y2) into (x1,y1), (x2,y1), (x2,y2)
@@ -1706,7 +1719,8 @@ def make_histogram(x, y, init=None, after=True):
         y_new.append(y[i])
     return [x_new, y_new]
 
-def plot_slowdown(ax, experiment, percentile, label, **kwargs):
+def plot_slowdown(ax: matplotlib.axes.Axes, experiment: str, percentile: str,
+        label: str, **kwargs):
     """
     Add a slowdown histogram to a plot.
 
@@ -1733,13 +1747,14 @@ def plot_slowdown(ax, experiment, percentile, label, **kwargs):
                 % (percentile))
     ax.plot(x, y, label=label, **kwargs)
 
-def plot_histogram(ax, experiment, metric, label, **kwargs):
+def plot_histogram(ax: matplotlib.axes.Axes, experiment: str, metric: str,
+        label: str, **kwargs) -> None:
     """
     Add a histogram to a plot created by start_plot_vs_msg_length().
 
     ax:            matplotlib Axes object: info will be plotted here.
     experiment:    Name of the experiment whose data should be graphed.
-    percentile:    Metric from experiment to graph, such as "p50" for 50th
+    metric:        Metric from experiment to graph, such as "p50" for 50th
                    percentile latency or "slow_99" for 99th percentile
                    slowdown
     label:         Text to display in the graph legend for this curve
@@ -1750,8 +1765,9 @@ def plot_histogram(ax, experiment, metric, label, **kwargs):
             init=[0, digest[metric][0]], after=False)
     ax.plot(x, y, label=label, **kwargs)
 
-def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
-        figsize=[5, 4], size=10, xscale="log", yscale="log"):
+def start_cdf_plot(title: str, min_x: float, max_x: float, min_y: float,
+        x_label: str, y_label: str, figsize: list[int] = [5, 4],
+        size: int = 10, xscale: str = "log", yscale:str = "log") -> None:
     """
     Create a pyplot graph that will be display a complementary CDF with
     log axes.
@@ -1808,7 +1824,7 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
     plt.text(max_x*1.3, 0.01, "P99", fontsize=16, horizontalalignment="left",
             verticalalignment="center", color="red")
 
-def get_short_cdf(experiment):
+def get_short_cdf(experiment: TypeToDo) -> tuple[list[float], list[float]]:
     """
     Return a complementary CDF histogram for the RTTs of short messages in
     an experiment. Short messages means all messages shorter than 1500 bytes
@@ -1871,7 +1887,7 @@ def get_short_cdf(experiment):
     f.close()
     return [x, y]
 
-def read_file_data(file):
+def read_file_data(file: str) -> None:
     """
     Reads data from a file and returns a dict whose keys are column names
     and whose values are lists of values from the given column.
@@ -1908,7 +1924,7 @@ def read_file_data(file):
     f.close()
     return columns
 
-def column_from_file(file, column):
+def column_from_file(file: str, column: str) -> list[Any]:
     """
     Return a list containing a column of data from a given file.
 
@@ -1943,7 +1959,7 @@ def column_from_file(file, column):
     data_from_files[file] = data
     return data[column]
 
-def scale_number(number, units):
+def scale_number(number: float, units: str) -> str:
     """
     Return a string describing a number, but with a "K", "M", or "G"
     suffix to keep the number small and readable.
@@ -1965,7 +1981,7 @@ def scale_number(number, units):
             space = " "
         return "%.1f%s%s" % (number, space, units)
 
-def unscale_number(number):
+def unscale_number(number: str) -> float:
     """
     Given a string representation of a number, which may have a "K",
     "M", or "G" scale factor (e.g. "1.2 M"), return the actual number
