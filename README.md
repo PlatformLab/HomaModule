@@ -76,6 +76,10 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant changes
+- September 2026: Protocol change in granting mechanism. Messages that
+  require grants are now completely scheduled (no initial unscheduled
+  packets are sent). A new packet type, START_MSG, has been introduced
+  for these messages to announce themselves to the recipient.
 - March 2026: backported Homa to Red Hat Enterprise Linux versions
   8 and 9.5, using the branches `rhel8` and `rhel9.5`. Future changes made to
   the `main` branch are likely to be reflected in these branches also.
