@@ -98,7 +98,8 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 				    __GFP_NOWARN);
 	if (!descriptors)
 		return -ENOMEM;
-	cores = alloc_percpu_gfp(struct homa_pool_core, __GFP_ZERO);
+	cores = alloc_percpu_gfp(struct homa_pool_core,
+				 GFP_KERNEL_ACCOUNT | __GFP_ZERO);
 	if (!cores) {
 		result = -ENOMEM;
 		goto error;
