@@ -94,7 +94,8 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 	 */
 	num_bpages = region_size >> HOMA_BPAGE_SHIFT;
 	descriptors = kmalloc_array(num_bpages, sizeof(struct homa_bpage),
-				    GFP_KERNEL | __GFP_ZERO | __GFP_ACCOUNT);
+				    GFP_KERNEL | __GFP_ZERO | __GFP_ACCOUNT |
+				    __GFP_NOWARN);
 	if (!descriptors)
 		return -ENOMEM;
 	cores = alloc_percpu_gfp(struct homa_pool_core, __GFP_ZERO);
