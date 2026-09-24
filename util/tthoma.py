@@ -2569,22 +2569,6 @@ class Dispatcher:
         'regexp': 'Discarding packet for unknown RPC, id ([0-9]+),'
     })
 
-    def __pacer_xmit(self, trace: dict[str, Any], time: float, core: int,
-            match: re.Match, interests: list[TypeToDo]) -> None:
-        id = int(match.group(1))
-        port = int(match.group(2))
-        offset = int(match.group(3))
-        bytes_left = int(match.group(4))
-        for interest in interests:
-            interest.tt_pacer_xmit(trace, time, core, id, offset, port,
-                    bytes_left)
-
-    patterns.append({
-        'name': 'pacer_xmit',
-        'regexp': 'pacer calling homa_xmit_data for rpc id ([0-9]+), port '
-                '([0-9]+), offset ([0-9]+), bytes_left ([0-9]+)'
-    })
-
     def __qdisc_defer(self, trace: dict[str, Any], time: float, core: int,
             match: re.Match, interests: list[TypeToDo]) -> None:
         id = int(match.group(1))
@@ -9309,14 +9293,6 @@ class AnalyzePackets:
             p['retransmits'][-1]['tso_length'] = length
         p['tx_qid'] = qid
 
-    def tt_pacer_xmit(self, trace: dict[str, Any], t: float, core: int, id: int,
-            offset: int, port: int, bytes_left: int) -> None:
-        global packets
-        p = packets[pkt_id(id, offset)]
-        if p['retransmits']:
-            p = p['retransmits'][-1]
-        p['pacer'] = True
-
     def tt_qdisc_defer(self, trace: dict[str, Any], t: float, core: int, id: int,
             offset: int) -> None:
         global packets
@@ -14438,8 +14414,6 @@ class AnalyzeTxpkts:
                 'transmitted by')
         print('           node or queue')
         print('Gbps:      Throughput of that queue')
-        print('PTsos:     Total number of TSO frames that were transmitted '
-                'by the pacer')
         print('QTsos:     Total number of TSO frames that were deferred by '
                 'homa_qdisc to')
         print('           limit NIC queue length')
@@ -14496,10 +14470,6 @@ class AnalyzeTxpkts:
             # queue
             qid_bytes = defaultdict(lambda: 0)
 
-            # Tx queue number -> total number of TSO frames transmitted
-            # by the pacer on that queue
-            qid_pacer_tsos = defaultdict(lambda: 0)
-
             # Tx queue number -> total number of TSO frames on that queue
             # that were deferred by homa_qdisc because of NIC queue overload
             qid_qdisc_tsos = defaultdict(lambda: 0)
@@ -14546,8 +14516,6 @@ class AnalyzeTxpkts:
                     qid_segs[qid] += segs
                     if 'tso_length' in pkt:
                         qid_bytes[qid] += length
-                    if 'pacer' in pkt:
-                        qid_pacer_tsos[qid] += 1
                     if qdisc != None:
                         qid_qdisc_tsos[qid] += 1
                     if 'tx_queue' in pkt:
@@ -14603,10 +14571,10 @@ class AnalyzeTxpkts:
                 q_details += '\n'
             q_details += 'Transmit queues for %s\n' % (node)
             q_details += 'Qid     TxQueue  Tsos  Segs   Gbps '
-            q_details += 'PTsos QTsos Backlog BFrac  NicP10 NicP50 NicP90  '
+            q_details += 'QTsos Backlog BFrac  NicP10 NicP50 NicP90  '
             q_details += 'GroP10 GroP50 GroP90  FreP10 FreP50 FreP90\n'
             q_details += '-----------------------------------'
-            q_details += '-------------------------------------------------'
+            q_details += '-------------------------------------------'
             q_details += '------------------------------------------\n'
             first_node = False
             totals = defaultdict(list)
@@ -14618,8 +14586,8 @@ class AnalyzeTxpkts:
                 q_details += '%4d %10s %5d %5d %6.2f ' % (
                         qid, qid_tx_queue[qid], qid_tsos[qid], qid_segs[qid],
                         8e-3 * qid_bytes[qid] / traces[node]['elapsed_time'])
-                q_details += '%5d %5d  %6.1f %5.2f  %s  %s  %s\n' % (
-                        qid_pacer_tsos[qid], qid_qdisc_tsos[qid],
+                q_details += '%5d  %6.1f %5.2f  %s  %s  %s\n' % (
+                        qid_qdisc_tsos[qid],
                         1e-3*qid_backlog[qid]/total_time,
                         qid_slow_bytes[qid]/qid_total_bytes[qid],
                         print_type(q_delays['nic']),
