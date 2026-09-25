@@ -9,7 +9,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   which appeared in the USENIX Annual Technical Conference in July, 2021.
 
 - A synopsis of the protocol implemented by this module is available in
-  [protocol.md](https://github.com/PlatformLab/HomaModule/blob/master/protocol.md).
+  [protocol.md](https://github.com/PlatformLab/HomaModule/blob/main/protocol.md).
 
 - As of August 2020, Homa has complete functionality for running real applications,
   and its tail latency is more than 10x better than TCP for all workloads I have
