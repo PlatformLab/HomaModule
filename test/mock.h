@@ -4,6 +4,89 @@
 #ifndef _HOMA_MOCK_H
 #define _HOMA_MOCK_H
 
+/* This file must be the very first #include for every compiled .c file
+ * (forced via -include mock.h in the test Makefile, before homa_impl.h and
+ * before any real kernel header). <linux/mm.h> -> <linux/bit_spinlock.h>
+ * and <linux/lockdep.h> -> <linux/smp.h>, dragged in transitively by many
+ * kernel headers homa_impl.h includes (skbuff.h, kthread.h, completion.h,
+ * sched/signal.h, proc_fs.h, etc.), use preempt_disable()/preempt_enable()/
+ * smp_processor_id()/raw_smp_processor_id()/WARN_ON_ONCE() in inline
+ * functions; those inline functions bake in whichever macro definition is
+ * active when the header is first parsed. Getting the mocked versions
+ * active before any of that runs requires mock.h itself to be included
+ * first, standalone. homa_impl.h's own later #include "mock.h" is then a
+ * no-op (include guard), but these overrides are already in effect.
+ */
+#include <linux/bug.h>
+
+#undef WARN
+#define WARN(...)
+
+#undef WARN_ON
+#define WARN_ON(condition) ({						\
+	int __ret_warn_on = !!(condition);				\
+	unlikely(__ret_warn_on);					\
+})
+
+#undef WARN_ON_ONCE
+#define WARN_ON_ONCE(condition) WARN_ON(condition)
+
+#undef WARN_ONCE
+#define WARN_ONCE(cond, ...) ({ bool __c = (cond); (void)__c; __c; })
+
+/* Pulling in the real <linux/preempt.h>/<linux/smp.h> here first (before
+ * the undef/define below) sets their include guards so later transitive
+ * re-inclusion is a no-op and can't clobber these overrides. This must
+ * come after the WARN overrides above, since preempt.h drags in
+ * <linux/thread_info.h> (via linkage.h), whose inline functions use
+ * WARN_ON_ONCE() and must see the mocked (no-op) version.
+ */
+#include <linux/preempt.h>
+#include <linux/smp.h>
+
+/* Forward declarations needed because the overrides below are used by
+ * headers included further down in this file, before mock.c's own
+ * declarations (later in this file) would otherwise be visible.
+ */
+void mock_preempt_disable(void);
+void mock_preempt_enable(void);
+int mock_processor_id(void);
+
+#undef preempt_disable
+#define preempt_disable() mock_preempt_disable()
+
+#undef preempt_enable
+#define preempt_enable() mock_preempt_enable()
+
+#undef smp_processor_id
+#define smp_processor_id() mock_processor_id()
+
+#undef raw_smp_processor_id
+#define raw_smp_processor_id() mock_processor_id()
+
+/* <net/tcp.h> (tcp_v4_check/tcp_v6_check), <linux/filter.h> (this_cpu_ptr,
+ * via <linux/bpf.h>), <net/icmp.h> (icmp_send), <net/ip6_route.h>
+ * (rt6_get_cookie, via <net/ip6_fib.h>) and <net/netns/generic.h>
+ * (net_generic) all declare real inline functions/objects whose names this
+ * file redirects below via object-style macros; those macros corrupt the
+ * real declarations if the real headers are parsed afterward (their
+ * include guards would otherwise make a later re-inclusion elsewhere a
+ * silent no-op with the corrupted macro baked in). Pulling them in here
+ * first, before any of the redirects below, avoids that. homa.h is
+ * included here too so the HOMA_BPAGE_SIZE/HOMA_MIN_DEFAULT_PORT/etc.
+ * overrides below apply after the real values are already defined, instead
+ * of being silently clobbered by a later #include of homa.h from
+ * homa_impl.h.
+ */
+#include <net/tcp.h>
+#include <net/ip6_checksum.h>
+#include <linux/filter.h>
+#include <net/icmp.h>
+#include <net/ip6_route.h>
+#include <net/netns/generic.h>
+#include "homa.h"
+#include "homa_wire.h"
+
 #include <linux/ethtool.h>
 
 /* Replace various Linux variables and functions with mocked ones. */
@@ -104,6 +187,12 @@
 #undef preempt_enable
 #define preempt_enable() mock_preempt_enable()
 
+#undef preempt_count_add
+#define preempt_count_add(val) mock_preempt_count_add(val)
+
+#undef preempt_count_sub
+#define preempt_count_sub(val) mock_preempt_count_sub(val)
+
 #define put_page mock_put_page
 
 #define rcu_read_lock mock_rcu_read_lock
@@ -118,6 +207,8 @@
 
 #undef register_net_sysctl
 #define register_net_sysctl mock_register_net_sysctl
+
+#define rt6_get_cookie(...) 999
 
 #define signal_pending(...) mock_signal_pending
 
@@ -137,9 +228,6 @@
 	     copied < f_len;                            \
 	     copied += p_len, p++, p_off = 0,           \
 	     p_len = f_len - copied)                    \
-
-#undef smp_processor_id
-#define smp_processor_id() mock_processor_id()
 
 #define sock_hold(sock) mock_sock_hold(sock)
 
@@ -185,6 +273,7 @@ extern int         mock_copy_to_frags_errors;
 extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
+extern int         cpu_number;
 extern struct net_device
 		   mock_devices[];
 extern enum skb_drop_reason
@@ -278,6 +367,8 @@ int         mock_page_refs(struct page *page);
 int         mock_page_to_nid(struct page *page);
 void        mock_preempt_disable(void);
 void        mock_preempt_enable(void);
+void        mock_preempt_count_add(int val);
+void        mock_preempt_count_sub(int val);
 int         mock_processor_id(void);
 void        mock_put_page(struct page *page);
 struct sk_buff *

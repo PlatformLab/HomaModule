@@ -22,7 +22,8 @@ CINCLUDES := \
 	    -I. \
 	    -I.. \
 	    $(KERN_INCLUDES) \
-	    -include $(KDIR)/include/linux/kconfig.h
+	    -include $(KDIR)/include/linux/kconfig.h \
+	    -include mock.h
 CCINCLUDES := \
 	    -I. \
 	    -I.. \
@@ -36,11 +37,12 @@ DEFS +=      -D__STRIP__
 endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
-		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS) \
-		-fsanitize=address -fno-omit-frame-pointer
-CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) \
-		-fsanitize=address -fno-omit-frame-pointer
+		-Wno-strict-aliasing -Wunused-but-set-variable -Wno-unused-variable \
+		-Wno-pointer-sign -Werror
+CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g -fcf-protection \
+	     -fsanitize=address -fno-omit-frame-pointer $(CINCLUDES) $(DEFS)
+CCFLAGS :=   -std=c++11 $(WARNS) -MD -g -fcf-protection \
+	     -fsanitize=address -fno-omit-frame-pointer $(CCINCLUDES) $(DEFS)
 
 TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_interest.c \
@@ -129,7 +131,7 @@ xxhash.o: xxhash.c
 	$(CC) -c $(CFLAGS) -O2 -fno-sanitize=address $< -o $@
 
 unit: $(OBJS)
-	$(CXX) $(CFLAGS) $^ -o $@
+	$(CXX) $(CFLAGS) $^ -o $@ -lasan
 
 test: unit
 	./unit
