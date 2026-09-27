@@ -206,7 +206,7 @@ struct homa_qdisc_dev {
 	int max_nic_queue_bytes;
 
 	/**
-	 * @nic_queue_info: Information used to compute @total_nic_queue,
+	 * @nic_queues: Information used to compute @total_nic_queue,
 	 * one struct for each entry in @dev->_tx.
 	 */
 	struct homa_nic_queue *nic_queues;

@@ -502,8 +502,8 @@ void homa_qdisc_add_queued(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 	 */
 	if (after(dql_queued, queued)) {
 		tt_record4("dql_queued (%d) ahead of queued (%d), diff %d, for qix %d\n",
-			dql_queued, queued, dql_queued - queued,
-			skb_get_queue_mapping(skb));
+			   dql_queued, queued, dql_queued - queued,
+			   skb_get_queue_mapping(skb));
 		queued = dql_queued;
 	}
 	queued += qdisc_pkt_len(skb);
@@ -588,8 +588,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	 */
 	h = (struct homa_data_hdr *)skb_transport_header(skb);
 	offset = ntohl(h->seg.offset);
-	if (h->common.type != DATA || ntohl(h->message_length) <
-				      qshared->defer_min_bytes) {
+	if (h->common.type != DATA ||
+	    ntohl(h->msg_length) < qshared->defer_min_bytes) {
 		homa_qdisc_update_link_idle(qdev, pkt_len, -1);
 		goto enqueue;
 	}
@@ -709,8 +709,7 @@ void homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb)
 	struct homa_qdisc_dev *qdev = q->qdev;
 	u64 now = homa_clock();
 
-	tt_record_tcp("homa_qdisc deferring TCP packet from "
-		"0x%x to 0x%x, data bytes %d, seq/ack %u",
+	tt_record_tcp("homa_qdisc deferring TCP packet from 0x%x to 0x%x, data bytes %d, seq/ack %u",
 		skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
 
 	homa_qdisc_lock_qdev(qdev);
@@ -842,7 +841,7 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 	if (skb_queue_empty(&q->deferred_tcp)) {
 		list_del_init(&q->defer_links);
 		if (!rb_first_cached(&qdev->deferred_rpcs) &&
-	            list_empty(&qdev->deferred_qdiscs)) {
+		    list_empty(&qdev->deferred_qdiscs)) {
 			INC_METRIC(nic_backlog_cycles,
 				   homa_clock() - qdev->last_defer);
 			qdev->last_defer = 0;
@@ -1059,7 +1058,7 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 					 SKB_DROP_REASON_NO_SOCKET);
 
 		if (!rb_first_cached(&qdev->deferred_rpcs) &&
-	    	    list_empty(&qdev->deferred_qdiscs)) {
+		    list_empty(&qdev->deferred_qdiscs)) {
 			INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
 			qdev->last_defer = 0;
 		}
@@ -1215,7 +1214,7 @@ int homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 				qdev->congest_start = now;
 			homa_qdisc_refresh_from_dql(qdev);
 			if (atomic_read(&qdev->total_nic_queue) >
-		    	    qdev->max_nic_queue_bytes)
+			    qdev->max_nic_queue_bytes)
 				goto done;
 			delta = homa_clock() - qdev->congest_start;
 			INC_METRIC(nic_congest_cycles, delta);
@@ -1327,9 +1326,9 @@ void homa_qdisc_refresh_from_dql(struct homa_qdisc_dev *qdev)
 {
 	struct homa_nic_queue *queue;
 	int pending, old, i;
-	struct dql *dql;
-	int recovered = 0;
 	int num_updates = 0;
+	int recovered = 0;
+	struct dql *dql;
 
 	for (i = 0; i < qdev->dev->real_num_tx_queues; i++) {
 		queue = &qdev->nic_queues[i];

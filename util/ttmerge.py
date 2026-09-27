@@ -9,7 +9,8 @@ must use the same time source.
 Usage: ttmerge.py file file file ...
 """
 
-from __future__ import division, print_function
+from __future__ import annotations
+from typing import Any
 from glob import glob
 import math
 from optparse import OptionParser
@@ -39,7 +40,7 @@ first = 0
 # ticks to microseconds.
 ghz = 0.0
 
-def next_line(info):
+def next_line(info: dict[str, Any]) -> None:
     """
     Read information from a file. The info argument is one of the
     entries in files.
@@ -50,7 +51,7 @@ def next_line(info):
             info["f"].close()
             info["f"] = None
             return
-        match = re.match(' *([0-9.]+) us \(\+ *([0-9.]+) us\) (.*)', line)
+        match = re.match(r' *([0-9.]+) us \(\+ *([0-9.]+) us\) (.*)', line)
         if not match:
             continue
         info["time"] = (float(match.group(1)) * ghz / info["ghz"]) + info["offset"]
@@ -64,9 +65,9 @@ for file in sys.argv[1:]:
     if not line:
         continue
     info = {"f": f}
-    match = re.match(' *([0-9.]+) us \(\+ *([0-9.]+) us\) .* '
+    match = re.match(r' *([0-9.]+) us \(\+ *([0-9.]+) us\) .* '
             'First event has timestamp ([0-9]+) '
-            '\(cpu_ghz ([0-9.]+)\)', line)
+            r'\(cpu_ghz ([0-9.]+)\)', line)
     if not match:
         continue
     info = {"name": file,

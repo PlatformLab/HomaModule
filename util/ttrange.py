@@ -12,7 +12,6 @@ timetrace will be written to standard output containing all entries whose
 timestamps fall between start_time and end_time, inclusive.
 """
 
-from __future__ import division, print_function
 from glob import glob
 from optparse import OptionParser
 import math

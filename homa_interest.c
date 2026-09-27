@@ -14,7 +14,7 @@
 /* DESIGN NOTES:
  * The key idea behind the design of the interest mechanism is to reduce usage
  * of socket locks while handing off ready RPCs to application threads. Private
- * handoffs do not requrie the socket lock to be acquired at all. Shared
+ * handoffs do not require the socket lock to be acquired at all. Shared
  * handoffs must acquire the socket lock to select one thread from a pool of
  * waiting threads. But in the normal case the thread receiving the ready RPC
  * does not need to acquire the socket lock again after the RPC has been
@@ -149,7 +149,7 @@ check_err:
 		homa_sock_lock(hsk);
 		list_del_init(&interest->links);
 		ready = atomic_read_acquire(&interest->state) &
-		        HOMA_INTEREST_READY;
+			HOMA_INTEREST_READY;
 		homa_sock_unlock(hsk);
 		if (ready == 0)
 			result = -EINTR;
@@ -213,7 +213,7 @@ void homa_interest_notify_shared(struct homa_sock *hsk, struct homa_rpc *rpc)
 			homa_clock();
 #else /* See strip.py */
 	interest = list_first_entry(&hsk->interests,
-					    struct homa_interest, links);
+				    struct homa_interest, links);
 #endif /* See strip.py */
 	list_del_init(&interest->links);
 	interest->rpc = rpc;

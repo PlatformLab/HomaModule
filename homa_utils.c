@@ -122,6 +122,8 @@ error:
  */
 void homa_destroy(struct homa *homa)
 {
+	UNIT_LOG("; ", "homa_destroy");
+
 	/* The order of the following cleanups matters! */
 	if (homa->socktab) {
 		homa_socktab_destroy(homa->socktab, NULL);

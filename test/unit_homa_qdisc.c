@@ -27,6 +27,7 @@ static struct sk_buff *new_test_skb(struct homa_rpc *rpc,
 				    struct in6_addr *daddr, int offset,
 				    int length)
 {
+	struct homa_skb_info *info;
 	struct homa_data_hdr data;
 	struct sk_buff *skb;
 
@@ -36,9 +37,16 @@ static struct sk_buff *new_test_skb(struct homa_rpc *rpc,
 		.type = DATA,
 		.sender_id = cpu_to_be64(rpc->id)
 	};
-	data.message_length = htonl(rpc->msgout.length);
+	data.msg_length = htonl(rpc->msgout.length);
 	data.seg.offset = htonl(offset);
-	skb = mock_skb_alloc(saddr, daddr, &data.common, length, 0);
+	skb = mock_raw_skb(saddr, daddr, IPPROTO_HOMA,
+			   sizeof(data) + length + sizeof(*info));
+	memcpy(skb_put(skb, sizeof(data)), &data, sizeof(data));
+	if (length != 0)
+		unit_fill_data(skb_put(skb, length), length, 0);
+	info = homa_get_skb_info(skb);
+	info->data_bytes = length;
+	qdisc_skb_cb(skb)->pkt_len = length + 100;
 	return skb;
 }
 
@@ -158,7 +166,7 @@ FIXTURE_SETUP(homa_qdisc)
 		.type = DATA,
 		.sender_id = cpu_to_be64(100)
 	};
-	self->data.message_length = htonl(10000);
+	self->data.msg_length = htonl(10000);
 
 	mock_clock = 10000;
 	unit_log_clear();
@@ -678,7 +686,7 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__short_final_packet_in_long_message)
 	ASSERT_NE(NULL, crpc);
 
 	atomic64_set(&q->qdev->link_idle_time, 1000000);
-	self->data.message_length = htonl(3000);
+	self->data.msg_length = htonl(3000);
 	self->data.seg.offset = htonl(2800);
 	skb = new_test_skb(crpc, &self->addr, &self->addr2, 7000, 100);
 	to_free = NULL;

@@ -9,7 +9,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   which appeared in the USENIX Annual Technical Conference in July, 2021.
 
 - A synopsis of the protocol implemented by this module is available in
-  [protocol.md](https://github.com/PlatformLab/HomaModule/blob/master/protocol.md).
+  [protocol.md](https://github.com/PlatformLab/HomaModule/blob/main/protocol.md).
 
 - As of August 2020, Homa has complete functionality for running real applications,
   and its tail latency is more than 10x better than TCP for all workloads I have
@@ -76,6 +76,10 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant changes
+- September 2026: Protocol change in granting mechanism. Messages that
+  require grants are now completely scheduled (no initial unscheduled
+  packets are sent). A new packet type, START_MSG, has been introduced
+  for these messages to announce themselves to the recipient.
 - March 2026: backported Homa to Red Hat Enterprise Linux versions
   8 and 9.5, using the branches `rhel8` and `rhel9.5`. Future changes made to
   the `main` branch are likely to be reflected in these branches also.

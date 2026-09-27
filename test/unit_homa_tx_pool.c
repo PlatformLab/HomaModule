@@ -544,6 +544,19 @@ TEST_F(homa_tx_pool, homa_tx_pool_gc__limited_by_min_kb)
 	homa_tx_pool_gc(&self->homa);
 	EXPECT_EQ(6, get_tx_pool_core(0)->pool->avail);
 }
+TEST_F(homa_tx_pool, homa_tx_pool_gc__ensure_64_bit_arithmetic_for_min_pages)
+{
+	mock_clock = 1000000;
+	self->homa.tx_page_free_time = 0;
+	self->homa.tx_page_frees_per_sec = 20;
+	self->homa.tx_page_pool_min_kb = 3000000;
+
+	add_to_pool(&self->homa, 10, 0);
+	get_tx_pool_core(0)->pool->low_mark = 10;
+
+	homa_tx_pool_gc(&self->homa);
+	EXPECT_EQ(10, get_tx_pool_core(0)->pool->avail);
+}
 TEST_F(homa_tx_pool, homa_tx_pool_gc__race_invalidates_max_low_mark)
 {
 	struct homa_tx_pool *tx_pool;
