@@ -1018,3 +1018,15 @@ TEST_F(homa_peer, homa_peer_unlink__basics)
 	homa_route_free(&route2->rcu_head);
 	homa_route_release(route);
 }
+
+TEST_F(homa_peer, homa_route__write_hot_fields_on_own_cacheline)
+{
+	/* refs/access_jiffies are written on every lookup; they must not
+	 * share a line with the key compared by rhashtable lookups.
+	 */
+	EXPECT_EQ(0, offsetof(struct homa_route, refs) % L1_CACHE_BYTES);
+	EXPECT_GT(offsetof(struct homa_route, refs),
+		  offsetof(struct homa_route, ht_linkage));
+	EXPECT_EQ(offsetof(struct homa_route, refs) / L1_CACHE_BYTES,
+		  offsetof(struct homa_route, access_jiffies) / L1_CACHE_BYTES);
+}

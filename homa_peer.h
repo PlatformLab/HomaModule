@@ -274,26 +274,6 @@ struct homa_route_key {
  * objects per peer, which have different homa_route_keys.
  */
 struct homa_route {
-	/**
-	 * @lock: used to synchronize uypdates to this struct.
-	 */
-	spinlock_t lock;
-
-	/**
-	 * @refs: Number of outstanding references to this object. Includes
-	 * one reference for the entry in peertab->route_ht, plus one for each
-	 * call to homa_route_get that has not been canceled by a call to
-	 * homa_peer_route_release; the object will be freed (via RCU) when
-	 * this count becomes zero.
-	 */
-	refcount_t refs;
-
-	/**
-	 * @access_jiffies: Time in jiffies of most recent access to this
-	 * object; used for garbage collection.
-	 */
-	unsigned long access_jiffies;
-
 	/** @key: Identifies this entry in peertab->route_ht. */
 	struct homa_route_key key;
 
@@ -327,6 +307,31 @@ struct homa_route {
 	 * peertab->route_ht.
 	 */
 	struct rhash_head ht_linkage;
+
+	/**
+	 * @refs: Number of outstanding references to this object. Includes
+	 * one reference for the entry in peertab->route_ht, plus one for each
+	 * call to homa_route_get that has not been canceled by a call to
+	 * homa_peer_route_release; the object will be freed (via RCU) when
+	 * this count becomes zero.
+	 *
+	 * On its own cache line (together with @access_jiffies): both are
+	 * written on every lookup, and sharing a line with the read-mostly
+	 * fields above (@key, @ht_linkage) forces a coherence miss on every
+	 * rhashtable walk from other cores.
+	 */
+	refcount_t refs ____cacheline_aligned_in_smp;
+
+	/**
+	 * @access_jiffies: Time in jiffies of most recent access to this
+	 * object; used for garbage collection.
+	 */
+	unsigned long access_jiffies;
+
+	/**
+	 * @lock: used to synchronize updates to this struct.
+	 */
+	spinlock_t lock;
 
 	/** @rcu_head: Holds state of a pending call_rcu invocation. */
 	struct rcu_head rcu_head;
