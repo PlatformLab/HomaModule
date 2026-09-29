@@ -609,7 +609,7 @@ int homa_route_pick_victims(struct homa_peertab *peertab,
 			 */
 			rhashtable_walk_stop(&peertab->route_ht_iter);
 			rhashtable_walk_exit(&peertab->route_ht_iter);
-			rhashtable_walk_enter(&peertab->peer_ht,
+			rhashtable_walk_enter(&peertab->route_ht,
 					      &peertab->route_ht_iter);
 			rhashtable_walk_start(&peertab->route_ht_iter);
 			route = rhashtable_walk_next(&peertab->route_ht_iter);

@@ -638,6 +638,7 @@ TEST_F(homa_peer, homa_route_pick_victims__hash_table_wraparound)
 	EXPECT_EQ(2, homa_route_pick_victims(peertab, victims, 5));
 	EXPECT_EQ(routes[0], victims[0]);
 	EXPECT_EQ(routes[2], victims[1]);
+	EXPECT_EQ(&peertab->route_ht, peertab->route_ht_iter.ht);
 }
 TEST_F(homa_peer, homa_route_pick_victims__EAGAIN_from_rht_walk)
 {
