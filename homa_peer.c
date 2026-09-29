@@ -443,7 +443,12 @@ struct homa_route *homa_route_get(struct homa_sock *hsk,
 				  route_ht_params);
 	tt_record("rhashtable_lookup for route key returned");
 	if (route && refcount_inc_not_zero(&route->refs)) {
-		route->access_jiffies = jiffies;
+		/* jiffies advances every few ms; an unconditional store here
+		 * dirties the line ~1M times/s under load for no extra
+		 * freshness.
+		 */
+		if (route->access_jiffies != jiffies)
+			route->access_jiffies = jiffies;
 		rcu_read_unlock();
 		return route;
 	}
