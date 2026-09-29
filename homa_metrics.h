@@ -735,6 +735,18 @@ struct homa_metrics {
 	u64 ignored_need_acks;
 
 	/**
+	 * @bpool_lock_misses: total number of times that Homa had to wait
+	 * to acquire the lock for a buffer pool.
+	 */
+	u64 bpool_lock_misses;
+
+	/**
+	 * @bpool_lock_miss_cycles: total time spent waiting for buffer pool
+	 * lock misses.
+	 */
+	u64 bpool_lock_miss_cycles;
+
+	/**
 	 * @bpage_reuses: total number of times that, when an owned page
 	 * reached the end, it could be reused because all existing
 	 * allocations had been released.

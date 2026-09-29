@@ -1062,7 +1062,8 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 			return -EFAULT;
 		}
 
-		ret = homa_pool_set_region(hsk, u64_to_user_ptr(args.start),
+		ret = homa_pool_set_region(hsk->buffer_pool,
+					   u64_to_user_ptr(args.start),
 					   args.length);
 		INC_METRIC(so_set_buf_calls, 1);
 		INC_METRIC(so_set_buf_cycles, homa_clock() - start);

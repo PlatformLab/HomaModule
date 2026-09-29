@@ -1,14 +1,13 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Notes for pool revision:
+  * Change API for homa_pool_set_region?
+
 * Notes for new granting mechanism:
-  * Update homa_prio.cc
   * Compile with __STRIP__
   * Reduce tt_record calls in homa_grant.c?
   * Remove grant->prev_grant?
-  * Review behavior of homa_pool_check_waiting when RPC restarts (only request
-    retransmission for unscheduled?)
-  * Why does homa_xmit_data check xmit_offset >= rpc->msgout.length?
   * What is the difference between granted and prev_grant in homa_message_in?
   * Make copied_from_user an atomic_t?
   * Remove "end" argument for homa_tx_skb_send? At the least, fix its

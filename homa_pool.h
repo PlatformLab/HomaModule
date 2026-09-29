@@ -75,6 +75,34 @@ struct homa_pool_core {
  */
 struct homa_pool {
 	/**
+	 * @lock: Used for mutual exclusion when performing operations that
+	 * affect @free_pages or @waiting_for_bufs.
+	 */
+	spinlock_t lock;
+
+	/**
+	 * @free_bpages: the number of pages still available for allocation
+	 * by homa_pool_get_pages. This equals the number of pages with zero
+	 * reference counts, minus the number of pages that have been claimed
+	 * by homa_pool_get_pages but not yet allocated.
+	 */
+	atomic_t free_bpages;
+
+	/**
+	 * @waiting_for_bufs: RPCs that are blocked waiting for bpages for
+	 * their incoming message (linked via rpc->buf_links). Sorted in
+	 * increasing order of message length.
+	 */
+	struct list_head waiting_for_bufs;
+
+	/**
+	 * @bpages_needed: the number of free bpages required to satisfy the
+	 * needs of the first RPC on @waiting_for_bufs, or INT_MAX if
+	 * that queue is empty.
+	 */
+	int bpages_needed;
+
+	/**
 	 * @hsk: the socket that this pool belongs to.
 	 */
 	struct homa_sock *hsk;
@@ -93,21 +121,6 @@ struct homa_pool {
 
 	/** @descriptors: kmalloced area containing one entry for each bpage. */
 	struct homa_bpage *descriptors;
-
-	/**
-	 * @free_bpages: the number of pages still available for allocation
-	 * by homa_pool_get_pages. This equals the number of pages with zero
-	 * reference counts, minus the number of pages that have been claimed
-	 * by homa_pool_get_pages but not yet allocated.
-	 */
-	atomic_t free_bpages;
-
-	/**
-	 * @bpages_needed: the number of free bpages required to satisfy the
-	 * needs of the first RPC on @hsk->waiting_for_bufs, or INT_MAX if
-	 * that queue is empty.
-	 */
-	int bpages_needed;
 
 	/** @cores: core-specific info; dynamically allocated. */
 	struct homa_pool_core __percpu *cores;
@@ -133,9 +146,44 @@ void     homa_pool_get_rcvbuf(struct homa_pool *pool,
 			      struct homa_rcvbuf_args *args);
 int      homa_pool_free_bufs(struct homa_pool *pool, int num_buffers,
 			     u32 *buffers);
-int      homa_pool_set_region(struct homa_sock *hsk, void __user *region,
+void     homa_pool_lock_slow(struct homa_pool *pool);
+int      homa_pool_set_region(struct homa_pool *pool, void __user *region,
 			      u64 region_size);
 void     homa_pool_wakeup_rpc(struct homa_rpc *rpc);
+
+#ifndef __STRIP__ /* See strip.py */
+/**
+ * homa_pool_lock() - Acquire the lock for a buffer pool. If the pool
+ * isn't immediately available, record stats on the waiting time.
+ * @pool:     Buffer pool to lock.
+ */
+static inline void homa_pool_lock(struct homa_pool *pool)
+	__acquires(pool->lock)
+{
+	if (!spin_trylock_bh(&pool->lock))
+		homa_pool_lock_slow(pool);
+}
+#else /* See strip.py */
+/**
+ * homa_pool_lock() - Acquire the lock for a buffer pool.
+ * @pool:     Buffer pool to lock.
+ */
+static inline void homa_pool_lock(struct homa_pool *pool)
+	__acquires(pool->lock)
+{
+	spin_lock_bh(&pool->lock);
+}
+#endif /* See strip.py */
+
+/**
+ * homa_pool_unlock() - Release the lock for a buffer pool.
+ * @hsk:   Buffer pool to unlock.
+ */
+static inline void homa_pool_unlock(struct homa_pool *pool)
+	__releases(pool->lock)
+{
+	spin_unlock_bh(&pool->lock);
+}
 
 /**
  * homa_pool_unlink() - Remove an RPC from any lists related to buffer

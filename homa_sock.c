@@ -217,7 +217,6 @@ int homa_sock_init(struct homa_sock *hsk)
 	atomic_set(&hsk->protect_count, 0);
 	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
-	INIT_LIST_HEAD(&hsk->waiting_for_bufs);
 	INIT_LIST_HEAD(&hsk->ready_rpcs);
 	INIT_LIST_HEAD(&hsk->interests);
 	for (i = 0; i < HOMA_CLIENT_RPC_BUCKETS; i++) {

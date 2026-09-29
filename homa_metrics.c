@@ -404,6 +404,10 @@ char *homa_metrics_print(void)
 		  "Explicit ACKs sent because peer->acks was full\n");
 		M("ignored_need_acks", m->ignored_need_acks,
 		  "NEED_ACKs ignored because RPC result not yet received\n");
+		M("bpool_lock_misses", m->bpool_lock_misses,
+		  "Buffer pool lock misses\n");
+		M("bpool_lock_miss_cycles", m->bpool_lock_miss_cycles,
+		  "Time lost waiting for buffer pool lock\n");
 		M("bpage_reuses", m->bpage_reuses,
 		  "Buffer page could be reused because ref count was zero\n");
 		M("buffer_alloc_failures", m->buffer_alloc_failures,

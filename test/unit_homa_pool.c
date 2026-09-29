@@ -70,7 +70,7 @@ TEST_F(homa_pool, set_bpages_needed)
 	atomic_set(&pool->free_bpages, 0);
 	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 2*HOMA_BPAGE_SIZE+1);
-	ASSERT_FALSE(list_empty(&self->hsk.waiting_for_bufs));
+	ASSERT_FALSE(list_empty(&self->hsk.buffer_pool->waiting_for_bufs));
 	EXPECT_EQ(3, pool->bpages_needed);
 	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 2*HOMA_BPAGE_SIZE);
@@ -99,8 +99,9 @@ TEST_F(homa_pool, homa_pool_set_region__region_not_page_aligned)
 	homa_pool_free(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 
-	EXPECT_EQ(EINVAL, -homa_pool_set_region(&self->hsk,
-		  ((char *) 0x1000000) + 10, 100*HOMA_BPAGE_SIZE));
+	EXPECT_EQ(EINVAL, -homa_pool_set_region(self->hsk.buffer_pool,
+						((char *) 0x1000000) + 10,
+						100*HOMA_BPAGE_SIZE));
 	EXPECT_STREQ("buffer pool is not page aligned", self->hsk.error_msg);
 }
 TEST_F(homa_pool, homa_pool_set_region__region_too_small)
@@ -108,7 +109,8 @@ TEST_F(homa_pool, homa_pool_set_region__region_too_small)
 	homa_pool_free(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 
-	EXPECT_EQ(EINVAL, -homa_pool_set_region(&self->hsk, (void *) 0x1000000,
+	EXPECT_EQ(EINVAL, -homa_pool_set_region(self->hsk.buffer_pool,
+						(void *) 0x1000000,
 		  nr_cpu_ids * HOMA_BPAGE_SIZE));
 	EXPECT_STREQ("buffer pool is not large enough", self->hsk.error_msg);
 }
@@ -122,7 +124,8 @@ TEST_F(homa_pool, homa_pool_set_region__region_too_large)
 	size = 1;
 	size <<= 32;
 	size++;
-	EXPECT_EQ(EINVAL, -homa_pool_set_region(&self->hsk, (void *) 0x1000000,
+	EXPECT_EQ(EINVAL, -homa_pool_set_region(self->hsk.buffer_pool,
+						(void *) 0x1000000,
 		  size));
 	EXPECT_STREQ("buffer pool cannot be larger than 4 GB",
 		     self->hsk.error_msg);
@@ -133,8 +136,9 @@ TEST_F(homa_pool, homa_pool_set_region__cant_allocate_descriptors)
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 
 	mock_kmalloc_errors = 1;
-	EXPECT_EQ(ENOMEM, -homa_pool_set_region(&self->hsk, (void *) 0x100000,
-			100*HOMA_BPAGE_SIZE));
+	EXPECT_EQ(ENOMEM, -homa_pool_set_region(self->hsk.buffer_pool,
+						(void *) 0x100000,
+						100*HOMA_BPAGE_SIZE));
 }
 TEST_F(homa_pool, homa_pool_set_region__cant_allocate_core_info)
 {
@@ -142,21 +146,24 @@ TEST_F(homa_pool, homa_pool_set_region__cant_allocate_core_info)
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 
 	mock_kmalloc_errors = 2;
-	EXPECT_EQ(ENOMEM, -homa_pool_set_region(&self->hsk, (void *) 0x100000,
-			100*HOMA_BPAGE_SIZE));
+	EXPECT_EQ(ENOMEM, -homa_pool_set_region(self->hsk.buffer_pool,
+						(void *) 0x100000,
+						100*HOMA_BPAGE_SIZE));
 }
 TEST_F(homa_pool, homa_pool_set_region__pool_already_has_region)
 {
-	EXPECT_EQ(EINVAL, -homa_pool_set_region(&self->hsk, (void *) 0x100000,
-			100*HOMA_BPAGE_SIZE));
+	EXPECT_EQ(EINVAL, -homa_pool_set_region(self->hsk.buffer_pool,
+						(void *) 0x100000,
+						100*HOMA_BPAGE_SIZE));
 }
 TEST_F(homa_pool, homa_pool_set_region__success)
 {
 	homa_pool_free(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 
-	EXPECT_EQ(0, -homa_pool_set_region(&self->hsk, (void *) 0x100000,
-			78*HOMA_BPAGE_SIZE));
+	EXPECT_EQ(0, -homa_pool_set_region(self->hsk.buffer_pool,
+					   (void *) 0x100000,
+					   78*HOMA_BPAGE_SIZE));
 	EXPECT_EQ(78, self->hsk.buffer_pool->num_bpages);
 	EXPECT_EQ(-1, self->hsk.buffer_pool->descriptors[69].owner);
 }
@@ -169,8 +176,9 @@ TEST_F(homa_pool, homa_pool_get_rcvbuf)
 	homa_pool_free(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
 
-	EXPECT_EQ(0, -homa_pool_set_region(&self->hsk, (void *)0x40000,
-		  100*HOMA_BPAGE_SIZE + 1000));
+	EXPECT_EQ(0, -homa_pool_set_region(self->hsk.buffer_pool,
+					   (void *)0x40000,
+		  			   100*HOMA_BPAGE_SIZE + 1000));
 	homa_pool_get_rcvbuf(self->hsk.buffer_pool, &args);
 	EXPECT_EQ(0x40000, args.start);
 	EXPECT_EQ(100*HOMA_BPAGE_SIZE, args.length);
@@ -523,17 +531,20 @@ TEST_F(homa_pool, homa_pool_alloc_msg__out_of_space)
 			&self->server_ip, 4000, 102, 1000, 2000);
 
 	ASSERT_EQ(0, atomic_read(&pool->free_bpages));
-	ASSERT_FALSE(list_empty(&self->hsk.waiting_for_bufs));
-	rpc = list_first_entry(&self->hsk.waiting_for_bufs, struct homa_rpc,
-			buf_links);
+	ASSERT_FALSE(list_empty(&self->hsk.buffer_pool->waiting_for_bufs));
+	rpc = list_first_entry(&self->hsk.buffer_pool->waiting_for_bufs,
+			       struct homa_rpc, buf_links);
 	EXPECT_EQ(98, rpc->id);
-	ASSERT_FALSE(list_is_last(&rpc->buf_links, &self->hsk.waiting_for_bufs));
+	ASSERT_FALSE(list_is_last(&rpc->buf_links,
+				  &self->hsk.buffer_pool->waiting_for_bufs));
 	rpc = list_next_entry(rpc, buf_links);
 	EXPECT_EQ(102, rpc->id);
-	ASSERT_FALSE(list_is_last(&rpc->buf_links, &self->hsk.waiting_for_bufs));
+	ASSERT_FALSE(list_is_last(&rpc->buf_links,
+				  &self->hsk.buffer_pool->waiting_for_bufs));
 	rpc = list_next_entry(rpc, buf_links);
 	EXPECT_EQ(100, rpc->id);
-	EXPECT_TRUE(list_is_last(&rpc->buf_links, &self->hsk.waiting_for_bufs));
+	EXPECT_TRUE(list_is_last(&rpc->buf_links,
+				 &self->hsk.buffer_pool->waiting_for_bufs));
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(3, homa_metrics_per_cpu()->buffer_alloc_failures);
 #endif /* See strip.py */
@@ -734,7 +745,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__rpc_initially_locked)
 			"rpc lock unavailable in homa_pool_check_waiting",
 			unit_log_get());
 	EXPECT_EQ(1, crpc->msgin.num_bpages);
-	EXPECT_TRUE(list_empty(&self->hsk.waiting_for_bufs));
+	EXPECT_TRUE(list_empty(&self->hsk.buffer_pool->waiting_for_bufs));
 }
 TEST_F(homa_pool, homa_pool_check_waiting__reset_bpages_needed)
 {

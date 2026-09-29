@@ -130,6 +130,8 @@ void homa_request_retrans(struct homa_rpc *rpc)
 	 */
 	if (rpc->state == RPC_OUTGOING && homa_is_client(rpc->id) &&
 	    rpc->msgout.granted == 0) {
+		tt_record2("Reissuing START_MSG for id %d, length %d",
+			   rpc->id, rpc->msgout.length);
 	    	homa_xmit_start_msg(rpc, rpc->msgout.length);
 		return;
 	}

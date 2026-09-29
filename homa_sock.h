@@ -315,13 +315,6 @@ struct homa_sock {
 	u64 dead_frags;
 
 	/**
-	 * @waiting_for_bufs: Contains RPCs that are blocked because there
-	 * wasn't enough space in the buffer pool region for their incoming
-	 * messages. Sorted in increasing order of message length.
-	 */
-	struct list_head waiting_for_bufs;
-
-	/**
 	 * @ready_rpcs: List of all RPCs that are ready for attention from
 	 * an application thread.
 	 */

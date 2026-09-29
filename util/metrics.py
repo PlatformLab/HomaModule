@@ -353,7 +353,8 @@ if elapsed_secs != 0:
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
-    for lock in ["client", "server", "socket", "grant", "peer_ack", "qdisc"]:
+    for lock in ["client", "server", "socket", "grant", "peer_ack", "qdisc",
+            "bpool"]:
         misses = float(deltas[lock + "_lock_misses"])
         cycles = float(deltas[lock + "_lock_miss_cycles"])
         if misses == 0:

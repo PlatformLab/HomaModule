@@ -427,8 +427,8 @@ struct homa_rpc {
 	struct list_head ready_links;
 
 	/**
-	 * @buf_links: Used to link this RPC into @hsk->waiting_for_bufs.
-	 * If the RPC isn't on @hsk->waiting_for_bufs, this is an empty
+	 * @buf_links: Used to link this RPC into @pool->waiting_for_bufs.
+	 * If the RPC isn't on @pool->waiting_for_bufs, this is an empty
 	 * list pointing to itself.
 	 */
 	struct list_head buf_links;
