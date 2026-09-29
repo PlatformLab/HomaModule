@@ -1618,6 +1618,18 @@ def sum_fields(list: list[dict[str, Any]], field: str) -> int | float:
         total += d[field]
     return total
 
+def trace_data_avl(node: str, t: float):
+    """
+    Return True if the trace for node includes the time t, False if t
+    is before the beginning of the trace or after the end.
+    """
+    global traces
+
+    if not node in traces:
+        return False
+    trace = traces[node]
+    return trace['first_time'] < t and trace['last_time'] > t
+
 class Dispatcher:
 
     # Info about trace file currently being parsed, or None if none.
@@ -9362,7 +9374,8 @@ class AnalyzePackets:
             rpcs[id]['softirq_grant_pkts'].append(g)
         g['softirq'] = t
         g['softirq_core'] = core
-        g['increment'] = increment
+        # Don't set the increment here: out-of-order packet arrivals could
+        # make it negative.
         g['priority'] = priority
         g['rx_node'] = trace['node']
 
@@ -10539,7 +10552,7 @@ class AnalyzeRpcs:
                         rpc['in_length'] = sender['out_length']
             rpc['unsched'] = 0
             if (not rpc['start_msg_softirq'] and not rpc['send_grant_pkts'] and
-                    rpc['in_length']):
+                    rpc['in_length'] and rpc['gro_data_pkts']):
                 rpc['unsched'] = rpc['in_length']
                 if rpc['unsched'] > max_unsched:
                     max_unsched = rpc['unsched']
@@ -11334,8 +11347,15 @@ class AnalyzeRxsnapshot:
 
             offset = pkt['offset']
             end_offset = offset + pkt['length']
-            for type in ['xmit', 'nic', 'gro', 'softirq', 'copied']:
-                if (type in pkt):
+
+            # Collect pre and post times, but skip times related to tx if
+            # the sender doesn't have trace data around the target time.
+            if trace_data_avl(pkt['tx_node'], t):
+                events = ['xmit', 'nic', 'gro', 'softirq', 'copied']
+            else:
+                events = ['gro', 'softirq', 'copied']
+            for type in events:
+                if type in pkt:
                     pkt_time = pkt[type]
                     if pkt_time < t:
                         if end_offset > live_rpc['pre_' + type]:
@@ -11355,7 +11375,11 @@ class AnalyzeRxsnapshot:
 
             end_offset = pkt['offset']
             offset = end_offset - pkt['increment']
-            for type in ['xmit', 'gro', 'softirq']:
+            if trace_data_avl(pkt['rx_node'], t):
+                events = ['xmit', 'gro', 'softirq']
+            else:
+                events = ['xmit']
+            for type in events:
                 if (type in pkt):
                     pkt_time = pkt[type]
                     if pkt_time < t:
