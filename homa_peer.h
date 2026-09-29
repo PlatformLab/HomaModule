@@ -156,24 +156,6 @@ struct homa_peer {
 	 */
 	struct rhash_head ht_linkage;
 
-	/**
-	 * @lock: used to synchronize access to fields in this struct, such
-	 * as @num_acks, @acks, @dst, and @dst_cookie.
-	 */
-	spinlock_t lock ____cacheline_aligned_in_smp;
-
-	/**
-	 * @num_acks: the number of (initial) entries in @acks that
-	 * currently hold valid information.
-	 */
-	int num_acks;
-
-	/**
-	 * @acks: info about client RPCs whose results have been completely
-	 * received.
-	 */
-	struct homa_ack acks[HOMA_MAX_ACKS_PER_PKT];
-
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @unsched_cutoffs: priorities to use for unscheduled packets
@@ -270,7 +252,8 @@ struct homa_route_key {
 /**
  * struct homa_route - Holds a dst_entry for communicating with a
  * particular peer, as well as information needed to cache the dst_entry
- * and share it for multiple RPCs. There can be more than one of these
+ * and share it for multiple RPCs. Also holds acks waiting to be piggybacked
+ * on packets sent over this route. There can be more than one of these
  * objects per peer, which have different homa_route_keys.
  */
 struct homa_route {
@@ -328,18 +311,37 @@ struct homa_route {
 	 */
 	unsigned long access_jiffies;
 
-	/**
-	 * @lock: used to synchronize updates to this struct.
-	 */
-	spinlock_t lock;
-
 	/** @rcu_head: Holds state of a pending call_rcu invocation. */
 	struct rcu_head rcu_head;
+
+	/**
+	 * @lock: used to synchronize access to @num_acks and @acks. These
+	 * are updated whenever a client RPC completes and drained by
+	 * outgoing packets, so they get their own cache line, away from the
+	 * fields read on every route lookup.
+	 */
+	spinlock_t lock ____cacheline_aligned_in_smp;
+
+	/**
+	 * @num_acks: the number of (initial) entries in @acks that
+	 * currently hold valid information. homa_route_get_acks reads it
+	 * without the lock as a fast-path check, which is racy, but the
+	 * worst that can happen is a wasted lock or an ack that waits for
+	 * the next packet.
+	 */
+	int num_acks;
+
+	/**
+	 * @acks: info about client RPCs sent on this route whose results
+	 * have been completely received. Kept per route, not per peer: a
+	 * server matches an ack by the source address of the packet
+	 * carrying it, so an ack must leave from the address its RPC used.
+	 */
+	struct homa_ack acks[HOMA_MAX_ACKS_PER_PKT];
 };
 
 void     homa_dst_refresh(struct homa_peertab *peertab,
 			  struct homa_peer *peer, struct homa_sock *hsk);
-void     homa_peer_add_ack(struct homa_rpc *rpc);
 struct homa_peer
 	*homa_peer_alloc(struct homa_sock *hsk, const struct in6_addr *addr);
 struct homa_peertab
@@ -351,13 +353,11 @@ void     homa_peer_free_net(struct homa_net *hnet);
 void     homa_peer_free_peertab(struct homa_peertab *peertab);
 struct homa_peer
 	*homa_peer_get(struct homa_sock *hsk, const struct in6_addr *addr);
-int      homa_peer_get_acks(struct homa_peer *peer, int count,
-			    struct homa_ack *dst);
-void     homa_peer_lock_slow(struct homa_peer *peer);
 void     homa_peer_release_fn(void *object, void *dummy);
 void     homa_peer_update_sysctl_deps(struct homa_peertab *peertab);
 void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
 			       int c2, int c3, int c4, int c5, int c6, int c7);
+void     homa_route_add_ack(struct homa_rpc *rpc);
 struct homa_route
 	*homa_route_alloc(struct homa_sock *hsk,
 			  const struct homa_route_key *key);
@@ -367,7 +367,10 @@ void     homa_route_gc(struct homa_peertab *peertab);
 struct homa_route
 	*homa_route_get(struct homa_sock *hsk,
 				    const struct in6_addr *addr);
+int      homa_route_get_acks(struct homa_route *route, int count,
+			     struct homa_ack *dst);
 u32      homa_route_hash(const void *data, u32 len, u32 seed);
+void     homa_route_lock_slow(struct homa_route *route);
 int      homa_route_pick_victims(struct homa_peertab *peertab,
 				 struct homa_route *victims[], int max_victims);
 int      homa_route_prefer_evict(struct homa_peertab *peertab,
@@ -382,36 +385,36 @@ extern const struct rhashtable_params route_ht_params;
 
 #ifndef __STRIP__ /* See strip.py */
 /**
- * homa_peer_lock() - Acquire the lock for a peer. If the lock isn't
+ * homa_route_lock() - Acquire the lock for a route. If the lock isn't
  * immediately available, record stats on the waiting time.
- * @peer:    Peer to lock.
+ * @route:   Route to lock.
  */
-static inline void homa_peer_lock(struct homa_peer *peer)
-	__acquires(peer->lock)
+static inline void homa_route_lock(struct homa_route *route)
+	__acquires(route->lock)
 {
-	if (!spin_trylock_bh(&peer->lock))
-		homa_peer_lock_slow(peer);
+	if (!spin_trylock_bh(&route->lock))
+		homa_route_lock_slow(route);
 }
 #else /* See strip.py */
 /**
- * homa_peer_lock() - Acquire the lock for a peer.
- * @peer:    Peer to lock.
+ * homa_route_lock() - Acquire the lock for a route.
+ * @route:   Route to lock.
  */
-static inline void homa_peer_lock(struct homa_peer *peer)
-	__acquires(peer->lock)
+static inline void homa_route_lock(struct homa_route *route)
+	__acquires(route->lock)
 {
-	spin_lock_bh(&peer->lock);
+	spin_lock_bh(&route->lock);
 }
 #endif /* See strip.py */
 
 /**
- * homa_peer_unlock() - Release the lock for a peer.
- * @peer:   Peer to lock.
+ * homa_route_unlock() - Release the lock for a route.
+ * @route:   Route to unlock.
  */
-static inline void homa_peer_unlock(struct homa_peer *peer)
-	__releases(peer->lock)
+static inline void homa_route_unlock(struct homa_route *route)
+	__releases(route->lock)
 {
-	spin_unlock_bh(&peer->lock);
+	spin_unlock_bh(&route->lock);
 }
 
 /**

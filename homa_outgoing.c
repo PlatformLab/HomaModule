@@ -267,7 +267,7 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 			   sizeof(struct homa_seg_hdr));
 	h->common.sender_id = cpu_to_be64(rpc->id);
 	h->msg_length = htonl(rpc->msgout.length);
-	homa_peer_get_acks(rpc->route->peer, 1, &h->ack);
+	homa_route_get_acks(rpc->route, 1, &h->ack);
 	IF_NO_STRIP(h->cutoff_version = rpc->route->peer->cutoff_version);
 	if (offset < rpc->msgout.next_xmit_offset)
 		h->retransmit = 1;

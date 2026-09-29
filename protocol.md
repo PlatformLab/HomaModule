@@ -129,8 +129,9 @@ the RPC. Acks can get sent in two ways. First, each DATA packet
 has room for one ack, so if a client is having an ongoing conversation
 with a server, it can use future RPCs to ack older ones. Second, clients
 can send explicit ACK packets, each of which can carry multiple acks.
-A client has limited storage for acks for each peer, so it will send
-an ACK packet if its storage for a peer overflows. In addition, the server
+A client has limited storage for pending acks for each route (a
+source and destination address pair), so it will send an ACK packet
+if that storage overflows. In addition, the server
 will use its timeout mechanism to request an explicit ack if all of the
 data has been transmitted for a response but no ack has been received.
 The server sends a NEED_ACK packet to request the ack, and the client
