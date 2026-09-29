@@ -243,7 +243,6 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 	peer->ht_key.addr = *addr;
 	peer->ht_key.hnet = hsk->hnet;
 	refcount_set(&peer->refs, 1);
-	spin_lock_init(&peer->lock);
 #ifndef __STRIP__ /* See strip.py */
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 2] = INT_MAX;
@@ -769,81 +768,82 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
 }
 
 /**
- * homa_peer_lock_slow() - This function implements the slow path for
- * acquiring a peer's @lock. It is invoked when the lock isn't
+ * homa_route_lock_slow() - This function implements the slow path for
+ * acquiring a route's @lock. It is invoked when the lock isn't
  * immediately available. It waits for the lock, but also records statistics
  * about the waiting time.
- * @peer:    Peer to  lock.
+ * @route:   Route to lock.
  */
-void homa_peer_lock_slow(struct homa_peer *peer)
-	__acquires(peer->lock)
+void homa_route_lock_slow(struct homa_route *route)
+	__acquires(route->lock)
 {
 	u64 start = homa_clock();
 
-	tt_record("beginning wait for peer lock");
-	spin_lock_bh(&peer->lock);
-	tt_record("ending wait for peer lock");
-	INC_METRIC(peer_ack_lock_misses, 1);
-	INC_METRIC(peer_ack_lock_miss_cycles, homa_clock() - start);
+	tt_record("beginning wait for route lock");
+	spin_lock_bh(&route->lock);
+	tt_record("ending wait for route lock");
+	INC_METRIC(route_ack_lock_misses, 1);
+	INC_METRIC(route_ack_lock_miss_cycles, homa_clock() - start);
 }
 #endif /* See strip.py */
 
 /**
- * homa_peer_add_ack() - Add a given RPC to the list of unacked
- * RPCs for its server. Once this method has been invoked, it's safe
+ * homa_route_add_ack() - Add a given RPC to the list of unacked
+ * RPCs for its route. Once this method has been invoked, it's safe
  * to delete the RPC, since it will eventually be acked to the server.
  * @rpc:    Client RPC that has now completed. Must be locked by caller.
  */
-void homa_peer_add_ack(struct homa_rpc *rpc)
+void homa_route_add_ack(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
-	struct homa_peer *peer = rpc->route->peer;
+	struct homa_route *route = rpc->route;
 	struct homa_ack_hdr ack;
 
-	homa_peer_lock(peer);
-	if (peer->num_acks < HOMA_MAX_ACKS_PER_PKT) {
-		peer->acks[peer->num_acks].client_id = cpu_to_be64(rpc->id);
-		peer->acks[peer->num_acks].server_port = htons(rpc->dport);
-		peer->num_acks++;
-		homa_peer_unlock(peer);
+	homa_route_lock(route);
+	if (route->num_acks < HOMA_MAX_ACKS_PER_PKT) {
+		route->acks[route->num_acks].client_id = cpu_to_be64(rpc->id);
+		route->acks[route->num_acks].server_port = htons(rpc->dport);
+		route->num_acks++;
+		homa_route_unlock(route);
 		return;
 	}
 
-	/* The peer has filled up; send an ACK message to empty it. The
+	/* The route has filled up; send an ACK message to empty it. The
 	 * RPC in the message header will also be considered ACKed.
 	 */
 	INC_METRIC(ack_overflows, 1);
-	memcpy(ack.acks, peer->acks, sizeof(peer->acks));
-	ack.num_acks = htons(peer->num_acks);
-	peer->num_acks = 0;
-	homa_peer_unlock(peer);
+	memcpy(ack.acks, route->acks, sizeof(route->acks));
+	ack.num_acks = htons(route->num_acks);
+	route->num_acks = 0;
+	homa_route_unlock(route);
 	homa_xmit_control(ACK, &ack, sizeof(ack), rpc);
 }
 
 /**
- * homa_peer_get_acks() - Copy acks out of a peer, and remove them from the
- * peer.
- * @peer:    Peer to check for possible unacked RPCs.
+ * homa_route_get_acks() - Copy acks out of a route, and remove them from the
+ * route.
+ * @route:   Route to check for possible unacked RPCs.
  * @count:   Maximum number of acks to return.
  * @dst:     The acks are copied to this location.
  *
- * Return:   The number of acks extracted from the peer (<= count).
+ * Return:   The number of acks extracted from the route (<= count).
  */
-int homa_peer_get_acks(struct homa_peer *peer, int count, struct homa_ack *dst)
+int homa_route_get_acks(struct homa_route *route, int count,
+			struct homa_ack *dst)
 {
 	/* Don't waste time acquiring the lock if there are no ids available. */
-	if (peer->num_acks == 0)
+	if (route->num_acks == 0)
 		return 0;
 
-	homa_peer_lock(peer);
+	homa_route_lock(route);
 
-	if (count > peer->num_acks)
-		count = peer->num_acks;
-	memcpy(dst, &peer->acks[peer->num_acks - count],
-	       count * sizeof(peer->acks[0]));
-	peer->num_acks -= count;
+	if (count > route->num_acks)
+		count = route->num_acks;
+	memcpy(dst, &route->acks[route->num_acks - count],
+	       count * sizeof(route->acks[0]));
+	route->num_acks -= count;
 
-	homa_peer_unlock(peer);
+	homa_route_unlock(route);
 	return count;
 }
 

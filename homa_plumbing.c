@@ -1523,7 +1523,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		 */
 		rpc->msgin.num_bpages = 0;
 		if (homa_is_client(rpc->id)) {
-			homa_peer_add_ack(rpc);
+			homa_route_add_ack(rpc);
 			homa_rpc_end(rpc);
 		} else {
 			rpc->state = RPC_IN_SERVICE;
