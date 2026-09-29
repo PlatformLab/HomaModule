@@ -420,6 +420,10 @@ void homa_freeze_peers(void)
 	int wrong_family;
 	int err;
 
+#ifdef __UNIT_TEST__
+	return;
+#endif
+
 	/* Find a socket to use (any socket for the namespace will do). */
 	hnet = homa_net(&init_net);
 	rcu_read_lock();
