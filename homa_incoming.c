@@ -1147,9 +1147,7 @@ void homa_start_msg_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		   homa_local_id(h->common.sender_id),
 		   ntohl(h->msg_length));
 
-	/* We don't need to do anything with this packet unless it
-	 * signals the beginning of a response message.
-	 */
+	/* Check for (and handle) the beginning of a response message. */
 	if (rpc->state == RPC_OUTGOING && homa_is_client(rpc->id)) {
 		INC_METRIC(responses_received, 1);
 		rpc->state = RPC_INCOMING;
@@ -1159,6 +1157,19 @@ void homa_start_msg_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		 */
 		homa_message_in_init(rpc, ntohl(h->msg_length), 0);
 	}
+
+	/* If this is a retransmission, return a BUSY so the sender knows
+	 * we know about the message.
+	 */
+	if (test_bit(RPC_GOT_START_MSG, &rpc->flags)) {
+		struct homa_busy_hdr busy;
+
+		tt_record2("sending BUSY response to START_MSG, id %d, state %d",
+			   rpc->id, rpc->state);
+		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
+	}
+	set_bit(RPC_GOT_START_MSG, &rpc->flags);
+
 	consume_skb(skb);
 }
 #endif /* See strip.py */

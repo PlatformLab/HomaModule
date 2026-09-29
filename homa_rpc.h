@@ -343,12 +343,16 @@ struct homa_rpc {
 	 *                         homa_grant_check_rpc is called, so it is
 	 *                         possible for RPC_GRANTABLE to be set but
 	 *                         not RPC_GRANT_MANAGED.
+	 * RPC_GOT_START_MSG -     1 means we have already received a
+	 *                         START_MSG packet for this RPC; used to
+	 *                         detect START_MSG retransmissions.
 	 */
 #define RPC_PKTS_READY        0
 #define APP_NEEDS_LOCK        1
 #define RPC_PRIVATE           2
 #define RPC_GRANTABLE         3
 #define RPC_GRANT_MANAGED     4
+#define RPC_GOT_START_MSG     5
 
 	/**
 	 * @refs: Number of references to this RPC, including one for each
