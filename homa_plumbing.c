@@ -1022,7 +1022,6 @@ int homa_ioc_release(struct socket *sock, unsigned long arg)
 				     args.bpage_offsets);
 	if (result)
 		hsk->error_msg = "error while releasing buffer pages";
-	homa_pool_check_waiting(hsk->buffer_pool);
 	return result;
 }
 

@@ -383,6 +383,7 @@ struct static_call_key __SCK__WARN_trap;
 struct paravirt_patch_template pv_ops;
 struct workqueue_struct *system_wq;
 struct workqueue_struct *system_percpu_wq;
+struct workqueue_struct *system_bh_wq;
 struct static_key_true validate_usercopy_range;
 unsigned long __per_cpu_offset[NR_CPUS];
 struct tracepoint __tracepoint_sched_set_state_tp;
@@ -1463,6 +1464,8 @@ void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 bool queue_work_on(int cpu, struct workqueue_struct *wq,
 		   struct work_struct *work)
 {
+	if (wq == system_bh_wq)
+		unit_log_printf("; ", "work queued for system_bh_wq");
 	return true;
 }
 

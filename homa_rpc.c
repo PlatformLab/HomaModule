@@ -630,8 +630,6 @@ release:
 	homa_sock_wakeup_wmem(hsk);
 	tt_record3("reaped %d rpcs; %d dead frags remain for port %d",
 		   num_rpcs, hsk->dead_frags, hsk->port);
-	if (hsk->buffer_pool)
-		homa_pool_check_waiting(hsk->buffer_pool);
 	return !checked_all_rpcs;
 }
 

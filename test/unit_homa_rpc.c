@@ -281,7 +281,7 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__dont_handoff_no_buffers)
 
 	mock_check_bpool_leaks = false;
 	self->data.msg_length = N(1400);
-	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
+	self->hsk.buffer_pool->free_bpages = 0;
 	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip,
 				     &self->data.common);
 	ASSERT_FALSE(IS_ERR(srpc));
@@ -491,8 +491,8 @@ TEST_F(homa_rpc, homa_rpc_end__remove_from_pool_wait_list)
 	struct homa_rpc *crpc;
 	int saved_free;
 
-	saved_free = atomic_read(&pool->free_bpages);
-	atomic_set(&pool->free_bpages, 0);
+	saved_free = pool->free_bpages;
+	pool->free_bpages = 0;
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			       self->server_ip, 4000, 98, 1000,	150000);
 	ASSERT_NE(NULL, crpc);
@@ -500,7 +500,7 @@ TEST_F(homa_rpc, homa_rpc_end__remove_from_pool_wait_list)
 
 	homa_rpc_end(crpc);
 	EXPECT_TRUE(list_empty(&crpc->buf_links));
-	atomic_set(&pool->free_bpages, saved_free);
+	pool->free_bpages = saved_free;
 }
 TEST_F(homa_rpc, homa_rpc_end__state_ready)
 {
@@ -1520,7 +1520,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__HOMA_RPC_BUF_STALL)
 	struct homa_rpc *crpc;
 
 	mock_check_bpool_leaks = false;
-	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
+	self->hsk.buffer_pool->free_bpages = 0;
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			       self->server_ip, self->server_port,
 			       self->client_id, 5000, 20000);

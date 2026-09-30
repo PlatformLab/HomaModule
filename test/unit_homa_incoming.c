@@ -223,11 +223,11 @@ TEST_F(homa_incoming, homa_message_in_init__no_buffers_available)
 			       self->server_ip, self->server_port,
 			       self->client_id, 1000, 1000);
 
-	saved_free = atomic_read(&self->hsk.buffer_pool->free_bpages);
-	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
+	saved_free = self->hsk.buffer_pool->free_bpages;
+	self->hsk.buffer_pool->free_bpages = 0;
 	EXPECT_EQ(0, homa_message_in_init(crpc, HOMA_BPAGE_SIZE*2, 10000));
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
-	atomic_set(&self->hsk.buffer_pool->free_bpages, saved_free);
+	self->hsk.buffer_pool->free_bpages = saved_free;
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_message_in_init__update_message_length_metrics)
@@ -1702,8 +1702,8 @@ TEST_F(homa_incoming, homa_data_pkt__no_buffers)
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
 
-	saved_free = atomic_read(&self->hsk.buffer_pool->free_bpages);
-	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
+	saved_free = self->hsk.buffer_pool->free_bpages;
+	self->hsk.buffer_pool->free_bpages = 0;
 	homa_data_pkt(mock_skb_alloc(self->server_ip, self->client_ip,
 				     &self->data.common, 1400, 0), crpc);
 #ifndef __STRIP__ /* See strip.py */
@@ -1711,7 +1711,7 @@ TEST_F(homa_incoming, homa_data_pkt__no_buffers)
 #endif /* See strip.py */
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
 	EXPECT_EQ(SKB_DROP_REASON_NOMEM, mock_drop_reasons[0]);
-	atomic_set(&self->hsk.buffer_pool->free_bpages, saved_free);
+	self->hsk.buffer_pool->free_bpages = saved_free;
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_data_pkt__send_cutoffs)
