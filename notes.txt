@@ -1,9 +1,6 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Notes for pool revision:
-  * Change API for homa_pool_set_region?
-
 * Notes for new granting mechanism:
   * Compile with __STRIP__
   * Reduce tt_record calls in homa_grant.c?
@@ -45,6 +42,10 @@ Notes for Homa implementation in Linux:
 * There is also a problem at very high loads with FIFO grants using up most
   or all of a node's incoming budget (they get spread across a large number
   of messages, none of which is responding).
+  * In some cases there are FIFO grants to multiple messages from the same
+    sender, none of which are getting transmitted.
+  * In some cases the FIFO grants are stuck waiting for softirqd to start up,
+    so they haven't been processed by GRO.
 
 * Check to see that software segmentation works again (with new homa_tx_pool
   functionality).
