@@ -1274,7 +1274,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
  *            must release the lock and the reference.
  */
 struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
-	__cond_acquires(rpc->bucket->lock)
+	__COND_ACQUIRES(rpc->bucket->lock)
 {
 	struct homa_interest interest;
 	struct homa_rpc *rpc;
