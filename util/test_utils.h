@@ -33,7 +33,7 @@ union sockaddr_in_union {
  * sockaddr_size() - Return the number of bytes used by the argument.
  * @sa:     Pointer to either an IPv4 or an IPv6 address.
  */
-static inline uint32_t sockaddr_size(const struct sockaddr *sa)
+static inline uint32_t sockaddr_size(const struct SOCKADDR *sa)
 {
 	return (sa->sa_family == AF_INET) ? sizeof(struct sockaddr_in) :
 			sizeof(struct sockaddr_in6);
@@ -81,7 +81,7 @@ inline static uint64_t rdtsc(void)
 inline static void init_sendmsg_hdrs(struct msghdr *hdr,
 				     struct homa_sendmsg_args *args,
 		       		     struct iovec *iov, int iovcnt,
-				     const struct sockaddr *dest_addr,
+				     const struct SOCKADDR *dest_addr,
 				     __u32 addrlen)
 {
 	args->id = 0;
@@ -89,7 +89,7 @@ inline static void init_sendmsg_hdrs(struct msghdr *hdr,
 	args->flags = 0;
 	args->reserved = 0;
 
-	hdr->msg_name = (struct sockaddr *)dest_addr;
+	hdr->msg_name = (struct SOCKADDR *)dest_addr;
 	hdr->msg_namelen = addrlen;
 	hdr->msg_iov = iov;
 	hdr->msg_iovlen = iovcnt;

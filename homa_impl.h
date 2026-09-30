@@ -93,6 +93,12 @@ struct homa_sock;
 #define __COND_ACQUIRES(lock) __cond_acquires(lock)
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0)
+#define SOCKADDR sockaddr_unsized
+#else
+#define SOCKADDR sockaddr
+#endif
+
 /**
  * union sockaddr_in_union - Holds either an IPv4 or IPv6 address (smaller
  * and easier to use than sockaddr_storage).
@@ -649,7 +655,7 @@ extern unsigned int homa_net_id;
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);
 enum skb_drop_reason homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
-int      homa_bind(struct socket *sk, struct sockaddr *addr,
+int      homa_bind(struct socket *sk, struct SOCKADDR *addr,
 		   int addr_len);
 void     homa_close(struct sock *sock, long timeout);
 int      homa_copy_to_user(struct homa_rpc *rpc);

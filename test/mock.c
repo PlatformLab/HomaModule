@@ -692,7 +692,7 @@ int inet6_del_protocol(const struct inet6_protocol *prot, unsigned char num)
 	return 0;
 }
 
-int inet6_getname(struct socket *sock, struct sockaddr *uaddr, int peer)
+int inet6_getname(struct socket *sock, struct SOCKADDR *uaddr, int peer)
 {
 	return 0;
 }
@@ -740,13 +740,13 @@ int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
 	return 0;
 }
 
-int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
+int inet_dgram_connect(struct socket *sock, struct SOCKADDR *uaddr,
 		       int addr_len, int flags)
 {
 	return 0;
 }
 
-int inet_getname(struct socket *sock, struct sockaddr *uaddr, int peer)
+int inet_getname(struct socket *sock, struct SOCKADDR *uaddr, int peer)
 {
 	return 0;
 }
@@ -808,7 +808,7 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
-int ip6_datagram_connect(struct sock *sk, struct sockaddr *addr, int addr_len)
+int ip6_datagram_connect(struct sock *sk, struct SOCKADDR *addr, int addr_len)
 {
 	return 0;
 }
@@ -958,7 +958,7 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 	return route;
 }
 
-int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
+int ip4_datagram_connect(struct sock *sk, struct SOCKADDR *uaddr,
 		int addr_len)
 {
 	return 0;
