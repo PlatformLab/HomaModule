@@ -84,6 +84,16 @@
 
 #include <linux/ethtool.h>
 
+#ifndef qdisc_from_priv
+/* Removed from net/pkt_sched.h in linux 7.0.. struct Qdisc still has
+ * privdata though, so reconstructing the inverse of qdisc_priv here.
+ */
+static inline struct Qdisc *qdisc_from_priv(void *priv)
+{
+	return container_of(priv, struct Qdisc, privdata);
+}
+#endif
+
 /* Used to enable sysctl access to configuration parameters related to
  * homa_qdisc. The @data fields are actually offsets within a struct
  * homa_qdisc_shared; these are converted to pointers into a net-specific
