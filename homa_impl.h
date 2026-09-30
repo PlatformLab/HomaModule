@@ -87,6 +87,12 @@ struct homa_sock;
 #include "homa_metrics.h"
 #endif /* See strip.py */
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#define __COND_ACQUIRES(lock) __cond_acquires(nonnull, lock)
+#else
+#define __COND_ACQUIRES(lock) __cond_acquires(lock)
+#endif
+
 /**
  * union sockaddr_in_union - Holds either an IPv4 or IPv6 address (smaller
  * and easier to use than sockaddr_storage).
