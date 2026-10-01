@@ -30,15 +30,17 @@ CCINCLUDES := \
 
 DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
-	     -D KBUILD_MODNAME='"homa"'
+	     -D KBUILD_MODNAME='"homa"' \
+	     -DCC_USING_FENTRY
 ifneq ($(__STRIP__),)
 DEFS +=      -D__STRIP__
 endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS) \
-		-fsanitize=address -fno-omit-frame-pointer
+CFLAGS :=    -std=gnu11 $(WARNS) -Wstrict-prototypes -MD -no-pie -g \
+		$(CINCLUDES) $(DEFS) -fsanitize=address \
+		-fno-omit-frame-pointer -fms-extensions
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) \
 		-fsanitize=address -fno-omit-frame-pointer
 
