@@ -171,7 +171,7 @@ TEST_F(homa_grant, homa_grant_alloc__success)
 	grant = homa_grant_alloc(&self->homa);
 	EXPECT_EQ(-1, grant->active_remaining[0]);
 	EXPECT_EQ(-1, grant->active_remaining[HOMA_MAX_GRANTS - 1]);
-	EXPECT_EQ(50, grant->fifo_fraction);
+	EXPECT_EQ(8, grant->max_overcommit);
 	homa_grant_free(grant);
 }
 TEST_F(homa_grant, homa_grant_alloc__cant_allocate_memory)
