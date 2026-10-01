@@ -22,7 +22,8 @@ CINCLUDES := \
 	    -I. \
 	    -I.. \
 	    $(KERN_INCLUDES) \
-	    -include $(KDIR)/include/linux/kconfig.h
+	    -include $(KDIR)/include/linux/kconfig.h \
+	    -include seg_compat.h
 CCINCLUDES := \
 	    -I. \
 	    -I.. \
