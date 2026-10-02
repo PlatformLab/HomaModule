@@ -456,21 +456,6 @@ void __rb_insert_augmented(struct rb_node *node, struct rb_root *root,
 	__rb_insert(node, root, augment_rotate);
 }
 
-/*
- * This function returns the first node (in sort order) of the tree.
- */
-struct rb_node *rb_first(const struct rb_root *root)
-{
-	struct rb_node	*n;
-
-	n = root->rb_node;
-	if (!n)
-		return NULL;
-	while (n->rb_left)
-		n = n->rb_left;
-	return n;
-}
-
 struct rb_node *rb_last(const struct rb_root *root)
 {
 	struct rb_node	*n;
