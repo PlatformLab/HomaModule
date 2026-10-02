@@ -626,8 +626,13 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode)
 {}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
+		const struct inet_skb_parm *parm)
+#else
 void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
 		const struct ip_options *opt)
+#endif
 {
 	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
 }
