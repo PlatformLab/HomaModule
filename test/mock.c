@@ -752,7 +752,7 @@ int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
 	return 0;
 }
 
-int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
+int inet_dgram_connect(struct socket *sock, struct SOCKADDR *uaddr,
 		       int addr_len, int flags)
 {
 	return 0;
