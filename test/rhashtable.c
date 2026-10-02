@@ -25,6 +25,7 @@
 #include <linux/rhashtable.h>
 #include <linux/err.h>
 #include <linux/export.h>
+#include <linux/version.h>
 
 #define HASH_DEFAULT_SIZE	64UL
 #define HASH_MIN_SIZE		4U
@@ -183,9 +184,19 @@ static struct bucket_table *bucket_table_alloc(struct rhashtable *ht,
 	int i;
 	static struct lock_class_key __key;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+	/* Linux 6.18 added an alignment parameter to the k[v]malloc family
+	 * (commit 2cd8231796b5); kvmalloc_node_noprof became a 4-arg macro,
+	 * so the bucket-table allocation uses kvmalloc_node_align_noprof().
+	 */
+	tbl = alloc_hooks_tag(ht->alloc_tag,
+			kvmalloc_node_align_noprof(struct_size(tbl, buckets, nbuckets),
+					     1, gfp|__GFP_ZERO, NUMA_NO_NODE));
+#else
 	tbl = alloc_hooks_tag(ht->alloc_tag,
 			kvmalloc_node_noprof(struct_size(tbl, buckets, nbuckets),
 					     gfp|__GFP_ZERO, NUMA_NO_NODE));
+#endif
 
 	size = nbuckets;
 

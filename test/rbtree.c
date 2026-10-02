@@ -11,6 +11,7 @@
 
 #include <linux/rbtree_augmented.h>
 #include <linux/export.h>
+#include <linux/version.h>
 
 /*
  * red-black trees properties:  https://en.wikipedia.org/wiki/Rbtree
@@ -456,6 +457,13 @@ void __rb_insert_augmented(struct rb_node *node, struct rb_root *root,
 	__rb_insert(node, root, augment_rotate);
 }
 
+/* Linux 6.19 inlined rb_first()/rb_last() into <linux/rbtree.h> as static
+ * inlines (commits c2d2dad24503 "rbtree: inline rb_first()" and
+ * 94984bfed58c "rbtree: inline rb_last()", Eric Dumazet). On older kernels
+ * the header still only declares them extern, so provide the out-of-line
+ * definitions there.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)
 /*
  * This function returns the first node (in sort order) of the tree.
  */
@@ -482,6 +490,7 @@ struct rb_node *rb_last(const struct rb_root *root)
 		n = n->rb_right;
 	return n;
 }
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0) */
 
 struct rb_node *rb_next(const struct rb_node *node)
 {

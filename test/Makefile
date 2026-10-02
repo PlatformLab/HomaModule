@@ -22,7 +22,8 @@ CINCLUDES := \
 	    -I. \
 	    -I.. \
 	    $(KERN_INCLUDES) \
-	    -include $(KDIR)/include/linux/kconfig.h
+	    -include $(KDIR)/include/linux/kconfig.h \
+	    -include seg_compat.h
 CCINCLUDES := \
 	    -I. \
 	    -I.. \
@@ -37,7 +38,7 @@ endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS) \
+CFLAGS :=    -std=gnu11 -fms-extensions $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS) \
 		-fsanitize=address -fno-omit-frame-pointer
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) \
 		-fsanitize=address -fno-omit-frame-pointer
