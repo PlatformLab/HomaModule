@@ -45,6 +45,7 @@
 #include <linux/module.h>
 #include <linux/string.h>
 #include <linux/xxhash.h>
+#include <linux/version.h>
 
 /*-*************************************
  * Macros
@@ -76,11 +77,13 @@ static const uint64_t PRIME64_5 =  2870177450012600261ULL;
 /*-**************************
  *  Utils
  ***************************/
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)
 void xxh32_copy_state(struct xxh32_state *dst, const struct xxh32_state *src)
 {
 	memcpy(dst, src, sizeof(*dst));
 }
 EXPORT_SYMBOL(xxh32_copy_state);
+#endif
 
 void xxh64_copy_state(struct xxh64_state *dst, const struct xxh64_state *src)
 {
@@ -239,6 +242,8 @@ EXPORT_SYMBOL(xxh64);
 /*-**************************************************
  * Advanced Hash Functions
  ***************************************************/
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)
+/* xxh32 streaming removed upstream in 6.19 (see note above). */
 void xxh32_reset(struct xxh32_state *statePtr, const uint32_t seed)
 {
 	/* use a local state for memcpy() to avoid strict-aliasing warnings */
@@ -252,6 +257,7 @@ void xxh32_reset(struct xxh32_state *statePtr, const uint32_t seed)
 	memcpy(statePtr, &state, sizeof(state));
 }
 EXPORT_SYMBOL(xxh32_reset);
+#endif
 
 void xxh64_reset(struct xxh64_state *statePtr, const uint64_t seed)
 {
