@@ -529,12 +529,14 @@ void __copy_overflow(int size, unsigned long count)
 	abort();
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
 __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 			const struct in6_addr *daddr,
 			__u32 len, __u8 proto, __wsum csum)
 {
 	return 0;
 }
+#endif
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 int debug_lockdep_rcu_enabled(void)
@@ -601,16 +603,21 @@ u64 hrtimer_forward(struct hrtimer *timer, ktime_t now,
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
 ktime_t hrtimer_get_time(void)
 {
 	return 0;
 }
+#endif
 
 void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 		  enum hrtimer_mode mode)
 {
 	timer->base = &clock_base;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+	/* struct hrtimer_clock_base lost its get_time member in 6.18. */
 	clock_base.get_time = &hrtimer_get_time;
+#endif
 }
 
 void hrtimer_setup(struct hrtimer *timer,
@@ -618,7 +625,9 @@ void hrtimer_setup(struct hrtimer *timer,
 		   clockid_t clock_id, enum hrtimer_mode mode)
 {
 	timer->base = &clock_base;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
 	clock_base.get_time = &hrtimer_get_time;
+#endif
 	timer->function = function;
 }
 
@@ -626,8 +635,13 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode)
 {}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
+		const struct inet_skb_parm *parm)
+#else
 void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
 		const struct ip_options *opt)
+#endif
 {
 	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
 }
@@ -1122,7 +1136,12 @@ void kvfree(const void *addr)
 	kfree(addr);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), unsigned long align,
+			     gfp_t flags, int node)
+#else
 void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), gfp_t flags, int node)
+#endif
 {
 	return mock_kmalloc(size, flags);
 }
@@ -1208,9 +1227,11 @@ ssize_t __modver_version_show(const struct module_attribute *a,
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)
 void __mutex_init(struct mutex *lock, const char *name,
 			 struct lock_class_key *key)
 {}
+#endif
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 void mutex_lock_nested(struct mutex *lock, unsigned int subclass)
