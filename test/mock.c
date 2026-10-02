@@ -601,16 +601,21 @@ u64 hrtimer_forward(struct hrtimer *timer, ktime_t now,
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
 ktime_t hrtimer_get_time(void)
 {
 	return 0;
 }
+#endif
 
 void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 		  enum hrtimer_mode mode)
 {
 	timer->base = &clock_base;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+	/* struct hrtimer_clock_base lost its get_time member in 6.18. */
 	clock_base.get_time = &hrtimer_get_time;
+#endif
 }
 
 void hrtimer_setup(struct hrtimer *timer,
@@ -618,7 +623,9 @@ void hrtimer_setup(struct hrtimer *timer,
 		   clockid_t clock_id, enum hrtimer_mode mode)
 {
 	timer->base = &clock_base;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
 	clock_base.get_time = &hrtimer_get_time;
+#endif
 	timer->function = function;
 }
 
