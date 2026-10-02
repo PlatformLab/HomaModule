@@ -1134,7 +1134,12 @@ void kvfree(const void *addr)
 	kfree(addr);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), unsigned long align,
+			     gfp_t flags, int node)
+#else
 void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), gfp_t flags, int node)
+#endif
 {
 	return mock_kmalloc(size, flags);
 }
