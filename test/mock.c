@@ -820,7 +820,7 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
-int ip6_datagram_connect(struct sock *sk, struct sockaddr *addr, int addr_len)
+int ip6_datagram_connect(struct sock *sk, struct SOCKADDR *addr, int addr_len)
 {
 	return 0;
 }
