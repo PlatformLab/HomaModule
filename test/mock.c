@@ -970,7 +970,7 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 	return route;
 }
 
-int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
+int ip4_datagram_connect(struct sock *sk, struct SOCKADDR *uaddr,
 		int addr_len)
 {
 	return 0;
