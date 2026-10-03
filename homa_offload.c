@@ -204,10 +204,33 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	int priority;
 	u32 saddr;
 	u32 hash;
+	unsigned int header_offset, packet_length;
 	int busy;
 
-	if (!homa_make_header_avl(skb))
+	if (!homa_make_header_avl(skb)) {
 		tt_record("homa_gro_receive couldn't pull enough data from packet");
+		kfree_skb_reason(skb, SKB_DROP_REASON_HDR_TRUNC);
+		return ERR_PTR(-EINPROGRESS);
+	}
+
+	/* Validate the common header before reading the packet type, and
+	 * the type-specific header before reading any of its fields.
+	 */
+	header_offset = skb_transport_offset(skb);
+	if (header_offset > skb->len ||
+	    skb->len - header_offset < sizeof(struct homa_common_hdr)) {
+		INC_METRIC(short_packets, 1);
+		kfree_skb_reason(skb, SKB_DROP_REASON_PKT_TOO_SMALL);
+		return ERR_PTR(-EINPROGRESS);
+	}
+	h_new = (struct homa_data_hdr *)skb_transport_header(skb);
+	packet_length = skb->len - header_offset;
+	if (h_new->common.type < DATA || h_new->common.type > MAX_OP ||
+	    packet_length < homa_header_lengths[h_new->common.type - DATA]) {
+		INC_METRIC(short_packets, 1);
+		kfree_skb_reason(skb, SKB_DROP_REASON_PKT_TOO_SMALL);
+		return ERR_PTR(-EINPROGRESS);
+	}
 
 	// if (homa_drop_packet(homa)) {
 	// 	kfree_skb(skb);

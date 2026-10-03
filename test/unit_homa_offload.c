@@ -138,6 +138,48 @@ TEST_F(homa_offload, homa_gso_segment__allocation_failure)
 	kfree_skb(skb);
 }
 
+TEST_F(homa_offload, homa_gro_receive__cannot_pull_header)
+{
+	struct sk_buff *skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			&self->header.common, 1400, 2000);
+
+	skb->data_len = skb->len - 20;
+	EXPECT_EQ(-EINPROGRESS,
+		PTR_ERR(homa_gro_receive(&self->empty_list, skb)));
+	EXPECT_EQ(NULL, cur_offload_core->held_skb);
+}
+
+TEST_F(homa_offload, homa_gro_receive__truncated_headers)
+{
+	struct sk_buff *skb;
+	int lengths[] = {sizeof(struct homa_common_hdr) - 1,
+			 sizeof(struct homa_data_hdr) - 1};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(lengths); i++) {
+		skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+				     &self->header.common, 1400, 2000);
+		skb->len = skb_transport_offset(skb) + lengths[i];
+		EXPECT_EQ(-EINPROGRESS,
+			PTR_ERR(homa_gro_receive(&self->empty_list, skb)));
+		EXPECT_EQ(NULL, cur_offload_core->held_skb);
+	}
+	EXPECT_EQ(2, homa_metrics_per_cpu()->short_packets);
+}
+
+TEST_F(homa_offload, homa_gro_receive__invalid_type)
+{
+	struct sk_buff *skb;
+
+	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			    &self->header.common, 1400, 2000);
+	((struct homa_common_hdr *)skb_transport_header(skb))->type = DATA - 1;
+	EXPECT_EQ(-EINPROGRESS,
+		PTR_ERR(homa_gro_receive(&self->empty_list, skb)));
+	EXPECT_EQ(NULL, cur_offload_core->held_skb);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->short_packets);
+}
+
 TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 {
 	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");

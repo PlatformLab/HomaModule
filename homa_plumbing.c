@@ -403,7 +403,7 @@ static struct ctl_table homa_ctl_table[] = {
 
 /* Sizes of the headers for each Homa packet type, in bytes. */
 #ifndef __STRIP__ /* See strip.py */
-static u16 header_lengths[] = {
+const u16 homa_header_lengths[] = {
 	sizeof(struct homa_data_hdr),
 	sizeof(struct homa_grant_hdr),
 	sizeof(struct homa_resend_hdr),
@@ -416,7 +416,7 @@ static u16 header_lengths[] = {
 	sizeof(struct homa_start_msg_hdr)
 };
 #else /* See strip.py */
-static u16 header_lengths[] = {
+const u16 homa_header_lengths[] = {
 	sizeof(struct homa_data_hdr),
 	0,
 	sizeof(struct homa_resend_hdr),
@@ -1686,7 +1686,7 @@ int homa_softirq(struct sk_buff *skb)
 		h = (struct homa_common_hdr *)skb->data;
 		if (unlikely(skb->len < sizeof(struct homa_common_hdr) ||
 			     h->type < DATA || h->type > MAX_OP ||
-			     skb->len < header_lengths[h->type - DATA])) {
+			     skb->len < homa_header_lengths[h->type - DATA])) {
 #ifndef __STRIP__ /* See strip.py */
 			const struct in6_addr saddr =
 					skb_canonical_ipv6_saddr(skb);
