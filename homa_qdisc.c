@@ -931,7 +931,8 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 		qrpc = &rpc->qrpc;
 		node = &qrpc->rb_node;
 	}
-	skb = skb_dequeue(&qrpc->packets);
+	/* qdev->defer_lock protects all mutations of this packet queue. */
+	skb = __skb_dequeue(&qrpc->packets);
 	if (skb_queue_len(&qrpc->packets) == 0) {
 		rb_erase_cached(node, &qdev->deferred_rpcs);
 		if (rpc == qdev->oldest_rpc)
@@ -1040,10 +1041,13 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_qdisc_dev *qdev = rpc->qrpc.qdev;
+	struct sk_buff_head packets;
+	struct sk_buff *skb;
 
 	if (!qdev)
 		return;
 
+	__skb_queue_head_init(&packets);
 	INC_METRIC(qdisc_flushes, 1);
 	homa_qdisc_lock_qdev(qdev);
 	if (skb_queue_len(&rpc->qrpc.packets) > 0) {
@@ -1052,10 +1056,10 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 		if (rpc == qdev->oldest_rpc)
 			qdev->oldest_rpc = NULL;
 
-		/* Free all of the RPC's deferred packets. */
-		while (skb_queue_len(&rpc->qrpc.packets) > 0)
-			kfree_skb_reason(skb_dequeue(&rpc->qrpc.packets),
-					 SKB_DROP_REASON_NO_SOCKET);
+		/* Detach the packets while holding qdev->defer_lock. The local
+		 * queue is private, so freeing it needs no queue lock.
+		 */
+		skb_queue_splice_init(&rpc->qrpc.packets, &packets);
 
 		if (!rb_first_cached(&qdev->deferred_rpcs) &&
 		    list_empty(&qdev->deferred_qdiscs)) {
@@ -1064,6 +1068,8 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 		}
 	}
 	homa_qdisc_unlock_qdev(qdev);
+	while ((skb = __skb_dequeue(&packets)) != NULL)
+		kfree_skb_reason(skb, SKB_DROP_REASON_NO_SOCKET);
 }
 
 /**
