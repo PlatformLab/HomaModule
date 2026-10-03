@@ -125,6 +125,19 @@ TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 	kfree_skb(segs);
 }
 
+TEST_F(homa_offload, homa_gso_segment__allocation_failure)
+{
+	struct sk_buff *skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			&self->header.common, 1400, 2000);
+	struct sk_buff *segs;
+
+	mock_skb_segment_errors = 1;
+	segs = homa_gso_segment(skb, 0);
+	EXPECT_TRUE(IS_ERR(segs));
+	EXPECT_EQ(-ENOMEM, PTR_ERR(segs));
+	kfree_skb(skb);
+}
+
 TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 {
 	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");

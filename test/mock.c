@@ -35,6 +35,7 @@ extern void      *memcpy(void *dest, const void *src, size_t n);
  */
 int mock_alloc_page_errors;
 int mock_alloc_skb_errors;
+int mock_skb_segment_errors;
 int mock_cmpxchg_errors;
 int mock_copy_data_errors;
 int mock_copy_to_frags_errors;
@@ -1710,6 +1711,9 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 	struct homa_data_hdr h;
 	int offset, length;
 
+	if (mock_check_error(&mock_skb_segment_errors))
+		return ERR_PTR(-ENOMEM);
+
 	/* Split the existing packet into two packets. */
 	memcpy(&h, skb_transport_header(head_skb), sizeof(h));
 	offset = ntohl(h.seg.offset);
@@ -2735,6 +2739,7 @@ void mock_teardown(void)
 	current_task = &mock_task;
 	mock_alloc_page_errors = 0;
 	mock_alloc_skb_errors = 0;
+	mock_skb_segment_errors = 0;
 	mock_cmpxchg_errors = 0;
 	mock_copy_data_errors = 0;
 	mock_copy_to_frags_errors = 0;

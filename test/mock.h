@@ -172,6 +172,7 @@ struct homa_socktab;
 /* Variables and functions for mocking that are exported to test code. */
 extern int         mock_alloc_page_errors;
 extern int         mock_alloc_skb_errors;
+extern int         mock_skb_segment_errors;
 extern int         mock_bpage_size;
 extern int         mock_bpage_shift;
 extern u64         mock_clock;

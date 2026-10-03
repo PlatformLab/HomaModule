@@ -145,6 +145,8 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 	__skb_pull(skb, sizeof(struct homa_data_hdr)
 			- sizeof(struct homa_seg_hdr));
 	segs = skb_segment(skb, features);
+	if (IS_ERR_OR_NULL(segs))
+		return segs;
 
 	/* Set incrementing ids in each of the segments (mimics behavior
 	 * of Mellanox NICs and other segmenters).
