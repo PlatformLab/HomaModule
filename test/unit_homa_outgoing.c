@@ -387,6 +387,49 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__find_starting_point)
 	EXPECT_STREQ("9800-11199", unit_log_get());
 	kfree_skb(skb);
 }
+TEST_F(homa_outgoing, homa_tx_skb_alloc__reuse_fragment_hint)
+{
+	struct homa_rpc *rpc;
+	struct sk_buff *skb;
+	u32 end;
+	int cached_index, cached_offset;
+
+	mock_no_high_order_pages = true;
+	rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			      self->server_ip, self->server_port,
+			      self->client_id, 20000, 100);
+	ASSERT_NE(NULL, rpc);
+	rpc->msgout.max_gso_segs = 1;
+
+	end = 10001;
+	skb = homa_tx_skb_alloc(rpc, 10000, &end);
+	ASSERT_FALSE(IS_ERR(skb));
+	cached_index = rpc->msgout.frag_hint;
+	cached_offset = rpc->msgout.frag_hint_offset;
+	EXPECT_GT(cached_index, 0);
+	kfree_skb(skb);
+
+	/* A later skb in the same page reuses the cached fragment. */
+	end = 11201;
+	skb = homa_tx_skb_alloc(rpc, 11200, &end);
+	ASSERT_FALSE(IS_ERR(skb));
+	EXPECT_EQ(cached_index, rpc->msgout.frag_hint);
+	EXPECT_EQ(cached_offset, rpc->msgout.frag_hint_offset);
+	EXPECT_EQ(12600, end);
+	kfree_skb(skb);
+
+	/* A retransmission before the hint falls back to the first page. */
+	end = 1;
+	skb = homa_tx_skb_alloc(rpc, 0, &end);
+	ASSERT_FALSE(IS_ERR(skb));
+	EXPECT_EQ(0, rpc->msgout.frag_hint);
+	EXPECT_EQ(0, rpc->msgout.frag_hint_offset);
+	EXPECT_EQ(1400, end);
+	EXPECT_EQ(skb_frag_page(&rpc->msgout.frags[0]),
+		  skb_frag_page(&skb_shinfo(skb)->frags[0]));
+	kfree_skb(skb);
+}
+
 TEST_F(homa_outgoing, homa_tx_skb_alloc__compute_num_segs)
 {
 	struct homa_rpc *crpc;

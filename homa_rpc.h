@@ -41,6 +41,16 @@ struct homa_message_out {
 	int num_frags;
 
 	/**
+	 * @frag_hint: Index of the fragment used by the most recent skb
+	 * allocation. The fragment array is immutable after allocation;
+	 * the RPC lock protects this hint and @frag_hint_offset.
+	 */
+	int frag_hint;
+
+	/** @frag_hint_offset: Byte offset of @frags[frag_hint] in the array. */
+	int frag_hint_offset;
+
+	/**
 	 * @frag_bytes: Total amount of memory in all of @frags; this is
 	 * included in sk_wmem_alloc.
 	 */
