@@ -304,3 +304,23 @@ The socked has been disabled using
 .SH SEE ALSO
 .BR sendmsg (2),
 .BR homa (7)
+
+.SH RELEASING BUFFERS WITHOUT RECEIVING
+To return buffers without waiting for or consuming another message, use
+.B ioctl(sockfd, HOMAIOCRELEASE, &args)
+with a writable
+.B struct homa_recvmsg_args
+containing the buffer tokens in
+.B num_bpages
+and
+.BR bpage_offsets .
+The
+.B reserved
+field must be zero. The id and completion_cookie fields are ignored.
+On success, num_bpages is zero. If a buffer token is invalid, already released
+entries are removed and the remaining entries are returned for correction or
+retry. The argument must remain writable throughout the call; if copying the
+updated tokens back fails, some buffers may already have been released.
+This operation requires a kernel module supporting HOMAIOCRELEASE; an older
+module rejects the ioctl. Do not substitute a nonblocking recvmsg: it can
+consume a pending message.

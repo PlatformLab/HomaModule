@@ -969,6 +969,53 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 }
 
 /**
+ * homa_ioc_release() - Return receive buffers without consuming a message.
+ * @sock: Socket owning the buffer pool.
+ * @arg: User-space homa_recvmsg_args; only num_bpages, bpage_offsets, and
+ *       reserved are used. Successfully released entries are removed even
+ *       if a subsequent entry is invalid; remaining entries may be retried.
+ * Return: Zero on success or a negative errno.
+ */
+static int homa_ioc_release(struct socket *sock, unsigned long arg)
+{
+	struct homa_sock *hsk = homa_sk(sock->sk);
+	struct homa_recvmsg_args args;
+	int result = 0;
+	int i;
+
+	if (copy_from_user(&args, (void __user *)arg, sizeof(args))) {
+		hsk->error_msg = "invalid address for release arguments";
+		return -EFAULT;
+	}
+	if (args.reserved || args.num_bpages > HOMA_MAX_BPAGES) {
+		hsk->error_msg = "invalid receive buffer release arguments";
+		return -EINVAL;
+	}
+	if (!hsk->buffer_pool) {
+		hsk->error_msg = "SO_HOMA_RECVBUF socket option has not been set";
+		return -EINVAL;
+	}
+	for (i = 0; i < args.num_bpages; i++) {
+		result = homa_pool_free_bufs(hsk->buffer_pool, 1,
+					     &args.bpage_offsets[i]);
+		if (result) {
+			hsk->error_msg = "error while releasing buffer pages";
+			break;
+		}
+	}
+	args.num_bpages -= i;
+	memmove(args.bpage_offsets, &args.bpage_offsets[i],
+		args.num_bpages * sizeof(args.bpage_offsets[0]));
+	if (i)
+		homa_pool_check_waiting(hsk->buffer_pool);
+	if (copy_to_user((void __user *)arg, &args, sizeof(args))) {
+		hsk->error_msg = "couldn't update release arguments";
+		return -EFAULT;
+	}
+	return result;
+}
+
+/**
  * homa_ioctl() - Implements the ioctl system call for Homa sockets.
  * @sock:  Socket on which the system call was invoked.
  * @cmd:   Identifier for a particular ioctl operation.
@@ -997,6 +1044,8 @@ int homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		return 0;
 	}
 #endif /* See strip.py */
+	if (cmd == HOMAIOCRELEASE)
+		return homa_ioc_release(sock, arg);
 	if (cmd == HOMAIOCINFO)
 		return homa_ioc_info(sock, arg);
 	homa_sk(sock->sk)->error_msg = "ioctl opcode isn't supported by Homa";

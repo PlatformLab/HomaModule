@@ -3,6 +3,8 @@
  */
 
 #include <algorithm>
+#include <errno.h>
+#include <sys/ioctl.h>
 #include <string.h>
 
 #include "homa_receiver.h"
@@ -105,9 +107,17 @@ void homa::receiver::release()
 	if (control.num_bpages == 0)
 		return;
 
-	/* This recvmsg request will do nothing except return buffer space. */
-	control.id = 0;
-	recvmsg(fd, &hdr, MSG_DONTWAIT);
-	control.num_bpages = 0;
+	/* A nonblocking recvmsg could consume another queued message. */
+	int result;
+	do {
+		result = ioctl(fd, HOMAIOCRELEASE, &control);
+	} while (result < 0 && errno == EINTR);
 	msg_length = -1;
+	if (result == 0) {
+		control.id = 0;
+		control.completion_cookie = 0;
+	}
+	/* On failure, keep the remaining buffer tokens for a later retry.
+	 * Do not fall back to recvmsg on kernels without this ioctl.
+	 */
 }
