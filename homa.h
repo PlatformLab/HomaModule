@@ -317,9 +317,10 @@ struct homa_info {
 
 /* I/O control calls on Homa sockets.*/
 #define HOMAIOCINFO  _IOWR('h', 0x90, struct homa_info)
+#define HOMAIOCRELEASE _IOW('h', 0x91, struct homa_recvmsg_args)
 #ifndef __STRIP__ /* See strip.py */
-#define HOMAIOCABORT  _IOWR('h', 0x91, struct homa_abort_args)
-#define HOMAIOCFREEZE _IO('h', 0x92)
+#define HOMAIOCABORT  _IOWR('h', 0x92, struct homa_abort_args)
+#define HOMAIOCFREEZE _IO('h', 0x93)
 #endif /* See strip.py */
 
 #endif /* _UAPI_LINUX_HOMA_H */

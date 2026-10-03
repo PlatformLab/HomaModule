@@ -167,7 +167,14 @@ The order of the bpages returned in
 is irrelevant, and a single
 .B recvmsg
 call can include bpages from multiple messages; all that matters is
-that each bpage is returned to Homa exactly once.
+that each bpage is returned to Homa exactly once. Buffer space can
+also be returned by invoking
+.B ioctl
+with the
+.B HOMAIOCRELEASE
+operation (see the
+.BR homa (7)
+man page for details).
 .IP \[bu]
 .IR msg ->\c
 .B msg_controllen

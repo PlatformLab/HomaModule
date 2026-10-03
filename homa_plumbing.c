@@ -962,6 +962,41 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 }
 
 /**
+ * homa_ioc_release() - Return receive buffers.
+ * @sock:   Socket owning the buffer pool.
+ * @arg:    Address of user-space homa_recvmsg_args; only num_bpages,
+ *          bpage_offsets, and reserved are used. The first num_bpages
+ *          entries in bpage_offsets will be released back to Homa; these
+ *          must have previously been owned by the application.
+ * Return:  zero on success or a negative errno.
+ */
+int homa_ioc_release(struct socket *sock, unsigned long arg)
+{
+	struct homa_sock *hsk = homa_sk(sock->sk);
+	struct homa_recvmsg_args args;
+	int result = 0;
+
+	if (copy_from_user(&args, (void __user *)arg, sizeof(args))) {
+		hsk->error_msg = "invalid address for HOMAIOCRELEASE arguments";
+		return -EFAULT;
+	}
+	if (args.reserved || args.num_bpages > HOMA_MAX_BPAGES) {
+		hsk->error_msg = "invalid HOMAIOCRELEASE arguments";
+		return -EINVAL;
+	}
+	if (!hsk->buffer_pool) {
+		hsk->error_msg = "SO_HOMA_RECVBUF socket option has not been set";
+		return -EINVAL;
+	}
+	result = homa_pool_free_bufs(hsk->buffer_pool, args.num_bpages,
+				     args.bpage_offsets);
+	if (result)
+		hsk->error_msg = "error while releasing buffer pages";
+	homa_pool_check_waiting(hsk->buffer_pool);
+	return result;
+}
+
+/**
  * homa_ioctl() - Implements the ioctl system call for Homa sockets.
  * @sock:  Socket on which the system call was invoked.
  * @cmd:   Identifier for a particular ioctl operation.
@@ -990,6 +1025,8 @@ int homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		return 0;
 	}
 #endif /* See strip.py */
+	if (cmd == HOMAIOCRELEASE)
+		return homa_ioc_release(sock, arg);
 	if (cmd == HOMAIOCINFO)
 		return homa_ioc_info(sock, arg);
 	homa_sk(sock->sk)->error_msg = "ioctl opcode isn't supported by Homa";

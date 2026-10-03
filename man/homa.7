@@ -477,6 +477,27 @@ the packet(s) and into the buffer memory for the message.
 The incoming message has been received successully and has been copied
 to buffer memory; it is currently queued waiting for a thread to invoke
 .BR recvmsg .
+.SH RELEASING RECEIVE BUFFERS
+Receive buffers returned by
+.B recvmsg
+are normally reuturned using subsequent
+.B recvmsg
+kernel calls. However, they can also be returned by invoking
+.B ioctl
+with the
+.B HOMAIOCRELEASE
+operation and a pointer to a
+.B homa_recvmsg_args
+struct. The
+.B num_bpages
+and
+.B bpage_offsets
+fields within the struct describe the bpages to release, just as for
+.BR recvmsg
+(see Homa's
+.BR recvmsg (2)
+man page for details). Other fields in the struct are ignored, except
+that any reserved fields must be zero.
 .SH SHUTDOWN
 .PP
 The

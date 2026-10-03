@@ -3,6 +3,8 @@
  */
 
 #include <algorithm>
+#include <errno.h>
+#include <sys/ioctl.h>
 #include <string.h>
 
 #include "homa_receiver.h"
@@ -105,9 +107,7 @@ void homa::receiver::release()
 	if (control.num_bpages == 0)
 		return;
 
-	/* This recvmsg request will do nothing except return buffer space. */
-	control.id = 0;
-	recvmsg(fd, &hdr, MSG_DONTWAIT);
+	ioctl(fd, HOMAIOCRELEASE, &control);
 	control.num_bpages = 0;
 	msg_length = -1;
 }

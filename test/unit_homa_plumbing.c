@@ -596,6 +596,56 @@ TEST_F(homa_plumbing, homa_ioc_info__cant_copy_back_to_user_space)
 		     self->hsk.error_msg);
 }
 
+TEST_F(homa_plumbing, homa_ioc_release__invalid_args_address)
+{
+	mock_copy_data_errors = 1;
+	EXPECT_EQ(EFAULT, -homa_ioc_release(self->hsk.sock.sk_socket,
+					    (unsigned long)&self->recvmsg_args));
+	EXPECT_STREQ("invalid address for HOMAIOCRELEASE arguments",
+		     self->hsk.error_msg);
+}
+TEST_F(homa_plumbing, homa_ioctl_release__invalid_count)
+{
+	self->recvmsg_args.num_bpages = HOMA_MAX_BPAGES + 1;
+	EXPECT_EQ(-EINVAL, homa_ioctl(self->hsk.sock.sk_socket,
+		  HOMAIOCRELEASE, (unsigned long)&self->recvmsg_args));
+	EXPECT_STREQ("invalid HOMAIOCRELEASE arguments", self->hsk.error_msg);
+	self->recvmsg_args.num_bpages = 0;
+}
+TEST_F(homa_plumbing, homa_ioc_release__no_buffer_pool)
+{
+	struct homa_pool *saved_pool = self->hsk.buffer_pool;
+
+	self->hsk.buffer_pool = NULL;
+	self->recvmsg_args.num_bpages = 2;
+	EXPECT_EQ(EINVAL, -homa_ioc_release(self->hsk.sock.sk_socket,
+					    (unsigned long)&self->recvmsg_args));
+	EXPECT_STREQ("SO_HOMA_RECVBUF socket option has not been set",
+		     self->hsk.error_msg);
+	self->hsk.buffer_pool = saved_pool;
+}
+TEST_F(homa_plumbing, homa_ioctl_release__success)
+{
+	int i;
+
+	EXPECT_EQ(0, homa_pool_get_pages(self->hsk.buffer_pool, 5,
+					 self->recvmsg_args.bpage_offsets, 0));
+	self->recvmsg_args.num_bpages = 5;
+	for (i = 0; i < 5; i++)
+		self->recvmsg_args.bpage_offsets[i] <<= HOMA_BPAGE_SHIFT;
+	EXPECT_EQ(0, -homa_ioc_release(self->hsk.sock.sk_socket,
+		  		      (unsigned long)&self->recvmsg_args));
+}
+TEST_F(homa_plumbing, homa_ioctl_release__bogus_offset)
+{
+	self->recvmsg_args.num_bpages = 1;
+	self->recvmsg_args.bpage_offsets[0] = INT_MAX;
+	EXPECT_EQ(EINVAL, -homa_ioc_release(self->hsk.sock.sk_socket,
+					    (unsigned long)&self->recvmsg_args));
+	EXPECT_STREQ("error while releasing buffer pages",
+		     self->hsk.error_msg);
+}
+
 TEST_F(homa_plumbing, homa_ioctl__HOMAIOCINFO)
 {
 	struct homa_info hinfo;

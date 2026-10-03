@@ -667,6 +667,7 @@ int      homa_hash(struct sock *sk);
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer);
 int      homa_init(struct homa *homa);
 int      homa_ioc_info(struct socket *sock, unsigned long arg);
+int      homa_ioc_release(struct socket *sock, unsigned long arg);
 int      homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
 int      homa_load(void);
 int      homa_message_out_init(struct homa_rpc *rpc, int length);
