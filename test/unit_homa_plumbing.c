@@ -1531,16 +1531,6 @@ TEST_F(homa_plumbing, homa_softirq__basics)
 	homa_softirq(skb);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_softirq__cant_pull_header)
-{
-	struct sk_buff *skb;
-
-	skb = mock_skb_alloc(self->client_ip, self->server_ip,
-			     &self->data.common, 1400, 1400);
-	skb->data_len = skb->len - 20;
-	homa_softirq(skb);
-	EXPECT_STREQ("pskb discard", unit_log_get());
-}
 TEST_F(homa_plumbing, homa_softirq__remove_extra_headers)
 {
 	struct sk_buff *skb;
@@ -1551,32 +1541,15 @@ TEST_F(homa_plumbing, homa_softirq__remove_extra_headers)
 	homa_softirq(skb);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_softirq__packet_too_short)
-{
-	struct sk_buff *skb;
-	struct homa_ack_hdr h;
-
-	h.common.type = ACK;
-	skb = mock_skb_alloc(self->client_ip, self->server_ip, &h.common, 0, 0);
-	skb->len -= 1;
-	homa_softirq(skb);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(1, homa_metrics_per_cpu()->malformed_packets);
-#endif /* See strip.py */
-}
-TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
+TEST_F(homa_plumbing, homa_softirq__homa_make_header_avl_fails)
 {
 	struct sk_buff *skb;
 
-	self->data.common.type = MAX_OP + 1;
 	skb = mock_skb_alloc(self->client_ip, self->server_ip,
 			     &self->data.common, 1400, 1400);
+	skb->data_len = skb->len - 20;
 	homa_softirq(skb);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-#ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(1, homa_metrics_per_cpu()->malformed_packets);
-#endif /* See strip.py */
+	EXPECT_STREQ("pskb discard", unit_log_get());
 }
 TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 {
@@ -2073,4 +2046,69 @@ TEST_F(homa_plumbing, homa_sysctl_softirq_cores__read_out_of_space_in_buffer)
 	EXPECT_STREQ("0 6 7 8 1", buffer);
 	EXPECT_EQ(strlen(buffer), length);
 	EXPECT_EQ(strlen(buffer), pos);
+}
+
+TEST_F(homa_plumbing, homa_make_header_avl__cant_pull_header)
+{
+	struct sk_buff *skb;
+
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 1400);
+	skb->data_len = skb->len - 20;
+	EXPECT_FALSE(homa_make_header_avl(skb));
+	EXPECT_STREQ("pskb discard", unit_log_get());
+	kfree_skb(skb);
+}
+TEST_F(homa_plumbing, homa_make_header_avl__packet_too_short_for_common_header)
+{
+	struct sk_buff *skb;
+	struct homa_ack_hdr h;
+
+	h.common.type = BUSY;
+	skb = mock_skb_alloc(self->client_ip, self->server_ip, &h.common, 0, 0);
+	skb->len = sizeof(struct homa_common_hdr) - 1;
+	EXPECT_FALSE(homa_make_header_avl(skb));
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(1, homa_metrics_per_cpu()->malformed_packets);
+#endif /* See strip.py */
+	kfree_skb(skb);
+}
+TEST_F(homa_plumbing, homa_make_header_avl__packet_too_short_for_specific_header)
+{
+	struct sk_buff *skb;
+	struct homa_ack_hdr h;
+
+	h.common.type = ACK;
+	skb = mock_skb_alloc(self->client_ip, self->server_ip, &h.common, 0, 0);
+	skb->len = sizeof(struct homa_ack_hdr) - 1;
+	EXPECT_FALSE(homa_make_header_avl(skb));
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(1, homa_metrics_per_cpu()->malformed_packets);
+#endif /* See strip.py */
+	kfree_skb(skb);
+}
+TEST_F(homa_plumbing, homa_make_header_avl__bogus_packet_type)
+{
+	struct sk_buff *skb;
+
+	self->data.common.type = MAX_OP + 1;
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 1400);
+	EXPECT_FALSE(homa_make_header_avl(skb));
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(1, homa_metrics_per_cpu()->malformed_packets);
+#endif /* See strip.py */
+	kfree_skb(skb);
+}
+TEST_F(homa_plumbing, homa_make_header_avl__success)
+{
+	struct sk_buff *skb;
+
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 1400);
+	EXPECT_TRUE(homa_make_header_avl(skb));
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(0, homa_metrics_per_cpu()->malformed_packets);
+#endif /* See strip.py */
+	kfree_skb(skb);
 }

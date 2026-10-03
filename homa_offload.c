@@ -206,8 +206,13 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	u32 hash;
 	int busy;
 
-	if (!homa_make_header_avl(skb))
-		tt_record("homa_gro_receive couldn't pull enough data from packet");
+	if (!homa_make_header_avl(skb)) {
+		tt_record2("homa_gro_receive couldn't access packet header, packet length %d, type %d",
+			   skb->len - (skb_transport_header(skb) - skb->data),
+			   ((struct homa_common_hdr *)skb_transport_header(skb))->type);
+		kfree_skb_reason(skb, SKB_DROP_REASON_PKT_TOO_SMALL);
+		return ERR_PTR(-EINPROGRESS);
+	}
 
 	// if (homa_drop_packet(homa)) {
 	// 	kfree_skb(skb);

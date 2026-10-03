@@ -613,23 +613,6 @@ static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 	return mapped;
 }
 
-/**
- * homa_make_header_avl() - Invokes pskb_may_pull to make sure that all the
- * Homa header information for a packet is in the linear part of the skb
- * where it can be addressed using skb_transport_header.
- * @skb:     Packet for which header is needed.
- * Return:   The result of pskb_may_pull (true for success)
- */
-static inline bool homa_make_header_avl(struct sk_buff *skb)
-{
-	int pull_length;
-
-	pull_length = skb_transport_header(skb) - skb->data + HOMA_MAX_HEADER;
-	if (pull_length > skb->len)
-		pull_length = skb->len;
-	return pskb_may_pull(skb, pull_length);
-}
-
 #ifndef __UPSTREAM__ /* See strip.py */
 #ifdef __UNIT_TEST__
 void unit_log_printf(const char *separator, const char *format, ...)
@@ -670,6 +653,7 @@ int      homa_ioc_info(struct socket *sock, unsigned long arg);
 int      homa_ioc_release(struct socket *sock, unsigned long arg);
 int      homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
 int      homa_load(void);
+bool     homa_make_header_avl(struct sk_buff *skb);
 int      homa_message_out_init(struct homa_rpc *rpc, int length);
 void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			   struct homa_rpc *rpc);

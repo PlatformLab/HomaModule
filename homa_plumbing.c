@@ -396,7 +396,7 @@ struct ctl_table homa_ctl_table[] = {
 
 /* Sizes of the headers for each Homa packet type, in bytes. */
 #ifndef __STRIP__ /* See strip.py */
-static u16 header_lengths[] = {
+static const u16 header_lengths[] = {
 	sizeof(struct homa_data_hdr),
 	sizeof(struct homa_grant_hdr),
 	sizeof(struct homa_resend_hdr),
@@ -409,7 +409,7 @@ static u16 header_lengths[] = {
 	sizeof(struct homa_start_msg_hdr)
 };
 #else /* See strip.py */
-static u16 header_lengths[] = {
+static const u16 header_lengths[] = {
 	sizeof(struct homa_data_hdr),
 	0,
 	sizeof(struct homa_resend_hdr),
@@ -1649,42 +1649,30 @@ int homa_softirq(struct sk_buff *skb)
 	for (skb = packets; skb; skb = next) {
 		next = skb->next;
 
-		/* Make the header available at skb->data, even if the packet
-		 * is fragmented. One complication: it's possible that the IP
-		 * header hasn't yet been removed (this happens for GRO packets
-		 * on the frag_list, since they aren't handled explicitly by IP.
+		/* It's possible that the IP header hasn't been removed yet
+		 * (this happens for GRO packets on the frag_list, since they
+		 * aren't handled explicitly by IP). If that's the case,
+		 * strip the IP header here.
 		 */
-		if (!homa_make_header_avl(skb)) {
-#ifndef __STRIP__ /* See strip.py */
-			if (homa->verbose)
-				pr_notice("Homa can't handle fragmented packet (no space for header); discarding\n");
-#endif /* See strip.py */
-			UNIT_LOG("", "pskb discard");
-			reason = SKB_DROP_REASON_HDR_TRUNC;
-			goto discard;
-		}
 		header_offset = skb_transport_header(skb) - skb->data;
 		if (header_offset)
 			__skb_pull(skb, header_offset);
 
-		/* Reject packets that are too short or have bogus types. */
-		h = (struct homa_common_hdr *)skb->data;
-		if (unlikely(skb->len < sizeof(struct homa_common_hdr) ||
-			     h->type < DATA || h->type > MAX_OP ||
-			     skb->len < header_lengths[h->type - DATA])) {
+		if (!homa_make_header_avl(skb)) {
 #ifndef __STRIP__ /* See strip.py */
 			const struct in6_addr saddr =
 					skb_canonical_ipv6_saddr(skb);
+
 			if (homa->verbose)
-				pr_warn("Homa %s packet from %s too short: %d bytes\n",
+				pr_warn("Homa %s packet from %s too short or bogus type: %d bytes\n",
 					homa_symbol_for_type(h->type),
 					homa_print_ipv6_addr(&saddr),
-					skb->len - header_offset);
+					skb->len);
 #endif /* See strip.py */
-			INC_METRIC(malformed_packets, 1);
 			reason = SKB_DROP_REASON_PKT_TOO_SMALL;
 			goto discard;
 		}
+		h = (struct homa_common_hdr *)skb_transport_header(skb);
 
 #ifndef __UPSTREAM__ /* See strip.py */
 		/* Check for FREEZE here, rather than in homa_incoming.c, so
@@ -2166,6 +2154,43 @@ int homa_timer_main(void *transport)
 	}
 	hrtimer_cancel(&hrtimer);
 	return 0;
+}
+
+/**
+ * homa_make_header_avl() - Invokes pskb_may_pull to make sure that all the
+ * Homa header information for a packet is in the linear part of the skb
+ * where it can be addressed using skb_transport_header. Also verifies that
+ * the packet is long enough to contain a complete header for the Homa
+ * packet type.
+ * @skb:     Packet for which header is needed.
+ * Return:   True for success; false means pskb_may_pull failed, or the
+ *           packet didn't contain a complete header.
+ */
+bool homa_make_header_avl(struct sk_buff *skb)
+{
+	struct homa_common_hdr *h;
+	int header_offset;
+	int pull_length;
+	int header_avl;
+
+	header_offset = skb_transport_header(skb) - skb->data;
+	pull_length = header_offset + HOMA_MAX_HEADER;
+	if (pull_length > skb->len)
+		pull_length = skb->len;
+	if (!pskb_may_pull(skb, pull_length)) {
+		UNIT_LOG("", "pskb discard");
+		return false;
+	}
+
+	header_avl = skb->len - header_offset;
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
+	if (unlikely(header_avl < sizeof(struct homa_common_hdr) ||
+	    h->type < DATA || h->type > MAX_OP ||
+	    header_avl < header_lengths[h->type - DATA])) {
+		INC_METRIC(malformed_packets, 1);
+		return false;
+	}
+	return true;
 }
 
 #ifndef __UNIT_TEST__
