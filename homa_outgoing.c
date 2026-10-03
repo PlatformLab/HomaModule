@@ -234,12 +234,25 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 	bytes_to_skip = seg_index * (rpc->msgout.max_seg_data +
 				     sizeof(struct homa_seg_hdr)) +
 			sizeof(struct homa_seg_hdr);
-	for (msg_frags_left = rpc->msgout.num_frags,
-	     msg_frag = rpc->msgout.frags; ; msg_frags_left--, msg_frag++) {
+
+	/* Try to continue scanning where we left off the last time (saves
+	 * repeatedly rescanning fragments from the beginning)
+	 */
+	if (bytes_to_skip >= rpc->msgout.cur_frag_offset) {
+		bytes_to_skip -= rpc->msgout.cur_frag_offset;
+	} else {
+		rpc->msgout.cur_frag = 0;
+		rpc->msgout.cur_frag_offset = 0;
+	}
+	while (rpc->msgout.cur_frag < rpc->msgout.num_frags) {
+		msg_frag = &rpc->msgout.frags[rpc->msgout.cur_frag];
 		if (bytes_to_skip < skb_frag_size(msg_frag))
 			break;
 		bytes_to_skip -= skb_frag_size(msg_frag);
+		rpc->msgout.cur_frag++;
+		rpc->msgout.cur_frag_offset += skb_frag_size(msg_frag);
 	}
+	msg_frags_left = rpc->msgout.num_frags - rpc->msgout.cur_frag;
 
 	/* Compute how much data from rpc->msgout.frags to include in the
 	 * packet.

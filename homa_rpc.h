@@ -33,12 +33,25 @@ struct homa_message_out {
 	 * homa_seg_hdr followed by the data for that segment. These
 	 * fragments will be incorporated into skb's to transmit the message.
 	 * If this doesn't point to @frag below then it is dynamically
-	 * allocated and must be freed.
+	 * allocated and must be freed.  Immutable once allocated.
 	 */
 	skb_frag_t *frags;
 
 	/** @num_frags: Number of fragments at @frags. */
 	int num_frags;
+
+	/**
+	 * @cur_frag: Index of a fragment in @frags (typically the most
+	 * recent fragment used by homa_tx_skb_alloc). Used to avoid
+	 * rescanning fragments from the beginning.
+	 */
+	int cur_frag;
+
+	/**
+	 * @cur_frag_offset: Byte offset within the message of
+	 * @frags[@cur_frag].
+	 */
+	int cur_frag_offset;
 
 	/**
 	 * @frag_bytes: Total amount of memory in all of @frags; this is
