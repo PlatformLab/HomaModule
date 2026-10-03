@@ -27,7 +27,7 @@ static const struct net_offload homa_offload = {
  */
 int homa_offload_init(void)
 {
-	int i, res1, res2;
+	int i, result;
 
 	for (i = 0; i < nr_cpu_ids; i++) {
 		struct homa_offload_core *offload_core;
@@ -46,10 +46,13 @@ int homa_offload_init(void)
 		offload_core->held_bucket = 0;
 	}
 
-	res1 = inet_add_offload(&homa_offload, IPPROTO_HOMA);
-	res2 = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
-
-	return res1 ? res1 : res2;
+	result = inet_add_offload(&homa_offload, IPPROTO_HOMA);
+	if (result)
+		return result;
+	result = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
+	if (result)
+		inet_del_offload(&homa_offload, IPPROTO_HOMA);
+	return result;
 }
 
 /**

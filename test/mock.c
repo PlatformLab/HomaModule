@@ -36,6 +36,9 @@ extern void      *memcpy(void *dest, const void *src, size_t n);
 int mock_alloc_page_errors;
 int mock_alloc_skb_errors;
 int mock_skb_segment_errors;
+int mock_inet_add_offload_errors;
+int mock_inet6_add_offload_errors;
+int mock_offload_registered;
 int mock_cmpxchg_errors;
 int mock_copy_data_errors;
 int mock_copy_to_frags_errors;
@@ -674,6 +677,9 @@ int import_ubuf(int rw, void __user *buf, size_t len, struct iov_iter *i)
 
 int inet6_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	if (mock_check_error(&mock_inet6_add_offload_errors))
+		return -EEXIST;
+	mock_offload_registered |= 2;
 	return 0;
 }
 
@@ -684,6 +690,7 @@ int inet6_add_protocol(const struct inet6_protocol *prot, unsigned char num)
 
 int inet6_del_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	mock_offload_registered &= ~2;
 	return 0;
 }
 
@@ -722,6 +729,9 @@ void inet6_unregister_protosw(struct inet_protosw *p)
 
 int inet_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	if (mock_check_error(&mock_inet_add_offload_errors))
+		return -EEXIST;
+	mock_offload_registered |= 1;
 	return 0;
 }
 
@@ -732,6 +742,7 @@ int inet_add_protocol(const struct net_protocol *prot, unsigned char num)
 
 int inet_del_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	mock_offload_registered &= ~1;
 	return 0;
 }
 
@@ -2740,6 +2751,9 @@ void mock_teardown(void)
 	mock_alloc_page_errors = 0;
 	mock_alloc_skb_errors = 0;
 	mock_skb_segment_errors = 0;
+	mock_inet_add_offload_errors = 0;
+	mock_inet6_add_offload_errors = 0;
+	mock_offload_registered = 0;
 	mock_cmpxchg_errors = 0;
 	mock_copy_data_errors = 0;
 	mock_copy_to_frags_errors = 0;

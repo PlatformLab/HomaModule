@@ -104,6 +104,24 @@ FIXTURE_TEARDOWN(homa_offload)
 	unit_teardown();
 }
 
+TEST_F(homa_offload, homa_offload_init__ipv4_registration_failure)
+{
+	homa_offload_end();
+	mock_inet_add_offload_errors = 1;
+	EXPECT_EQ(-EEXIST, homa_offload_init());
+	EXPECT_EQ(0, mock_offload_registered);
+}
+
+TEST_F(homa_offload, homa_offload_init__ipv6_failure_rolls_back_ipv4)
+{
+	homa_offload_end();
+	mock_inet6_add_offload_errors = 1;
+	EXPECT_EQ(-EEXIST, homa_offload_init());
+	EXPECT_EQ(0, mock_offload_registered);
+	EXPECT_EQ(0, homa_offload_init());
+	EXPECT_EQ(3, mock_offload_registered);
+}
+
 TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 {
 	struct sk_buff *skb, *segs;
