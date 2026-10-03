@@ -16,6 +16,14 @@
 #include "homa_qdisc.h"
 #endif /* See strip.py */
 
+static int scanned_gaps;
+
+static void gap_count_hook(char *id)
+{
+	if (strcmp(id, "gap_scan") == 0)
+		scanned_gaps++;
+}
+
 static struct homa_rpc *hook_rpc;
 static int delete_count;
 static int lock_delete_count;
@@ -538,33 +546,29 @@ TEST_F(homa_incoming, homa_add_packet__no_memory_for_new_gap)
 	EXPECT_EQ(1400, crpc->msgin.recv_end);
 	EXPECT_EQ(1, skb_queue_len(&crpc->msgin.packets));
 }
-TEST_F(homa_incoming, homa_add_packet__packet_before_gap)
+TEST_F(homa_incoming, homa_add_packet__packet_before_first_gap)
 {
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+	struct homa_rpc *rpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, 99, 1000, 1000);
 	struct sk_buff *skb;
 
-	homa_message_in_init(crpc, 10000, 0);
-	unit_log_clear();
+	homa_message_in_init(rpc, 10000, 0);
+	rpc->msgin.recv_end = 6000;
+	homa_gap_alloc(&rpc->msgin.gaps, 1000, 2000);
+	homa_gap_alloc(&rpc->msgin.gaps, 3000, 4000);
+	homa_gap_alloc(&rpc->msgin.gaps, 5000, 6000);
 	self->data.seg.offset = htonl(0);
 	skb = mock_skb_alloc(self->client_ip, self->server_ip,
-			     &self->data.common, 1400, 0);
-	homa_add_packet(crpc, skb);
+			     &self->data.common, 1000, 0);
+	scanned_gaps = 0;
+	unit_hook_register(gap_count_hook);
+	EXPECT_EQ(SKB_DROP_REASON_DUP_FRAG, homa_add_packet(rpc, skb));
+	EXPECT_EQ(1, scanned_gaps);
+	EXPECT_EQ(0, skb_queue_len(&rpc->msgin.packets));
+	EXPECT_STREQ("start 1000, end 2000; start 3000, end 4000; "
+		     "start 5000, end 6000", unit_print_gaps(rpc));
 	kfree_skb(skb);
-
-	self->data.seg.offset = htonl(4200);
-	skb = mock_skb_alloc(self->client_ip, self->server_ip,
-			     &self->data.common, 1400, 4200);
-	homa_add_packet(crpc, skb);
-	kfree_skb(skb);
-	EXPECT_STREQ("start 1400, end 4200", unit_print_gaps(crpc));
-
-	self->data.seg.offset = htonl(0);
-	skb = mock_skb_alloc(self->client_ip, self->server_ip, &self->data.common, 1400, 0);
-	homa_add_packet(crpc, skb);
-	kfree_skb(skb);
-	EXPECT_EQ(2, skb_queue_len(&crpc->msgin.packets));
 }
 TEST_F(homa_incoming, homa_add_packet__packet_straddles_start_of_gap)
 {
