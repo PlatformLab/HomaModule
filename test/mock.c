@@ -529,12 +529,14 @@ void __copy_overflow(int size, unsigned long count)
 	abort();
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
 __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 			const struct in6_addr *daddr,
 			__u32 len, __u8 proto, __wsum csum)
 {
 	return 0;
 }
+#endif
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 int debug_lockdep_rcu_enabled(void)
