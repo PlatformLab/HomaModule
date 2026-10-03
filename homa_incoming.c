@@ -824,6 +824,11 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	struct homa_grant_hdr *h = (struct homa_grant_hdr *)skb->data;
 	u32 new_offset = ntohl(h->offset);
 
+	if (unlikely(h->priority >= HOMA_MAX_PRIORITIES)) {
+		INC_METRIC(malformed_packets, 1);
+		goto done;
+	}
+
 	tt_record4("processing grant for id %llu, offset %d, priority %d, increment %d",
 		   homa_local_id(h->common.sender_id), ntohl(h->offset),
 		   h->priority, new_offset - rpc->msgout.granted);
@@ -835,6 +840,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		rpc->msgout.priority = h->priority;
 		homa_xmit_data(rpc);
 	}
+done:
 	consume_skb(skb);
 }
 #endif /* See strip.py */
@@ -858,6 +864,13 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	struct homa_busy_hdr busy;
 	int tx_end;
 	int end;
+
+#ifndef __STRIP__ /* See strip.py */
+	if (unlikely(h->priority >= HOMA_MAX_PRIORITIES)) {
+		INC_METRIC(malformed_packets, 1);
+		goto done;
+	}
+#endif /* See strip.py */
 
 	/* See the comment "Homa Retransmission Strategy" at the beginning
 	 * of homa_timer.c for info about the overall strategy for retrying
