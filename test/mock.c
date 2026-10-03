@@ -47,6 +47,8 @@ int mock_dst_check_errors;
 int mock_ethtool_ksettings_errors;
 int mock_import_ubuf_errors;
 int mock_import_iovec_errors;
+int mock_inet_add_offload_errors;
+int mock_inet6_add_offload_errors;
 int mock_ip6_xmit_errors;
 int mock_ip_queue_xmit_errors;
 int mock_kmalloc_errors;
@@ -704,6 +706,13 @@ int import_ubuf(int rw, void __user *buf, size_t len, struct iov_iter *i)
 
 int inet6_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	UNIT_LOG("; ", "inet6_add_offload for protocol %d", protocol);
+	if (mock_check_error(&mock_inet6_add_offload_errors))
+		return -EEXIST;
+	if (inet6_offloads[protocol] != NULL)
+		FAIL("inet6_add_offload found existing registration for protocol %d",
+		     protocol);
+	inet6_offloads[protocol] = prot;
 	return 0;
 }
 
@@ -714,6 +723,8 @@ int inet6_add_protocol(const struct inet6_protocol *prot, unsigned char num)
 
 int inet6_del_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	UNIT_LOG("; ", "inet6_del_offload for protocol %d", protocol);
+	inet6_offloads[protocol] = NULL;
 	return 0;
 }
 
@@ -752,6 +763,13 @@ void inet6_unregister_protosw(struct inet_protosw *p)
 
 int inet_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	UNIT_LOG("; ", "inet_add_offload for protocol %d", protocol);
+	if (mock_check_error(&mock_inet_add_offload_errors))
+		return -EEXIST;
+	if (inet_offloads[protocol] != NULL)
+		FAIL("inet_add_offload found existing registration for protocol %d",
+		     protocol);
+	inet_offloads[protocol] = prot;
 	return 0;
 }
 
@@ -762,6 +780,8 @@ int inet_add_protocol(const struct net_protocol *prot, unsigned char num)
 
 int inet_del_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	UNIT_LOG("; ", "inet_del_offload for protocol %d", protocol);
+	inet_offloads[protocol] = NULL;
 	return 0;
 }
 
@@ -2841,6 +2861,8 @@ void mock_teardown(void)
 	mock_dst_check_errors = 0;
 	mock_import_ubuf_errors = 0;
 	mock_import_iovec_errors = 0;
+	mock_inet_add_offload_errors = 0;
+	mock_inet6_add_offload_errors = 0;
 	mock_ip6_xmit_errors = 0;
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
@@ -2902,6 +2924,16 @@ void mock_teardown(void)
 	for (i = 0; i < MAX_DROP_REASONS; i++)
 		mock_drop_reasons[i] = -1;
 	mock_sysctl_intval = 0;
+	for (i = 0; i < MAX_INET_PROTOS; i++) {
+		if (i == IPPROTO_TCP)
+			continue;
+		if (inet_offloads[i] != NULL)
+			FAIL("IPv4 offload callbacks not removed for protocol %d",
+			      i);
+		if (inet6_offloads[i] != NULL)
+			FAIL("IPv6 offload callbacks not removed for protocol %d",
+			      i);
+	}
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));

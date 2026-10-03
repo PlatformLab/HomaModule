@@ -104,6 +104,33 @@ FIXTURE_TEARDOWN(homa_offload)
 	unit_teardown();
 }
 
+TEST_F(homa_offload, homa_offload_init__ipv4_registration_failure)
+{
+	homa_offload_end();
+	unit_log_clear();
+	mock_inet_add_offload_errors = 1;
+	EXPECT_EQ(-EEXIST, homa_offload_init());
+	EXPECT_STREQ("inet_add_offload for protocol 146", unit_log_get());
+}
+TEST_F(homa_offload, homa_offload_init__ipv6_failure_rolls_back_ipv4)
+{
+	homa_offload_end();
+
+	/* First try: IPv4 succeeds, IPv6 fails. */
+	unit_log_clear();
+	mock_inet6_add_offload_errors = 1;
+	EXPECT_EQ(-EEXIST, homa_offload_init());
+	EXPECT_STREQ("inet_add_offload for protocol 146; "
+		     "inet6_add_offload for protocol 146; "
+		     "inet_del_offload for protocol 146", unit_log_get());
+
+	/* Second try: both succeed*/
+	unit_log_clear();
+	EXPECT_EQ(0, homa_offload_init());
+	EXPECT_STREQ("inet_add_offload for protocol 146; "
+		     "inet6_add_offload for protocol 146", unit_log_get());
+}
+
 TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 {
 	struct sk_buff *skb, *segs;

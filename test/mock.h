@@ -212,6 +212,8 @@ extern int         mock_ethtool_ksettings_errors;
 extern bool        mock_exit_thread;
 extern int         mock_import_iovec_errors;
 extern int         mock_import_ubuf_errors;
+extern int         mock_inet_add_offload_errors;
+extern int         mock_inet6_add_offload_errors;
 extern int         mock_ip6_xmit_errors;
 extern int         mock_ip_queue_xmit_errors;
 extern bool        mock_ipv6;
