@@ -91,7 +91,7 @@ for info in files:
     next_line(info)
 
 # Repeatedly output the earliest line until there are no lines left to output.
-prevTime = 0.0
+prev_time = 0.0
 while True:
     best = None
     best_time = 0.0
@@ -102,6 +102,6 @@ while True:
     if not best:
         break
     time = best["time"]
-    print("%9.3f us (+%8.3f us) %s" % (time, time - prevTime, best["suffix"]))
+    print("%9.3f us (+%8.3f us) %s" % (time, time - prev_time, best["suffix"]))
     prev_time = time
     next_line(best)
