@@ -16,6 +16,14 @@
 #include "homa_qdisc.h"
 #endif /* See strip.py */
 
+static int scanned_gaps;
+
+static void count_scanned_gaps(char *id)
+{
+	if (strcmp(id, "gap_scan") == 0)
+		scanned_gaps++;
+}
+
 static struct homa_rpc *hook_rpc;
 static int delete_count;
 static int lock_delete_count;
@@ -840,6 +848,31 @@ TEST_F(homa_incoming, homa_add_packet__kmalloc_failure_while_splitting_gap)
 	EXPECT_EQ(2, skb_queue_len(&crpc->msgin.packets));
 	EXPECT_STREQ("start 1400, end 4200, time 1000", unit_print_gaps(crpc));
 }
+TEST_F(homa_incoming, homa_add_packet__duplicate_before_first_gap)
+{
+	struct homa_rpc *rpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, 99, 1000, 1000);
+	struct sk_buff *skb;
+
+	homa_message_in_init(rpc, 10000, 0);
+	rpc->msgin.recv_end = 6000;
+	homa_gap_alloc(&rpc->msgin.gaps, 1000, 2000);
+	homa_gap_alloc(&rpc->msgin.gaps, 3000, 4000);
+	homa_gap_alloc(&rpc->msgin.gaps, 5000, 6000);
+	self->data.seg.offset = htonl(0);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1000, 0);
+	scanned_gaps = 0;
+	unit_hook_register(count_scanned_gaps);
+	EXPECT_EQ(SKB_DROP_REASON_DUP_FRAG, homa_add_packet(rpc, skb));
+	EXPECT_EQ(1, scanned_gaps);
+	EXPECT_EQ(0, skb_queue_len(&rpc->msgin.packets));
+	EXPECT_STREQ("start 1000, end 2000; start 3000, end 4000; "
+		     "start 5000, end 6000", unit_print_gaps(rpc));
+	kfree_skb(skb);
+}
+
 TEST_F(homa_incoming, homa_add_packet__scan_multiple_gaps)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

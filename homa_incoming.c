@@ -247,10 +247,12 @@ enum skb_drop_reason homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	 * an existing gap.
 	 */
 	list_for_each_entry_safe(gap, dummy, &rpc->msgin.gaps, links) {
+		UNIT_HOOK("gap_scan");
 		/* Is packet at the start of this gap? */
 		if (start <= gap->start) {
+			/* Gaps are ordered: no later gap can overlap either. */
 			if (end <= gap->start)
-				continue;
+				break;
 			if (start < gap->start) {
 				tt_record4("Packet overlaps gap start: id %d, start %d, end %d, gap_start %d",
 					   rpc->id, start, end, gap->start);

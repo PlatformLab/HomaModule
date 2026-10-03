@@ -171,6 +171,7 @@ struct homa_message_in {
 	/**
 	 * @gaps: List of homa_gaps describing all of the bytes with
 	 * offsets less than @recv_end that have not yet been received.
+	 * Entries are ordered by increasing start offset and never overlap.
 	 */
 	struct list_head gaps;
 
