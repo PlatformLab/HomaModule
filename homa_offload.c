@@ -128,7 +128,8 @@ void homa_send_ipis(void)
  * into multiple smaller packets.
  * @skb:       Packet to split.
  * @features:  Passed through to skb_segment.
- * Return: A list of packets, or NULL if for the packet couldn't be split.
+ * Return:     A list of packets, or NULL or negative errno if the packet
+ *             couldn't be split.
  */
 struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 				 netdev_features_t features)
@@ -144,6 +145,8 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 	__skb_pull(skb, sizeof(struct homa_data_hdr)
 			- sizeof(struct homa_seg_hdr));
 	segs = skb_segment(skb, features);
+	if (IS_ERR_OR_NULL(segs))
+		return segs;
 
 	/* Set incrementing ids in each of the segments (mimics behavior
 	 * of Mellanox NICs and other segmenters).

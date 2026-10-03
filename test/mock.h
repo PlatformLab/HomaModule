@@ -203,7 +203,6 @@ extern int         mock_copy_to_frags_errors;
 extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
-extern int         mock_numa_nodes[20];
 extern struct net_device
 		   mock_devices[];
 extern enum skb_drop_reason
@@ -231,6 +230,7 @@ extern struct netdev_queue
 extern int         mock_netif_schedule_calls;
 extern struct net  mock_nets[];
 extern int         mock_num_numas;
+extern int         mock_numa_nodes[20];
 extern bool        mock_no_high_order_pages;
 extern int         mock_num_drop_reasons;
 extern int         mock_page_nid_mask;
@@ -248,6 +248,7 @@ extern void      **mock_rht_walk_results;
 extern int         mock_rht_num_walk_results;
 extern int         mock_route_errors;
 extern int         mock_signal_pending;
+extern int         mock_skb_segment_errors;
 extern int         mock_sock_holds;
 extern int         mock_sysctl_intval;
 extern struct task_struct

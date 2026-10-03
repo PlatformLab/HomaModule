@@ -58,6 +58,7 @@ int mock_register_sysctl_errors;
 int mock_rht_init_errors;
 int mock_rht_insert_errors;
 int mock_route_errors;
+int mock_skb_segment_errors;
 int mock_trylock_errors;
 int mock_vmalloc_errors;
 int mock_wait_intr_irq_errors;
@@ -1786,6 +1787,9 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 	struct homa_data_hdr h;
 	int offset, length;
 
+	if (mock_check_error(&mock_skb_segment_errors))
+		return ERR_PTR(-ENOMEM);
+
 	/* Split the existing packet into two packets. */
 	memcpy(&h, skb_transport_header(head_skb), sizeof(h));
 	offset = ntohl(h.seg.offset);
@@ -2847,6 +2851,7 @@ void mock_teardown(void)
 	mock_register_sysctl_errors = 0;
 	mock_rht_init_errors = 0;
 	mock_rht_insert_errors = 0;
+	mock_skb_segment_errors = 0;
 	mock_wait_intr_irq_errors = 0;
 	mock_copy_from_iter_no_log = false;
 	mock_copy_to_user_dont_copy = 0;
