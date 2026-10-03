@@ -1266,6 +1266,12 @@ int netif_receive_skb(struct sk_buff *skb)
 void __netif_schedule(struct Qdisc *q)
 {}
 
+/* linux/preempt.h only declares preempt_count_add()/preempt_count_sub() as
+ * extern functions under CONFIG_DEBUG_PREEMPT/CONFIG_TRACE_PREEMPT_TOGGLE,
+ * otherwise they are macros wrapping the arch __preempt_count_add() inline, and
+ * defining them here would redefine that inline.
+ */
+#if defined(CONFIG_DEBUG_PREEMPT) || defined(CONFIG_TRACE_PREEMPT_TOGGLE)
 void preempt_count_add(int val)
 {
 	int i;
@@ -1281,6 +1287,7 @@ void preempt_count_sub(int val)
 	for (i = 0; i < val; i++)
 		preempt_enable();
 }
+#endif
 
 long prepare_to_wait_event(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry, int state)

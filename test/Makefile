@@ -31,7 +31,8 @@ CCINCLUDES := \
 
 DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
-	     -D KBUILD_MODNAME='"homa"'
+	     -D KBUILD_MODNAME='"homa"' \
+	     -DCONFIG_TRACE_PREEMPT_TOGGLE
 ifneq ($(__STRIP__),)
 DEFS +=      -D__STRIP__
 endif
