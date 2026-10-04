@@ -344,6 +344,7 @@ unsigned long vmemmap_base;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
 #endif
+unsigned long random_kmalloc_seed;
 int __preempt_count;
 int cpu_number = 1;
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
@@ -355,8 +356,10 @@ int debug_locks;
 struct static_call_key __SCK__cond_resched;
 struct static_call_key __SCK__might_resched;
 struct static_call_key __SCK__preempt_schedule;
+struct static_call_key __SCK__WARN_trap;
 struct paravirt_patch_template pv_ops;
 struct workqueue_struct *system_wq;
+struct workqueue_struct *system_percpu_wq;
 struct static_key_true validate_usercopy_range;
 unsigned long __per_cpu_offset[NR_CPUS];
 struct tracepoint __tracepoint_sched_set_state_tp;
@@ -1233,6 +1236,10 @@ void __mutex_init(struct mutex *lock, const char *name,
 {}
 #endif
 
+/* since 6.19, static inline __mutex_init() calls mutex_init_generic(). */
+void mutex_init_generic(struct mutex *lock)
+{}
+
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 void mutex_lock_nested(struct mutex *lock, unsigned int subclass)
 #else
@@ -1576,6 +1583,10 @@ int __SCT__might_resched(void)
 void __SCT__preempt_schedule(void)
 {}
 
+/* since 6.19, x86 asm/bug.h routes WARN() through a static call (WARN_trap). */
+void __SCT__WARN_trap(struct bug_entry *bug, ...)
+{}
+
 void security_sk_classify_flow(const struct sock *sk,
 		struct flowi_common *flic)
 {}
@@ -1839,6 +1850,16 @@ int vfs_fsync(struct file *file, int datasync)
 {
 	return 0;
 }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+struct vlan_type_depth __vlan_get_protocol_offset(const struct sk_buff *skb,
+						  __be16 type,
+						  int mac_offset)
+{
+	struct vlan_type_depth result = {0, 0};
+	return result;
+}
+#endif
 
 void wait_for_completion(struct completion *x) {}
 
