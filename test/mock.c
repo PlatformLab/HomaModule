@@ -357,6 +357,7 @@ struct static_call_key __SCK__might_resched;
 struct static_call_key __SCK__preempt_schedule;
 struct paravirt_patch_template pv_ops;
 struct workqueue_struct *system_wq;
+unsigned long random_kmalloc_seed;
 struct static_key_true validate_usercopy_range;
 unsigned long __per_cpu_offset[NR_CPUS];
 struct tracepoint __tracepoint_sched_set_state_tp;
