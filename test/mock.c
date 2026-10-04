@@ -355,6 +355,7 @@ int debug_locks;
 struct static_call_key __SCK__cond_resched;
 struct static_call_key __SCK__might_resched;
 struct static_call_key __SCK__preempt_schedule;
+struct static_call_key __SCK__WARN_trap;
 struct paravirt_patch_template pv_ops;
 struct workqueue_struct *system_wq;
 struct workqueue_struct *system_percpu_wq;
@@ -1587,6 +1588,10 @@ int __SCT__might_resched(void)
 }
 
 void __SCT__preempt_schedule(void)
+{}
+
+/* since 6.19, x86 asm/bug.h routes WARN() through a static call (WARN_trap). */
+void __SCT__WARN_trap(struct bug_entry *bug, ...)
 {}
 
 void security_sk_classify_flow(const struct sock *sk,
