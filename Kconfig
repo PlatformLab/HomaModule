@@ -6,6 +6,9 @@
 config HOMA
 	tristate "The Homa transport protocol"
 	depends on IPV6
+#ifndef __STRIP__ /* See strip.py */
+	depends on NET_UDP_TUNNEL
+#endif /* See strip.py */
 
 	help
 	  Homa is a network transport protocol for communication within

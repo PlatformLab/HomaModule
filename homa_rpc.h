@@ -475,6 +475,16 @@ struct homa_rpc {
 	 */
 	u32 done_timer_ticks;
 
+#ifndef __STRIP__ /* See strip.py */
+	/**
+	 * @udp_admitted: True means this RPC was admitted as a UDP-hijacked
+	 * RPC (see homa_hijack_udp_admit()) and so holds a reference against
+	 * its namespace's udp_rpc_count that must be released exactly once,
+	 * via homa_hijack_udp_end_rpc(), when the RPC dies.
+	 */
+	bool udp_admitted;
+#endif /* See strip.py */
+
 	/**
 	 * @magic: when the RPC is alive, this holds a distinct value that
 	 * is unlikely to occur naturally. The value is cleared when the
@@ -492,7 +502,7 @@ struct homa_rpc {
 };
 
 void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
-			 int port, int error);
+			 int port, int error, int protocol);
 void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 void     homa_rpc_ack(struct homa_sock *hsk, struct homa_rpc *rpc,

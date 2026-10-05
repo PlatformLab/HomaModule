@@ -15,6 +15,7 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
+#include "homa_hijack.h"
 #include "homa_offload.h"
 #endif /* See strip.py */
 
@@ -495,8 +496,12 @@ free_skbs:
  * @skb:       First packet in the batch, linked through skb->next. Caller
  *             must ensure that packets are long enough to cover the
  *             type-specific Homa header.
+ * @origin:    Either HOMA_PKT_NATIVE or HOMA_PKT_UDP (see enum
+ *             homa_pkt_origin); identifies how @skb arrived, so that
+ *             transport isolation can be enforced between UDP-hijacked
+ *             sockets and everything else.
  */
-void homa_dispatch_pkts(struct sk_buff *skb)
+void homa_dispatch_pkts(struct sk_buff *skb, int origin)
 {
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct homa_common_hdr *h = (struct homa_common_hdr *)skb->data;
@@ -510,6 +515,26 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 	/* Find the appropriate socket.*/
 	hnet = homa_net(dev_net(skb->dev));
 	hsk = homa_sock_find(hnet, dport);
+#ifndef __STRIP__ /* See strip.py */
+	/* Enforce transport isolation: a socket that has been selected for
+	 * UDP hijacking may only receive packets that arrived via the UDP
+	 * tunnel, and vice versa. A mismatch here doesn't mean the port is
+	 * unused (some other transport's socket owns it), so the packets
+	 * are silently dropped without generating a port-unreachable ICMP.
+	 */
+	if (hsk && homa_sock_udp_hijacked(hsk) != (origin == HOMA_PKT_UDP)) {
+		INC_METRIC(unknown_packet_types, 1);
+		tt_record3("Discarding packet(s) for port %u, id %llu: transport mismatch (origin %d)",
+			   dport, homa_local_id(h->sender_id), origin);
+		sock_put(&hsk->sock);
+		while (skb) {
+			next = skb->next;
+			kfree_skb(skb);
+			skb = next;
+		}
+		return;
+	}
+#endif /* See strip.py */
 	if (!hsk || (!homa_is_client(id) && !hsk->is_server)) {
 		if (skb_is_ipv6(skb))
 			icmp6_send(skb, ICMPV6_DEST_UNREACH,
@@ -563,8 +588,11 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 		if (!rpc) {
 			if (!homa_is_client(id)) {
 				/* We are the server for this RPC. */
-				if (h->type == DATA ||
-				    h->type == START_MSG) {
+				if (h->type == DATA
+#ifndef __STRIP__ /* See strip.py */
+				    || h->type == START_MSG
+#endif /* See strip.py */
+				   ) {
 					/* Create a new RPC if one doesn't
 					 * already exist.
 					 */

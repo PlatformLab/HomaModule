@@ -583,7 +583,9 @@ void homa_pool_wakeup_rpc(struct homa_rpc *rpc)
 	 */
 	resend.offset = htonl(0);
 	resend.length = htonl(rpc->msgin.length);
+#ifndef __STRIP__ /* See strip.py */
 	resend.priority = homa_high_priority(rpc->hsk->homa);
+#endif /* See strip.py */
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 }
 

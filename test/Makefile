@@ -136,45 +136,13 @@ unit: $(OBJS)
 test: unit
 	./unit
 
-# Additional definitions for running unit tests using stripped sources.
-
-S_HOMA_SRCS := $(patsubst %,stripped/%,$(filter-out timetrace.c, $(HOMA_SRCS)))
-S_HOMA_OBJS :=  $(patsubst %.c,%.o,$(S_HOMA_SRCS))
-S_HOMA_HDRS := stripped/homa.h \
-		stripped/homa_impl.h \
-		stripped/homa_peer.h \
-		stripped/homa_pool.h \
-		stripped/homa_receiver.h \
-		stripped/homa_rpc.h \
-		stripped/homa_sock.h \
-		stripped/homa_stub.h \
-		stripped/homa_wire.h
-stripped/%.c: ../%.c
-	../util/strip.py --alt $< > $@
-stripped/%.h: ../%.h
-	../util/strip.py --alt $< > $@
-S_TEST_OBJS := $(patsubst %,stripped/%,$(filter-out unit_timetrace.o, $(TEST_OBJS)))
-S_OBJS := $(S_HOMA_OBJS) $(S_TEST_OBJS) $(patsubst %,stripped/%,$(OTHER_OBJS))
-
-$(S_OBJS): | stripped $(S_HOMA_HDRS)
-
-stripped:
-	mkdir -p stripped
-
-stripped/%.o: stripped/%.c
-	$(CC) -c $(patsubst -I..,-Istripped,$(CFLAGS)) $< -o $@
-stripped/%.o: %.c
-	$(CC) -c $(patsubst -I..,-Istripped,$(CFLAGS)) $< -o $@
-stripped/%.o: %.cc
-	$(CXX) -c $(patsubst -I..,-Istripped,$(CCFLAGS)) $< -o $@
-
-s_unit: $(S_OBJS)
-	$(CXX) $(CFLAGS) $^ -o $@ -lasan
-
-s_test: s_unit
-	./s_unit
-
-CLEANS += s_unit
+# Compile-time stripping keeps unit-test hooks while excluding code that is
+# omitted from the upstream build. Use clean submakes so changed compiler
+# definitions cannot reuse objects from a normal unit-test build.
+.PHONY: s_test
+s_test:
+	$(MAKE) clean
+	$(MAKE) __STRIP__=y test
 
 # The target below shouldn't be needed: theoretically, any code that is
 # sensitive to IPv4 vs. IPv6 should be tested explicitly, regardless of

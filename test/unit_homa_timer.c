@@ -139,6 +139,40 @@ TEST_F(homa_timer, homa_timer_check_rpc__server_has_received_request)
 	EXPECT_EQ(0, srpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_timer, homa_timer_check_rpc__udp_drain_deadline)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 100);
+
+	ASSERT_NE(NULL, srpc);
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+	srpc->udp_admitted = true;
+	atomic_set(&self->hnet->udp_rpc_count, 1);
+	self->hnet->udp_state = HOMA_UDP_DRAINING;
+	self->homa.timer_ticks = UINT_MAX - 2;
+	self->hnet->udp_drain_deadline = self->homa.timer_ticks + 5;
+
+	homa_rpc_lock(srpc);
+	homa_timer_check_rpc(srpc);
+	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
+
+	self->homa.timer_ticks = 1;
+	homa_timer_check_rpc(srpc);
+	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
+
+	self->homa.timer_ticks = self->hnet->udp_drain_deadline;
+	homa_timer_check_rpc(srpc);
+	homa_rpc_unlock(srpc);
+	EXPECT_EQ(RPC_DEAD, srpc->state);
+	/* Server RPCs ignore the abort error and are just freed by
+	 * homa_rpc_end, which always sets rpc->error to -EINVAL.
+	 */
+	EXPECT_EQ(EINVAL, -srpc->error);
+	EXPECT_EQ(0, atomic_read(&self->hnet->udp_rpc_count));
+}
+#endif /* See strip.py */
 TEST_F(homa_timer, homa_timer_check_rpc__granted_bytes_not_sent)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

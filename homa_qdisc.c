@@ -163,8 +163,17 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
 		protocol = ipv6_hdr(skb)->nexthdr;
 	else
 		return false;
-	return protocol == IPPROTO_HOMA ||
-		(protocol == IPPROTO_TCP && homa_skb_hijacked(skb));
+	if (protocol == IPPROTO_HOMA ||
+	    (protocol == IPPROTO_TCP && homa_skb_hijacked(skb)))
+		return true;
+#ifndef __STRIP__ /* See strip.py */
+	if (protocol == IPPROTO_UDP)
+		return skb->len >= skb_transport_offset(skb) +
+				sizeof(struct udphdr) +
+				sizeof(struct homa_common_hdr) &&
+		       udp_hdr(skb)->dest == htons(HOMA_UDP_HIJACK_PORT);
+#endif /* See strip.py */
+	return false;
 }
 
 /**
@@ -586,7 +595,12 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	 * issue any grants, even though the "incoming" data isn't going to
 	 * be transmitted anytime soon.
 	 */
-	h = (struct homa_data_hdr *)skb_transport_header(skb);
+	h = (struct homa_data_hdr *)homa_skb_inner_hdr(skb);
+	if (!h) {
+		INC_METRIC(short_packets, 1);
+		homa_qdisc_update_link_idle(qdev, pkt_len, -1);
+		goto enqueue;
+	}
 	offset = ntohl(h->seg.offset);
 	if (h->common.type != DATA ||
 	    ntohl(h->msg_length) < qshared->defer_min_bytes) {
@@ -610,8 +624,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 
 enqueue:
 	if (is_homa_pkt(skb)) {
-		h = (struct homa_data_hdr *)skb_transport_header(skb);
-		if (h->common.type == DATA) {
+		h = (struct homa_data_hdr *)homa_skb_inner_hdr(skb);
+		if (h && h->common.type == DATA) {
 			tt_record3("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d on qid %d",
 				   be64_to_cpu(h->common.sender_id), offset,
 				   q->ix);
@@ -750,8 +764,11 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 		struct homa_data_hdr *h;
 		int bytes_left;
 
-		h = (struct homa_data_hdr *)skb_transport_header(skb);
-		bytes_left = rpc->msgout.length - ntohl(h->seg.offset);
+		h = (struct homa_data_hdr *)homa_skb_inner_hdr(skb);
+		if (WARN_ON_ONCE(!h))
+			bytes_left = rpc->qrpc.tx_left;
+		else
+			bytes_left = rpc->msgout.length - ntohl(h->seg.offset);
 		if (bytes_left < rpc->qrpc.tx_left)
 			rpc->qrpc.tx_left = bytes_left;
 		rpc->qrpc.qdev = qdev;
@@ -945,11 +962,13 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 	 * it's position won't change because it is already highest priority).
 	 */
 	info = homa_get_skb_info(skb);
-	h = (struct homa_data_hdr *)skb_transport_header(skb);
-	bytes_left = rpc->msgout.length - (ntohl(h->seg.offset) +
-					   info->data_bytes);
-	if (bytes_left < qrpc->tx_left)
-		qrpc->tx_left = bytes_left;
+	h = (struct homa_data_hdr *)homa_skb_inner_hdr(skb);
+	if (!WARN_ON_ONCE(!h)) {
+		bytes_left = rpc->msgout.length - (ntohl(h->seg.offset) +
+						   info->data_bytes);
+		if (bytes_left < qrpc->tx_left)
+			qrpc->tx_left = bytes_left;
+	}
 	if (fifo) {
 		if (skb_queue_len(&qrpc->packets) > 0) {
 			rb_erase_cached(node, &qdev->deferred_rpcs);
@@ -991,9 +1010,10 @@ int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 
 	pkt_len = qdisc_pkt_len(skb);
 	homa_qdisc_update_link_idle(qdev, pkt_len, -1);
-	h = (struct homa_data_hdr *)skb_transport_header(skb);
-	tt_record2("homa_qdisc_pacer queuing homa data packet for id %d, offset %d",
-		   be64_to_cpu(h->common.sender_id), ntohl(h->seg.offset));
+	h = (struct homa_data_hdr *)homa_skb_inner_hdr(skb);
+	if (h)
+		tt_record2("homa_qdisc_pacer queuing homa data packet for id %d, offset %d",
+			   be64_to_cpu(h->common.sender_id), ntohl(h->seg.offset));
 
 	/* Run the packet through dev_queue_xmit again to transmit it;
 	 * this means it will pass through homa_disc_enqueue again, but

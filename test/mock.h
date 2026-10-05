@@ -89,6 +89,23 @@ int mock_processor_id(void);
 
 #include <linux/ethtool.h>
 
+/* net/udp_tunnel.h's udp_sock_create() is a static inline that calls
+ * udp_sock_create4()/udp_sock_create6() directly, so those two must be
+ * mocked (and prototyped, since struct udp_port_cfg isn't defined until
+ * the include below) before udp_tunnel.h is parsed - otherwise the inline
+ * body bakes in calls to the real, unlinked kernel functions.
+ */
+struct udp_port_cfg;
+int mock_udp_sock_create4(struct net *net, struct udp_port_cfg *cfg,
+			   struct socket **sockp);
+int mock_udp_sock_create6(struct net *net, struct udp_port_cfg *cfg,
+			   struct socket **sockp);
+#undef udp_sock_create4
+#define udp_sock_create4 mock_udp_sock_create4
+#undef udp_sock_create6
+#define udp_sock_create6 mock_udp_sock_create6
+#include <net/udp_tunnel.h>
+
 /* Replace various Linux variables and functions with mocked ones. */
 #undef alloc_pages
 #define alloc_pages mock_alloc_pages
@@ -208,12 +225,21 @@ int mock_processor_id(void);
 #undef register_net_sysctl
 #define register_net_sysctl mock_register_net_sysctl
 
+#undef register_net_sysctl_sz
+#define register_net_sysctl_sz mock_register_net_sysctl_sz
+
 #define rt6_get_cookie(...) 999
+
+#undef schedule_work
+#define schedule_work(work) mock_schedule_work(work)
 
 #define signal_pending(...) mock_signal_pending
 
 #undef set_active_memcg
 #define set_active_memcg mock_set_active_memcg
+
+#undef setup_udp_tunnel_sock
+#define setup_udp_tunnel_sock mock_setup_udp_tunnel_sock
 
 /* Must redefine skb_frag_foreach_page because page pointers are different
  * when unit testing (a page point points to an actual page, rather than
@@ -241,11 +267,34 @@ int mock_processor_id(void);
 #undef tcp_v6_check
 #define tcp_v6_check(...) (~(__force __sum16)666U)
 
+/* udp_set_csum()/udp6_set_csum() perform real checksum computation using
+ * kernel internals (skb_is_gso, skb_dst, NETIF_F_IP_CSUM, ...) that aren't
+ * available in the unit test environment, so (like tcp_v4_check/
+ * tcp_v6_check above) they are replaced here with simple stand-ins that
+ * just store a fixed, distinguishable value in the packet's checksum
+ * field.
+ */
+#undef udp_set_csum
+#define udp_set_csum(nocheck, skb, saddr, daddr, len) \
+		(udp_hdr(skb)->check = (__force __sum16)555U)
+
+#undef udp6_set_csum
+#define udp6_set_csum(nocheck, skb, saddr, daddr, len) \
+		(udp_hdr(skb)->check = (__force __sum16)777U)
+
 #undef this_cpu_ptr
 #define this_cpu_ptr(name) (&name[cpu_number])
 
 #undef __this_cpu_read
 #define __this_cpu_read(name) (name)
+
+#undef udp_tunnel_sock_release
+#define udp_tunnel_sock_release mock_udp_tunnel_sock_release
+
+/* udp_sock_create4/6 are mocked earlier, right before the
+ * #include <net/udp_tunnel.h> near the top of this file - see the
+ * comment there.
+ */
 
 #undef vmalloc
 #define vmalloc mock_vmalloc
@@ -312,6 +361,7 @@ extern int         mock_queue_index;
 extern int         mock_register_protosw_errors;
 extern int         mock_register_qdisc_errors;
 extern int         mock_register_sysctl_errors;
+extern size_t      mock_register_sysctl_size;
 extern int         mock_rht_init_errors;
 extern int         mock_rht_insert_errors;
 extern void      **mock_rht_walk_results;
@@ -324,14 +374,22 @@ extern struct task_struct
 extern int         mock_total_spin_locks;
 extern int         mock_trylock_errors;
 extern u64         mock_tt_cycles;
+extern int         mock_udp_sock_create_errors;
+extern int         mock_udp_tunnel_release_count;
+extern struct udp_tunnel_sock_cfg
+		   mock_udp_tunnel_cfg;
 extern int         mock_vmalloc_errors;
 extern int         mock_wait_intr_irq_errors;
 extern int         mock_xmit_log_verbose;
 extern int         mock_xmit_log_hijack;
+extern int         mock_xmit_log_udp_hijack;
 extern char        mock_xmit_prios[];
 
 extern struct task_struct *current_task;
 
+void        hrtimer_setup(struct hrtimer *timer,
+			  enum hrtimer_restart (*function)(struct hrtimer *),
+			  clockid_t clock_id, enum hrtimer_mode mode);
 struct page *
 	    mock_alloc_pages(gfp_t gfp, unsigned order);
 struct Qdisc
@@ -384,6 +442,11 @@ struct ctl_table_header *
 	    mock_register_net_sysctl(struct net *net,
 				     const char *path,
 				     struct ctl_table *table);
+struct ctl_table_header *
+	    mock_register_net_sysctl_sz(struct net *net,
+					const char *path,
+					struct ctl_table *table,
+					size_t table_size);
 int         mock_rht_init(struct rhashtable *ht,
 			  const struct rhashtable_params *params);
 void       *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
@@ -398,6 +461,7 @@ int         mock_rht_lookup_insert_fast(struct rhashtable *ht,
 void       *mock_rht_walk_next(struct rhashtable_iter *iter);
 void        mock_rpc_hold(struct homa_rpc *rpc);
 void        mock_rpc_put(struct homa_rpc *rpc);
+bool        mock_schedule_work(struct work_struct *work);
 struct mem_cgroup *
             mock_set_active_memcg(struct mem_cgroup *memcg);
 void        mock_set_clock_vals(u64 t, ...);
@@ -416,10 +480,17 @@ int         mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet,
 void        mock_sock_put(struct sock *sk);
 void        mock_spin_lock(spinlock_t *lock);
 void        mock_spin_unlock(spinlock_t *lock);
+void        mock_setup_udp_tunnel_sock(struct net *net, struct socket *sock,
+				      struct udp_tunnel_sock_cfg *cfg);
 struct sk_buff *
 	    mock_tcp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
 			 int sequence, int extra_bytes);
 void        mock_teardown(void);
+int         mock_udp_sock_create4(struct net *net, struct udp_port_cfg *cfg,
+				  struct socket **sockp);
+int         mock_udp_sock_create6(struct net *net, struct udp_port_cfg *cfg,
+				  struct socket **sockp);
+void        mock_udp_tunnel_sock_release(struct socket *sock);
 void       *mock_vmalloc(size_t size);
 
 #endif /* _HOMA_MOCK_H */

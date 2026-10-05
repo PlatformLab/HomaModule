@@ -15,6 +15,7 @@
 #include "utils.h"
 
 #ifndef __STRIP__ /* See strip.py */
+#include "homa_hijack.h"
 #include "homa_qdisc.h"
 #endif /* See strip.py */
 
@@ -69,6 +70,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		return crpc;
 	crpc->msgout.next_xmit_offset = crpc->msgout.length;
 
+#ifndef __STRIP__ /* See strip.py */
 	if (state == UNIT_RCVD_START_MSG) {
 		struct homa_start_msg_hdr start;
 		memset(&start, 0, sizeof(start));
@@ -81,9 +83,10 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		start.msg_length = htonl(resp_length);
 
 		homa_dispatch_pkts(mock_skb_alloc(server_ip, client_ip,
-				   &start.common, 0, 0));
+				   &start.common, 0, 0), HOMA_PKT_NATIVE);
 		return crpc;
 	}
+#endif /* See strip.py */
 
 	struct homa_data_hdr h;
 	memset(&h, 0, sizeof(h));
@@ -98,7 +101,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
 	homa_dispatch_pkts(mock_skb_alloc(server_ip, client_ip, &h.common,
-			   this_size, 0));
+			   this_size, 0), HOMA_PKT_NATIVE);
 	if (state == UNIT_RCVD_ONE_PKT)
 		return crpc;
 	for (bytes_received = UNIT_TEST_DATA_PER_PACKET;
@@ -109,7 +112,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		homa_dispatch_pkts(mock_skb_alloc(server_ip, client_ip,
-						  &h.common, this_size, 0));
+						  &h.common, this_size, 0), HOMA_PKT_NATIVE);
 	}
 	if (state == UNIT_RCVD_MSG)
 		return crpc;
@@ -327,6 +330,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	int bytes_received;
 	int status;
 
+#ifndef __STRIP__ /* See strip.py */
 	if (state == UNIT_RCVD_START_MSG) {
 		struct homa_start_msg_hdr start;
 		memset(&start, 0, sizeof(start));
@@ -339,12 +343,13 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		start.msg_length = htonl(req_length);
 
 		homa_dispatch_pkts(mock_skb_alloc(client_ip, server_ip,
-				   &start.common, 0, 0));
+				   &start.common, 0, 0), HOMA_PKT_NATIVE);
 		srpc = homa_rpc_find_server(hsk, client_ip, id);
 		if (srpc)
 			homa_rpc_unlock(srpc);
 		return srpc;
 	}
+#endif /* See strip.py */
 
 	memset(&h, 0, sizeof(h));
 	h.common = (struct homa_common_hdr){
@@ -362,7 +367,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	homa_rpc_unlock(srpc);
 	homa_dispatch_pkts(mock_skb_alloc(client_ip, server_ip, &h.common,
 			(req_length > UNIT_TEST_DATA_PER_PACKET)
-			? UNIT_TEST_DATA_PER_PACKET : req_length, 0));
+			? UNIT_TEST_DATA_PER_PACKET : req_length, 0), HOMA_PKT_NATIVE);
 	if (state == UNIT_RCVD_ONE_PKT)
 		return srpc;
 	for (bytes_received = UNIT_TEST_DATA_PER_PACKET;
@@ -374,7 +379,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		homa_dispatch_pkts(mock_skb_alloc(client_ip, server_ip,
-						  &h.common, this_size, 0));
+						  &h.common, this_size, 0), HOMA_PKT_NATIVE);
 	}
 	if (state == UNIT_RCVD_MSG)
 		return srpc;
@@ -523,7 +528,7 @@ const char *unit_log_deferred(struct homa_qdisc_dev *qdev)
 		rpc = container_of(node, struct homa_rpc, qrpc.rb_node);
 		unit_log_printf("; ", "[id %llu, offsets", rpc->id);
         	skb_queue_walk(&rpc->qrpc.packets, skb) {
-			h = (struct homa_data_hdr *)skb_transport_header(skb);
+			h = (struct homa_data_hdr *)homa_skb_inner_hdr(skb);
 			unit_log_printf(" ", "%d", ntohl(h->seg.offset));
 		}
 		unit_log_printf("", "]");

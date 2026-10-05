@@ -41,6 +41,9 @@
 #include <linux/skbuff.h>
 #include <linux/socket.h>
 #include <linux/vmalloc.h>
+#ifndef __STRIP__ /* See strip.py */
+#include <linux/workqueue.h>
+#endif /* See strip.py */
 #include <net/icmp.h>
 #include <net/ip.h>
 #include <net/netns/generic.h>
@@ -502,6 +505,83 @@ struct homa_net {
 	 * for this namespace. Managed by homa_peer.c under the peertab lock.
 	 */
 	int num_routes;
+
+#ifndef __STRIP__ /* See strip.py */
+	/**
+	 * @hijack_udp: Non-zero means enable UDP hijacking: encapsulate
+	 * outgoing Homa packets in UDP packets sent to a pair of dedicated
+	 * kernel tunnel sockets, so that ECMP/RSS can use the outer UDP
+	 * source port for entropy. Set externally via sysctl; the actual
+	 * lifecycle state is tracked separately in @udp_state because
+	 * disabling requires an asynchronous drain. See homa_hijack.c.
+	 */
+	int hijack_udp;
+
+	/**
+	 * @udp_state: Current lifecycle state of the UDP hijack tunnel
+	 * sockets for this namespace. One of the HOMA_UDP_xxx values below.
+	 * Protected by @udp_mutex.
+	 */
+	int udp_state;
+#define HOMA_UDP_DISABLED  0
+#define HOMA_UDP_ENABLED   1
+#define HOMA_UDP_DRAINING  2
+#define HOMA_UDP_TEARDOWN  3
+
+	/**
+	 * @udp_mutex: Protects @udp_state, @udp_tun4, @udp_tun6, and
+	 * transitions between them. Sleeping lock: never acquired from
+	 * softirq/RPC-completion context (see homa_hijack.c).
+	 */
+	struct mutex udp_mutex;
+
+	/** @udp_tun4: IPv4 UDP tunnel socket used for hijacked traffic,
+	 * or NULL if not currently created. Protected by @udp_mutex.
+	 */
+	struct socket *udp_tun4;
+
+	/** @udp_tun6: IPv6 UDP tunnel socket used for hijacked traffic,
+	 * or NULL if not currently created. Protected by @udp_mutex.
+	 */
+	struct socket *udp_tun6;
+
+	/**
+	 * @udp_rpc_count: Number of RPCs that were admitted for UDP
+	 * hijacking and have not yet completed. Used to determine when it
+	 * is safe to release @udp_tun4/@udp_tun6 after hijacking is
+	 * disabled. Manipulated with atomic ops, not @udp_mutex (see
+	 * homa_hijack.c for the synchronization argument).
+	 */
+	atomic_t udp_rpc_count;
+
+	/**
+	 * @udp_drain_deadline: Value of homa->timer_ticks after which the
+	 * timer will forcibly abort any surviving UDP-hijacked RPCs so that
+	 * the tunnel sockets can be released. Only meaningful when
+	 * @udp_state is HOMA_UDP_DRAINING.
+	 */
+	u32 udp_drain_deadline;
+
+	/**
+	 * @udp_release_work: Deferred work that releases @udp_tun4/
+	 * @udp_tun6 once @udp_rpc_count reaches zero while draining. Runs
+	 * in process context because releasing tunnel sockets can sleep.
+	 */
+	struct work_struct udp_release_work;
+
+	/**
+	 * @udp_ctl_table: Per-namespace copy of the sysctl table used to
+	 * expose @hijack_udp as net.homa.hijack_udp for this namespace.
+	 * Dynamically allocated; must be kfreed.
+	 */
+	struct ctl_table *udp_ctl_table;
+
+	/**
+	 * @udp_ctl_header: Handle returned by register_net_sysctl for
+	 * @udp_ctl_table, needed to unregister it later.
+	 */
+	struct ctl_table_header *udp_ctl_header;
+#endif /* See strip.py */
 };
 
 /**
@@ -649,7 +729,26 @@ void     homa_close(struct sock *sock, long timeout);
 int      homa_copy_to_user(struct homa_rpc *rpc);
 void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_destroy(struct homa *homa);
-void     homa_dispatch_pkts(struct sk_buff *skb);
+/**
+ * enum homa_pkt_origin - Identifies how a batch of packets passed to
+ * homa_dispatch_pkts() arrived, so that Homa can enforce transport
+ * isolation between UDP-hijacked sockets and everything else.
+ */
+enum homa_pkt_origin {
+	/**
+	 * @HOMA_PKT_NATIVE: The packets arrived as native (IPPROTO_HOMA)
+	 * traffic, or were recovered from the TCP pipeline by TCP hijacking;
+	 * both cases are treated identically for transport isolation.
+	 */
+	HOMA_PKT_NATIVE = 0,
+
+	/**
+	 * @HOMA_PKT_UDP: The packets were delivered via a UDP hijack tunnel
+	 * socket's encap_rcv callback (see homa_hijack.c).
+	 */
+	HOMA_PKT_UDP    = 1,
+};
+void     homa_dispatch_pkts(struct sk_buff *skb, int origin);
 int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
 int      homa_err_handler_v6(struct sk_buff *skb,
 			     struct inet6_skb_parm *opt, u8 type,  u8 code,
@@ -663,7 +762,7 @@ int      homa_init(struct homa *homa);
 int      homa_ioc_info(struct socket *sock, unsigned long arg);
 int      homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
 int      homa_load(void);
-void     homa_message_out_init(struct homa_rpc *rpc, int length);
+int      homa_message_out_init(struct homa_rpc *rpc, int length);
 void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			   struct homa_rpc *rpc);
 void     homa_net_destroy(struct homa_net *hnet);
@@ -687,6 +786,7 @@ int      homa_shutdown(struct socket *sock, int how);
 struct sk_buff *__homa_skb_alloc(int length);
 int      homa_socket(struct sock *sk);
 int      homa_softirq(struct sk_buff *skb);
+void     homa_softirq_dispatch(struct sk_buff *skb, int origin);
 void     homa_spin(int ns);
 void     homa_timer(struct homa *homa);
 void     homa_timer_check_rpc(struct homa_rpc *rpc);

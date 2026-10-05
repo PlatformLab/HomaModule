@@ -11,6 +11,7 @@
 #include "homa_wire.h"
 
 #ifndef __STRIP__ /* See strip.py */
+#include <linux/udp.h>
 #include "homa_hijack.h"
 #include "homa_qdisc.h"
 #endif /* See strip.py */
@@ -23,8 +24,13 @@
  *             locked by caller. Fields in rpc->msgout should have been
  *             zeroed by the caller.
  * @length:    Number of bytes that will eventually be in rpc->msgout.
+ * Return:     0 for success, otherwise a negative errno (e.g. the route
+ *             MTU is too small to hold a single byte of UDP-encapsulated
+ *             Homa DATA for a UDP-hijacked RPC). This failure is fail-fast
+ *             and non-retryable; it is unrelated to later transmit-time
+ *             errors from ip_queue_xmit()/ip6_xmit().
  */
-void homa_message_out_init(struct homa_rpc *rpc, int length)
+int homa_message_out_init(struct homa_rpc *rpc, int length)
 	__must_hold(rpc->bucket->lock)
 {
 	struct dst_entry *dst;
@@ -46,6 +52,27 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 	rcu_read_lock();
 	dst = rcu_dereference(rpc->route->dst);
 	mtu = dst_mtu(dst);
+
+#ifndef __STRIP__ /* See strip.py */
+	if (homa_sock_udp_hijacked(rpc->hsk)) {
+		int min_mtu = rpc->hsk->ip_header_length +
+			      sizeof(struct udphdr) +
+			      sizeof(struct homa_data_hdr) + 1;
+
+		if (mtu < min_mtu) {
+			rcu_read_unlock();
+			return -EMSGSIZE;
+		}
+		rpc->msgout.max_seg_data = mtu - rpc->hsk->ip_header_length -
+					   sizeof(struct udphdr) -
+					   sizeof(struct homa_data_hdr);
+		rpc->msgout.max_gso_segs = 1;
+		rpc->msgout.max_gso_data = rpc->msgout.max_seg_data;
+		rcu_read_unlock();
+		return 0;
+	}
+#endif /* See strip.py */
+
 	rpc->msgout.max_seg_data = mtu - rpc->hsk->ip_header_length -
 				   sizeof(struct homa_data_hdr);
 	max_segs = min_t(u32, rpc->hsk->homa->max_gso_size,
@@ -60,6 +87,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 	rpc->msgout.max_gso_segs = max_segs;
 	rpc->msgout.max_gso_data = max_segs * rpc->msgout.max_seg_data;
 	rcu_read_unlock();
+	return 0;
 }
 
 /**
@@ -501,6 +529,23 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_route *route,
 
 	IF_NO_STRIP(int priority);
 
+#ifndef __STRIP__ /* See strip.py */
+	if (homa_sock_udp_hijacked(hsk)) {
+		int padded_length = length < HOMA_MIN_PKT_LENGTH ?
+				    HOMA_MIN_PKT_LENGTH : length;
+		struct dst_entry *dst;
+		int mtu;
+
+		rcu_read_lock();
+		dst = rcu_dereference(route->dst);
+		mtu = dst_mtu(dst);
+		rcu_read_unlock();
+		if (mtu < hsk->ip_header_length + sizeof(struct udphdr) +
+				padded_length)
+			return -EMSGSIZE;
+	}
+#endif /* See strip.py */
+
 	skb = __homa_skb_alloc(HOMA_MAX_HEADER);
 	if (unlikely(!skb))
 		return -ENOBUFS;
@@ -565,6 +610,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	}
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_xmit_start_msg() - Emit a START_MSG packet for a scheduled outgoing
  * message (this will trigger grant generation on the receiver).
@@ -584,6 +630,7 @@ void homa_xmit_start_msg(struct homa_rpc *rpc, int length)
 		   rpc->msgout.length);
 	homa_xmit_control(START_MSG, &h, sizeof(h), rpc);
 }
+#endif /* See strip.py */
 
 /**
  * homa_xmit_data() - If an RPC has outbound data packets that are permitted

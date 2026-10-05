@@ -11,6 +11,7 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
+#include "homa_hijack.h"
 #include "homa_qdisc.h"
 #endif /* See strip.py */
 
@@ -158,6 +159,7 @@ int homa_net_init(struct homa_net *hnet, struct homa *homa)
 	memset(hnet, 0, sizeof(*hnet));
 	hnet->homa = homa;
 	hnet->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
+	IF_NO_STRIP(homa_hijack_udp_net_init(hnet));
 	return 0;
 }
 
@@ -170,6 +172,7 @@ void homa_net_destroy(struct homa_net *hnet)
 {
 	homa_socktab_destroy(hnet->homa->socktab, hnet);
 	homa_peer_free_net(hnet);
+	IF_NO_STRIP(homa_hijack_udp_net_destroy(hnet));
 }
 
 #ifndef __STRIP__ /* See strip.py */

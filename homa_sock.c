@@ -239,6 +239,7 @@ int homa_sock_init(struct homa_sock *hsk)
 	hsk->sock.sk_sndbuf = homa->wmem_max;
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
 	IF_NO_STRIP(homa_hijack_sock_init(hsk));
+	IF_NO_STRIP(homa_hijack_udp_sock_select(hsk));
 
 	/* This is needed to prevent blocking when allocating memory in
 	 * functions like ip_route_output_flow, which could be invoked
@@ -271,10 +272,13 @@ int homa_sock_init(struct homa_sock *hsk)
 	}
 	result = homa_sock_link(hsk, hnet->prev_default_port);
 	spin_unlock_bh(&socktab->write_lock);
-	if (result == 0)
+	if (result == 0) {
+		IF_NO_STRIP(homa_hijack_udp_unlock(hnet));
 		return result;
+	}
 
 error:
+	IF_NO_STRIP(homa_hijack_udp_unlock(hnet));
 	hsk->shutdown = true;
 	hsk->homa = NULL;
 	homa_pool_free(buffer_pool);

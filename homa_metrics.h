@@ -575,7 +575,6 @@ struct homa_metrics {
 	 * because it was too short to hold all the required information.
 	 */
 	u64 short_packets;
-
 	/**
 	 * @packet_discards: total number of times a normal (non-retransmitted)
 	 * packet was discarded because all its data had already been received.

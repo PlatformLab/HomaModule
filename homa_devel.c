@@ -7,6 +7,9 @@
 #include "homa_impl.h"
 #include "homa_devel.h"
 #include "homa_grant.h"
+#ifndef __STRIP__ /* See strip.py */
+#include "homa_hijack.h"
+#endif /* See strip.py */
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #ifndef __STRIP__ /* See strip.py */
@@ -123,6 +126,38 @@ char *homa_print_ipv6_addr(const struct in6_addr *addr)
 }
 
 /**
+ * homa_print_hdr_offset() - Determine how many bytes past
+ * skb_transport_header(skb) the packet's homa_common_hdr begins, for use
+ * by homa_print_packet() and homa_print_packet_short(). Those functions
+ * are invoked both on incoming packets (already positioned at the Homa
+ * header by the receive path) and on outgoing packets at the point they
+ * are handed to ip_queue_xmit()/ip6_xmit(), which is before any IP
+ * header has been added; homa_skb_inner_hdr() can't be used here because
+ * its UDP-encapsulation detection relies on an IP header (and
+ * skb->protocol) that doesn't exist yet at that point. Instead, this
+ * peeks directly at skb_transport_header(skb): if it looks like a real
+ * UDP header for the UDP-hijack port, the Homa header follows
+ * immediately after it; otherwise skb_transport_header(skb) already
+ * points at the Homa header.
+ * @skb:    Packet to examine.
+ * Return:  Number of bytes between skb_transport_header(skb) and the
+ *          packet's homa_common_hdr.
+ */
+static int homa_print_hdr_offset(struct sk_buff *skb)
+{
+#ifndef __STRIP__ /* See strip.py */
+	struct udphdr *uh = (struct udphdr *)skb_transport_header(skb);
+
+	if (skb->len >= (int)(skb_transport_offset(skb) + sizeof(*uh) +
+			sizeof(struct homa_common_hdr)) &&
+	    uh->dest == htons(HOMA_UDP_HIJACK_PORT) &&
+	    uh->source == htons(HOMA_UDP_HIJACK_PORT))
+		return sizeof(*uh);
+#endif /* See strip.py */
+	return 0;
+}
+
+/**
  * homa_print_packet() - Print a human-readable string describing the
  * information in a Homa packet.
  * @skb:     Packet whose information should be printed.
@@ -137,6 +172,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 	char header[HOMA_MAX_HEADER];
 	struct in6_addr saddr;
 	int used = 0;
+	int offset;
 
 	if (!skb) {
 		snprintf(buffer, buf_len, "skb is NULL!");
@@ -144,7 +180,9 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		return buffer;
 	}
 
-	skb_copy_bits(skb, 0, &header, min(sizeof(header), skb->len));
+	offset = homa_print_hdr_offset(skb);
+	skb_copy_bits(skb, offset, &header, min(sizeof(header),
+						 skb->len - offset));
 	common = (struct homa_common_hdr *)header;
 	saddr = skb_canonical_ipv6_saddr(skb);
 	used = homa_snprintf(buffer, buf_len, used,
@@ -308,9 +346,12 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 {
 	struct homa_common_hdr *common;
 	char header[HOMA_MAX_HEADER];
+	int offset;
 
+	offset = homa_print_hdr_offset(skb);
 	common = (struct homa_common_hdr *)header;
-	skb_copy_bits(skb, 0, header, min(HOMA_MAX_HEADER, skb->len));
+	skb_copy_bits(skb, offset, header, min(HOMA_MAX_HEADER,
+					       skb->len - offset));
 	switch (common->type) {
 	case DATA: {
 		struct homa_data_hdr *h = (struct homa_data_hdr *)header;
