@@ -60,6 +60,13 @@ WS_DLL_PUBLIC_DEF const int plugin_want_minor = WIRESHARK_VERSION_MINOR;
 
 #define HOMA_PROTO 0xFD
 
+/* Fixed UDP destination port used by Homa's optional UDP hijacking
+ * feature (see HOMA_UDP_HIJACK_PORT in homa_wire.h); packets encapsulated
+ * this way carry a Homa common header immediately after the UDP header,
+ * so the same dissector used for IPPROTO_HOMA also works for them.
+ */
+#define HOMA_UDP_HIJACK_PORT 54321
+
 #define HOMA_HEADER_TYPE_OFFSET 13
 #define HOMA_DATA_PACKET 0x10
 #define HOMA_GRANT_PACKET 0x11
@@ -396,6 +403,7 @@ static void proto_reg_handoff_homa(void)
 
 	homa_handle = create_dissector_handle(dissect_homa, proto_homa);
 	dissector_add_uint("ip.proto", HOMA_PROTO, homa_handle);
+	dissector_add_uint("udp.port", HOMA_UDP_HIJACK_PORT, homa_handle);
 }
 
 WS_DLL_PUBLIC void plugin_register(void)

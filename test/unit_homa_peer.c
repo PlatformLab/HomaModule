@@ -361,6 +361,71 @@ TEST_F(homa_peer, homa_route_alloc__route_error_ipv6)
 #endif /* See strip.py */
 }
 
+TEST_F(homa_peer, homa_route_key_init__sk_protocol)
+{
+	struct homa_route_key key;
+
+	self->hsk.sock.sk_protocol = IPPROTO_HOMA;
+	homa_route_key_init(&key, &self->hsk, ip1111);
+	EXPECT_EQ(IPPROTO_HOMA, key.sk_protocol);
+
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+	homa_route_key_init(&key, &self->hsk, ip1111);
+	EXPECT_EQ(IPPROTO_UDP, key.sk_protocol);
+}
+
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_peer, homa_route_alloc__udp_hijack_proto_and_ports_ipv4)
+{
+	struct homa_route_key key;
+	struct homa_route *route;
+
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, 0);
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+
+	homa_route_key_init(&key, &self->hsk, &self->client_ip[0]);
+	route = homa_route_alloc(&self->hsk, &key);
+	ASSERT_FALSE(IS_ERR(route));
+	EXPECT_EQ(IPPROTO_UDP, route->flow.u.ip4.flowi4_proto);
+	EXPECT_EQ(htons(HOMA_UDP_HIJACK_PORT), route->flow.u.ip4.fl4_dport);
+	EXPECT_EQ(htons(HOMA_UDP_HIJACK_PORT), route->flow.u.ip4.fl4_sport);
+	homa_route_free(&route->rcu_head);
+}
+TEST_F(homa_peer, homa_route_alloc__udp_hijack_proto_and_ports_ipv6)
+{
+	struct homa_route_key key;
+	struct homa_route *route;
+
+	mock_ipv6 = true;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, 0);
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+
+	homa_route_key_init(&key, &self->hsk, ip3333);
+	route = homa_route_alloc(&self->hsk, &key);
+	ASSERT_FALSE(IS_ERR(route));
+	EXPECT_EQ(IPPROTO_UDP, route->flow.u.ip6.flowi6_proto);
+	EXPECT_EQ(htons(HOMA_UDP_HIJACK_PORT), route->flow.u.ip6.fl6_dport);
+	EXPECT_EQ(htons(HOMA_UDP_HIJACK_PORT), route->flow.u.ip6.fl6_sport);
+	homa_route_free(&route->rcu_head);
+}
+#endif /* See strip.py */
+TEST_F(homa_peer, homa_route_alloc__native_proto_and_zero_ports)
+{
+	struct homa_route_key key;
+	struct homa_route *route;
+
+	homa_route_key_init(&key, &self->hsk, ip1111);
+	route = homa_route_alloc(&self->hsk, &key);
+	ASSERT_FALSE(IS_ERR(route));
+	EXPECT_EQ(IPPROTO_HOMA, route->flow.u.ip6.flowi6_proto);
+	EXPECT_EQ(0, route->flow.u.ip6.fl6_dport);
+	EXPECT_EQ(0, route->flow.u.ip6.fl6_sport);
+	homa_route_free(&route->rcu_head);
+}
+
 TEST_F(homa_peer, homa_route_free)
 {
 	struct homa_route_key key;

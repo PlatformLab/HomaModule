@@ -3,6 +3,33 @@ analyzing Homa. Here is a summary of some of the programs in this
 directory; for more information, run any program with the "--help"
 option, or look at its source code.
 
+### UDP Request/Response Tests
+
+The `udp` operation replaces `invoke` and uses the same sequential
+request/response timing loop as `rtt`:
+
+```bash
+./homa_test 10.157.149.212:8000 --count 2 --length 1000 --seed 1 udp
+```
+
+This sends 10 warmup requests followed by 2 measured requests and prints
+RTT statistics and median bandwidth. The default measured count is 1000.
+Send or receive errors make the `udp` operation exit with a nonzero status.
+
+Enable `net.homa.hijack_udp=1` in both endpoint network namespaces before
+starting their Homa client and server sockets. The utility does not change
+the sysctl or force a transport: with UDP disabled, it uses native Homa.
+The server must listen on the specified Homa port. For IPv6, use a bracketed
+destination and `--ipv6`, for example `[fd00::2]:8000 --ipv6 --count 2 udp`.
+
+At startup, the Homa server queries its socket's `SO_PROTOCOL` and prints
+`Server transport: Homa-over-UDP (port 8000)`,
+`Server transport: Homa-over-TCP (port 8000)`, or
+`Server transport: native Homa (port 8000)`, even without `--verbose`.
+Failed queries and unrecognized protocols are reported as `unknown` without
+stopping the receive loop. The startup line is flushed for redirected logs.
+This reports the socket's selected transport, not the current sysctl value.
+
 ### Cluster Performance Tests
 
 **cp_node**: a program that runs on an individual node as part of cluster

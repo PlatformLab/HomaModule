@@ -9,6 +9,8 @@
 #include "homa_rpc.h"
 
 #include <linux/xxhash.h>
+#include <net/route.h>
+#include <net/ip6_route.h>
 
 #ifdef __UNIT_TEST__
 #undef rhashtable_init
@@ -350,12 +352,20 @@ struct homa_route *homa_route_alloc(struct homa_sock *hsk,
 	route->flow.flowi_secid = key->secid;
 	if (ipv6_addr_v4mapped(&route->key.daddr)) {
 		struct rtable *rt;
+		__be16 port = 0;
+		u8 proto = IPPROTO_HOMA;
 
+#ifndef __STRIP__ /* See strip.py */
+		if (key->sk_protocol == IPPROTO_UDP) {
+			proto = IPPROTO_UDP;
+			port = htons(HOMA_UDP_HIJACK_PORT);
+		}
+#endif /* See strip.py */
 		flowi4_init_output(&route->flow.u.ip4, key->bound_dev_if,
 				   key->mark, 0, RT_SCOPE_UNIVERSE,
-				   IPPROTO_HOMA, 0,
+				   proto, 0,
 				   ipv6_to_ipv4(route->key.daddr),
-				   ipv6_to_ipv4(route->key.saddr), 0, 0,
+				   ipv6_to_ipv4(route->key.saddr), port, port,
 				   key->uid);
 		rt = ip_route_output_flow(sock_net(&hsk->sock),
 					  &route->flow.u.ip4, &hsk->sock);
@@ -365,15 +375,23 @@ struct homa_route *homa_route_alloc(struct homa_sock *hsk,
 		}
 		rcu_assign_pointer(route->dst, &rt->dst);
 	} else {
+		__be16 port = 0;
+
 		/* This code is derived from code in tcp_v6_connect. */
 		route->flow.u.ip6.flowi6_proto = IPPROTO_HOMA;
+#ifndef __STRIP__ /* See strip.py */
+		if (key->sk_protocol == IPPROTO_UDP) {
+			route->flow.u.ip6.flowi6_proto = IPPROTO_UDP;
+			port = htons(HOMA_UDP_HIJACK_PORT);
+		}
+#endif /* See strip.py */
 		route->flow.u.ip6.daddr = route->key.daddr;
 		route->flow.u.ip6.saddr = route->key.saddr;
 		route->flow.u.ip6.flowlabel = ip6_make_flowinfo(0, 0);
 		route->flow.u.ip6.flowi6_oif = key->bound_dev_if;
 		route->flow.u.ip6.flowi6_mark = key->mark;
-		route->flow.u.ip6.fl6_dport = 0;
-		route->flow.u.ip6.fl6_sport = 0;
+		route->flow.u.ip6.fl6_dport = port;
+		route->flow.u.ip6.fl6_sport = port;
 		route->flow.u.ip6.flowi6_uid = key->uid;
 		dst = ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
 						   &route->flow.u.ip6, NULL);
@@ -546,6 +564,77 @@ int homa_route_validate(struct homa_rpc *rpc)
 	}
 	return 0;
 }
+
+#ifndef __STRIP__ /* See strip.py */
+/**
+ * homa_route_update_pmtu() - Invoked when an ICMP error indicates that the
+ * effective path MTU to a destination has decreased (IPv4 "fragmentation
+ * needed" or IPv6 "packet too big"). Updates the kernel's PMTU exception
+ * cache for the destination (so that future route lookups will reflect the
+ * new MTU) and removes Homa's own cached route(s) to that destination from
+ * peertab->route_ht (so that RPCs currently using the route will look up a
+ * fresh one, picking up the reduced MTU via the generic dst_mtu()
+ * machinery). Only the table's own reference on each matching route is
+ * dropped; RPCs that are still using a route keep their own reference and
+ * are unaffected until they next call homa_route_validate() or complete.
+ * Idempotent: safe to call even if no matching routes remain.
+ * @hnet:   Namespace that owns @skb.
+ * @skb:    The ICMP error packet; its network header must be positioned
+ *          at the quoted (original) IP/IPv6 header that triggered the
+ *          error, and skb->dev must be the receiving device. This is
+ *          guaranteed for the UDP hijack tunnel socket's encap_err_rcv
+ *          callback.
+ * @daddr:  Destination address (network order; IPv4 addresses are
+ *          represented as IPv4-mapped IPv6 addresses) whose cached
+ *          route(s) should be updated.
+ * @mtu:    New path MTU, in host byte order.
+ */
+void homa_route_update_pmtu(struct homa_net *hnet, struct sk_buff *skb,
+			    const struct in6_addr *daddr, u32 mtu)
+{
+	struct homa_peertab *peertab = hnet->homa->peertab;
+	struct net *net = dev_net(skb->dev);
+	bool is_ipv6 = skb_is_ipv6(skb);
+	struct rhashtable_iter iter;
+	struct homa_route *route;
+
+	rhashtable_walk_enter(&peertab->route_ht, &iter);
+	rhashtable_walk_start(&iter);
+	while (1) {
+		route = rhashtable_walk_next(&iter);
+		if (!route)
+			break;
+		if (IS_ERR(route))
+			continue;
+		if (route->key.hnet != hnet ||
+		    !ipv6_addr_equal(&route->key.daddr, daddr))
+			continue;
+
+		if (is_ipv6)
+			ip6_update_pmtu(skb, net, htonl(mtu),
+					route->key.bound_dev_if,
+					route->key.mark, route->key.uid);
+		else
+			ipv4_update_pmtu(skb, net, mtu,
+					 route->key.bound_dev_if,
+					 route->key.sk_protocol);
+
+		spin_lock_bh(&peertab->lock);
+		if (rhashtable_remove_fast(&peertab->route_ht,
+					   &route->ht_linkage,
+					   route_ht_params) == 0) {
+			peertab->num_routes--;
+			hnet->num_routes--;
+			tt_record1("homa_route_update_pmtu removed route for 0x%x",
+				   tt_addr(*daddr));
+			homa_route_release(route);
+		}
+		spin_unlock_bh(&peertab->lock);
+	}
+	rhashtable_walk_stop(&iter);
+	rhashtable_walk_exit(&iter);
+}
+#endif /* See strip.py */
 
 /**
  * homa_route_gc() - This function is invoked by Homa at regular intervals;

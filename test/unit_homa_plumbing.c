@@ -963,6 +963,7 @@ TEST_F(homa_plumbing, homa_sendmsg__request_sent_successfully)
 	EXPECT_EQ(88888, crpc->completion_cookie);
 	homa_rpc_unlock(crpc);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_packet_for_scheduled_msg)
 {
 	self->homa.unsched_bytes = 100;
@@ -971,7 +972,6 @@ TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_packet_for_scheduled_msg)
 	EXPECT_SUBSTR("xmit START_MSG 200", unit_log_get());
 	ASSERT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
-#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__request_metrics)
 {
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
@@ -1036,6 +1036,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_wrong_state)
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_for_scheduled_response)
 {
 	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
@@ -1048,6 +1049,7 @@ TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_for_scheduled_response)
 	EXPECT_SUBSTR("xmit START_MSG 200", unit_log_get());
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
+#endif /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__homa_tx_copy_from_user_returns_error)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,

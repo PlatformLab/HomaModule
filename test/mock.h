@@ -4,7 +4,107 @@
 #ifndef _HOMA_MOCK_H
 #define _HOMA_MOCK_H
 
+/* This file must be the very first #include for every compiled .c file
+ * (forced via -include mock.h in the test Makefile, before homa_impl.h and
+ * before any real kernel header). <linux/mm.h> -> <linux/bit_spinlock.h>
+ * and <linux/lockdep.h> -> <linux/smp.h>, dragged in transitively by many
+ * kernel headers homa_impl.h includes (skbuff.h, kthread.h, completion.h,
+ * sched/signal.h, proc_fs.h, etc.), use preempt_disable()/preempt_enable()/
+ * smp_processor_id()/raw_smp_processor_id()/WARN_ON_ONCE() in inline
+ * functions; those inline functions bake in whichever macro definition is
+ * active when the header is first parsed. Getting the mocked versions
+ * active before any of that runs requires mock.h itself to be included
+ * first, standalone. homa_impl.h's own later #include "mock.h" is then a
+ * no-op (include guard), but these overrides are already in effect.
+ */
+#include <linux/bug.h>
+
+#undef WARN
+#define WARN(...)
+
+#undef WARN_ON
+#define WARN_ON(condition) ({						\
+	int __ret_warn_on = !!(condition);				\
+	unlikely(__ret_warn_on);					\
+})
+
+#undef WARN_ON_ONCE
+#define WARN_ON_ONCE(condition) WARN_ON(condition)
+
+#undef WARN_ONCE
+#define WARN_ONCE(cond, ...) ({ bool __c = (cond); (void)__c; __c; })
+
+/* Pulling in the real <linux/preempt.h>/<linux/smp.h> here first (before
+ * the undef/define below) sets their include guards so later transitive
+ * re-inclusion is a no-op and can't clobber these overrides. This must
+ * come after the WARN overrides above, since preempt.h drags in
+ * <linux/thread_info.h> (via linkage.h), whose inline functions use
+ * WARN_ON_ONCE() and must see the mocked (no-op) version.
+ */
+#include <linux/preempt.h>
+#include <linux/smp.h>
+
+/* Forward declarations needed because the overrides below are used by
+ * headers included further down in this file, before mock.c's own
+ * declarations (later in this file) would otherwise be visible.
+ */
+void mock_preempt_disable(void);
+void mock_preempt_enable(void);
+int mock_processor_id(void);
+
+#undef preempt_disable
+#define preempt_disable() mock_preempt_disable()
+
+#undef preempt_enable
+#define preempt_enable() mock_preempt_enable()
+
+#undef smp_processor_id
+#define smp_processor_id() mock_processor_id()
+
+#undef raw_smp_processor_id
+#define raw_smp_processor_id() mock_processor_id()
+
+/* <net/tcp.h> (tcp_v4_check/tcp_v6_check), <linux/filter.h> (this_cpu_ptr,
+ * via <linux/bpf.h>), <net/icmp.h> (icmp_send), <net/ip6_route.h>
+ * (rt6_get_cookie, via <net/ip6_fib.h>) and <net/netns/generic.h>
+ * (net_generic) all declare real inline functions/objects whose names this
+ * file redirects below via object-style macros; those macros corrupt the
+ * real declarations if the real headers are parsed afterward (their
+ * include guards would otherwise make a later re-inclusion elsewhere a
+ * silent no-op with the corrupted macro baked in). Pulling them in here
+ * first, before any of the redirects below, avoids that. homa.h is
+ * included here too so the HOMA_BPAGE_SIZE/HOMA_MIN_DEFAULT_PORT/etc.
+ * overrides below apply after the real values are already defined, instead
+ * of being silently clobbered by a later #include of homa.h from
+ * homa_impl.h.
+ */
+#include <net/tcp.h>
+#include <net/ip6_checksum.h>
+#include <linux/filter.h>
+#include <net/icmp.h>
+#include <net/ip6_route.h>
+#include <net/netns/generic.h>
+#include "homa.h"
+#include "homa_wire.h"
+
 #include <linux/ethtool.h>
+
+/* net/udp_tunnel.h's udp_sock_create() is a static inline that calls
+ * udp_sock_create4()/udp_sock_create6() directly, so those two must be
+ * mocked (and prototyped, since struct udp_port_cfg isn't defined until
+ * the include below) before udp_tunnel.h is parsed - otherwise the inline
+ * body bakes in calls to the real, unlinked kernel functions.
+ */
+struct udp_port_cfg;
+int mock_udp_sock_create4(struct net *net, struct udp_port_cfg *cfg,
+			   struct socket **sockp);
+int mock_udp_sock_create6(struct net *net, struct udp_port_cfg *cfg,
+			   struct socket **sockp);
+#undef udp_sock_create4
+#define udp_sock_create4 mock_udp_sock_create4
+#undef udp_sock_create6
+#define udp_sock_create6 mock_udp_sock_create6
+#include <net/udp_tunnel.h>
 
 /* Replace various Linux variables and functions with mocked ones. */
 #undef alloc_pages
@@ -104,6 +204,12 @@
 #undef preempt_enable
 #define preempt_enable() mock_preempt_enable()
 
+#undef preempt_count_add
+#define preempt_count_add(val) mock_preempt_count_add(val)
+
+#undef preempt_count_sub
+#define preempt_count_sub(val) mock_preempt_count_sub(val)
+
 #define put_page mock_put_page
 
 #define rcu_read_lock mock_rcu_read_lock
@@ -119,10 +225,21 @@
 #undef register_net_sysctl
 #define register_net_sysctl mock_register_net_sysctl
 
+#undef register_net_sysctl_sz
+#define register_net_sysctl_sz mock_register_net_sysctl_sz
+
+#define rt6_get_cookie(...) 999
+
+#undef schedule_work
+#define schedule_work(work) mock_schedule_work(work)
+
 #define signal_pending(...) mock_signal_pending
 
 #undef set_active_memcg
 #define set_active_memcg mock_set_active_memcg
+
+#undef setup_udp_tunnel_sock
+#define setup_udp_tunnel_sock mock_setup_udp_tunnel_sock
 
 /* Must redefine skb_frag_foreach_page because page pointers are different
  * when unit testing (a page point points to an actual page, rather than
@@ -138,9 +255,6 @@
 	     copied += p_len, p++, p_off = 0,           \
 	     p_len = f_len - copied)                    \
 
-#undef smp_processor_id
-#define smp_processor_id() mock_processor_id()
-
 #define sock_hold(sock) mock_sock_hold(sock)
 
 #define sock_put(sock) mock_sock_put(sock)
@@ -153,11 +267,34 @@
 #undef tcp_v6_check
 #define tcp_v6_check(...) (~(__force __sum16)666U)
 
+/* udp_set_csum()/udp6_set_csum() perform real checksum computation using
+ * kernel internals (skb_is_gso, skb_dst, NETIF_F_IP_CSUM, ...) that aren't
+ * available in the unit test environment, so (like tcp_v4_check/
+ * tcp_v6_check above) they are replaced here with simple stand-ins that
+ * just store a fixed, distinguishable value in the packet's checksum
+ * field.
+ */
+#undef udp_set_csum
+#define udp_set_csum(nocheck, skb, saddr, daddr, len) \
+		(udp_hdr(skb)->check = (__force __sum16)555U)
+
+#undef udp6_set_csum
+#define udp6_set_csum(nocheck, skb, saddr, daddr, len) \
+		(udp_hdr(skb)->check = (__force __sum16)777U)
+
 #undef this_cpu_ptr
 #define this_cpu_ptr(name) (&name[cpu_number])
 
 #undef __this_cpu_read
 #define __this_cpu_read(name) (name)
+
+#undef udp_tunnel_sock_release
+#define udp_tunnel_sock_release mock_udp_tunnel_sock_release
+
+/* udp_sock_create4/6 are mocked earlier, right before the
+ * #include <net/udp_tunnel.h> near the top of this file - see the
+ * comment there.
+ */
 
 #undef vmalloc
 #define vmalloc mock_vmalloc
@@ -185,6 +322,7 @@ extern int         mock_copy_to_frags_errors;
 extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
+extern int         cpu_number;
 extern struct net_device
 		   mock_devices[];
 extern enum skb_drop_reason
@@ -223,6 +361,7 @@ extern int         mock_queue_index;
 extern int         mock_register_protosw_errors;
 extern int         mock_register_qdisc_errors;
 extern int         mock_register_sysctl_errors;
+extern size_t      mock_register_sysctl_size;
 extern int         mock_rht_init_errors;
 extern int         mock_rht_insert_errors;
 extern void      **mock_rht_walk_results;
@@ -235,14 +374,22 @@ extern struct task_struct
 extern int         mock_total_spin_locks;
 extern int         mock_trylock_errors;
 extern u64         mock_tt_cycles;
+extern int         mock_udp_sock_create_errors;
+extern int         mock_udp_tunnel_release_count;
+extern struct udp_tunnel_sock_cfg
+		   mock_udp_tunnel_cfg;
 extern int         mock_vmalloc_errors;
 extern int         mock_wait_intr_irq_errors;
 extern int         mock_xmit_log_verbose;
 extern int         mock_xmit_log_hijack;
+extern int         mock_xmit_log_udp_hijack;
 extern char        mock_xmit_prios[];
 
 extern struct task_struct *current_task;
 
+void        hrtimer_setup(struct hrtimer *timer,
+			  enum hrtimer_restart (*function)(struct hrtimer *),
+			  clockid_t clock_id, enum hrtimer_mode mode);
 struct page *
 	    mock_alloc_pages(gfp_t gfp, unsigned order);
 struct Qdisc
@@ -278,6 +425,8 @@ int         mock_page_refs(struct page *page);
 int         mock_page_to_nid(struct page *page);
 void        mock_preempt_disable(void);
 void        mock_preempt_enable(void);
+void        mock_preempt_count_add(int val);
+void        mock_preempt_count_sub(int val);
 int         mock_processor_id(void);
 void        mock_put_page(struct page *page);
 struct sk_buff *
@@ -293,6 +442,11 @@ struct ctl_table_header *
 	    mock_register_net_sysctl(struct net *net,
 				     const char *path,
 				     struct ctl_table *table);
+struct ctl_table_header *
+	    mock_register_net_sysctl_sz(struct net *net,
+					const char *path,
+					struct ctl_table *table,
+					size_t table_size);
 int         mock_rht_init(struct rhashtable *ht,
 			  const struct rhashtable_params *params);
 void       *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
@@ -307,6 +461,7 @@ int         mock_rht_lookup_insert_fast(struct rhashtable *ht,
 void       *mock_rht_walk_next(struct rhashtable_iter *iter);
 void        mock_rpc_hold(struct homa_rpc *rpc);
 void        mock_rpc_put(struct homa_rpc *rpc);
+bool        mock_schedule_work(struct work_struct *work);
 struct mem_cgroup *
             mock_set_active_memcg(struct mem_cgroup *memcg);
 void        mock_set_clock_vals(u64 t, ...);
@@ -325,10 +480,17 @@ int         mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet,
 void        mock_sock_put(struct sock *sk);
 void        mock_spin_lock(spinlock_t *lock);
 void        mock_spin_unlock(spinlock_t *lock);
+void        mock_setup_udp_tunnel_sock(struct net *net, struct socket *sock,
+				      struct udp_tunnel_sock_cfg *cfg);
 struct sk_buff *
 	    mock_tcp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
 			 int sequence, int extra_bytes);
 void        mock_teardown(void);
+int         mock_udp_sock_create4(struct net *net, struct udp_port_cfg *cfg,
+				  struct socket **sockp);
+int         mock_udp_sock_create6(struct net *net, struct udp_port_cfg *cfg,
+				  struct socket **sockp);
+void        mock_udp_tunnel_sock_release(struct socket *sock);
 void       *mock_vmalloc(size_t size);
 
 #endif /* _HOMA_MOCK_H */

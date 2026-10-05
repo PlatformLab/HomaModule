@@ -22,7 +22,8 @@ CINCLUDES := \
 	    -I. \
 	    -I.. \
 	    $(KERN_INCLUDES) \
-	    -include $(KDIR)/include/linux/kconfig.h
+	    -include $(KDIR)/include/linux/kconfig.h \
+	    -include mock.h
 CCINCLUDES := \
 	    -I. \
 	    -I.. \
@@ -36,11 +37,12 @@ DEFS +=      -D__STRIP__
 endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
-		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS) \
-		-fsanitize=address -fno-omit-frame-pointer
-CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) \
-		-fsanitize=address -fno-omit-frame-pointer
+		-Wno-strict-aliasing -Wunused-but-set-variable -Wno-unused-variable \
+		-Wno-pointer-sign -Werror
+CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g -fcf-protection \
+	     -fsanitize=address -fno-omit-frame-pointer $(CINCLUDES) $(DEFS)
+CCFLAGS :=   -std=c++11 $(WARNS) -MD -g -fcf-protection \
+	     -fsanitize=address -fno-omit-frame-pointer $(CCINCLUDES) $(DEFS)
 
 TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_interest.c \
@@ -129,50 +131,18 @@ xxhash.o: xxhash.c
 	$(CC) -c $(CFLAGS) -O2 -fno-sanitize=address $< -o $@
 
 unit: $(OBJS)
-	$(CXX) $(CFLAGS) $^ -o $@
+	$(CXX) $(CFLAGS) $^ -o $@ -lasan
 
 test: unit
 	./unit
 
-# Additional definitions for running unit tests using stripped sources.
-
-S_HOMA_SRCS := $(patsubst %,stripped/%,$(filter-out timetrace.c, $(HOMA_SRCS)))
-S_HOMA_OBJS :=  $(patsubst %.c,%.o,$(S_HOMA_SRCS))
-S_HOMA_HDRS := stripped/homa.h \
-		stripped/homa_impl.h \
-		stripped/homa_peer.h \
-		stripped/homa_pool.h \
-		stripped/homa_receiver.h \
-		stripped/homa_rpc.h \
-		stripped/homa_sock.h \
-		stripped/homa_stub.h \
-		stripped/homa_wire.h
-stripped/%.c: ../%.c
-	../util/strip.py --alt $< > $@
-stripped/%.h: ../%.h
-	../util/strip.py --alt $< > $@
-S_TEST_OBJS := $(patsubst %,stripped/%,$(filter-out unit_timetrace.o, $(TEST_OBJS)))
-S_OBJS := $(S_HOMA_OBJS) $(S_TEST_OBJS) $(patsubst %,stripped/%,$(OTHER_OBJS))
-
-$(S_OBJS): | stripped $(S_HOMA_HDRS)
-
-stripped:
-	mkdir -p stripped
-
-stripped/%.o: stripped/%.c
-	$(CC) -c $(patsubst -I..,-Istripped,$(CFLAGS)) $< -o $@
-stripped/%.o: %.c
-	$(CC) -c $(patsubst -I..,-Istripped,$(CFLAGS)) $< -o $@
-stripped/%.o: %.cc
-	$(CXX) -c $(patsubst -I..,-Istripped,$(CCFLAGS)) $< -o $@
-
-s_unit: $(S_OBJS)
-	$(CXX) $(CFLAGS) $^ -o $@ -lasan
-
-s_test: s_unit
-	./s_unit
-
-CLEANS += s_unit
+# Compile-time stripping keeps unit-test hooks while excluding code that is
+# omitted from the upstream build. Use clean submakes so changed compiler
+# definitions cannot reuse objects from a normal unit-test build.
+.PHONY: s_test
+s_test:
+	$(MAKE) clean
+	$(MAKE) __STRIP__=y test
 
 # The target below shouldn't be needed: theoretically, any code that is
 # sensitive to IPv4 vs. IPv6 should be tested explicitly, regardless of

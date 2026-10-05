@@ -773,6 +773,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__reset_bpages_needed)
 	EXPECT_EQ(0, crpc2->msgin.num_bpages);
 	EXPECT_EQ(2, pool->bpages_needed);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_unscheduled)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
@@ -821,6 +822,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc_scheduled)
 	EXPECT_EQ(2, crpc->msgin.num_bpages);
 	EXPECT_SUBSTR("xmit GRANT 50000@0", unit_log_get());
 }
+#endif /* See strip.py */
 TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
@@ -844,6 +846,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)
 	EXPECT_EQ(4, pool->bpages_needed);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_pool, homa_pool_wakeup_rpc__scheduled)
 {
 	struct homa_rpc *srpc;
@@ -859,6 +862,7 @@ TEST_F(homa_pool, homa_pool_wakeup_rpc__scheduled)
 	EXPECT_STREQ("xmit GRANT 20000@0", unit_log_get());
 	homa_rpc_unlock(srpc);
 }
+#endif /* See strip.py */
 TEST_F(homa_pool, homa_pool_wakeup_rpc__unscheduled)
 {
 	struct homa_rpc *srpc;
@@ -870,7 +874,11 @@ TEST_F(homa_pool, homa_pool_wakeup_rpc__unscheduled)
 	unit_log_clear();
 	homa_rpc_lock(srpc);
 	homa_pool_wakeup_rpc(srpc);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 0, 200 @6", unit_log_get());
+#else /* See strip.py */
+	EXPECT_STREQ("xmit RESEND 0, 200", unit_log_get());
+#endif /* See strip.py */
 	homa_rpc_unlock(srpc);
 }
 
