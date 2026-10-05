@@ -861,7 +861,7 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 	 * will choose a new output queue for the skb, which could result
 	 * in undesirable packet reordering.
 	 */
-	qdisc = qdisc_from_priv(q);
+	qdisc = homa_qdisc_from_priv(q);
 	spin_lock_bh(qdisc_lock(qdisc));
 	qdisc_enqueue_tail(skb, qdisc);
 	spin_unlock_bh(qdisc_lock(qdisc));
