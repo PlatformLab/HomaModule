@@ -56,6 +56,10 @@ int homa_message_out_init(struct homa_rpc *rpc, int length)
 	mtu = dst_mtu(dst);
 	rpc->msgout.max_seg_data = mtu - rpc->hsk->ip_header_length -
 				   sizeof(struct homa_data_hdr);
+	if (rpc->msgout.max_seg_data < HOMA_MIN_SEG_DATA) {
+		err = -EHOSTUNREACH;
+		goto done;
+	}
 	max_segs = min_t(u32, rpc->hsk->homa->max_gso_size,
 			 dst->dev->gso_max_size) -
 		   (sizeof(struct homa_data_hdr) + HOMA_SKB_EXTRA);
@@ -67,8 +71,10 @@ int homa_message_out_init(struct homa_rpc *rpc, int length)
 		max_segs = 1;
 	rpc->msgout.max_gso_segs = max_segs;
 	rpc->msgout.max_gso_data = max_segs * rpc->msgout.max_seg_data;
+
+done:
 	rcu_read_unlock();
-	return 0;
+	return err;
 }
 
 /**

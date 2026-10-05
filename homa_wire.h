@@ -91,6 +91,14 @@ enum homa_packet_type {
 #endif /* See strip.py */
 
 /**
+ * define HOMA_MIN_SEG_DATA - Homa will consider a host unreachable if
+ * there isn't room for at least this many bytes of message data in DATA
+ * packets for that host (the exact number is somewhat arbitrary; what's
+ * absolutely essential is that the value must be greater than zero).
+ */
+#define HOMA_MIN_SEG_DATA 100
+
+/**
  * struct homa_common_hdr - Wire format for the first bytes in every Homa
  * packet. This must (mostly) match the format of a TCP header to enable
  * Homa packets to actually be transmitted as TCP packets (and thereby
