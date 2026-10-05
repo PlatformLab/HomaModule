@@ -2581,7 +2581,7 @@ TEST_F(homa_incoming, homa_ack_pkt__target_rpc_doesnt_exist)
 }
 
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_incoming, homa_start_msg_pkt)
+TEST_F(homa_incoming, homa_start_msg_pkt__handle_states)
 {
 	struct homa_start_msg_hdr h;
 	struct homa_rpc *crpc;
@@ -2597,18 +2597,47 @@ TEST_F(homa_incoming, homa_start_msg_pkt)
 	h.common.type = START_MSG;
 	h.msg_length = htonl(1000);
 
-	/* First attempt: RPC is in wrong state. */
+	/* First attempt: RPC is already in RPC_INCOMING state. */
 	crpc->state = RPC_INCOMING;
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0), HOMA_PKT_NATIVE);
 	EXPECT_EQ(-1, crpc->msgin.length);
 
-	/* Second attempt: RPC is in correct state. */
+	/* Second attempt: RPC is in RPC_OUTGOING state. */
 	crpc->state = RPC_OUTGOING;
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0), HOMA_PKT_NATIVE);
 	EXPECT_EQ(1000, crpc->msgin.length);
 	EXPECT_EQ(RPC_INCOMING, crpc->state);
+}
+TEST_F(homa_incoming, homa_start_msg_pkt__return_busy)
+{
+	struct homa_start_msg_hdr h;
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 20000, 1600);
+	ASSERT_NE(NULL, crpc);
+
+	h.common.sport = htons(self->server_port);
+	h.common.dport = htons(self->hsk.port);
+	h.common.sender_id = cpu_to_be64(self->server_id);
+	h.common.type = START_MSG;
+	h.msg_length = htonl(1000);
+
+	/* First packet: don't return BUSY. */
+	unit_log_clear();
+	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
+					  &h.common, 0, 0));
+	EXPECT_EQ(1000, crpc->msgin.length);
+	EXPECT_STREQ("xmit GRANT 1000@0", unit_log_get());
+
+	/* Second attempt: return BUSY. */
+	unit_log_clear();
+	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
+					  &h.common, 0, 0));
+	EXPECT_STREQ("xmit BUSY", unit_log_get());
 }
 #endif
 

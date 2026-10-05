@@ -49,8 +49,8 @@
  * maintained by the dynamic queue limits mechanism (DQL). DQL keeps
  * counters for each netdev_queue that indicate how many bytes are in the
  * NIC's possession for each queue (i.e. packets that have been passed
- * to the NIC but not yet returned after transmission). If the number of
- * outstanding bytes for any queue exceeds a limit (determined by the
+ * to the NIC but not yet returned after transmission). If the total number of
+ * outstanding bytes in the NIC exceeds a limit (determined by the
  * max_nic_queue_usecs sysctl parameter) then the NIC is considered
  * congested and Homa will stop queuing more packets until the congestion
  * subsides. This reduces worst-case total NIC queuing by 2-3x (as of
@@ -878,7 +878,7 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 	 * will choose a new output queue for the skb, which could result
 	 * in undesirable packet reordering.
 	 */
-	qdisc = qdisc_from_priv(q);
+	qdisc = homa_qdisc_from_priv(q);
 	spin_lock_bh(qdisc_lock(qdisc));
 	qdisc_enqueue_tail(skb, qdisc);
 	spin_unlock_bh(qdisc_lock(qdisc));

@@ -761,7 +761,7 @@ void homa_net_exit(struct net *net)
  * Return:    0 on success, otherwise a negative errno. Sets hsk->error_msg
  *            on errors.
  */
-int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
+int homa_bind(struct socket *sock, struct SOCKADDR *addr, int addr_len)
 {
 	union sockaddr_in_union *addr_in = (union sockaddr_in_union *)addr;
 	struct homa_sock *hsk = homa_sk(sock->sk);
@@ -1076,7 +1076,8 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 			return -EFAULT;
 		}
 
-		ret = homa_pool_set_region(hsk, u64_to_user_ptr(args.start),
+		ret = homa_pool_set_region(hsk->buffer_pool,
+					   u64_to_user_ptr(args.start),
 					   args.length);
 		INC_METRIC(so_set_buf_calls, 1);
 		INC_METRIC(so_set_buf_cycles, homa_clock() - start);

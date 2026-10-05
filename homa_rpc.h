@@ -343,12 +343,16 @@ struct homa_rpc {
 	 *                         homa_grant_check_rpc is called, so it is
 	 *                         possible for RPC_GRANTABLE to be set but
 	 *                         not RPC_GRANT_MANAGED.
+	 * RPC_GOT_START_MSG -     1 means we have already received a
+	 *                         START_MSG packet for this RPC; used to
+	 *                         detect START_MSG retransmissions.
 	 */
 #define RPC_PKTS_READY        0
 #define APP_NEEDS_LOCK        1
 #define RPC_PRIVATE           2
 #define RPC_GRANTABLE         3
 #define RPC_GRANT_MANAGED     4
+#define RPC_GOT_START_MSG     5
 
 	/**
 	 * @refs: Number of references to this RPC, including one for each
@@ -423,8 +427,8 @@ struct homa_rpc {
 	struct list_head ready_links;
 
 	/**
-	 * @buf_links: Used to link this RPC into @hsk->waiting_for_bufs.
-	 * If the RPC isn't on @hsk->waiting_for_bufs, this is an empty
+	 * @buf_links: Used to link this RPC into @pool->waiting_for_bufs.
+	 * If the RPC isn't on @pool->waiting_for_bufs, this is an empty
 	 * list pointing to itself.
 	 */
 	struct list_head buf_links;
@@ -543,7 +547,7 @@ static inline void homa_rpc_lock(struct homa_rpc *rpc)
  *             currently owned by someone else.
  */
 static inline int homa_rpc_try_lock(struct homa_rpc *rpc)
-	__cond_acquires(rpc->bucket->lock)
+	__COND_ACQUIRES(rpc->bucket->lock)
 {
 	if (!spin_trylock_bh(&rpc->bucket->lock))
 		return 0;

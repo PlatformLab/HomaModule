@@ -402,6 +402,17 @@ void            homa_rcu_kfree(void *object);
 void            homa_rcu_kfree_callback(struct rcu_head *head);
 
 /**
+ * homa_qdisc_from_priv() - Given a pointer to qdisc private data (e.g. a
+ * struct homa_disc *), return a pointer to the Qdisc.
+ * @priv:    Private data associated with a qdisc.
+ * Return:   See above.
+ */
+static inline struct Qdisc *homa_qdisc_from_priv(void *priv)
+{
+	return container_of(priv, struct Qdisc, privdata);
+}
+
+/**
  * homa_qdisc_active() - Return true if homa qdiscs are enabled for @hnet
  * (so the old pacer should not be used), false otherwise.
  * @homa:    Information about the Homa transport.

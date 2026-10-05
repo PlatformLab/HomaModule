@@ -221,7 +221,7 @@ TEST_F(homa_plumbing, homa_net_exit__free_route)
 
 TEST_F(homa_plumbing, homa_bind__version_mismatch)
 {
-	struct sockaddr addr = {};
+	struct SOCKADDR addr = {};
 	struct socket sock = {};
 	int result;
 
@@ -231,7 +231,7 @@ TEST_F(homa_plumbing, homa_bind__version_mismatch)
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	addr.sa_family = AF_INET6;
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr, sizeof(addr));
+	result = homa_bind(&sock, (struct SOCKADDR *)&addr, sizeof(addr));
 	EXPECT_EQ(EAFNOSUPPORT, -result);
 	EXPECT_STREQ("address family in bind address didn't match socket",
 		     self->hsk.error_msg);
@@ -249,7 +249,7 @@ TEST_F(homa_plumbing, homa_bind__ipv6_address_too_short)
 
 	addr.in6.sin6_family = AF_INET6;
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in6)-1);
+	result = homa_bind(&sock, (struct SOCKADDR *)&addr.sa, sizeof(addr.in6)-1);
 	EXPECT_EQ(EINVAL, -result);
 	EXPECT_STREQ("ipv6 address too short", self->hsk.error_msg);
 }
@@ -268,7 +268,7 @@ TEST_F(homa_plumbing, homa_bind__ipv6_ok)
 	addr.in6.sin6_family = AF_INET6;
 	addr.in6.sin6_port = htons(123);
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in6));
+	result = homa_bind(&sock, (struct SOCKADDR *)&addr.sa, sizeof(addr.in6));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(123, self->hsk.port);
 	EXPECT_EQ(1, self->hsk.is_server);
@@ -286,7 +286,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_address_too_short)
 
 	addr.in4.sin_family = AF_INET;
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in4)-1);
+	result = homa_bind(&sock, (struct SOCKADDR *)&addr.sa, sizeof(addr.in4)-1);
 	EXPECT_EQ(EINVAL, -result);
 	EXPECT_STREQ("ipv4 address too short", self->hsk.error_msg);
 }
@@ -305,7 +305,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 	addr.in4.sin_family = AF_INET;
 	addr.in4.sin_port = htons(345);
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in4));
+	result = homa_bind(&sock, (struct SOCKADDR *)&addr.sa, sizeof(addr.in4));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(345, self->hsk.port);
 	EXPECT_EQ(1, self->hsk.is_server);
@@ -731,7 +731,8 @@ TEST_F(homa_plumbing, homa_getsockopt__recvbuf_success)
 
 	homa_pool_free(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
-	EXPECT_EQ(0, -homa_pool_set_region(&self->hsk, (void *)0x40000,
+	EXPECT_EQ(0, -homa_pool_set_region(self->hsk.buffer_pool,
+					   (void *)0x40000,
 					   100*HOMA_BPAGE_SIZE + 1000));
 	EXPECT_EQ(0, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
 		  SO_HOMA_RCVBUF, (char *)&val, &size));

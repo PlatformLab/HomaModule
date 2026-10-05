@@ -19,7 +19,7 @@
  */
 static void set_bpages_needed(struct homa_pool *pool)
 {
-	struct homa_rpc *rpc = list_first_entry(&pool->hsk->waiting_for_bufs,
+	struct homa_rpc *rpc = list_first_entry(&pool->waiting_for_bufs,
 						struct homa_rpc, buf_links);
 
 	pool->bpages_needed = (rpc->msgin.length + HOMA_BPAGE_SIZE - 1) >>
@@ -39,31 +39,31 @@ struct homa_pool *homa_pool_alloc(struct homa_sock *hsk)
 	pool = kzalloc(sizeof(*pool), GFP_KERNEL_ACCOUNT);
 	if (!pool)
 		return ERR_PTR(-ENOMEM);
+	spin_lock_init(&pool->lock);
+	INIT_LIST_HEAD(&pool->waiting_for_bufs);
 	pool->hsk = hsk;
 	return pool;
 }
 
 /**
  * homa_pool_set_region() - Associate a region of memory with a pool.
- * @hsk:          Socket whose pool the region will be associated with.
- *                Must not be locked, and the pool must not currently
- *                have a region associated with it.
+ * @pool:         Buffer pool the region will be associated with. Must not
+ *                currently have a region associated with it.
  * @region:       First byte of the memory region for the pool, allocated
  *                by the application; must be page-aligned.
  * @region_size:  Total number of bytes available at @buf_region.
  * Return: Either zero (for success) or a negative errno for failure.
  */
-int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
+int homa_pool_set_region(struct homa_pool *pool, void __user *region,
 			 u64 region_size)
 {
 	struct homa_pool_core __percpu *cores;
 	struct homa_bpage *descriptors;
 	int i, result, num_bpages;
-	struct homa_pool *pool;
 	u64 min_size;
 
 	if (((uintptr_t)region) & ~PAGE_MASK) {
-		hsk->error_msg = "buffer pool is not page aligned";
+		pool->hsk->error_msg = "buffer pool is not page aligned";
 		return -EINVAL;
 	}
 
@@ -76,7 +76,7 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 	min_size = nr_cpu_ids;
 	min_size = min_size * HOMA_BPAGE_SIZE + 2 * HOMA_MAX_MESSAGE_LENGTH;
 	if (region_size < min_size) {
-		hsk->error_msg = "buffer pool is not large enough";
+		pool->hsk->error_msg = "buffer pool is not large enough";
 		return -EINVAL;
 	}
 
@@ -85,11 +85,11 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 	 * homa_recvmsg_args.
 	 */
 	if (region_size > 0x100000000ULL) {
-		hsk->error_msg = "buffer pool cannot be larger than 4 GB";
+		pool->hsk->error_msg = "buffer pool cannot be larger than 4 GB";
 		return -EINVAL;
 	}
 
-	/* Allocate memory before locking the socket, so we can allocate
+	/* Allocate memory before locking the pool, so we can allocate
 	 * without GFP_ATOMIC.
 	 */
 	num_bpages = region_size >> HOMA_BPAGE_SHIFT;
@@ -105,11 +105,10 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 		goto error;
 	}
 
-	homa_sock_lock(hsk);
-	pool = hsk->buffer_pool;
+	homa_pool_lock(pool);
 	if (pool->region) {
 		result = -EINVAL;
-		homa_sock_unlock(hsk);
+		homa_pool_unlock(pool);
 		goto error;
 	}
 
@@ -131,7 +130,7 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 	 * newly-created region will see all the region's data.
 	 */
 	smp_store_release(&pool->region, (char __user *)region);
-	homa_sock_unlock(hsk);
+	homa_pool_unlock(pool);
 	return 0;
 
 error:
@@ -335,7 +334,7 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	rpc->msgin.num_bpages = full_pages;
 
 	/* The last chunk may be less than a full bpage; for this we use
-	 * the bpage that we own (and reuse it for multiple messages).
+	 * the bpage owned by this core (and reuse it for multiple messages).
 	 */
 	partial = rpc->msgin.length & (HOMA_BPAGE_SIZE - 1);
 	if (unlikely(partial == 0))
@@ -401,7 +400,7 @@ success:
 	return 0;
 
 	/* We get here if there wasn't enough buffer space for this
-	 * message; add the RPC to hsk->waiting_for_bufs. The list is sorted
+	 * message; add the RPC to pool->waiting_for_bufs. The list is sorted
 	 * by RPC length in order to implement SRPT.
 	 */
 out_of_space:
@@ -409,18 +408,18 @@ out_of_space:
 	tt_record4("Buffer allocation failed, port %d, id %d, length %d, free_bpages %d",
 		   pool->hsk->port, rpc->id, rpc->msgin.length,
 		   atomic_read(&pool->free_bpages));
-	homa_sock_lock(pool->hsk);
-	list_for_each_entry(other, &pool->hsk->waiting_for_bufs, buf_links) {
+	homa_pool_lock(pool);
+	list_for_each_entry(other, &pool->waiting_for_bufs, buf_links) {
 		if (other->msgin.length > rpc->msgin.length) {
 			list_add_tail(&rpc->buf_links, &other->buf_links);
 			goto queued;
 		}
 	}
-	list_add_tail(&rpc->buf_links, &pool->hsk->waiting_for_bufs);
+	list_add_tail(&rpc->buf_links, &pool->waiting_for_bufs);
 
 queued:
 	set_bpages_needed(pool);
-	homa_sock_unlock(pool->hsk);
+	homa_pool_unlock(pool);
 	return 0;
 }
 
@@ -520,32 +519,32 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 	while (atomic_read_acquire(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
 
-		homa_sock_lock(pool->hsk);
-		if (list_empty(&pool->hsk->waiting_for_bufs)) {
+		homa_pool_lock(pool);
+		if (list_empty(&pool->waiting_for_bufs)) {
 			pool->bpages_needed = INT_MAX;
-			homa_sock_unlock(pool->hsk);
+			homa_pool_unlock(pool);
 			break;
 		}
-		rpc = list_first_entry(&pool->hsk->waiting_for_bufs,
+		rpc = list_first_entry(&pool->waiting_for_bufs,
 				       struct homa_rpc, buf_links);
 		if (!homa_rpc_try_lock(rpc)) {
-			/* Can't just spin on the RPC lock because we're
-			 * holding the socket lock and the lock order is
-			 * rpc-then-socket (see "Homa Locking Strategy" in
-			 * homa_impl.h). Instead, release the socket lock
-			 * and try the entire operation again.
+			/* Can't spin on the RPC lock because we're holding
+			 * the pool lock and the lock order is rpc-then-pool
+			 * (see "Homa Locking Strategy" in homa_impl.h).
+			 * Instead, release the pool lock and try the entire
+			 * operation again.
 			 */
-			homa_sock_unlock(pool->hsk);
+			homa_pool_unlock(pool);
 			UNIT_LOG("; ", "rpc lock unavailable in %s", __func__);
 			cpu_relax();
 			continue;
 		}
 		list_del_init(&rpc->buf_links);
-		if (list_empty(&pool->hsk->waiting_for_bufs))
+		if (list_empty(&pool->waiting_for_bufs))
 			pool->bpages_needed = INT_MAX;
 		else
 			set_bpages_needed(pool);
-		homa_sock_unlock(pool->hsk);
+		homa_pool_unlock(pool);
 		tt_record4("Retrying buffer allocation for id %d, length %d, free_bpages %d, new bpages_needed %d",
 			   rpc->id, rpc->msgin.length,
 			   atomic_read(&pool->free_bpages),
@@ -618,3 +617,24 @@ u64 homa_pool_avail_bytes(struct homa_pool *pool)
 	}
 	return avail;
 }
+
+#ifndef __STRIP__ /* See strip.py */
+/**
+ * homa_pool_lock_slow() - This function implements the slow path for
+ * acquiring the lock for a buffer pool. It is invoked when the lock isn't
+ * immediately available. It waits for the lock but also records statistics
+ * about the waiting time.
+ * @pool:    Buffer pool to  lock.
+ */
+void homa_pool_lock_slow(struct homa_pool *pool)
+	__acquires(pool->lock)
+{
+	u64 start = homa_clock();
+
+	tt_record("beginning wait for bpool lock");
+	spin_lock_bh(&pool->lock);
+	tt_record("ending wait for bpool lock");
+	INC_METRIC(bpool_lock_misses, 1);
+	INC_METRIC(bpool_lock_miss_cycles, homa_clock() - start);
+}
+#endif /* See strip.py */

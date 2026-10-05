@@ -131,6 +131,8 @@ void homa_request_retrans(struct homa_rpc *rpc)
 	 */
 	if (rpc->state == RPC_OUTGOING && homa_is_client(rpc->id) &&
 	    rpc->msgout.granted == 0) {
+		tt_record2("Reissuing START_MSG for id %d, length %d",
+			   rpc->id, rpc->msgout.length);
 	    	homa_xmit_start_msg(rpc, rpc->msgout.length);
 		return;
 	}
@@ -1175,9 +1177,7 @@ void homa_start_msg_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		   homa_local_id(h->common.sender_id),
 		   ntohl(h->msg_length));
 
-	/* We don't need to do anything with this packet unless it
-	 * signals the beginning of a response message.
-	 */
+	/* Check for (and handle) the beginning of a response message. */
 	if (rpc->state == RPC_OUTGOING && homa_is_client(rpc->id)) {
 		INC_METRIC(responses_received, 1);
 		rpc->state = RPC_INCOMING;
@@ -1187,6 +1187,19 @@ void homa_start_msg_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		 */
 		homa_message_in_init(rpc, ntohl(h->msg_length), 0);
 	}
+
+	/* If this is a retransmission, return a BUSY so the sender knows
+	 * we know about the message.
+	 */
+	if (test_bit(RPC_GOT_START_MSG, &rpc->flags)) {
+		struct homa_busy_hdr busy;
+
+		tt_record2("sending BUSY response to START_MSG, id %d, state %d",
+			   rpc->id, rpc->state);
+		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
+	}
+	set_bit(RPC_GOT_START_MSG, &rpc->flags);
+
 	consume_skb(skb);
 }
 #endif /* See strip.py */
@@ -1289,7 +1302,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
  *            must release the lock and the reference.
  */
 struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
-	__cond_acquires(rpc->bucket->lock)
+	__COND_ACQUIRES(rpc->bucket->lock)
 {
 	struct homa_interest interest;
 	struct homa_rpc *rpc;

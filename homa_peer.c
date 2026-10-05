@@ -461,7 +461,12 @@ struct homa_route *homa_route_get(struct homa_sock *hsk,
 				  route_ht_params);
 	tt_record("rhashtable_lookup for route key returned");
 	if (route && refcount_inc_not_zero(&route->refs)) {
-		route->access_jiffies = jiffies;
+		/* jiffies advances every few ms; an unconditional store here
+		 * dirties the line ~1M times/s under load for no extra
+		 * freshness.
+		 */
+		if (route->access_jiffies != jiffies)
+			route->access_jiffies = jiffies;
 		rcu_read_unlock();
 		return route;
 	}
@@ -698,7 +703,7 @@ int homa_route_pick_victims(struct homa_peertab *peertab,
 			 */
 			rhashtable_walk_stop(&peertab->route_ht_iter);
 			rhashtable_walk_exit(&peertab->route_ht_iter);
-			rhashtable_walk_enter(&peertab->peer_ht,
+			rhashtable_walk_enter(&peertab->route_ht,
 					      &peertab->route_ht_iter);
 			rhashtable_walk_start(&peertab->route_ht_iter);
 			route = rhashtable_walk_next(&peertab->route_ht_iter);
