@@ -1594,6 +1594,16 @@ void __SCT__preempt_schedule(void)
 void __SCT__WARN_trap(struct bug_entry *bug, ...)
 {}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+struct vlan_type_depth __vlan_get_protocol_offset(const struct sk_buff *skb,
+						  __be16 type, int mac_offset)
+{
+	struct vlan_type_depth res = {0, 0};
+
+	return res;
+}
+#endif
+
 void security_sk_classify_flow(const struct sock *sk,
 		struct flowi_common *flic)
 {}
