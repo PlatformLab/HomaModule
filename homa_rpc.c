@@ -10,6 +10,7 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
+#include "homa_hijack.h"
 #include "homa_qdisc.h"
 #endif /* See strip.py */
 
@@ -80,6 +81,15 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 		err = -ESHUTDOWN;
 		goto error;
 	}
+#ifndef __STRIP__ /* See strip.py */
+	err = homa_hijack_udp_admit(crpc);
+	if (err) {
+		homa_sock_unlock(hsk);
+		homa_rpc_unlock(crpc);
+		hsk->error_msg = "UDP hijacking has been disabled";
+		goto error;
+	}
+#endif /* See strip.py */
 	hlist_add_head(&crpc->hash_links, &bucket->rpcs);
 	rcu_read_lock();
 	list_add_tail_rcu(&crpc->active_links, &hsk->active_rpcs);
@@ -201,6 +211,13 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 		err = -ESHUTDOWN;
 		goto error;
 	}
+#ifndef __STRIP__ /* See strip.py */
+	err = homa_hijack_udp_admit(srpc);
+	if (err) {
+		homa_sock_unlock(hsk);
+		goto error;
+	}
+#endif /* See strip.py */
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
 	homa_sock_unlock(hsk);
@@ -310,6 +327,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 		   rpc->hsk->port);
 	rpc->state = RPC_DEAD;
 	rpc->error = -EINVAL;
+	IF_NO_STRIP(homa_hijack_udp_end_rpc(rpc));
 
 #ifndef __STRIP__ /* See strip.py */
 	/* The following line must occur before the socket is locked. This is
@@ -373,9 +391,10 @@ void homa_rpc_abort(struct homa_rpc *rpc, int error)
  * @port:    If nonzero, then RPCs will only be aborted if they were
  *	     targeted at this server port.
  * @error:   Negative errno value indicating the reason for the abort.
+ * @protocol: If nonzero, only sockets using this transport are scanned.
  */
 void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
-		     int port, int error)
+		     int port, int error, int protocol)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
@@ -383,6 +402,8 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 
 	for (hsk = homa_socktab_start_scan(homa->socktab, &scan); hsk;
 	     hsk = homa_socktab_next(&scan)) {
+		if (protocol && hsk->sock.sk_protocol != protocol)
+			continue;
 		/* Skip the (expensive) lock acquisition if there's no
 		 * work to do.
 		 */
@@ -746,8 +767,22 @@ struct homa_rpc *homa_rpc_find_from_skb(struct sk_buff *skb, bool incoming)
 	int port;
 	u64 id;
 
-	/* Find the appropriate socket.*/
-	h = (struct homa_common_hdr *)skb_transport_header(skb);
+	/* Find the appropriate socket. For outgoing packets, the inner Homa
+	 * header may be preceded by a UDP encapsulation header, so use the
+	 * bounds-checked accessor; incoming packets are already positioned
+	 * at the Homa header by the receive path.
+	 */
+	if (incoming) {
+		h = (struct homa_common_hdr *)skb_transport_header(skb);
+	} else {
+#ifndef __STRIP__ /* See strip.py */
+		h = homa_skb_inner_hdr(skb);
+		if (!h)
+			return NULL;
+#else /* See strip.py */
+		h = (struct homa_common_hdr *)skb_transport_header(skb);
+#endif /* See strip.py */
+	}
 	id = be64_to_cpu(h->sender_id);
 	if (incoming) {
 		port = ntohs(h->dport);

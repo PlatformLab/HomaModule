@@ -265,6 +265,14 @@ struct homa_route_key {
 
 	/** @bound_dev_if: sock->sk_bound_dev_if */
 	int bound_dev_if;
+
+	/**
+	 * @sk_protocol: sock->sk_protocol (IPPROTO_HOMA, IPPROTO_TCP, or
+	 * IPPROTO_UDP). Separates cache entries by transport so that
+	 * native, TCP-hijacked, and UDP-hijacked traffic to the same peer
+	 * never share a dst_entry/flow.
+	 */
+	u8 sk_protocol;
 };
 
 /**
@@ -375,6 +383,11 @@ int      homa_route_prefer_evict(struct homa_peertab *peertab,
 				 struct homa_route *route2);
 int      homa_route_validate(struct homa_rpc *rpc);
 
+#ifndef __STRIP__ /* See strip.py */
+void     homa_route_update_pmtu(struct homa_net *hnet, struct sk_buff *skb,
+				const struct in6_addr *daddr, u32 mtu);
+#endif /* See strip.py */
+
 extern const struct rhashtable_params peer_ht_params;
 extern const struct rhashtable_params route_ht_params;
 
@@ -469,11 +482,21 @@ static inline int homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
 	rcu_read_unlock();
 	IF_NO_STRIP(priority = hsk->homa->priority_map[priority]);
 	if (ipv6_addr_v4mapped(&route->peer->addr)) {
-		IF_NO_STRIP(homa_hijack_set_hdr(skb, route, false));
+#ifndef __STRIP__ /* See strip.py */
+		if (homa_sock_udp_hijacked(hsk))
+			homa_hijack_prepend_udp(skb, route, false);
+		else
+			homa_hijack_set_hdr(skb, route, false);
+#endif /* See strip.py */
 		hsk->inet.tos = priority << 5;
 		return ip_queue_xmit(&hsk->inet.sk, skb, &route->flow);
 	}
-	IF_NO_STRIP(homa_hijack_set_hdr(skb, route, true));
+#ifndef __STRIP__ /* See strip.py */
+	if (homa_sock_udp_hijacked(hsk))
+		homa_hijack_prepend_udp(skb, route, true);
+	else
+		homa_hijack_set_hdr(skb, route, true);
+#endif /* See strip.py */
 	return ip6_xmit(&hsk->inet.sk, skb, &route->flow.u.ip6, 0,
 			NULL, priority << 5, 0);
 }
@@ -534,6 +557,7 @@ static inline void homa_route_key_init(struct homa_route_key *key,
 	security_sk_classify_flow(&hsk->sock, &flowic);
 	key->secid = flowic.flowic_secid;
 	key->bound_dev_if = hsk->sock.sk_bound_dev_if;
+	key->sk_protocol = hsk->sock.sk_protocol;
 }
 
 #endif /* _HOMA_PEER_H */

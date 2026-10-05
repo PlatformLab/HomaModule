@@ -9,6 +9,7 @@
 #include "homa_pool.h"
 #include "homa_tx_pool.h"
 #ifndef __STRIP__ /* See strip.py */
+#include "homa_hijack.h"
 #include "homa_qdisc.h"
 #endif /* See strip.py */
 #include "ccutils.h"
@@ -53,10 +54,14 @@ int mock_prepare_to_wait_errors;
 int mock_register_protosw_errors;
 int mock_register_qdisc_errors;
 int mock_register_sysctl_errors;
+size_t mock_register_sysctl_size;
 int mock_rht_init_errors;
 int mock_rht_insert_errors;
 int mock_route_errors;
 int mock_trylock_errors;
+int mock_udp_sock_create_errors;
+int mock_udp_tunnel_release_count;
+struct udp_tunnel_sock_cfg mock_udp_tunnel_cfg;
 int mock_vmalloc_errors;
 int mock_wait_intr_irq_errors;
 
@@ -80,6 +85,11 @@ int mock_xmit_log_verbose;
  * information from outgoing packets.
  */
 int mock_xmit_log_hijack;
+
+/* If a test sets this variable to nonzero, ip*xmit will log the outer
+ * UDP header of outgoing UDP-hijacked packets.
+ */
+int mock_xmit_log_udp_hijack;
 
 /* If a test sets this variable to nonzero, calls to wake_up and
  * wake_up_all will be logged.
@@ -346,6 +356,14 @@ kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
 #endif
 int __preempt_count;
 int cpu_number = 1;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+/* Storage for the kernel's per-cpu "hot" fields (task, preempt count,
+ * cpu number, etc.); real per-cpu semantics don't matter for unit tests,
+ * which are single-threaded, but the symbol must exist to satisfy the
+ * linker for inline kernel functions that reference it directly.
+ */
+struct pcpu_hot pcpu_hot;
+#endif
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
 struct net_hotdata net_hotdata = {
 	.rps_cpu_mask = 0x1f,
@@ -894,10 +912,27 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 		unit_log_printf("; ", "hijack checksum %d, flags 0x%x",
 			       h->checksum, h->flags);
 	}
+	if (mock_xmit_log_udp_hijack) {
+		struct udphdr *uh;
+
+		uh = (struct udphdr *)skb_transport_header(skb);
+		unit_log_printf("; ",
+			       "udp hijack sport %d, dport %d, len %d, checksum %d",
+			       ntohs(uh->source), ntohs(uh->dest),
+			       ntohs(uh->len), uh->check);
+	}
 #endif /* See strip.py */
 	kfree_skb(skb);
 	return 0;
 }
+
+#ifndef __STRIP__ /* See strip.py */
+void ip6_update_pmtu(struct sk_buff *skb, struct net *net, __be32 mtu,
+		int oif, u32 mark, kuid_t uid)
+{
+	unit_log_printf("; ", "ip6_update_pmtu mtu %d", ntohl(mtu));
+}
+#endif /* See strip.py */
 
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
@@ -933,6 +968,15 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 		unit_log_printf("; ", "hijack checksum %d, flags 0x%x",
 			       h->checksum, h->flags);
 	}
+	if (mock_xmit_log_udp_hijack) {
+		struct udphdr *uh;
+
+		uh = (struct udphdr *)skb_transport_header(skb);
+		unit_log_printf("; ",
+			       "udp hijack sport %d, dport %d, len %d, checksum %d",
+			       ntohs(uh->source), ntohs(uh->dest),
+			       ntohs(uh->len), uh->check);
+	}
 #endif /* See strip.py */
 	kfree_skb(skb);
 	return 0;
@@ -949,6 +993,14 @@ unsigned int ipv4_mtu(const struct dst_entry *dst)
 {
 	return mock_mtu;
 }
+
+#ifndef __STRIP__ /* See strip.py */
+void ipv4_update_pmtu(struct sk_buff *skb, struct net *net, u32 mtu,
+		int oif, u8 protocol)
+{
+	unit_log_printf("; ", "ipv4_update_pmtu mtu %d", mtu);
+}
+#endif /* See strip.py */
 
 struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 		const struct sock *sk)
@@ -1131,6 +1183,15 @@ void *__kmalloc_noprof(size_t size, gfp_t flags)
 	return mock_kmalloc(size, flags);
 }
 
+void *kmemdup_noprof(const void *src, size_t len, gfp_t flags)
+{
+	void *block = mock_kmalloc(len, flags);
+
+	if (block)
+		memcpy(block, src, len);
+	return block;
+}
+
 void kvfree(const void *addr)
 {
 	kfree(addr);
@@ -1167,26 +1228,16 @@ int kthread_stop(struct task_struct *k)
 	return 0;
 }
 
-#ifdef CONFIG_DEBUG_LIST
-bool __list_add_valid(struct list_head *new, struct list_head *prev,
-		      struct list_head *next)
-{
-	return true;
-}
-#endif
-
+/* __list_add_valid/__list_del_entry_valid are now provided by the
+ * kernel's own linux/list.h (unconditionally, regardless of
+ * CONFIG_DEBUG_LIST) - only the _or_report reporting hooks still need
+ * a definition here.
+ */
 bool __list_add_valid_or_report(struct list_head *new, struct list_head *prev,
 				struct list_head *next)
 {
 	return true;
 }
-
-#ifdef CONFIG_DEBUG_LIST
-bool __list_del_entry_valid(struct list_head *entry)
-{
-	return true;
-}
-#endif
 
 bool __list_del_entry_valid_or_report(struct list_head *entry)
 {
@@ -1221,7 +1272,7 @@ void lock_sock_nested(struct sock *sk, int subclass)
 	sk->sk_lock.owned = 1;
 }
 
-ssize_t __modver_version_show(const struct module_attribute *a,
+ssize_t __modver_version_show(struct module_attribute *a,
 		struct module_kobject *b, char *c)
 {
 	return 0;
@@ -1266,20 +1317,21 @@ int netif_receive_skb(struct sk_buff *skb)
 void __netif_schedule(struct Qdisc *q)
 {}
 
-void preempt_count_add(int val)
+void mock_preempt_count_add(int val)
 {
-	int i;
-
-	for (i = 0; i < val; i++)
-		preempt_disable();
+	/* Just adjust the mock backing-store counter directly; don't
+	 * route through mock_preempt_disable(), since preempt_count_add()
+	 * is used by callers (e.g. local_bh_disable()) that don't pair up
+	 * 1-for-1 with preempt_disable()/preempt_enable(), so looping
+	 * through the disable/enable leak-detector here would produce
+	 * false "preempt_disables still active" failures.
+	 */
+	__preempt_count += val;
 }
 
-void preempt_count_sub(int val)
+void mock_preempt_count_sub(int val)
 {
-	int i;
-
-	for (i = 0; i < val; i++)
-		preempt_enable();
+	__preempt_count -= val;
 }
 
 long prepare_to_wait_event(struct wait_queue_head *wq_head,
@@ -1349,6 +1401,22 @@ int proc_dointvec(const struct ctl_table *table, int write,
 	return 0;
 }
 
+/* Backs the SYSCTL_ZERO/SYSCTL_ONE/etc. macros in linux/sysctl.h (the real
+ * array lives in kernel/sysctl.c, which isn't linked into the unit tests).
+ */
+const int sysctl_vals[] = {0, 1, 2, 3, 4, 100, 200, 1000, 3000, INT_MAX};
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
+int proc_dointvec_minmax(struct ctl_table *table, int write,
+		     void __user *buffer, size_t *lenp, loff_t *ppos)
+#else
+int proc_dointvec_minmax(const struct ctl_table *table, int write,
+		     void __user *buffer, size_t *lenp, loff_t *ppos)
+#endif
+{
+	return 0;
+}
+
 void proc_remove(struct proc_dir_entry *de)
 {
 	if (!de)
@@ -1375,7 +1443,40 @@ void proto_unregister(struct proto *prot)
 
 void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 {
-	return NULL;
+	struct skb_shared_info *shinfo = skb_shinfo(skb);
+	unsigned char *destination;
+	int copied = 0;
+
+	if (delta < 0 || delta > skb->data_len ||
+	    delta > skb_end_pointer(skb) - skb_tail_pointer(skb))
+		return NULL;
+	destination = skb_put(skb, delta);
+	skb->len -= delta;
+	while (copied < delta) {
+		skb_frag_t *frag;
+		struct page *page;
+		int bytes;
+
+		if (shinfo->nr_frags == 0)
+			return NULL;
+		frag = &shinfo->frags[0];
+		bytes = min(delta - copied, (int)skb_frag_size(frag));
+		memcpy(destination + copied,
+		       page_address(skb_frag_page(frag)) + skb_frag_off(frag),
+		       bytes);
+		copied += bytes;
+		frag->offset += bytes;
+		skb_frag_size_set(frag, skb_frag_size(frag) - bytes);
+		if (skb_frag_size(frag) != 0)
+			continue;
+		page = skb_frag_page(frag);
+		shinfo->nr_frags--;
+		memmove(frag, frag + 1,
+			shinfo->nr_frags * sizeof(shinfo->frags[0]));
+		put_page(page);
+	}
+	skb->data_len -= delta;
+	return skb_tail_pointer(skb);
 }
 
 bool queue_work_on(int cpu, struct workqueue_struct *wq,
@@ -1500,9 +1601,9 @@ bool rcuref_get_slowpath(rcuref_t *ref)
 	return true;
 }
 
-bool rcuref_put_slowpath(rcuref_t *ref, unsigned int cnt)
+bool rcuref_put_slowpath(rcuref_t *ref)
 {
-	return cnt == RCUREF_NOREF;
+	return true;
 }
 
 void refcount_warn_saturate(refcount_t *r, enum refcount_saturation_type t) {}
@@ -2286,6 +2387,7 @@ struct sk_buff *mock_raw_skb(struct in6_addr *saddr, struct in6_addr *daddr,
 		skb->protocol = htons(ETH_P_IPV6);
 	} else {
 		ip_hdr(skb)->version = 4;
+		ip_hdr(skb)->ihl = 5;
 		ip_hdr(skb)->saddr = saddr->in6_u.u6_addr32[3];
 		ip_hdr(skb)->daddr = daddr->in6_u.u6_addr32[3];
 		ip_hdr(skb)->protocol = protocol;
@@ -2403,6 +2505,120 @@ struct ctl_table_header *mock_register_net_sysctl(struct net *net,
 		return NULL;
 	return (struct ctl_table_header *)11111;
 }
+
+/**
+ * mock_register_net_sysctl_sz() - Called instead of register_net_sysctl_sz
+ * when Homa is compiled for unit testing.
+ */
+struct ctl_table_header *mock_register_net_sysctl_sz(struct net *net,
+		const char *path, struct ctl_table *table, size_t table_size)
+{
+	mock_register_sysctl_size = table_size;
+	return mock_register_net_sysctl(net, path, table);
+}
+
+/**
+ * mock_schedule_work() - Called instead of schedule_work when Homa is
+ * compiled for unit testing. Runs the work function immediately and
+ * synchronously, since there is no real kernel workqueue thread in the
+ * unit test harness.
+ * @work:   Work item to run.
+ * Return:  Always true (the work "was scheduled").
+ */
+bool mock_schedule_work(struct work_struct *work)
+{
+	work->func(work);
+	return true;
+}
+
+#ifndef __STRIP__ /* See strip.py */
+/**
+ * mock_setup_udp_tunnel_sock() - Called instead of setup_udp_tunnel_sock
+ * when Homa is compiled for unit testing. Just records the requested
+ * configuration in the (fake) socket, and in mock_udp_tunnel_cfg, so
+ * tests can inspect it (and invoke the registered encap_rcv/
+ * encap_err_lookup/encap_err_rcv callbacks directly).
+ * @net:    Unused.
+ * @sock:   Tunnel socket previously returned by mock_udp_sock_create4()
+ *          or mock_udp_sock_create6().
+ * @cfg:    Configuration to associate with @sock.
+ */
+void mock_setup_udp_tunnel_sock(struct net *net, struct socket *sock,
+				struct udp_tunnel_sock_cfg *cfg)
+{
+	sock->sk->sk_user_data = cfg->sk_user_data;
+	mock_udp_tunnel_cfg = *cfg;
+}
+
+/**
+ * mock_udp_sock_create4() - Called instead of udp_sock_create4 when Homa
+ * is compiled for unit testing. Allocates a fake socket/sock pair instead
+ * of creating a real kernel UDP socket.
+ * @net:    Unused.
+ * @cfg:    Configuration for the new socket; @cfg->local_udp_port is
+ *          recorded in the fake sock's sk_num field.
+ * @sockp:  Modified to point at the new fake socket.
+ * Return:  0 on success, or -EADDRINUSE if
+ *          mock_udp_sock_create_errors indicates this call should fail.
+ */
+int mock_udp_sock_create4(struct net *net, struct udp_port_cfg *cfg,
+			  struct socket **sockp)
+{
+	struct socket *sock;
+
+	if (mock_check_error(&mock_udp_sock_create_errors))
+		return -EADDRINUSE;
+	sock = malloc(sizeof(*sock));
+	memset(sock, 0, sizeof(*sock));
+	sock->sk = malloc(sizeof(*sock->sk));
+	memset(sock->sk, 0, sizeof(*sock->sk));
+	sock->sk->sk_family = AF_INET;
+	sock->sk->sk_num = ntohs(cfg->local_udp_port);
+	*sockp = sock;
+	return 0;
+}
+
+/**
+ * mock_udp_sock_create6() - Called instead of udp_sock_create6 when Homa
+ * is compiled for unit testing. See mock_udp_sock_create4().
+ * @net:    Unused.
+ * @cfg:    Configuration for the new socket.
+ * @sockp:  Modified to point at the new fake socket.
+ * Return:  0 on success, or -EADDRINUSE if
+ *          mock_udp_sock_create_errors indicates this call should fail.
+ */
+int mock_udp_sock_create6(struct net *net, struct udp_port_cfg *cfg,
+			  struct socket **sockp)
+{
+	struct socket *sock;
+
+	if (mock_check_error(&mock_udp_sock_create_errors))
+		return -EADDRINUSE;
+	sock = malloc(sizeof(*sock));
+	memset(sock, 0, sizeof(*sock));
+	sock->sk = malloc(sizeof(*sock->sk));
+	memset(sock->sk, 0, sizeof(*sock->sk));
+	sock->sk->sk_family = AF_INET6;
+	sock->sk->sk_num = ntohs(cfg->local_udp_port);
+	*sockp = sock;
+	return 0;
+}
+
+/**
+ * mock_udp_tunnel_sock_release() - Called instead of
+ * udp_tunnel_sock_release when Homa is compiled for unit testing. Frees
+ * the fake socket/sock pair allocated by mock_udp_sock_create4()/6().
+ * @sock:   Fake socket to release.
+ */
+void mock_udp_tunnel_sock_release(struct socket *sock)
+{
+	mock_udp_tunnel_release_count++;
+	UNIT_HOOK("udp_tunnel_release");
+	sock->sk->sk_user_data = NULL;
+	free(sock->sk);
+	free(sock);
+}
+#endif /* See strip.py */
 
 int mock_rht_init(struct rhashtable *ht,
 		    const struct rhashtable_params *params)
@@ -2782,8 +2998,12 @@ void mock_teardown(void)
 	mock_register_protosw_errors = 0;
 	mock_register_qdisc_errors = 0;
 	mock_register_sysctl_errors = 0;
+	mock_register_sysctl_size = 0;
 	mock_rht_init_errors = 0;
 	mock_rht_insert_errors = 0;
+	mock_udp_sock_create_errors = 0;
+	mock_udp_tunnel_release_count = 0;
+	memset(&mock_udp_tunnel_cfg, 0, sizeof(mock_udp_tunnel_cfg));
 	mock_wait_intr_irq_errors = 0;
 	mock_copy_from_iter_no_log = false;
 	mock_copy_to_user_dont_copy = 0;
@@ -2801,6 +3021,7 @@ void mock_teardown(void)
 	mock_signal_pending = 0;
 	mock_xmit_log_verbose = 0;
 	mock_xmit_log_hijack = 0;
+	mock_xmit_log_udp_hijack = 0;
 	mock_log_wakeups = 0;
 	mock_mtu = 0;
 	mock_max_skb_frags = 10;
@@ -2814,6 +3035,9 @@ void mock_teardown(void)
 	homa_net_id = 0;
 	for (i = 0; i < MOCK_MAX_NETS; i++) {
 		if (mock_hnets[i]) {
+#ifndef __STRIP__ /* See strip.py */
+			homa_hijack_udp_net_destroy(mock_hnets[i]);
+#endif /* See strip.py */
 			free(mock_hnets[i]);
 			mock_hnets[i] = NULL;
 		}

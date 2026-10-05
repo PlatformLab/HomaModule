@@ -60,6 +60,7 @@ Here are details about the #ifdefs used for stripping:
     #else /* See strip.py */
     ...
     #endif /* See strip.py */
+
 """
 
 from __future__ import annotations

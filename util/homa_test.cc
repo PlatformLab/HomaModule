@@ -125,7 +125,10 @@ void print_help(const char *name)
 	printf("Usage: %s host:port [options] op op ...\n\n"
 		"host:port describes a server to communicate with, and each op\n"
 		"selects a particular test to run (see the code for available\n"
-		"tests). The following options are supported:\n\n"
+		"tests). udp runs an RTT test over the selected Homa transport;\n"
+		"enable net.homa.hijack_udp before starting it to use UDP.\n"
+		"rtt and udp send 10 warmups before the measured requests.\n"
+		"The following options are supported:\n\n"
 		"--count      Number of times to repeat a test (default: 1000)\n"
 		"--ipv6       Use IPv6 instead of IPv4 (default: IPv4)\n"
 		"--length     Size of messages, in bytes (default: 100)\n"
@@ -218,46 +221,6 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 	double timePer = to_seconds(end-start) / completed;
 	printf("%d/%d RPCs succeeded, average goodput %.1f MB/sec (%.1f us/RPC)\n",
 		completed, count, tput*1e-06, timePer*1e06);
-}
-
-/**
- * test_invoke() - Send a request and wait for response.
- * @fd:       Homa socket.
- * @dest:     Where to send the request
- * @request:  Request message.
- */
-void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
-{
-	struct homa_sendmsg_args homa_args;
-	struct msghdr msghdr;
-	ssize_t resp_length;
-	struct iovec iov;
-	int status;
-
-	iov.iov_base = request;
-	iov.iov_len = length;
-	init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &dest->sa,
-			  sockaddr_size(&dest->sa));
-	status = sendmsg(fd, &msghdr, 0);
-	if (status < 0) {
-		printf("Error in sendmsg: %s\n", strerror(errno));
-		return;
-	} else {
-		printf("sendmsg succeeded, id %llu\n", homa_args.id);
-	}
-	recv_args.id = 0;
-	recv_hdr.msg_controllen = sizeof(recv_args);
-	resp_length = recvmsg(fd, &recv_hdr, 0);
-	if (resp_length < 0) {
-		printf("Error in recvmsg: %s\n", strerror(errno));
-		return;
-	}
-	int seed = check_message(&recv_args, buf_region, resp_length,
-			2*sizeof32(int));
-	printf("Received message from %s with %lu bytes, "
-			"seed %d, id %llu\n",
-			print_address(&source_addr), resp_length, seed,
-			recv_args.id);
 }
 
 /**
@@ -431,7 +394,7 @@ void test_read(int fd, int count)
  * @dest:     Where to send requests.
  * @request:  Request message.
  */
-void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
+int test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 {
 	uint64_t *times = new uint64_t[count];
 	struct homa_sendmsg_args homa_args;
@@ -450,7 +413,8 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 		status = sendmsg(fd, &msghdr, 0);
 		if (status < 0) {
 			printf("Error in sendmsg: %s\n", strerror(errno));
-			return;
+			delete[] times;
+			return 1;
 		}
 		recv_args.id = 0;
 		recv_hdr.msg_controllen = sizeof(recv_args);
@@ -459,7 +423,8 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 			times[i] = rdtsc() - start;
 		if (resp_length < 0) {
 			printf("Error in recvmsg: %s\n", strerror(errno));
-			return;
+			delete[] times;
+			return 1;
 		}
 		if (resp_length != length)
 			printf("Expected %d bytes in response, received %ld\n",
@@ -469,6 +434,7 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 	printf("Bandwidth at median: %.1f MB/sec\n",
 			2.0*((double) length)/(to_seconds(times[count/2])*1e06));
 	delete[] times;
+	return 0;
 }
 
 /**
@@ -1020,13 +986,28 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 	host = argv[1];
-	port_name = strchr(argv[1], ':');
+	if (host[0] == '[') {
+		char *closing_bracket = strchr(host, ']');
+
+		if ((closing_bracket == NULL) || (closing_bracket[1] != ':')) {
+			printf("Bad server spec %s: bracketed IPv6 must be '[host]:port'\n",
+					argv[1]);
+			exit(1);
+		}
+		*closing_bracket = 0;
+		host++;
+		port_name = closing_bracket + 2;
+	} else {
+		port_name = strchr(host, ':');
+	}
 	if (port_name == NULL) {
 		printf("Bad server spec %s: must be 'host:port'\n", argv[1]);
 		exit(1);
 	}
-	*port_name = 0;
-	port_name++;
+	if (host == argv[1]) {
+		*port_name = 0;
+		port_name++;
+	}
 	port = get_int(port_name,
 			"Bad port number %s; must be positive integer\n");
 	for (next_arg = 2; (next_arg < argc) && (*argv[next_arg] == '-');
@@ -1132,8 +1113,9 @@ int main(int argc, char** argv)
 			test_close();
 		} else if (strcmp(argv[next_arg], "fill_memory") == 0) {
 			test_fill_memory(fd, &dest, buffer);
-		} else if (strcmp(argv[next_arg], "invoke") == 0) {
-			test_invoke(fd, &dest, buffer);
+		} else if (strcmp(argv[next_arg], "udp") == 0) {
+			if (test_rtt(fd, &dest, buffer) != 0)
+				exit(1);
 		} else if (strcmp(argv[next_arg], "ioctl") == 0) {
 			test_ioctl(fd, count);
 		} else if (strcmp(argv[next_arg], "poll") == 0) {

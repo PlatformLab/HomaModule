@@ -168,6 +168,13 @@ struct homa_common_hdr {
 	 */
 	__be16 urgent;
 #define HOMA_HIJACK_URGENT 0xb97d
+
+/**
+ * HOMA_UDP_HIJACK_PORT - UDP port number (both source and destination)
+ * used for the pair of kernel tunnel sockets that implement UDP hijacking
+ * (see homa_hijack.c). Chosen from the dynamic/private port range.
+ */
+#define HOMA_UDP_HIJACK_PORT 54321
 #else /* See strip.py */
 	/** @reserved2: Not used (corresponds to TCP urgent field). */
 	__be16 reserved2;

@@ -723,6 +723,80 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__defer_homa_packet_because_of_nic_queue_co
 	EXPECT_TRUE(homa_qdisc_any_deferred(q->qdev));
 	EXPECT_STREQ("[id 1234, offsets 0]", unit_log_deferred(q->qdev));
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_qdisc, homa_qdisc_enqueue__defer_udp_homa_packet)
+{
+	struct homa_qdisc *q = init_qdisc(self->qdiscs[3]);
+	struct sk_buff *skb, *to_free;
+	struct homa_rpc *crpc;
+	struct udphdr *uh;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->server_port,
+			       self->client_id, 7100, 100);
+	ASSERT_NE(NULL, crpc);
+	mock_ipv6 = false;
+	skb = new_test_skb(crpc, &self->addr, &self->addr2, 1400, 1500);
+	uh = skb_push(skb, sizeof(*uh));
+	skb_reset_transport_header(skb);
+	uh->source = htons(HOMA_UDP_HIJACK_PORT);
+	uh->dest = htons(HOMA_UDP_HIJACK_PORT);
+	uh->len = htons(skb->len);
+	ip_hdr(skb)->protocol = IPPROTO_UDP;
+	to_free = NULL;
+	mock_log_wakeups = 1;
+	atomic_set(&q->qdev->total_nic_queue, 1500);
+	q->qdev->max_nic_queue_bytes = 1499;
+
+	unit_log_clear();
+	EXPECT_EQ(NET_XMIT_SUCCESS,
+		  homa_qdisc_enqueue(skb, q->qdisc, &to_free));
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_TRUE(homa_qdisc_any_deferred(q->qdev));
+	EXPECT_STREQ("[id 1234, offsets 1400]", unit_log_deferred(q->qdev));
+}
+TEST_F(homa_qdisc, homa_qdisc_enqueue__defer_nonlinear_udp_homa_packet)
+{
+	struct homa_qdisc *q = init_qdisc(self->qdiscs[3]);
+	struct skb_shared_info *shinfo;
+	struct sk_buff *skb, *to_free;
+	struct homa_rpc *crpc;
+	struct udphdr *uh;
+	int inner_length;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->server_port,
+			       self->client_id, 7100, 100);
+	ASSERT_NE(NULL, crpc);
+	mock_ipv6 = false;
+	skb = new_test_skb(crpc, &self->addr, &self->addr2, 1400, 1500);
+	inner_length = skb->len;
+	shinfo = skb_shinfo(skb);
+	unit_alloc_frags(1, shinfo->frags, 0, inner_length);
+	memcpy(unit_frag_first_byte(&shinfo->frags[0]), skb->data,
+	       inner_length);
+	shinfo->nr_frags = 1;
+	uh = skb_push(skb, sizeof(*uh));
+	skb_reset_transport_header(skb);
+	uh->source = htons(HOMA_UDP_HIJACK_PORT);
+	uh->dest = htons(HOMA_UDP_HIJACK_PORT);
+	uh->len = htons(skb->len);
+	ip_hdr(skb)->protocol = IPPROTO_UDP;
+	skb_set_tail_pointer(skb, sizeof(*uh));
+	skb->data_len = inner_length;
+	to_free = NULL;
+	mock_log_wakeups = 1;
+	atomic_set(&q->qdev->total_nic_queue, 1500);
+	q->qdev->max_nic_queue_bytes = 1499;
+
+	unit_log_clear();
+	EXPECT_EQ(NET_XMIT_SUCCESS,
+		  homa_qdisc_enqueue(skb, q->qdisc, &to_free));
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_TRUE(homa_qdisc_any_deferred(q->qdev));
+	EXPECT_STREQ("[id 1234, offsets 1400]", unit_log_deferred(q->qdev));
+}
+#endif /* See strip.py */
 TEST_F(homa_qdisc, homa_qdisc_enqueue__defer_homa_packet_other_packets_deferred)
 {
 	struct homa_qdisc *q = init_qdisc(self->qdiscs[3]);

@@ -180,6 +180,43 @@ TEST_F(homa_outgoing, homa_message_out_init__max_gso_segs)
 
 	homa_rpc_unlock(crpc);
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_message_out_init__udp_hijacked_geometry)
+{
+	struct homa_rpc *crpc;
+
+	self->hnet->udp_state = HOMA_UDP_ENABLED;
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	ASSERT_NE(NULL, crpc);
+	ASSERT_FALSE(IS_ERR(crpc));
+
+	EXPECT_EQ(0, homa_message_out_init(crpc, 10000));
+	EXPECT_EQ(1, crpc->msgout.max_gso_segs);
+	EXPECT_EQ(crpc->msgout.max_seg_data, crpc->msgout.max_gso_data);
+	EXPECT_EQ(mock_mtu - self->hsk.ip_header_length -
+		  sizeof(struct udphdr) - sizeof(struct homa_data_hdr),
+		  crpc->msgout.max_seg_data);
+
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_message_out_init__udp_hijacked_mtu_too_small)
+{
+	struct homa_rpc *crpc;
+
+	self->hnet->udp_state = HOMA_UDP_ENABLED;
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	ASSERT_NE(NULL, crpc);
+	ASSERT_FALSE(IS_ERR(crpc));
+	mock_mtu = self->hsk.ip_header_length + sizeof(struct udphdr) +
+		   sizeof(struct homa_data_hdr);
+
+	EXPECT_EQ(EMSGSIZE, -homa_message_out_init(crpc, 10000));
+
+	homa_rpc_unlock(crpc);
+}
+#endif /* See strip.py */
 
 TEST_F(homa_outgoing, homa_tx_copy_from_user__basics)
 {
@@ -661,7 +698,8 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__shinfo_gso_fields)
 	shinfo = skb_shinfo(skb);
 	EXPECT_EQ(3, shinfo->gso_segs);
 	EXPECT_EQ(1400 + sizeof(struct homa_seg_hdr), shinfo->gso_size);
-	EXPECT_EQ(SKB_GSO_TCPV6, shinfo->gso_type);
+	EXPECT_EQ(mock_ipv6 ? SKB_GSO_TCPV6 : SKB_GSO_TCPV4,
+		  shinfo->gso_type);
 	kfree_skb(skb);
 }
 TEST_F(homa_outgoing, homa_tx_skb_alloc__homa_info_fields)
@@ -880,6 +918,81 @@ TEST_F(homa_outgoing, homa_tx_skb_send__ipv6_transmit_error)
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors));
 	homa_rpc_unlock(crpc);
 }
+TEST_F(homa_outgoing, homa_tx_skb_send__ipv4_call_homa_hijack_prepend_udp)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	unit_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
+	self->hnet->udp_state = HOMA_UDP_ENABLED;
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 1000, 100);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(1, crpc->msgout.max_gso_segs);
+	mock_xmit_log_udp_hijack = 1;
+	unit_log_clear();
+
+	homa_rpc_lock(crpc);
+	end = 1000;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 0, &end));
+	EXPECT_SUBSTR("udp hijack sport 54321, dport 54321,", unit_log_get());
+	EXPECT_SUBSTR("checksum 555", unit_log_get());
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_skb_send__ipv6_call_homa_hijack_prepend_udp)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+	struct in6_addr addr;
+
+	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
+	self->hnet->udp_state = HOMA_UDP_ENABLED;
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       &addr, self->server_port,
+			       self->client_id, 1000, 100);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(1, crpc->msgout.max_gso_segs);
+	mock_xmit_log_udp_hijack = 1;
+	unit_log_clear();
+
+	homa_rpc_lock(crpc);
+	end = 1000;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 0, &end));
+	EXPECT_SUBSTR("udp hijack sport 54321, dport 54321,", unit_log_get());
+	EXPECT_SUBSTR("checksum 777", unit_log_get());
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_skb_send__udp_retransmit)
+{
+	struct homa_rpc *crpc;
+	u32 end;
+
+	self->hnet->udp_state = HOMA_UDP_ENABLED;
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 3000, 100);
+	ASSERT_NE(NULL, crpc);
+	mock_xmit_log_verbose = 1;
+	mock_xmit_log_udp_hijack = 1;
+	crpc->msgout.next_xmit_offset = 1400;
+
+	homa_rpc_lock(crpc);
+	end = 1400;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 0, &end));
+	EXPECT_SUBSTR("RETRANSMIT", unit_log_get());
+	EXPECT_SUBSTR("udp hijack sport 54321, dport 54321", unit_log_get());
+	EXPECT_EQ(1392, end);
+	homa_rpc_unlock(crpc);
+}
 #endif /* See strip.py */
 
 TEST_F(homa_outgoing, homa_xmit_control__busy_from_server_request)
@@ -1054,6 +1167,88 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors));
 	homa_rpc_unlock(srpc);
 }
+TEST_F(homa_outgoing, __homa_xmit_control__udp_hijacked_mtu_too_small)
+{
+	struct homa_busy_hdr h;
+	struct homa_rpc *srpc;
+
+	self->hnet->udp_state = HOMA_UDP_ENABLED;
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+		self->server_ip, self->client_port, 1111, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
+
+	h.common.type = BUSY;
+	mock_mtu = self->hsk.ip_header_length + sizeof(struct udphdr) +
+		   HOMA_MIN_PKT_LENGTH - 1;
+	EXPECT_EQ(EMSGSIZE, -__homa_xmit_control(&h, sizeof(h), srpc->route,
+		  &self->hsk));
+	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_outgoing, __homa_xmit_control__udp_hijacked_ok)
+{
+	struct homa_grant_hdr h;
+	struct homa_rpc *srpc;
+
+	self->hnet->udp_state = HOMA_UDP_ENABLED;
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+		self->server_ip, self->client_port, 1111, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
+
+	h.offset = htonl(12345);
+	h.priority = 4;
+	mock_xmit_log_udp_hijack = 1;
+	homa_rpc_lock(srpc);
+	EXPECT_EQ(0, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_SUBSTR("udp hijack sport 54321, dport 54321,", unit_log_get());
+	homa_rpc_unlock(srpc);
+}
+
+TEST_F(homa_outgoing, __homa_xmit_control__udp_packet_class_matrix)
+{
+	struct {
+		enum homa_packet_type type;
+		size_t length;
+	} cases[] = {
+		{GRANT, sizeof(struct homa_grant_hdr)},
+		{RESEND, sizeof(struct homa_resend_hdr)},
+		{RPC_UNKNOWN, sizeof(struct homa_rpc_unknown_hdr)},
+		{BUSY, sizeof(struct homa_busy_hdr)},
+		{CUTOFFS, sizeof(struct homa_cutoffs_hdr)},
+		{FREEZE, sizeof(struct homa_freeze_hdr)},
+		{NEED_ACK, sizeof(struct homa_need_ack_hdr)},
+		{ACK, sizeof(struct homa_ack_hdr)},
+		{START_MSG, sizeof(struct homa_start_msg_hdr)},
+	};
+	unsigned char contents[HOMA_MAX_HEADER];
+	struct homa_common_hdr *h = (struct homa_common_hdr *)contents;
+	struct homa_rpc *srpc;
+	int i;
+
+	self->hnet->udp_state = HOMA_UDP_ENABLED;
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, self->client_port, 1111,
+			       10000, 10000);
+	ASSERT_NE(NULL, srpc);
+	mock_xmit_log_udp_hijack = 1;
+
+	for (i = 0; i < ARRAY_SIZE(cases); i++) {
+		memset(contents, 0, sizeof(contents));
+		h->sport = htons(self->server_port);
+		h->dport = htons(self->client_port);
+		h->type = cases[i].type;
+		h->sender_id = cpu_to_be64(1111);
+		unit_log_clear();
+		EXPECT_EQ(0, __homa_xmit_control(contents, cases[i].length,
+						   srpc->route, &self->hsk));
+		EXPECT_SUBSTR("udp hijack sport 54321, dport 54321",
+			      unit_log_get());
+	}
+}
 
 TEST_F(homa_outgoing, homa_xmit_unknown__basics)
 {
@@ -1069,6 +1264,25 @@ TEST_F(homa_outgoing, homa_xmit_unknown__basics)
 	homa_xmit_unknown(skb, &self->hsk);
 	EXPECT_STREQ("xmit RPC_UNKNOWN from 0.0.0.0:99, dport 40000, id 99991",
 			unit_log_get());
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_xmit_unknown__udp_hijacked)
+{
+	struct homa_grant_hdr h = {{.sport = htons(self->client_port),
+			.dport = htons(self->server_port),
+			.sender_id = cpu_to_be64(99990),
+			.type = GRANT},
+			.offset = htonl(11200)};
+	struct sk_buff *skb;
+
+	self->hnet->udp_state = HOMA_UDP_ENABLED;
+	self->hsk.sock.sk_protocol = IPPROTO_UDP;
+	mock_xmit_log_verbose = 1;
+	mock_xmit_log_udp_hijack = 1;
+	skb = mock_skb_alloc(self->client_ip, self->server_ip, &h.common, 0, 0);
+	homa_xmit_unknown(skb, &self->hsk);
+	EXPECT_SUBSTR("xmit RPC_UNKNOWN", unit_log_get());
+	EXPECT_SUBSTR("udp hijack sport 54321, dport 54321", unit_log_get());
 	kfree_skb(skb);
 }
 TEST_F(homa_outgoing, homa_xmit_unknown__cant_find_peer)

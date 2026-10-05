@@ -721,8 +721,19 @@ module_exit(homa_unload);
  */
 int homa_net_start(struct net *net)
 {
+	struct homa_net *hnet = homa_net(net);
+	int err;
+
 	pr_notice("Homa attaching to net namespace\n");
-	return homa_net_init(homa_net(net), &homa_data);
+	err = homa_net_init(hnet, &homa_data);
+#ifndef __STRIP__ /* See strip.py */
+	if (err)
+		return err;
+	err = homa_hijack_udp_net_start(hnet, net);
+	if (err)
+		homa_net_destroy(hnet);
+#endif /* See strip.py */
+	return err;
 }
 
 /**
@@ -732,8 +743,11 @@ int homa_net_start(struct net *net)
  */
 void homa_net_exit(struct net *net)
 {
+	struct homa_net *hnet = homa_net(net);
+
 	pr_notice("Homa detaching from net namespace\n");
-	homa_net_destroy(homa_net(net));
+	IF_NO_STRIP(homa_hijack_udp_net_exit_begin(hnet));
+	homa_net_destroy(hnet);
 }
 
 /**
@@ -1260,7 +1274,11 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			   : tt_addr(addr->in6.sin6_addr),
 			   ntohs(addr->in6.sin6_port), rpc->id, length);
 		rpc->completion_cookie = args.completion_cookie;
-		homa_message_out_init(rpc, msg->msg_iter.count);
+		result = homa_message_out_init(rpc, msg->msg_iter.count);
+		if (result) {
+			hsk->error_msg = "route MTU too small for message";
+			goto error;
+		}
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.granted == 0)
 			homa_xmit_start_msg(rpc, msg->msg_iter.count);
@@ -1321,7 +1339,11 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		rpc->state = RPC_OUTGOING;
 
-		homa_message_out_init(rpc, msg->msg_iter.count);
+		result = homa_message_out_init(rpc, msg->msg_iter.count);
+		if (result) {
+			hsk->error_msg = "route MTU too small for message";
+			goto error;
+		}
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.granted == 0)
 			homa_xmit_start_msg(rpc, msg->msg_iter.count);
@@ -1579,12 +1601,18 @@ void homa_unhash(struct sock *sk)
 }
 
 /**
- * homa_softirq() - This function is invoked at SoftIRQ level to handle
- * incoming packets.
- * @skb:   The incoming packet.
- * Return: Always 0
+ * homa_softirq_dispatch() - Shared body for homa_softirq(): processes a
+ * batch of incoming packets, tagging them with @origin so that
+ * homa_dispatch_pkts() can enforce transport isolation. Used both by
+ * homa_softirq() itself (for native/TCP-hijacked packets) and by the UDP
+ * hijack tunnel's encap_rcv callback (for UDP-hijacked packets); see
+ * homa_hijack.c.
+ * @skb:     The incoming packet (or, for GRO batches, the first packet
+ *           in a list linked through skb_shinfo(skb)->frag_list).
+ * @origin:  Either HOMA_PKT_NATIVE or HOMA_PKT_UDP (see enum
+ *           homa_pkt_origin).
  */
-int homa_softirq(struct sk_buff *skb)
+void homa_softirq_dispatch(struct sk_buff *skb, int origin)
 {
 	struct sk_buff *packets, *other_pkts, *next;
 	struct sk_buff **prev_link, **other_link;
@@ -1681,7 +1709,7 @@ int homa_softirq(struct sk_buff *skb)
 				 h->type);
 			*prev_link = skb->next;
 			skb->next = NULL;
-			homa_dispatch_pkts(skb);
+			homa_dispatch_pkts(skb, origin);
 		} else {
 			prev_link = &skb->next;
 		}
@@ -1733,7 +1761,7 @@ discard:
 			UNIT_LOG("", " %d", ntohl(h3->seg.offset));
 		}
 #endif /* __UNIT_TEST__ */
-		homa_dispatch_pkts(packets);
+		homa_dispatch_pkts(packets, origin);
 		packets = other_pkts;
 	}
 
@@ -1741,6 +1769,17 @@ discard:
 	atomic_dec(&per_cpu(homa_offload_core, raw_smp_processor_id()).softirq_backlog);
 #endif /* See strip.py */
 	INC_METRIC(softirq_cycles, homa_clock() - start);
+}
+
+/**
+ * homa_softirq() - This function is invoked at SoftIRQ level to handle
+ * incoming packets.
+ * @skb:   The incoming packet.
+ * Return: Always 0
+ */
+int homa_softirq(struct sk_buff *skb)
+{
+	homa_softirq_dispatch(skb, HOMA_PKT_NATIVE);
 	return 0;
 }
 
@@ -1783,7 +1822,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 			  __func__, info, type, code);
 	}
 	if (error != 0)
-		homa_abort_rpcs(homa, &daddr, port, error);
+		homa_abort_rpcs(homa, &daddr, port, error, IPPROTO_HOMA);
 	return 0;
 }
 
@@ -1820,7 +1859,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 		error = -EPROTONOSUPPORT;
 	}
 	if (error != 0)
-		homa_abort_rpcs(homa, &iph->daddr, port, error);
+		homa_abort_rpcs(homa, &iph->daddr, port, error, IPPROTO_HOMA);
 	return 0;
 }
 

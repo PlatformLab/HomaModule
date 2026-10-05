@@ -383,6 +383,27 @@ TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 	unit_sock_destroy(&hijack);
 	unit_sock_destroy(&no_hijack);
 }
+TEST_F(homa_sock, homa_sock_init__hijack_udp)
+{
+	struct homa_sock hijack_udp, hijack_tcp, neither;
+
+	self->hnet->udp_state = HOMA_UDP_ENABLED;
+	mock_sock_init(&hijack_udp, self->hnet, 0);
+	EXPECT_EQ(IPPROTO_UDP, hijack_udp.sock.sk_protocol);
+
+	self->homa.hijack_tcp = 1;
+	mock_sock_init(&hijack_tcp, self->hnet, 0);
+	EXPECT_EQ(IPPROTO_TCP, hijack_tcp.sock.sk_protocol);
+	self->homa.hijack_tcp = 0;
+
+	self->hnet->udp_state = HOMA_UDP_DISABLED;
+	mock_sock_init(&neither, self->hnet, 0);
+	EXPECT_EQ(IPPROTO_HOMA, neither.sock.sk_protocol);
+
+	unit_sock_destroy(&hijack_udp);
+	unit_sock_destroy(&hijack_tcp);
+	unit_sock_destroy(&neither);
+}
 #endif /* See strip.py */
 
 TEST_F(homa_sock, homa_sock_link__basics)

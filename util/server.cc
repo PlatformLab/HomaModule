@@ -104,6 +104,24 @@ void homa_server(int port)
 		return;
 	}
 
+	int protocol;
+	socklen_t protocol_length = sizeof(protocol);
+	if (getsockopt(fd, SOL_SOCKET, SO_PROTOCOL, &protocol,
+			&protocol_length) < 0) {
+		printf("Server transport: unknown (SO_PROTOCOL failed: %s)\n",
+				strerror(errno));
+	} else if (protocol == IPPROTO_UDP) {
+		printf("Server transport: Homa-over-UDP (port %d)\n", port);
+	} else if (protocol == IPPROTO_TCP) {
+		printf("Server transport: Homa-over-TCP (port %d)\n", port);
+	} else if (protocol == IPPROTO_HOMA) {
+		printf("Server transport: native Homa (port %d)\n", port);
+	} else {
+		printf("Server transport: unknown (IP protocol %d, port %d)\n",
+				protocol, port);
+	}
+	fflush(stdout);
+
 	memset(&recv_args, 0, sizeof(recv_args));
 	hdr.msg_name = &source;
 	hdr.msg_namelen = sizeof32(source);

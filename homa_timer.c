@@ -82,6 +82,19 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 	struct homa *homa = rpc->hsk->homa;
 	int tx_end = homa_rpc_tx_end(rpc);
 
+#ifndef __STRIP__ /* See strip.py */
+	/* If UDP hijacking is being disabled for this RPC's namespace and
+	 * this RPC hasn't finished by the drain deadline, abort it so that
+	 * the namespace's UDP tunnel sockets can be released.
+	 */
+	if (rpc->udp_admitted &&
+	    READ_ONCE(rpc->hsk->hnet->udp_state) == HOMA_UDP_DRAINING &&
+	    (s32)(homa->timer_ticks - rpc->hsk->hnet->udp_drain_deadline) >= 0) {
+		homa_rpc_abort(rpc, -ENETDOWN);
+		return;
+	}
+#endif /* See strip.py */
+
 	/* See if we need to request an ack for this RPC. */
 	if (!homa_is_client(rpc->id) && rpc->state == RPC_OUTGOING &&
 	    tx_end == rpc->msgout.length) {

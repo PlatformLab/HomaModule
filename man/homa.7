@@ -612,6 +612,31 @@ requires Homa to intercept all incoming TCP packets to see if they are
 actually Homa packets. Some might object to this interference with the
 rest of the Linux kernel.
 .TP
+.IR hijack_udp
+An integer value; if nonzero, Homa will transmit its packets encapsulated
+in UDP packets (using a fixed, reserved destination port) instead of using
+IPPROTO_HOMA directly. Like
+.IR hijack_tcp ,
+this allows Homa to take advantage of NIC hardware support (such as RSS
+and checksum offload) that isn't always available for a raw IPPROTO_HOMA
+socket. The transport used by a given socket is selected once, when the
+socket is created;
+.IR hijack_tcp
+takes precedence over
+.IR hijack_udp
+if both are enabled at that time. Enabling this parameter takes effect
+immediately for new sockets; existing UDP-hijacked RPCs are drained (up
+to a bounded time limit) before the underlying tunnel sockets are torn
+down, rather than being switched over in place. Homa owns the reserved
+UDP port outright: there is no fallback to plain UDP or coexistence with
+other users of that port, so enabling this parameter will fail (leaving
+hijacking off) if the port cannot be reserved. Because there is no
+fallback, packets sent with UDP hijacking enabled always require correct
+UDP checksums; this is a current (v1) performance limitation compared to
+.IR hijack_tcp ,
+since checksum computation cannot be skipped or offloaded in every
+configuration.
+.TP
 .IR homa_share
 When there exist both Homa and TCP packets whose transmission has been
 deferred because the NIC queue is overloaded, this determines how the
