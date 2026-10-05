@@ -709,7 +709,7 @@ int inet6_del_protocol(const struct inet6_protocol *prot, unsigned char num)
 	return 0;
 }
 
-int inet6_getname(struct socket *sock, struct SOCKADDR *uaddr, int peer)
+int inet6_getname(struct socket *sock, struct sockaddr *uaddr, int peer)
 {
 	return 0;
 }
@@ -763,7 +763,7 @@ int inet_dgram_connect(struct socket *sock, struct SOCKADDR *uaddr,
 	return 0;
 }
 
-int inet_getname(struct socket *sock, struct SOCKADDR *uaddr, int peer)
+int inet_getname(struct socket *sock, struct sockaddr *uaddr, int peer)
 {
 	return 0;
 }
