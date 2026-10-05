@@ -23,13 +23,14 @@
  *             locked by caller. Fields in rpc->msgout should have been
  *             zeroed by the caller.
  * @length:    Number of bytes that will eventually be in rpc->msgout.
+ * Return:     0 on success, negative errno on failure.
  */
-void homa_message_out_init(struct homa_rpc *rpc, int length)
+int homa_message_out_init(struct homa_rpc *rpc, int length)
 	__must_hold(rpc->bucket->lock)
 {
 	struct dst_entry *dst;
 	u64 max_segs;
-	int mtu;
+	int err, mtu;
 
 	memset(&rpc->msgout, 0, sizeof(rpc->msgout));
 	rpc->msgout.length = length;
@@ -41,6 +42,13 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 		rpc->msgout.granted = length;
 #endif /* See strip.py */
 	rpc->msgout.init_time = homa_clock();
+
+	/* Validate the route before computing packet geometry (MTU
+	 * might change).
+	 */
+	err = homa_route_validate(rpc);
+	if (err != 0)
+		return err;
 
 	/* Compute the geometry of packets. */
 	rcu_read_lock();
@@ -60,6 +68,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 	rpc->msgout.max_gso_segs = max_segs;
 	rpc->msgout.max_gso_data = max_segs * rpc->msgout.max_seg_data;
 	rcu_read_unlock();
+	return 0;
 }
 
 /**

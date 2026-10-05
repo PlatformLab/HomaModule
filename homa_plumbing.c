@@ -1260,7 +1260,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			   : tt_addr(addr->in6.sin6_addr),
 			   ntohs(addr->in6.sin6_port), rpc->id, length);
 		rpc->completion_cookie = args.completion_cookie;
-		homa_message_out_init(rpc, msg->msg_iter.count);
+		result = homa_message_out_init(rpc, msg->msg_iter.count);
+		if (result)
+			goto error;
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.granted == 0)
 			homa_xmit_start_msg(rpc, msg->msg_iter.count);
@@ -1321,7 +1323,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		rpc->state = RPC_OUTGOING;
 
-		homa_message_out_init(rpc, msg->msg_iter.count);
+		result = homa_message_out_init(rpc, msg->msg_iter.count);
+		if (result)
+			goto error;
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.granted == 0)
 			homa_xmit_start_msg(rpc, msg->msg_iter.count);

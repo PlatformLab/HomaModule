@@ -968,7 +968,12 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 	rcuref_init(&route->dst.__rcuref, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_devices[0];
-	route->dst.obsolete = 0;
+
+	/* This forces all calls to dst_check to invoke mock_dst_check,
+	 * which gives us control over whether an error is returned
+	 * (via mock_dst_check_errors).
+	 */
+	route->dst.obsolete = 1;
 	if (!routes_in_use)
 		routes_in_use = unit_hash_new();
 	unit_hash_set(routes_in_use, route, "used");

@@ -675,7 +675,7 @@ int      homa_init(struct homa *homa);
 int      homa_ioc_info(struct socket *sock, unsigned long arg);
 int      homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
 int      homa_load(void);
-void     homa_message_out_init(struct homa_rpc *rpc, int length);
+int      homa_message_out_init(struct homa_rpc *rpc, int length);
 void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			   struct homa_rpc *rpc);
 void     homa_net_destroy(struct homa_net *hnet);

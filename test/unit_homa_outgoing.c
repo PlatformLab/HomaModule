@@ -135,15 +135,27 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 
 	/* First call: message is scheduled. */
 	self->homa.unsched_bytes = 10000;
-	homa_message_out_init(srpc, 10001);
+	EXPECT_EQ(0, homa_message_out_init(srpc, 10001));
 	EXPECT_EQ(0, srpc->msgout.granted);
 
 	/* Second call: message is unscheduled. */
-	homa_message_out_init(srpc, 10000);
+	EXPECT_EQ(0, homa_message_out_init(srpc, 10000));
 	EXPECT_EQ(10000, srpc->msgout.granted);
 	EXPECT_EQ(6, srpc->msgout.priority);
 }
 #endif /* See strip.py */
+TEST_F(homa_outgoing, homa_message_out_init__no_route)
+{
+	struct homa_rpc *srpc;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+		self->server_ip, self->client_port, 1111, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+
+	mock_dst_check_errors = 1;
+	mock_route_errors = 1;
+	EXPECT_EQ(EHOSTUNREACH, -homa_message_out_init(srpc, 10001));
+}
 TEST_F(homa_outgoing, homa_message_out_init__max_gso_segs)
 {
 	struct homa_rpc *crpc;
@@ -154,28 +166,28 @@ TEST_F(homa_outgoing, homa_message_out_init__max_gso_segs)
 	mock_devices[0].gso_max_segs = 2;
 	self->homa.max_gso_size = 100000;
 	mock_devices[0].gso_max_size = 100000;
-	homa_message_out_init(crpc, 10000);
+	EXPECT_EQ(0, homa_message_out_init(crpc, 10000));
 	EXPECT_EQ(2, crpc->msgout.max_gso_segs);
 
 	/* Second call: limited by homa->max_gso_size. */
 	mock_devices[0].gso_max_segs = 10;
 	self->homa.max_gso_size = 5000;
 	mock_devices[0].gso_max_size = 100000;
-	homa_message_out_init(crpc, 10000);
+	EXPECT_EQ(0, homa_message_out_init(crpc, 10000));
 	EXPECT_EQ(3, crpc->msgout.max_gso_segs);
 
 	/* Third call: limited by dev->gso_max_size. */
 	mock_devices[0].gso_max_segs = 10;
 	self->homa.max_gso_size = 100000;
 	mock_devices[0].gso_max_size = 6900;
-	homa_message_out_init(crpc, 10000);
+	EXPECT_EQ(0, homa_message_out_init(crpc, 10000));
 	EXPECT_EQ(4, crpc->msgout.max_gso_segs);
 
 	/* Fourth call: ensure at least one segment. */
 	mock_devices[0].gso_max_segs = 10;
 	self->homa.max_gso_size = 100000;
 	mock_devices[0].gso_max_size = 1000;
-	homa_message_out_init(crpc, 10000);
+	EXPECT_EQ(0, homa_message_out_init(crpc, 10000));
 	EXPECT_EQ(1, crpc->msgout.max_gso_segs);
 
 	homa_rpc_unlock(crpc);
@@ -192,7 +204,7 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__basics)
 	iter = unit_iov_iter(data, sizeof(data));
 	mock_no_high_order_pages = true;
 
-	homa_message_out_init(crpc, iter->count);
+	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
 	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, false));
 	EXPECT_EQ(3, crpc->msgout.num_frags);
 	EXPECT_EQ(0, skb_frag_off(&crpc->msgout.frags[0]));
@@ -225,7 +237,7 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__cant_allocate_frags)
 	iter = unit_iov_iter(NULL, 1000);
 	mock_alloc_page_errors = 0xff;
 
-	homa_message_out_init(crpc, iter->count);
+	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
 	EXPECT_EQ(-ENOMEM, homa_tx_copy_from_user(crpc, iter, false));
 	EXPECT_EQ(0, crpc->msgout.num_frags);
 	homa_rpc_unlock(crpc);
@@ -239,7 +251,7 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__homa_copy_to_frags_fails)
 	iter = unit_iov_iter(NULL, 1000);
 	mock_copy_to_frags_errors = 1;
 
-	homa_message_out_init(crpc, iter->count);
+	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
 	EXPECT_EQ(EINVAL, -homa_tx_copy_from_user(crpc, iter, false));
 	homa_rpc_unlock(crpc);
 }
@@ -252,7 +264,7 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__homa_copy_iter_to_frags_fails)
 	iter = unit_iov_iter(NULL, 9000);
 	mock_copy_data_errors = 1;
 
-	homa_message_out_init(crpc, iter->count);
+	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
 	EXPECT_EQ(EFAULT, -homa_tx_copy_from_user(crpc, iter, false));
 	homa_rpc_unlock(crpc);
 }
@@ -267,7 +279,7 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__call_homa_xmit_data_at_end)
 	unit_log_clear();
 	mock_copy_from_iter_no_log = true;
 
-	homa_message_out_init(crpc, iter->count);
+	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
 	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, true));
 	EXPECT_STREQ("homa_tx_copy_to_user done; xmit DATA 500@0",
 		     unit_log_get());
@@ -284,7 +296,7 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__xmit_false)
 	unit_log_clear();
 	mock_copy_from_iter_no_log = true;
 
-	homa_message_out_init(crpc, iter->count);
+	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
 	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, false));
 	EXPECT_STREQ("homa_tx_copy_to_user done", unit_log_get());
 	IF_NO_STRIP(EXPECT_EQ(1500, homa_metrics_per_cpu()->sent_msg_bytes));

@@ -43,6 +43,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	int bytes_received, this_size;
 	struct homa_rpc *crpc;
 	u8 *tx_msg;
+	int status;
 
 	server_addr.in6.sin6_family = AF_INET6;
 	server_addr.in6.sin6_addr = *server_ip;
@@ -54,7 +55,9 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		return NULL;
 	tx_msg = kmalloc(req_length, GFP_ATOMIC);
 	unit_fill_data(tx_msg, req_length, 0);
-	homa_message_out_init(crpc, req_length);
+	status = homa_message_out_init(crpc, req_length);
+	if (status != 0)
+		return NULL;
 	if (homa_tx_copy_from_user(crpc, unit_iov_iter(tx_msg, req_length),
 				   false) != 0) {
 		homa_rpc_end(crpc);
@@ -382,7 +385,9 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	if (state == UNIT_IN_SERVICE)
 		return srpc;
 	homa_rpc_lock(srpc);
-	homa_message_out_init(srpc, resp_length);
+	status = homa_message_out_init(srpc, resp_length);
+	if (status != 0)
+		goto error;
 	status = homa_tx_copy_from_user(srpc, unit_iov_iter((void *) 2000,
 				        resp_length), false);
 	homa_rpc_unlock(srpc);

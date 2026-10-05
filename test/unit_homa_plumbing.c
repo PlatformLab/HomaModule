@@ -936,6 +936,15 @@ TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_alloc_client)
 		     self->hsk.error_msg);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_message_out_init_for_request)
+{
+	mock_dst_check_errors = 1;
+	mock_route_errors = 2;
+	EXPECT_EQ(EHOSTUNREACH, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_STREQ("couldn't find route for peer", self->hsk.error_msg);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_sendmsg__cant_update_user_arguments)
 {
 	mock_copy_to_user_errors = 1;
@@ -1035,6 +1044,21 @@ TEST_F(homa_plumbing, homa_sendmsg__response_wrong_state)
 		     self->hsk.error_msg);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_message_out_init_for_response)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 2000, 100);
+
+	mock_dst_check_errors = 1;
+	mock_route_errors = 1;
+	self->sendmsg_args.id = self->server_id;
+	EXPECT_EQ(EHOSTUNREACH, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_STREQ("couldn't find route for peer", self->hsk.error_msg);
+	EXPECT_EQ(RPC_DEAD, srpc->state);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_for_scheduled_response)
 {
