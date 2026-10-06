@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Checks the version of Linux we're compiling against and selects the
+# appropriate versions of various Linux source files (in this directory)
+# to include when building tests.
+#
+# Usage:
+# linux_objs <file>
+# Where <file> is the version.h file that will be used with the current
+# version of Linux.
+#
+# Prints a list of file names.
+
+VERSION=$(awk '/LINUX_VERSION_CODE/ {print $3; exit}' $1)
+
+V7_0_0=$(( (7 * 65536) + (0 * 256) + 0))
+
+if [ $VERSION -ge $V7_0_0 ]; then
+    echo rbtree_v7_0_14.o rhashtable_v7_0_14.o xxhash_v7_0_14.o
+else
+    echo rbtree_v6_17_8.o rhashtable_v6_17_8.o xxhash_v6_17_8.o
+fi
