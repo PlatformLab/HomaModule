@@ -373,6 +373,8 @@ int      homa_route_pick_victims(struct homa_peertab *peertab,
 int      homa_route_prefer_evict(struct homa_peertab *peertab,
 				 struct homa_route *route1,
 				 struct homa_route *route2);
+void     homa_route_remove(struct homa_route *route,
+			   struct homa_peertab *peertab);
 int      homa_route_validate(struct homa_rpc *rpc);
 
 extern const struct rhashtable_params peer_ht_params;

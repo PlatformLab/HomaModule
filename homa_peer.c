@@ -442,15 +442,31 @@ struct homa_route *homa_route_get(struct homa_sock *hsk,
 	route = rhashtable_lookup(&peertab->route_ht, &route_key,
 				  route_ht_params);
 	tt_record("rhashtable_lookup for route key returned");
+
+	/* Note: if the refcount is zero below we don't have to remove
+	 * the entry from the table: the fact that the reference count
+	 * is zero means the entry has already been removed from the
+	 * table.
+	 */
 	if (route && refcount_inc_not_zero(&route->refs)) {
-		/* jiffies advances every few ms; an unconditional store here
-		 * dirties the line ~1M times/s under load for no extra
-		 * freshness.
+		/* Make sure the route is still valid. */
+		if (dst_check(rcu_dereference_protected(route->dst, 1),
+							route->dst_cookie)) {
+			/* jiffies advances every few ms; an unconditional
+			 * store here dirties the line ~1M times/s under load
+			 * for no extra freshness.
+			*/
+			if (route->access_jiffies != jiffies)
+				route->access_jiffies = jiffies;
+			rcu_read_unlock();
+			return route;
+		}
+
+		/* Drop the reference we just acquired above, then remove
+		 * the entry from the table.
 		 */
-		if (route->access_jiffies != jiffies)
-			route->access_jiffies = jiffies;
-		rcu_read_unlock();
-		return route;
+		homa_route_release(route);
+		homa_route_remove(route, peertab);
 	}
 
 	/* No existing entry, so we have to create a new one. Switch from
@@ -505,6 +521,27 @@ struct homa_route *homa_route_get(struct homa_sock *hsk,
 }
 
 /**
+ * homa_route_remove() - Remove a route entry from its hash table.
+ * @route:     Route to remove (if for some reason this route is no longer
+ *             in @peertab than this function does nothing).
+ * @peertab:   Contains the table from which to remove route. Must not
+ *             be locked by caller.
+ */
+void homa_route_remove(struct homa_route *route, struct homa_peertab *peertab)
+{
+	spin_lock_bh(&peertab->lock);
+	if (rhashtable_remove_fast(&peertab->route_ht, &route->ht_linkage,
+				   route_ht_params) == 0) {
+		homa_route_release(route);
+		peertab->num_routes--;
+		route->key.hnet->num_routes--;
+		tt_record1("homa_route_remove removed invalid route for 0x%x",
+			   tt_addr(route->peer->addr));
+	}
+	spin_unlock_bh(&peertab->lock);
+}
+
+/**
  * homa_route_validate() - Check to be sure that the information in the
  * route for an RPC is still valid; if not, try to allocate a new route
  * for the RPC.
@@ -528,16 +565,7 @@ int homa_route_validate(struct homa_rpc *rpc)
 		/* Existing route is no longer valid; remove it from
 		 * the hash table and try to create a new one.
 		 */
-		spin_lock_bh(&peertab->lock);
-		if (rhashtable_remove_fast(&peertab->route_ht, &old->ht_linkage,
-					   route_ht_params) == 0) {
-			homa_route_release(old);
-			peertab->num_routes--;
-			old->key.hnet->num_routes--;
-			tt_record1("homa_route_validate removed invalid route for 0x%x",
-				   tt_addr(rpc->route->peer->addr));
-		}
-		spin_unlock_bh(&peertab->lock);
+		homa_route_remove(old, peertab);
 		route = homa_route_get(rpc->hsk, &rpc->route->peer->addr);
 		if (IS_ERR(route))
 			return PTR_ERR(route);

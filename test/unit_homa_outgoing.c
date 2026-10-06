@@ -144,18 +144,6 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 	EXPECT_EQ(6, srpc->msgout.priority);
 }
 #endif /* See strip.py */
-TEST_F(homa_outgoing, homa_message_out_init__no_route)
-{
-	struct homa_rpc *srpc;
-
-	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-		self->server_ip, self->client_port, 1111, 10000, 10000);
-	ASSERT_NE(NULL, srpc);
-
-	mock_dst_check_errors = 1;
-	mock_route_errors = 1;
-	EXPECT_EQ(EHOSTUNREACH, -homa_message_out_init(srpc, 10001));
-}
 TEST_F(homa_outgoing, homa_message_out_init__mtu_too_small)
 {
 	struct homa_rpc *srpc;

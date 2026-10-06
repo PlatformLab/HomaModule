@@ -425,6 +425,30 @@ TEST_F(homa_peer, homa_route_get__basics)
 	homa_route_release(route);
 	homa_route_release(route2);
 }
+TEST_F(homa_peer, homa_route_get__stale_route)
+{
+	struct homa_route *route, *route2;
+
+	/* First call: get new route. */
+	route = homa_route_get(&self->hsk, ip1111);
+	ASSERT_FALSE(IS_ERR(route));
+	EXPECT_EQ_IP(*ip1111, route->peer->addr);
+
+	/* Second call finds stale route, so makes new one. */
+	mock_dst_check_errors = 1;
+	route2 = homa_route_get(&self->hsk, ip1111);
+	ASSERT_FALSE(IS_ERR(route2));
+	EXPECT_NE(route, route2);
+	EXPECT_EQ_IP(*ip1111, route2->peer->addr);
+	EXPECT_EQ(2, refcount_read(&route2->refs));
+	EXPECT_EQ(1, refcount_read(&route->refs));
+
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(2, homa_metrics_per_cpu()->route_allocs);
+#endif /* See strip.py */
+	homa_route_release(route);
+	homa_route_release(route2);
+}
 struct homa_route *hook_route;
 struct homa_peertab *hook_peertab;
 /* Hook function that removes a route from the hash table and frees it. */
@@ -518,6 +542,33 @@ TEST_F(homa_peer, homa_route_get__conflicting_create)
 	EXPECT_EQ(1, self->hnet->num_routes);
 }
 
+TEST_F(homa_peer, homa_route_remove)
+{
+	struct homa_route *route, *route2;
+
+	route = homa_route_get(&self->hsk, ip1111);
+	ASSERT_FALSE(IS_ERR(route));
+	EXPECT_EQ_IP(*ip1111, route->peer->addr);
+	EXPECT_EQ(2, refcount_read(&route->refs));
+
+	/* First call: route is in the table. */
+	homa_route_remove(route, self->homa.peertab);
+	EXPECT_EQ(1, refcount_read(&route->refs));
+
+	/* Second call: route is no longer in the table. */
+	homa_route_remove(route, self->homa.peertab);
+	EXPECT_EQ(1, refcount_read(&route->refs));
+
+	/* homa_route_get should now return a different route. */
+	route2 = homa_route_get(&self->hsk, ip1111);
+	ASSERT_FALSE(IS_ERR(route2));
+	EXPECT_EQ_IP(*ip1111, route->peer->addr);
+	EXPECT_NE(route, route2);
+
+	homa_route_release(route);
+	homa_route_release(route2);
+}
+
 TEST_F(homa_peer, homa_route_validate)
 {
 	struct homa_route *route;
@@ -534,8 +585,7 @@ TEST_F(homa_peer, homa_route_validate)
 	EXPECT_EQ(0, -homa_route_validate(crpc));
 	EXPECT_EQ(route, crpc->route);
 
-	/* Second call: route is invalid. */
-	route->dst->obsolete = 1;
+	/* Second call: route is stale. */
 	mock_dst_check_errors = 1;
 	EXPECT_EQ(0, -homa_route_validate(crpc));
 	EXPECT_NE(route, crpc->route);
@@ -545,7 +595,6 @@ TEST_F(homa_peer, homa_route_validate)
 
 	/* Third call: route is invalid but can't create replacement. */
 	route = crpc->route;
-	route->dst->obsolete = 1;
 	mock_dst_check_errors = 1;
 	mock_kmalloc_errors = 1;
 	EXPECT_EQ(ENOMEM, -homa_route_validate(crpc));

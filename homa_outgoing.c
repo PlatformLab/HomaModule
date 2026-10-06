@@ -30,7 +30,8 @@ int homa_message_out_init(struct homa_rpc *rpc, int length)
 {
 	struct dst_entry *dst;
 	u64 max_segs;
-	int err, mtu;
+	int err = 0;
+	int mtu;
 
 	memset(&rpc->msgout, 0, sizeof(rpc->msgout));
 	rpc->msgout.length = length;
@@ -42,13 +43,6 @@ int homa_message_out_init(struct homa_rpc *rpc, int length)
 		rpc->msgout.granted = length;
 #endif /* See strip.py */
 	rpc->msgout.init_time = homa_clock();
-
-	/* Validate the route before computing packet geometry (MTU
-	 * might change).
-	 */
-	err = homa_route_validate(rpc);
-	if (err != 0)
-		return err;
 
 	/* Compute the geometry of packets. */
 	rcu_read_lock();
