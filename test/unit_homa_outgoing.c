@@ -166,6 +166,7 @@ TEST_F(homa_outgoing, homa_message_out_init__mtu_too_small)
 
 	mock_mtu = 50;
 	EXPECT_EQ(EHOSTUNREACH, -homa_message_out_init(srpc, 10001));
+	EXPECT_STREQ("route has MTU too small for Homa", srpc->hsk->error_msg);
 }
 TEST_F(homa_outgoing, homa_message_out_init__max_gso_segs)
 {

@@ -58,6 +58,7 @@ int homa_message_out_init(struct homa_rpc *rpc, int length)
 				   sizeof(struct homa_data_hdr);
 	if (rpc->msgout.max_seg_data < HOMA_MIN_SEG_DATA) {
 		err = -EHOSTUNREACH;
+		rpc->hsk->error_msg = "route has MTU too small for Homa";
 		goto done;
 	}
 	max_segs = min_t(u32, rpc->hsk->homa->max_gso_size,
