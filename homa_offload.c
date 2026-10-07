@@ -77,16 +77,15 @@ int homa_offload_end(void)
 void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 {
 	struct rps_sock_flow_table *sock_flow_table;
-	int hash;
+	u32 hash, index;
 
 	rcu_read_lock();
 	sock_flow_table = rcu_dereference(net_hotdata.rps_sock_flow_table);
 	if (sock_flow_table) {
 		hash = cpu + net_hotdata.rps_cpu_mask + 1;
-		if (sock_flow_table->ents[hash] != hash) {
-			sock_flow_table = rcu_dereference(net_hotdata.rps_sock_flow_table);
-			sock_flow_table->ents[hash] = hash;
-		}
+		index = hash & sock_flow_table->mask;
+		if (READ_ONCE(sock_flow_table->ents[index]) != hash)
+			WRITE_ONCE(sock_flow_table->ents[index], hash);
 		__skb_set_sw_hash(skb, hash, false);
 	}
 	rcu_read_unlock();
