@@ -230,6 +230,7 @@ extern int         mock_rht_num_walk_results;
 extern int         mock_route_errors;
 extern int         mock_signal_pending;
 extern int         mock_sock_holds;
+extern int         mock_sysctl_intval;
 extern struct task_struct
 		   mock_task;
 extern int         mock_total_spin_locks;

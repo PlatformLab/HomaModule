@@ -58,10 +58,12 @@ int homa_message_out_init(struct homa_rpc *rpc, int length)
 	max_segs = min_t(u32, rpc->hsk->homa->max_gso_size,
 			 dst->dev->gso_max_size) -
 		   (sizeof(struct homa_data_hdr) + HOMA_SKB_EXTRA);
-	do_div(max_segs, rpc->msgout.max_seg_data +
-			 sizeof(struct homa_seg_hdr));
-	if (max_segs > dst->dev->gso_max_segs)
-		max_segs = dst->dev->gso_max_segs;
+	if (likely(max_segs > 0)) {
+		do_div(max_segs, rpc->msgout.max_seg_data +
+				sizeof(struct homa_seg_hdr));
+		if (max_segs > dst->dev->gso_max_segs)
+			max_segs = dst->dev->gso_max_segs;
+	}
 	if (max_segs < 1)
 		max_segs = 1;
 	rpc->msgout.max_gso_segs = max_segs;

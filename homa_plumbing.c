@@ -159,7 +159,7 @@ static struct inet6_protocol homav6_protocol = {
  * to pointers into a net-specific struct homa later.
  */
 #define OFFSET(field) ((void *)offsetof(struct homa, field))
-static struct ctl_table homa_ctl_table[] = {
+struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "accept_bits",
 		.data		= OFFSET(accept_bits),
@@ -1892,6 +1892,51 @@ int homa_dointvec(const struct ctl_table *table, int write,
 
 	result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
 	if (write) {
+		/* Clamp values to appropriate ranges to avoid errors. */
+		if (homa->accept_bits < 0)
+			homa->accept_bits = 0;
+		if (homa->bpage_lease_usecs < 0)
+			homa->bpage_lease_usecs = 0;
+		/* busy_usecs:          no constraints */
+		/* cutoff_version:      no constraints */
+		/* dead_frags_limit:    no constraints */
+		if (homa->drop_bits < 0)
+			homa->drop_bits = 0;
+		/* gro_busy_usecs:      no constraints */
+		/* gro_policy:          no constraints */
+		/* gso_force_software:  no constraints */
+		/* hijack_tcp:          no constraints */
+		if (homa->link_mbps < 1)
+			homa->link_mbps = 1;
+		/* max_dead_frags:      no constraints */
+		if (homa->max_gro_skbs < 1)
+			homa->max_gro_skbs = 1;
+		/* max_gso_size:        no constraints */
+		if (homa->max_sched_prio < 0)
+			homa->max_sched_prio = 0;
+		/* next_id:             no constraints */
+		if (homa->num_priorities < 1)
+			homa->num_priorities = 1;
+		if (homa->num_priorities > HOMA_MAX_PRIORITIES)
+			homa->num_priorities = HOMA_MAX_PRIORITIES;
+		if (homa->poll_usecs < 0)
+			homa->poll_usecs = 0;
+		/* priority_map:        no constraints */
+		/* request_ack_ticks:   no constraints */
+		if (homa->resend_interval < 1)
+			homa->resend_interval = 1;
+		/* timeout_resends:     no constraints */
+		/* timeout_ticks:       no constraints */
+		if (homa->tx_page_frees_per_sec < 1)
+			homa->tx_page_frees_per_sec = 1;
+		if (homa->tx_page_pool_min_kb < 0)
+			homa->tx_page_pool_min_kb = 0;
+		if (homa->unsched_bytes < 0)
+			homa->unsched_bytes = 0;
+		/* unsched_cutoffs:     no constraints */
+		if (homa->wmem_max < 1000)
+			homa->wmem_max = 1000;
+
 		/* Update any information that is dependent on sysctl values
 		 * (don't worry about which value changed, just refresh all
 		 * dependent information).

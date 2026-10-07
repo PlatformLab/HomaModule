@@ -9,6 +9,8 @@
 #include "mock.h"
 #include "utils.h"
 
+extern struct ctl_table homa_ctl_table[];
+
 FIXTURE(homa_plumbing) {
 	struct in6_addr client_ip[1];
 	int client_port;
@@ -1815,4 +1817,72 @@ TEST_F(homa_plumbing, homa_poll__socket_readable)
 			       self->client_id, 100, 100);
 	EXPECT_EQ(POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM,
 		  homa_poll(NULL, &sock, NULL));
+}
+
+TEST_F(homa_plumbing, homa_dointvec__clamp_values)
+{
+	unit_sysctl(homa_dointvec, homa_ctl_table, "accept_bits", 10);
+	EXPECT_EQ(10, self->homa.accept_bits);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "accept_bits", -100);
+	EXPECT_EQ(0, self->homa.accept_bits);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "bpage_lease_usecs", 10);
+	EXPECT_EQ(10, self->homa.bpage_lease_usecs);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "bpage_lease_usecs", -100);
+	EXPECT_EQ(0, self->homa.bpage_lease_usecs);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "drop_bits", 10);
+	EXPECT_EQ(10, self->homa.drop_bits);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "drop_bits", -100);
+	EXPECT_EQ(0, self->homa.drop_bits);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "link_mbps", 100);
+	EXPECT_EQ(100, self->homa.link_mbps);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "link_mbps", -100);
+	EXPECT_EQ(1, self->homa.link_mbps);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "max_gro_skbs", 10);
+	EXPECT_EQ(10, self->homa.max_gro_skbs);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "max_gro_skbs", -100);
+	EXPECT_EQ(1, self->homa.max_gro_skbs);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "max_gro_skbs", 10);
+	EXPECT_EQ(10, self->homa.max_gro_skbs);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "max_gro_skbs", -100);
+	EXPECT_EQ(1, self->homa.max_gro_skbs);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "num_priorities", 10);
+	EXPECT_EQ(8, self->homa.num_priorities);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "num_priorities", -100);
+	EXPECT_EQ(1, self->homa.num_priorities);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "poll_usecs", 10);
+	EXPECT_EQ(10, self->homa.poll_usecs);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "poll_usecs", -100);
+	EXPECT_EQ(0, self->homa.poll_usecs);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "resend_interval", 10);
+	EXPECT_EQ(10, self->homa.resend_interval);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "resend_interval", -100);
+	EXPECT_EQ(1, self->homa.resend_interval);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "tx_page_frees_per_sec", 10);
+	EXPECT_EQ(10, self->homa.tx_page_frees_per_sec);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "tx_page_frees_per_sec", -100);
+	EXPECT_EQ(1, self->homa.tx_page_frees_per_sec);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "tx_page_pool_min_kb", 10);
+	EXPECT_EQ(10, self->homa.tx_page_pool_min_kb);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "tx_page_pool_min_kb", -100);
+	EXPECT_EQ(0, self->homa.tx_page_pool_min_kb);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "unsched_bytes", 10);
+	EXPECT_EQ(10, self->homa.unsched_bytes);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "unsched_bytes", -100);
+	EXPECT_EQ(0, self->homa.unsched_bytes);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "wmem_max", 5000);
+	EXPECT_EQ(5000, self->homa.wmem_max);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "wmem_max", 200);
+	EXPECT_EQ(1000, self->homa.wmem_max);
 }

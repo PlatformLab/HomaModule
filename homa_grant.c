@@ -1164,11 +1164,23 @@ void homa_grant_update_sysctl_deps(struct homa_grant *grant)
 	u64 fifo_mbps, clocks_per_fifo_mbit, interval;
 	int i;
 
-	if (grant->max_overcommit > HOMA_MAX_GRANTS)
-		grant->max_overcommit = HOMA_MAX_GRANTS;
-
+	/* Clamp values to safe ranges. */
+	if (grant->fifo_grant_increment < 0)
+		grant->fifo_grant_increment = 0;
 	if (grant->fifo_fraction > 500)
 		grant->fifo_fraction = 500;
+	if (grant->fifo_fraction < 0)
+		grant->fifo_fraction = 0;
+	/* max_grantable_rpcs:  no constraints */
+	if (grant->max_incoming < 0)
+		grant->max_incoming = 0;
+	if (grant->max_overcommit > HOMA_MAX_GRANTS)
+		grant->max_overcommit = HOMA_MAX_GRANTS;
+	if (grant->max_overcommit < 1)
+		grant->max_overcommit = 1;
+	if (grant->window_param < 0)
+		grant->window_param = 0;
+
 	fifo_mbps = (u64)grant->homa->link_mbps * grant->fifo_fraction;
 	do_div(fifo_mbps, 1000);
 	if (fifo_mbps > 0 && grant->fifo_grant_increment > 0) {

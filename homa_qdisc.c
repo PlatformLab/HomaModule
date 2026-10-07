@@ -1439,15 +1439,17 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 	struct homa_qdisc_dev *qdev;
 	u64 tmp;
 
-	if (qshared->fifo_fraction > 0) {
-		tmp = (1000 - qshared->fifo_fraction) << HOMA_FIFO_WEIGHT_SHIFT;
-		do_div(tmp, qshared->fifo_fraction);
-		qshared->fifo_weight = tmp;
-	}
-
-	qshared->max_nic_est_backlog_cycles = homa_ns_to_cycles(1000 *
-			qshared->max_nic_est_backlog_usecs);
-
+	/* Clamp values to safe ranges. */
+	if (qshared->max_nic_est_backlog_usecs < 0)
+		qshared->max_nic_est_backlog_usecs = 0;
+	if (qshared->max_nic_queue_usecs < 0)
+		qshared->max_nic_queue_usecs = 0;
+	if (qshared->fifo_fraction > 500)
+		qshared->fifo_fraction = 500;
+	if (qshared->fifo_fraction < 0)
+		qshared->fifo_fraction = 0;
+	if (qshared->defer_min_bytes < 0)
+		qshared->defer_min_bytes = 0;
 	if (qshared->homa_share < 0)
 		qshared->homa_share = 0;
 	if (qshared->homa_share > 100)
@@ -1456,6 +1458,15 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 		qshared->max_link_usage = 5;
 	if (qshared->max_link_usage > 100)
 		qshared->max_link_usage = 100;
+
+	if (qshared->fifo_fraction > 0) {
+		tmp = (1000 - qshared->fifo_fraction) << HOMA_FIFO_WEIGHT_SHIFT;
+		do_div(tmp, qshared->fifo_fraction);
+		qshared->fifo_weight = tmp;
+	}
+
+	qshared->max_nic_est_backlog_cycles = homa_ns_to_cycles(1000 *
+			qshared->max_nic_est_backlog_usecs);
 
 	/* Use a mutex rather than RCU to prevent qdev deletion while we
 	 * traverse the list. This is more expensive, but RCU isn't safe

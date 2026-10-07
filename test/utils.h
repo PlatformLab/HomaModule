@@ -69,6 +69,10 @@ struct homa_rpc
 			     int client_port, int id, int req_length,
 			     int resp_length);
 void         unit_sock_destroy(struct homa_sock *hsk);
+int          unit_sysctl(int (*fn)(const struct ctl_table *table, int write,
+				   void *buffer, size_t *length, loff_t *ppos),
+			 const struct ctl_table *table, char *name,
+			 int value);
 void         unit_teardown(void);
 
 #ifndef __STRIP__ /* See strip.py */

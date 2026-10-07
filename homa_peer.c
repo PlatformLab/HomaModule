@@ -855,6 +855,10 @@ int homa_peer_get_acks(struct homa_peer *peer, int count, struct homa_ack *dst)
  */
 void homa_peer_update_sysctl_deps(struct homa_peertab *peertab)
 {
+	/* Note: no need to clamp values to safe ranges: all values are "safe"
+	 * for all params.
+	 */
+
 	peertab->idle_jiffies_min = peertab->idle_secs_min * HZ;
 	peertab->idle_jiffies_max = peertab->idle_secs_max * HZ;
 }

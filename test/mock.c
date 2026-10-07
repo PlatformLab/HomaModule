@@ -68,9 +68,6 @@ int mock_prepare_to_wait_status = -ERESTARTSYS;
 /* The return value from calls to signal_pending(). */
 int mock_signal_pending;
 
-/* Used as current task during tests. Also returned by kthread_run. */
-struct task_struct mock_task;
-
 /* If a test sets this variable to nonzero, ip*xmit will log
  * outgoing packets using the long format rather than short.
  */
@@ -289,6 +286,12 @@ struct net mock_nets[MOCK_MAX_NETS];
 struct homa_net *mock_hnets[MOCK_MAX_NETS];
 struct net_device mock_devices[MOCK_MAX_NETS];
 
+/* Connects mock_task to mock_nets. */
+struct nsproxy mock_nsproxy = {.net_ns = &mock_nets[0]};
+
+/* Used as current task during tests. Also returned by kthread_run. */
+struct task_struct mock_task = {.nsproxy = &mock_nsproxy};
+
 /* Nonzero means don't generate a unit test failure when freeing peers
  * if the reference count isn't zero (log a message instead).
  */
@@ -326,6 +329,11 @@ int mock_num_socks;
 #define MAX_DROP_REASONS 10
 enum skb_drop_reason mock_drop_reasons[MAX_DROP_REASONS];
 int mock_num_drop_reasons;
+
+/* Integer value that will be used for the value of the sysctl variable
+ * in calls to functions like proc_dointvec.
+ */
+int mock_sysctl_intval;
 
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
@@ -1363,6 +1371,10 @@ int proc_dointvec(const struct ctl_table *table, int write,
 		     void __user *buffer, size_t *lenp, loff_t *ppos)
 #endif
 {
+	if (table->maxlen == sizeof(int))
+		*((int *)table->data) = mock_sysctl_intval;
+	else
+		*((int64_t *)table->data) = mock_sysctl_intval;
 	return 0;
 }
 
@@ -2827,7 +2839,10 @@ void mock_teardown(void)
 	mock_route_errors = 0;
 	mock_trylock_errors = 0;
 	mock_vmalloc_errors = 0;
+	memset(&mock_nsproxy, 0, sizeof(mock_nsproxy));
+	mock_nsproxy.net_ns = &mock_nets[0];
 	memset(&mock_task, 0, sizeof(mock_task));
+	mock_task.nsproxy = &mock_nsproxy;
 	mock_prepare_to_wait_status = -ERESTARTSYS;
 	mock_signal_pending = 0;
 	mock_xmit_log_verbose = 0;
@@ -2860,6 +2875,7 @@ void mock_teardown(void)
 	mock_num_drop_reasons = 0;
 	for (i = 0; i < MAX_DROP_REASONS; i++)
 		mock_drop_reasons[i] = -1;
+	mock_sysctl_intval = 0;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));

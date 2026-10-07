@@ -560,3 +560,29 @@ void unit_alloc_frags(int num_frags, skb_frag_t *frags, ...)
 		skb_frag_size_set(&frags[i], length);
 	}
 }
+
+/**
+ * unit_sysctl() - A convenience function for invoking a sysctl handler
+ * such as homa_dointvec.
+ * @fn:     The actual sysctl handler to invoke, such as homa_dointvec.
+ * @table:  The ctl_table containing an entry for @name: the entry must
+ *          exit in the table.
+ * @name:   The name of the value to modify.
+ * @value:  The value to assign to the sysctl variable.
+ * Return:  Zero for success, otherwise a negative errno.
+ */
+int unit_sysctl(int (*fn)(const struct ctl_table *entry, int write,
+			  void *buffer, size_t *length, loff_t *ppos),
+		const struct ctl_table *table, char *name, int value)
+{
+	static char *buffer = "abcdef";
+	const struct ctl_table *entry;
+	size_t length = 6;
+
+	mock_sysctl_intval = value;
+	for (entry = table; ; entry++) {
+		if (strcmp(entry->procname, name) == 0)
+			return fn(entry, 1, buffer, &length, NULL);
+	}
+	return -ENOENT;
+}

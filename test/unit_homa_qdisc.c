@@ -2456,6 +2456,41 @@ TEST_F(homa_qdisc, homa_qdev_update_sysctl__cant_get_link_speed_from_dev)
 	homa_qdisc_qdev_put(qdev);
 }
 
+TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__clamp_values)
+{
+	self->homa.qshared->max_nic_est_backlog_usecs = -100;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->max_nic_est_backlog_usecs);
+
+	self->homa.qshared->max_nic_queue_usecs = -100;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->max_nic_queue_usecs);
+
+	self->homa.qshared->fifo_fraction = 2000;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(500, self->homa.qshared->fifo_fraction);
+	self->homa.qshared->fifo_fraction = -1;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->fifo_fraction);
+
+	self->homa.qshared->defer_min_bytes = -100;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->defer_min_bytes);
+
+	self->homa.qshared->homa_share = -100;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->homa_share);
+	self->homa.qshared->homa_share = 150;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(100, self->homa.qshared->homa_share);
+
+	self->homa.qshared->max_link_usage = 4;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(5, self->homa.qshared->max_link_usage);
+	self->homa.qshared->max_link_usage = 102;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(100, self->homa.qshared->max_link_usage);
+}
 TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__fifo_fraction)
 {
 	self->homa.qshared->fifo_fraction = 500;
@@ -2466,10 +2501,6 @@ TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__fifo_fraction)
 	homa_qdisc_update_sysctl_deps(self->homa.qshared);
 	EXPECT_EQ(4 * (1 << HOMA_FIFO_WEIGHT_SHIFT),
 		  self->homa.qshared->fifo_weight);
-
-	self->homa.qshared->fifo_fraction = 800;
-	homa_qdisc_update_sysctl_deps(self->homa.qshared);
-	EXPECT_EQ((1 << HOMA_FIFO_WEIGHT_SHIFT) / 4, self->homa.qshared->fifo_weight);
 
 	self->homa.qshared->fifo_fraction = 0;
 	self->homa.qshared->fifo_weight = -1;
