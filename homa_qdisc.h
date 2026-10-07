@@ -301,10 +301,11 @@ struct homa_qdisc_shared {
 
 	/**
 	 * @max_nic_queue_usecs: An additional limit on NIC queue buildup:
-	 * if any individual NIC queue reaches a length where it would
-	 * take at least this many microseconds to transmit all of its packets,
-	 * then no more packets will be queued for *any* NIC queue until
-	 * the queue gets below this limit. Set externally via sysctl.
+	 * if the total number of bytes in all packets that have been handed
+	 * off to the NIC but not yet returned after transmission would take
+	 * at least this many microseconds to transmit, then no more packets
+	 * will be queued for the NIC queue until the packets in its
+	 * posession get below this limit. Set externally via sysctl.
 	 */
 	int max_nic_queue_usecs;
 
