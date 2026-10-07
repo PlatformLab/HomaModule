@@ -27,7 +27,7 @@ static const struct net_offload homa_offload = {
  */
 int homa_offload_init(void)
 {
-	int i, res1, res2;
+	int i, result;
 
 	for (i = 0; i < nr_cpu_ids; i++) {
 		struct homa_offload_core *offload_core;
@@ -46,10 +46,13 @@ int homa_offload_init(void)
 		offload_core->held_bucket = 0;
 	}
 
-	res1 = inet_add_offload(&homa_offload, IPPROTO_HOMA);
-	res2 = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
-
-	return res1 ? res1 : res2;
+	result = inet_add_offload(&homa_offload, IPPROTO_HOMA);
+	if (result)
+		return result;
+	result = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
+	if (result)
+		inet_del_offload(&homa_offload, IPPROTO_HOMA);
+	return result;
 }
 
 /**
@@ -145,6 +148,8 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 	__skb_pull(skb, sizeof(struct homa_data_hdr)
 			- sizeof(struct homa_seg_hdr));
 	segs = skb_segment(skb, features);
+	if (IS_ERR_OR_NULL(segs))
+		return segs;
 
 	/* Set incrementing ids in each of the segments (mimics behavior
 	 * of Mellanox NICs and other segmenters).
@@ -202,10 +207,33 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	int priority;
 	u32 saddr;
 	u32 hash;
+	unsigned int header_offset, packet_length;
 	int busy;
 
-	if (!homa_make_header_avl(skb))
+	if (!homa_make_header_avl(skb)) {
 		tt_record("homa_gro_receive couldn't pull enough data from packet");
+		kfree_skb_reason(skb, SKB_DROP_REASON_HDR_TRUNC);
+		return ERR_PTR(-EINPROGRESS);
+	}
+
+	/* Validate the common header before reading the packet type, and
+	 * the type-specific header before reading any of its fields.
+	 */
+	header_offset = skb_transport_offset(skb);
+	if (header_offset > skb->len ||
+	    skb->len - header_offset < sizeof(struct homa_common_hdr)) {
+		INC_METRIC(short_packets, 1);
+		kfree_skb_reason(skb, SKB_DROP_REASON_PKT_TOO_SMALL);
+		return ERR_PTR(-EINPROGRESS);
+	}
+	h_new = (struct homa_data_hdr *)skb_transport_header(skb);
+	packet_length = skb->len - header_offset;
+	if (h_new->common.type < DATA || h_new->common.type > MAX_OP ||
+	    packet_length < homa_header_lengths[h_new->common.type - DATA]) {
+		INC_METRIC(short_packets, 1);
+		kfree_skb_reason(skb, SKB_DROP_REASON_PKT_TOO_SMALL);
+		return ERR_PTR(-EINPROGRESS);
+	}
 
 	// if (homa_drop_packet(homa)) {
 	// 	kfree_skb(skb);

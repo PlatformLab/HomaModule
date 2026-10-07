@@ -185,6 +185,8 @@ void homa_prios_changed(struct homa *homa)
 {
 	int i;
 
+	if (homa->num_priorities < 1)
+		homa->num_priorities = 1;
 	if (homa->num_priorities > HOMA_MAX_PRIORITIES)
 		homa->num_priorities = HOMA_MAX_PRIORITIES;
 

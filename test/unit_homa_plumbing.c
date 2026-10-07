@@ -603,6 +603,47 @@ TEST_F(homa_plumbing, homa_ioctl__HOMAIOCINFO)
 		  (unsigned long) &hinfo));
 	EXPECT_STREQ("Sample error message", hinfo.error_msg);
 }
+TEST_F(homa_plumbing, homa_ioctl__release_does_not_receive)
+{
+	struct homa_rpc *rpc = unit_server_rpc(&self->hsk,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+			self->client_port, self->server_id, 100, 200);
+	int old_state = rpc->state;
+
+	EXPECT_EQ(0, homa_pool_get_pages(self->hsk.buffer_pool, 1,
+			self->recvmsg_args.bpage_offsets, 0));
+	self->recvmsg_args.num_bpages = 1;
+	self->recvmsg_args.bpage_offsets[0] <<= HOMA_BPAGE_SHIFT;
+	EXPECT_EQ(0, homa_ioctl(self->hsk.sock.sk_socket, HOMAIOCRELEASE,
+			(unsigned long)&self->recvmsg_args));
+	EXPECT_EQ(0, self->recvmsg_args.num_bpages);
+	EXPECT_EQ(old_state, rpc->state);
+}
+
+TEST_F(homa_plumbing, homa_ioctl__release_preserves_unreleased_tokens)
+{
+	EXPECT_EQ(0, homa_pool_get_pages(self->hsk.buffer_pool, 1,
+			self->recvmsg_args.bpage_offsets, 0));
+	self->recvmsg_args.num_bpages = 2;
+	self->recvmsg_args.bpage_offsets[0] <<= HOMA_BPAGE_SHIFT;
+	self->recvmsg_args.bpage_offsets[1] =
+		self->hsk.buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
+	EXPECT_EQ(-EINVAL, homa_ioctl(self->hsk.sock.sk_socket,
+			HOMAIOCRELEASE, (unsigned long)&self->recvmsg_args));
+	EXPECT_EQ(1, self->recvmsg_args.num_bpages);
+	EXPECT_EQ(self->hsk.buffer_pool->num_bpages << HOMA_BPAGE_SHIFT,
+		self->recvmsg_args.bpage_offsets[0]);
+	self->recvmsg_args.num_bpages = 0;
+}
+
+TEST_F(homa_plumbing, homa_ioctl__release_rejects_invalid_count)
+{
+	self->recvmsg_args.num_bpages = HOMA_MAX_BPAGES + 1;
+	EXPECT_EQ(-EINVAL, homa_ioctl(self->hsk.sock.sk_socket,
+			HOMAIOCRELEASE, (unsigned long)&self->recvmsg_args));
+	self->recvmsg_args.num_bpages = 0;
+}
+
 TEST_F(homa_plumbing, homa_ioctl__unknown_ioctl_command)
 {
 	EXPECT_EQ(EINVAL, -homa_ioctl(self->hsk.sock.sk_socket, 47, 0));

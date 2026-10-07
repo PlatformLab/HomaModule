@@ -651,6 +651,7 @@ void unit_hook(char *id);
 #endif /* See strip.py */
 
 extern unsigned int homa_net_id;
+extern const u16 homa_header_lengths[];
 
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);

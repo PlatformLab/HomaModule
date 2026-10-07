@@ -403,7 +403,7 @@ static struct ctl_table homa_ctl_table[] = {
 
 /* Sizes of the headers for each Homa packet type, in bytes. */
 #ifndef __STRIP__ /* See strip.py */
-static u16 header_lengths[] = {
+const u16 homa_header_lengths[] = {
 	sizeof(struct homa_data_hdr),
 	sizeof(struct homa_grant_hdr),
 	sizeof(struct homa_resend_hdr),
@@ -416,7 +416,7 @@ static u16 header_lengths[] = {
 	sizeof(struct homa_start_msg_hdr)
 };
 #else /* See strip.py */
-static u16 header_lengths[] = {
+const u16 homa_header_lengths[] = {
 	sizeof(struct homa_data_hdr),
 	0,
 	sizeof(struct homa_resend_hdr),
@@ -969,6 +969,53 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 }
 
 /**
+ * homa_ioc_release() - Return receive buffers without consuming a message.
+ * @sock: Socket owning the buffer pool.
+ * @arg: User-space homa_recvmsg_args; only num_bpages, bpage_offsets, and
+ *       reserved are used. Successfully released entries are removed even
+ *       if a subsequent entry is invalid; remaining entries may be retried.
+ * Return: Zero on success or a negative errno.
+ */
+static int homa_ioc_release(struct socket *sock, unsigned long arg)
+{
+	struct homa_sock *hsk = homa_sk(sock->sk);
+	struct homa_recvmsg_args args;
+	int result = 0;
+	int i;
+
+	if (copy_from_user(&args, (void __user *)arg, sizeof(args))) {
+		hsk->error_msg = "invalid address for release arguments";
+		return -EFAULT;
+	}
+	if (args.reserved || args.num_bpages > HOMA_MAX_BPAGES) {
+		hsk->error_msg = "invalid receive buffer release arguments";
+		return -EINVAL;
+	}
+	if (!hsk->buffer_pool) {
+		hsk->error_msg = "SO_HOMA_RECVBUF socket option has not been set";
+		return -EINVAL;
+	}
+	for (i = 0; i < args.num_bpages; i++) {
+		result = homa_pool_free_bufs(hsk->buffer_pool, 1,
+					     &args.bpage_offsets[i]);
+		if (result) {
+			hsk->error_msg = "error while releasing buffer pages";
+			break;
+		}
+	}
+	args.num_bpages -= i;
+	memmove(args.bpage_offsets, &args.bpage_offsets[i],
+		args.num_bpages * sizeof(args.bpage_offsets[0]));
+	if (i)
+		homa_pool_check_waiting(hsk->buffer_pool);
+	if (copy_to_user((void __user *)arg, &args, sizeof(args))) {
+		hsk->error_msg = "couldn't update release arguments";
+		return -EFAULT;
+	}
+	return result;
+}
+
+/**
  * homa_ioctl() - Implements the ioctl system call for Homa sockets.
  * @sock:  Socket on which the system call was invoked.
  * @cmd:   Identifier for a particular ioctl operation.
@@ -997,6 +1044,8 @@ int homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		return 0;
 	}
 #endif /* See strip.py */
+	if (cmd == HOMAIOCRELEASE)
+		return homa_ioc_release(sock, arg);
 	if (cmd == HOMAIOCINFO)
 		return homa_ioc_info(sock, arg);
 	homa_sk(sock->sk)->error_msg = "ioctl opcode isn't supported by Homa";
@@ -1641,7 +1690,7 @@ int homa_softirq(struct sk_buff *skb)
 		h = (struct homa_common_hdr *)skb->data;
 		if (unlikely(skb->len < sizeof(struct homa_common_hdr) ||
 			     h->type < DATA || h->type > MAX_OP ||
-			     skb->len < header_lengths[h->type - DATA])) {
+			     skb->len < homa_header_lengths[h->type - DATA])) {
 #ifndef __STRIP__ /* See strip.py */
 			const struct in6_addr saddr =
 					skb_canonical_ipv6_saddr(skb);

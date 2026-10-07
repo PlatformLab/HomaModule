@@ -205,6 +205,7 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 	__must_hold(rpc->bucket->lock)
 {
 	int msg_frags_left, bytes_left, bytes_to_skip, rem;
+	int frag_index = 0, frag_start = 0;
 	struct homa_sock *hsk = rpc->hsk;
 	struct homa_skb_info *homa_info;
 	skb_frag_t *msg_frag, *skb_frag;
@@ -230,12 +231,24 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 	bytes_to_skip = seg_index * (rpc->msgout.max_seg_data +
 				     sizeof(struct homa_seg_hdr)) +
 			sizeof(struct homa_seg_hdr);
-	for (msg_frags_left = rpc->msgout.num_frags,
-	     msg_frag = rpc->msgout.frags; ; msg_frags_left--, msg_frag++) {
+	/* Sequential skbs can resume at the previous fragment rather than
+	 * scanning from the beginning. Earlier retransmissions start over.
+	 */
+	if (bytes_to_skip >= rpc->msgout.frag_hint_offset) {
+		frag_index = rpc->msgout.frag_hint;
+		frag_start = rpc->msgout.frag_hint_offset;
+		bytes_to_skip -= frag_start;
+	}
+	for (msg_frags_left = rpc->msgout.num_frags - frag_index,
+	     msg_frag = rpc->msgout.frags + frag_index;
+	     ; msg_frags_left--, msg_frag++) {
 		if (bytes_to_skip < skb_frag_size(msg_frag))
 			break;
 		bytes_to_skip -= skb_frag_size(msg_frag);
+		frag_start += skb_frag_size(msg_frag);
 	}
+	rpc->msgout.frag_hint = rpc->msgout.num_frags - msg_frags_left;
+	rpc->msgout.frag_hint_offset = frag_start;
 
 	/* Compute how much data from rpc->msgout.frags to include in the
 	 * packet.

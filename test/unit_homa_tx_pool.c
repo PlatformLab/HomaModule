@@ -26,6 +26,14 @@ static void add_to_pool(struct homa *homa, int num_pages, int core)
 	}
 }
 
+static int frag_array_allocations;
+
+static void count_frag_array_allocations(char *id)
+{
+	if (strcmp(id, "kmalloc") == 0)
+		frag_array_allocations++;
+}
+
 static struct homa_tx_pool *hook_pool;
 
 /* Used to remove a page from hook_pool in a race. */
@@ -184,6 +192,45 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc__reallocate_frags_array_multiple_times)
 	homa_tx_pool_free(&self->homa, num_frags, frags);
 	kfree(frags);
 }
+TEST_F(homa_tx_pool, homa_tx_pool_alloc__small_pages_geometric_growth)
+{
+	skb_frag_t frag, *frags = &frag;
+	int num_frags = 1;
+	int total = 0;
+	int i;
+
+	mock_no_high_order_pages = true;
+	frag_array_allocations = 0;
+	unit_hook_register(count_frag_array_allocations);
+	ASSERT_EQ(0, homa_tx_pool_alloc(&self->homa,
+			HOMA_MAX_MESSAGE_LENGTH, &num_frags, &frags));
+	EXPECT_LE(frag_array_allocations, 6);
+	for (i = 0; i < num_frags; i++)
+		total += skb_frag_size(&frags[i]);
+	EXPECT_EQ(HOMA_MAX_MESSAGE_LENGTH, total);
+	homa_tx_pool_free(&self->homa, num_frags, frags);
+	kfree(frags);
+}
+
+TEST_F(homa_tx_pool, homa_tx_pool_alloc__growth_retries_smaller_array)
+{
+	skb_frag_t frag, *frags = &frag;
+	int num_frags = 1;
+	int total = 0;
+	int i;
+
+	mock_no_high_order_pages = true;
+	/* Fail the second expansion, then accept the smaller retry. */
+	mock_kmalloc_errors = 2;
+	ASSERT_EQ(0, homa_tx_pool_alloc(&self->homa,
+			HOMA_MAX_MESSAGE_LENGTH, &num_frags, &frags));
+	for (i = 0; i < num_frags; i++)
+		total += skb_frag_size(&frags[i]);
+	EXPECT_EQ(HOMA_MAX_MESSAGE_LENGTH, total);
+	homa_tx_pool_free(&self->homa, num_frags, frags);
+	kfree(frags);
+}
+
 TEST_F(homa_tx_pool, homa_tx_pool_alloc__cleanup_after_error)
 {
 	skb_frag_t frag;
