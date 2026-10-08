@@ -457,8 +457,7 @@ void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
 }
 
 /**
- * homa_pool_free_bufs() - Release buffer space so that it can be
- * reused.
+ * homa_pool_free_bufs() - Release buffer space so that it can be reused.
  * @pool:         Pool that the buffer space belongs to. Doesn't need to
  *                be locked.
  * @num_buffers:  How many buffers to release.
@@ -469,6 +468,14 @@ void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
 int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 {
 	int i;
+
+	/* Note: a misbehaving application could potentially free the same
+	 * offset multiple times, which could lead to accidental sharing
+	 * of buffer space across RPCs. Fortunately, the resulting corruption
+	 * affects only the misbehaving application (buffer pools are not
+	 * shared across applciations), and eliminating any potential for
+	 * corruption seems hard.
+	 */
 
 	if (!homa_pool_exists(pool))
 		return -EINVAL;
