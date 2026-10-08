@@ -868,7 +868,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 	struct homa_info hinfo;
 	struct homa_rpc *rpc;
 	int result = 0;
-	int bytes_avl;
+	u64 bytes_avl;
 	int num_rpcs;
 	char *dst;
 	int i;
