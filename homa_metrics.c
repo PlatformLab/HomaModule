@@ -376,10 +376,10 @@ char *homa_metrics_print(void)
 		  "Socket lock misses\n");
 		M("socket_lock_miss_cycles", m->socket_lock_miss_cycles,
 		  "Time lost waiting for socket locks\n");
-		M("peer_ack_lock_misses", m->peer_ack_lock_misses,
-		  "Misses on peer ack locks\n");
-		M("peer_ack_lock_miss_cycles", m->peer_ack_lock_miss_cycles,
-		  "Time lost waiting for peer ack locks\n");
+		M("route_ack_lock_misses", m->route_ack_lock_misses,
+		  "Misses on route ack locks\n");
+		M("route_ack_lock_miss_cycles", m->route_ack_lock_miss_cycles,
+		  "Time lost waiting for route ack locks\n");
 		M("grant_locks", m->grant_locks,
 		  "Grant lock acquisitions\n");
 		M("grant_lock_misses", m->grant_lock_misses,
@@ -401,7 +401,7 @@ char *homa_metrics_print(void)
 		M("reaper_calls", m->reaper_calls,
 		  "Reaper invocations that were not disabled\n");
 		M("ack_overflows", m->ack_overflows,
-		  "Explicit ACKs sent because peer->acks was full\n");
+		  "Explicit ACKs sent because route->acks was full\n");
 		M("ignored_need_acks", m->ignored_need_acks,
 		  "NEED_ACKs ignored because RPC result not yet received\n");
 		M("bpool_lock_misses", m->bpool_lock_misses,

@@ -1374,16 +1374,16 @@ TEST_F(homa_plumbing, homa_recvmsg__add_ack)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->server_port,
 			self->client_id, 100, 2000);
-	struct homa_peer *peer;
+	struct homa_route *route;
 
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
 
-	peer = crpc->route->peer;
+	route = crpc->route;
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
-	EXPECT_EQ(1, peer->num_acks);
+	EXPECT_EQ(1, route->num_acks);
 }
 TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 {
@@ -1396,7 +1396,7 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-	EXPECT_EQ(0, srpc->route->peer->num_acks);
+	EXPECT_EQ(0, srpc->route->num_acks);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)

@@ -2388,9 +2388,9 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = NEED_ACK}};
 
-	route->peer->acks[0].server_port = htons(self->server_port);
-	route->peer->acks[0].client_id = cpu_to_be64(self->client_id+2);
-	route->peer->num_acks = 1;
+	route->acks[0].server_port = htons(self->server_port);
+	route->acks[0].client_id = cpu_to_be64(self->client_id+2);
+	route->num_acks = 1;
 	mock_xmit_log_verbose = 1;
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0));
