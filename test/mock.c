@@ -16,6 +16,8 @@
 
 #include <linux/rhashtable.h>
 
+#include <errno.h>
+
 /* It isn't safe to include some header files, such as stdlib, because
  * they conflict with kernel header files. The explicit declarations
  * below replace those header files.
@@ -1150,6 +1152,18 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 void *__kmalloc_noprof(size_t size, gfp_t flags)
 {
 	return mock_kmalloc(size, flags);
+}
+
+int kstrtoint(const char *s, unsigned int base, int *res)
+{
+	long int strtol(const char *nptr, char **endptr, int base);
+	char *end;
+
+	errno = 0;
+	*res = strtol(s, &end, base);
+	if (end == s)
+		return -EINVAL;
+	return -errno;
 }
 
 void kvfree(const void *addr)
@@ -2882,6 +2896,7 @@ void mock_teardown(void)
 	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
 			&tcp_v6_offload;
 	jiffies = 1100;
+	nr_cpu_ids = 8;
 
 	count = unit_hash_size(skbs_in_use);
 	if (count > 0)

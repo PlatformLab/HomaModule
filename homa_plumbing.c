@@ -1871,9 +1871,11 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
  * that depend on the modified value.
  * @table:    sysctl table describing value to be read or written.
  * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space of the input/output data.
- * @lenp:     Not exactly sure.
- * @ppos:     Not exactly sure.
+ * @buffer:   Address in kernel space of the input/output data.
+ * @lenp:     Points to available space in buffer; must be modified to hold
+ *            number of bytes actually read or written.
+ * @ppos:     File pointer; must be incremented by number of bytes read
+ *            or written.
  *
  * Return: 0 for success, nonzero for error.
  */
@@ -2005,9 +2007,11 @@ int homa_dointvec(const struct ctl_table *table, int write,
  * processing.
  * @table:    sysctl table describing value to be read or written.
  * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space of the input/output data.
- * @lenp:     Not exactly sure.
- * @ppos:     Not exactly sure.
+ * @buffer:   Address in kernel space of the input/output data.
+ * @lenp:     Points to available space in buffer; must be modified to hold
+ *            number of bytes actually read or written.
+ * @ppos:     File pointer; must be incremented by number of bytes read
+ *            or written.
  *
  * Return: 0 for success, nonzero for error.
  */
@@ -2015,62 +2019,73 @@ int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
 			      void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct homa_offload_core *offload_core;
-	struct ctl_table table_copy;
-	int max_values, *values;
-	int result, i;
+	int i, err, out_len;
+	char *p;
 
-	max_values = (NUM_GEN3_SOFTIRQ_CORES + 1) * nr_cpu_ids;
-	values = kmalloc_array(max_values, sizeof(int), GFP_KERNEL_ACCOUNT);
-	if (!values)
-		return -ENOMEM;
+	if (*ppos != 0) {
+		*lenp = 0;
+		return 0;
+	}
 
-	table_copy = *table;
-	table_copy.data = values;
+	err = 0;
 	if (write) {
-		/* First value is core id, others are contents of its
-		 * gen3_softirq_cores.
+		/* Note: buffer is a temporary copy that we can modify. */
+
+		/* Each iteration of this loop scans the information for
+		 * one core.
 		 */
-		for (i = 0; i < max_values ; i++)
-			values[i] = -1;
-		table_copy.maxlen = max_values;
-		result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
-		if (result != 0)
-			goto done;
-		for (i = 0; i < max_values;
-				i += NUM_GEN3_SOFTIRQ_CORES + 1) {
-			int j;
+		p = buffer;
+		while (1) {
+			int core;
 
-			if (values[i] < 0)
-				break;
-			offload_core = &per_cpu(homa_offload_core, values[i]);
-			for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++)
-				offload_core->gen3_softirq_cores[j] =
-						values[i +  j + 1];
-		}
-	} else {
-		/* Read: return values from all of the cores. */
-		int *dst;
+			err = next_int_from_string(&p, &core);
+			if (err != 0)
+				goto write_done;
+			if (core >= nr_cpu_ids) {
+				err = -EINVAL;
+				goto write_done;
+			}
+			offload_core = &per_cpu(homa_offload_core, core);
 
-		table_copy.maxlen = 0;
-		dst = values;
-		for (i = 0; i < nr_cpu_ids; i++) {
-			int j;
+			for (i = 0; i < NUM_GEN3_SOFTIRQ_CORES; i++) {
+				int value;
 
-			*dst = i;
-			dst++;
-			table_copy.maxlen += sizeof(int);
-			offload_core = &per_cpu(homa_offload_core, i);
-			for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++) {
-				*dst = offload_core->gen3_softirq_cores[j];
-				dst++;
-				table_copy.maxlen += sizeof(int);
+				err = next_int_from_string(&p, &value);
+				if (err != 0)
+					goto write_done;
+				offload_core->gen3_softirq_cores[i] = value;
 			}
 		}
-		result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
+write_done:
+		if (p)
+			*lenp = p - (char *)buffer;
+		*ppos += *lenp;
+		return err == -ENOMSG ? 0 : err;
 	}
-done:
-	kfree(values);
-	return result;
+
+	/* Read: return values from all of the cores. */
+	p = buffer;
+	out_len = 0;
+	for (i = 0; i < nr_cpu_ids; i++) {
+		int j;
+
+		offload_core = &per_cpu(homa_offload_core, i);
+		if (i != 0)
+			out_len += snprintf(p + out_len, *lenp - out_len, " ");
+		out_len += snprintf(p + out_len, *lenp - out_len, "%d", i);
+		for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++)
+			out_len += snprintf(p + out_len, *lenp - out_len,
+				    	    " %d",
+					    offload_core->gen3_softirq_cores[j]);
+	}
+	out_len += snprintf(p + out_len, *lenp - out_len, "\n");
+	if (out_len < *lenp)
+		*lenp = out_len;
+	else
+		/* snprintf used the last byte for a NULL terminator. */
+		*lenp -= 1;
+	*ppos += *lenp;
+	return err;
 }
 #endif /* See strip.py */
 

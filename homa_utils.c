@@ -224,3 +224,33 @@ void homa_spin(int ns)
 	while (homa_clock() < end)
 		cpu_relax();
 }
+
+/**
+ * next_int_from_string() - Extract the next integer value from a string.
+ * @p:       Pointer to string pointer; on return, advanced to refer to
+ *           the first character after the end of the integer value.
+ *           A final value of NULL means the end of the string was
+ *           reached.
+ * @value:   The integer value is stored here.
+ * Return:   0 on success (or end of string), otherwise a negative errno.
+ *           -ENOMSG means there was nothing in the string besides separators.
+ */
+int next_int_from_string(char **p, int *value)
+{
+	char *token;
+	int err;
+
+	while (1) {
+		token = strsep(p, " \t\n");
+		if (!token)
+			return -ENOMSG;
+		if (*token == '\0')
+			continue;
+		err = kstrtoint(token, 0, value);
+		if (err != 0)
+			return err;
+		return 0;
+	}
+}
+
+

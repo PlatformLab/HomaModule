@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 #include "homa_impl.h"
+#include "homa_offload.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 #define KSELFTEST_NOT_MAIN 1
@@ -1885,4 +1886,141 @@ TEST_F(homa_plumbing, homa_dointvec__clamp_values)
 	EXPECT_EQ(5000, self->homa.wmem_max);
 	unit_sysctl(homa_dointvec, homa_ctl_table, "wmem_max", 200);
 	EXPECT_EQ(1000, self->homa.wmem_max);
+}
+
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__write_basics)
+{
+	struct homa_offload_core *offload_core;
+	char buffer[100];
+	size_t length;
+	loff_t pos;
+
+	strcpy(buffer, "2 3 4 5 1 2 3 4");
+	length = strlen(buffer);
+	pos = 0;
+	EXPECT_EQ(0, homa_sysctl_softirq_cores(NULL, 1, buffer, &length, &pos));
+	EXPECT_EQ(15, length);
+	EXPECT_EQ(15, pos);
+	offload_core = &per_cpu(homa_offload_core, 2);
+	EXPECT_EQ(3, offload_core->gen3_softirq_cores[0]);
+	EXPECT_EQ(4, offload_core->gen3_softirq_cores[1]);
+	EXPECT_EQ(5, offload_core->gen3_softirq_cores[2]);
+	offload_core = &per_cpu(homa_offload_core, 1);
+	EXPECT_EQ(2, offload_core->gen3_softirq_cores[0]);
+	EXPECT_EQ(3, offload_core->gen3_softirq_cores[1]);
+	EXPECT_EQ(4, offload_core->gen3_softirq_cores[2]);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__nonzero_pos)
+{
+	char buffer[200];
+	size_t length;
+	loff_t pos;
+
+	length = sizeof(buffer);
+	buffer[0] = '\0';
+	pos = 1;
+
+	EXPECT_EQ(0, homa_sysctl_softirq_cores(NULL, 0, buffer, &length, &pos));
+	EXPECT_EQ(0, length);
+	EXPECT_EQ(1, pos);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__write_no_data)
+{
+	size_t length;
+	char buffer[100];
+	loff_t pos;
+
+	strcpy(buffer, "     ");
+	length = strlen(buffer);
+	pos = 0;
+	EXPECT_EQ(0, -homa_sysctl_softirq_cores(NULL, 1, buffer,
+						     &length, &pos));
+	EXPECT_EQ(5, length);
+	EXPECT_EQ(5, pos);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__write_bad_core)
+{
+	size_t length;
+	char buffer[100];
+	loff_t pos;
+
+	strcpy(buffer, "100 5 6 7");
+	length = strlen(buffer);
+	pos = 0;
+	EXPECT_EQ(EINVAL, -homa_sysctl_softirq_cores(NULL, 1, buffer,
+						     &length, &pos));
+	EXPECT_EQ(4, length);
+	EXPECT_EQ(4, pos);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__write_data_ends_in_middle_of_core)
+{
+	struct homa_offload_core *offload_core;
+	char buffer[100];
+	size_t length;
+	loff_t pos;
+
+	strcpy(buffer, "3 6");
+	length = strlen(buffer);
+	pos = 0;
+	offload_core = &per_cpu(homa_offload_core, 3);
+	memset(offload_core->gen3_softirq_cores, 0,
+	       sizeof(offload_core->gen3_softirq_cores));
+	EXPECT_EQ(0, homa_sysctl_softirq_cores(NULL, 1, buffer, &length, &pos));
+	EXPECT_EQ(3, length);
+	EXPECT_EQ(3, pos);
+	EXPECT_EQ(6, offload_core->gen3_softirq_cores[0]);
+	EXPECT_EQ(0, offload_core->gen3_softirq_cores[1]);
+	EXPECT_EQ(0, offload_core->gen3_softirq_cores[2]);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__read_basics)
+{
+	struct homa_offload_core *offload_core;
+	char buffer[200];
+	size_t length;
+	loff_t pos;
+
+	nr_cpu_ids = 2;
+	offload_core = &per_cpu(homa_offload_core, 0);
+	offload_core->gen3_softirq_cores[0] = 6;
+	offload_core->gen3_softirq_cores[1] = 7;
+	offload_core->gen3_softirq_cores[2] = 8;
+	offload_core = &per_cpu(homa_offload_core, 1);
+	offload_core->gen3_softirq_cores[0] = 9;
+	offload_core->gen3_softirq_cores[1] = 10;
+	offload_core->gen3_softirq_cores[2] = 11;
+
+	length = sizeof(buffer);
+	buffer[0] = '\0';
+	pos = 0;
+
+	EXPECT_EQ(0, homa_sysctl_softirq_cores(NULL, 0, buffer, &length, &pos));
+	EXPECT_STREQ("0 6 7 8 1 9 10 11\n", buffer);
+	EXPECT_EQ(strlen(buffer), length);
+	EXPECT_EQ(strlen(buffer), pos);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__read_out_of_space_in_buffer)
+{
+	struct homa_offload_core *offload_core;
+	char buffer[200];
+	size_t length;
+	loff_t pos;
+
+	nr_cpu_ids = 2;
+	offload_core = &per_cpu(homa_offload_core, 0);
+	offload_core->gen3_softirq_cores[0] = 6;
+	offload_core->gen3_softirq_cores[1] = 7;
+	offload_core->gen3_softirq_cores[2] = 8;
+	offload_core = &per_cpu(homa_offload_core, 1);
+	offload_core->gen3_softirq_cores[0] = 10;
+	offload_core->gen3_softirq_cores[1] = 11;
+	offload_core->gen3_softirq_cores[2] = 12;
+
+	length = 10;
+	buffer[0] = '\0';
+	pos = 0;
+
+	EXPECT_EQ(0, homa_sysctl_softirq_cores(NULL, 0, buffer, &length, &pos));
+	EXPECT_STREQ("0 6 7 8 1", buffer);
+	EXPECT_EQ(strlen(buffer), length);
+	EXPECT_EQ(strlen(buffer), pos);
 }

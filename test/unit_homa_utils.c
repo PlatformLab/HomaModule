@@ -233,3 +233,67 @@ TEST_F(homa_utils, homa_prios_changed__share_lowest_priority)
 	EXPECT_EQ(0, self->homa.max_sched_prio);
 }
 #endif /* See strip.py */
+
+TEST_F(homa_utils, next_int_from_string__basics)
+{
+	char buffer[100];
+	int value;
+	char *p;
+
+	strcpy(buffer, " 10 -4\t\n 6  ");
+	p = buffer;
+
+	EXPECT_EQ(0, -next_int_from_string(&p, &value));
+	EXPECT_EQ(10, value);
+	EXPECT_STREQ("-4\t\n 6  ", p);
+
+	EXPECT_EQ(0, -next_int_from_string(&p, &value));
+	EXPECT_EQ(-4, value);
+	EXPECT_STREQ("\n 6  ", p);
+
+	EXPECT_EQ(0, -next_int_from_string(&p, &value));
+	EXPECT_EQ(6, value);
+	EXPECT_STREQ(" ", p);
+
+	EXPECT_EQ(ENOMSG, -next_int_from_string(&p, &value));
+	EXPECT_EQ(NULL, p);
+}
+TEST_F(homa_utils, next_int_from_string__nothing_after_value)
+{
+	char buffer[100];
+	int value;
+	char *p;
+
+	strcpy(buffer, "100");
+	p = buffer;
+
+	EXPECT_EQ(0, -next_int_from_string(&p, &value));
+	EXPECT_EQ(100, value);
+	EXPECT_EQ(NULL, p);
+}
+TEST_F(homa_utils, next_int_from_string__errors)
+{
+	char buffer[100];
+	int value;
+	char *p;
+
+	strcpy(buffer, "gorp xyz");
+	p = buffer;
+	EXPECT_EQ(EINVAL, -next_int_from_string(&p, &value));
+	EXPECT_STREQ("xyz", p);
+
+	strcpy(buffer, "999999999999999999999  abc");
+	p = buffer;
+	EXPECT_EQ(ERANGE, -next_int_from_string(&p, &value));
+	EXPECT_STREQ(" abc", p);
+}
+TEST_F(homa_utils, next_int_from_string__null_pointer)
+{
+	int value;
+	char *p;
+
+	p = NULL;
+
+	EXPECT_EQ(ENOMSG, -next_int_from_string(&p, &value));
+	EXPECT_EQ(NULL, p);
+}

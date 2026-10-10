@@ -718,6 +718,7 @@ int      __homa_xmit_control(void *contents, size_t length,
 			     struct homa_route *route, struct homa_sock *hsk);
 void     homa_xmit_data(struct homa_rpc *rpc);
 void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
+int      next_int_from_string(char **p, int *value);
 
 #ifndef __STRIP__ /* See strip.py */
 void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
