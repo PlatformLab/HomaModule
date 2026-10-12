@@ -1182,6 +1182,20 @@ TEST_F(homa_outgoing, homa_xmit_data__stop_because_not_enough_data_copied_from_u
 
 	homa_rpc_unlock(crpc);
 }
+TEST_F(homa_outgoing, homa_xmit_data__stop_because_of_error_in_homa_tx_skb_send)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 6000, 1000);
+
+	/* This test will loop forever if there is no error check. */
+	unit_log_clear();
+	mock_alloc_skb_errors = -1;
+	homa_rpc_lock(crpc);
+	homa_xmit_data(crpc);
+	homa_rpc_unlock(crpc);
+	EXPECT_STREQ("", unit_log_get());
+}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, homa_xmit_data__metrics_for_client_rpc)
 {

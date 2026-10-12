@@ -630,7 +630,8 @@ void homa_xmit_data(struct homa_rpc *rpc)
 		if (xmit_offset >= rpc->msgout.length)
 			break;
 		end = rpc->msgout.length;
-		homa_tx_skb_send(rpc, xmit_offset, &end);
+		if (homa_tx_skb_send(rpc, xmit_offset, &end) != 0)
+			break;
 #ifndef __STRIP__ /* See strip.py */
 		if (homa_is_client(rpc->id)) {
 			INC_METRIC(client_request_bytes_done, end - xmit_offset);
