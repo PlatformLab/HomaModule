@@ -205,3 +205,15 @@ clean:
 # prints the value of a make variable.
 print-%:
 	@echo $* = $($*)
+
+# User-space receiver tests can run without a kernel build tree.
+receiver_unit: unit_homa_receiver.cc ../homa_receiver.cc ../homa_receiver.h ../homa.h
+	$(CXX) -std=c++17 -Wall -Wextra -Werror -g -I.. \
+		-fsanitize=address,undefined -fno-omit-frame-pointer \
+		unit_homa_receiver.cc ../homa_receiver.cc -o $@
+
+receiver_test: receiver_unit
+	./receiver_unit
+
+CLEANS += receiver_unit
+.PHONY: receiver_test

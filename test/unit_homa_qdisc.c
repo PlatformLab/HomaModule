@@ -92,6 +92,18 @@ static void defer_hook(char *id)
 	}
 }
 
+static struct homa_rpc *flush_hook_rpc;
+static int flush_hook_skbs_at_unlock;
+static int flush_hook_queued_at_unlock;
+static void flush_unlock_hook(char *id)
+{
+	if (strcmp(id, "unlock") != 0 || !flush_hook_rpc ||
+	    !mock_is_locked(&flush_hook_rpc->qrpc.qdev->defer_lock))
+		return;
+	flush_hook_skbs_at_unlock = mock_skb_count();
+	flush_hook_queued_at_unlock = skb_queue_len(&flush_hook_rpc->qrpc.packets);
+}
+
 static int create_hook_count;
 static struct net_device *hook_dev;
 static void qdev_create_hook(char *id)
@@ -1809,6 +1821,41 @@ TEST_F(homa_qdisc, homa_qdisc_flush_rpc__free_packets)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->qdisc_flushes);
         homa_qdisc_qdev_put(qdev);
 }
+TEST_F(homa_qdisc, homa_qdisc_flush_rpc__free_after_unlock)
+{
+	int counts[] = {0, 1, 128};
+	struct homa_qdisc_dev *qdev;
+	struct homa_rpc *crpc;
+	int before, i, j;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			      &self->server_ip, self->server_port,
+			      self->client_id, 100000, 100000);
+	ASSERT_NE(NULL, crpc);
+	flush_hook_rpc = crpc;
+	unit_hook_register(flush_unlock_hook);
+	for (i = 0; i < ARRAY_SIZE(counts); i++) {
+		before = mock_skb_count();
+		for (j = 0; j < counts[i]; j++)
+			homa_qdisc_defer_homa(qdev, new_test_skb(crpc,
+					 &self->addr, &self->addr2, j * 500, 500));
+		/* Cover empty queues with a non-NULL qdev as well. */
+		crpc->qrpc.qdev = qdev;
+		flush_hook_skbs_at_unlock = -1;
+		flush_hook_queued_at_unlock = -1;
+		homa_qdisc_flush_rpc(crpc);
+		EXPECT_EQ(0, flush_hook_queued_at_unlock);
+		EXPECT_EQ(before + counts[i], flush_hook_skbs_at_unlock);
+		EXPECT_EQ(before, mock_skb_count());
+		EXPECT_FALSE(mock_is_locked(&qdev->defer_lock));
+		EXPECT_STREQ("", unit_log_deferred(qdev));
+	}
+	flush_hook_rpc = NULL;
+	unit_hook_clear();
+	homa_qdisc_qdev_put(qdev);
+}
+
 TEST_F(homa_qdisc, homa_qdisc_flush_rpc__update_last_defer_and_metrics)
 {
 	struct homa_rpc *crpc1, *crpc2;

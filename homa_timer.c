@@ -202,7 +202,7 @@ void homa_timer(struct homa *homa)
 	start = homa_clock();
 	total_grants = 0;
 	for (core = 0; core < nr_cpu_ids; core++) {
-		struct homa_metrics *m = homa_metrics_per_cpu();
+		struct homa_metrics *m = &per_cpu(homa_metrics, core);
 
 		total_grants += m->packets_sent[GRANT - DATA];
 	}

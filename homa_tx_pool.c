@@ -140,13 +140,24 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 		/* Expand the frag array if needed. */
 		if (frags_allocated == max_frags) {
 			skb_frag_t *new_frags;
-			int num_new;
+			int num_new, min_new;
 
-			num_new = ((bytes_left + HOMA_TX_PAGE_SIZE - 1) >>
+			min_new = ((bytes_left + HOMA_TX_PAGE_SIZE - 1) >>
 				   (PAGE_SHIFT + HOMA_TX_PAGE_ORDER)) +
 				  frags_allocated;
+			/* Small-page fallback must not repeatedly grow the array
+			 * by just a few entries and recopy its entire prefix.
+			 */
+			num_new = max(min_new, max_frags * 2);
 			new_frags = kvmalloc_array(num_new, sizeof(*new_frags),
 						   GFP_ATOMIC);
+			/* Preserve the old, smaller allocation under pressure. */
+			if (!new_frags && num_new != min_new) {
+				num_new = min_new;
+				new_frags = kvmalloc_array(num_new,
+							   sizeof(*new_frags),
+							   GFP_ATOMIC);
+			}
 			if (!new_frags) {
 				err = -ENOMEM;
 				goto error;

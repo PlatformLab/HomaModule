@@ -222,6 +222,21 @@ TEST_F(homa_utils, homa_prios_changed__num_priorities_too_large)
 	homa_prios_changed(&self->homa);
 	EXPECT_EQ(8, self->homa.num_priorities);
 }
+TEST_F(homa_utils, homa_prios_changed__nonpositive_priority_count)
+{
+	int values[] = {0, -1, INT_MIN};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(values); i++) {
+		self->homa.num_priorities = values[i];
+		homa_prios_changed(&self->homa);
+		EXPECT_EQ(1, self->homa.num_priorities);
+		EXPECT_EQ(INT_MAX, self->homa.unsched_cutoffs[0]);
+		EXPECT_EQ(0, self->homa.unsched_cutoffs[1]);
+		EXPECT_EQ(0, self->homa.max_sched_prio);
+	}
+}
+
 TEST_F(homa_utils, homa_prios_changed__share_lowest_priority)
 {
 	set_cutoffs(&self->homa, 90, 80, 70, 60, 50, 40, 30, 0);
