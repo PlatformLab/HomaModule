@@ -1406,6 +1406,11 @@ void proc_remove(struct proc_dir_entry *de)
 
 }
 
+void proc_set_user(struct proc_dir_entry *de, kuid_t uid, kgid_t gid)
+{
+
+}
+
 int proto_register(struct proto *prot, int alloc_slab)
 {
 	return 0;

@@ -27,15 +27,23 @@ struct homa_metrics_output homa_mout;
  */
 int homa_metrics_init(void)
 {
+	kuid_t root_uid = KUIDT_INIT(0);
+	kgid_t root_gid = KGIDT_INIT(0);
+
+	/* The metrics file (/proc/homa_metrics) restricts access to
+	 * root only, since it contains information that is private to
+	 * a network namespace.
+	 */
 	mutex_init(&homa_mout.mutex);
 	homa_mout.output = NULL;
-	homa_mout.dir_entry = proc_create("homa_metrics", 0444,
+	homa_mout.dir_entry = proc_create("homa_metrics", 0400,
 					  init_net.proc_net,
 					  &homa_metrics_ops);
 	if (!homa_mout.dir_entry) {
 		pr_err("couldn't create /proc/net/homa_metrics\n");
 		return -ENOMEM;
 	}
+	proc_set_user(homa_mout.dir_entry, root_uid, root_gid);
 	return 0;
 }
 
