@@ -47,6 +47,12 @@ struct homa_message_out {
 	int frag_bytes;
 
 	/**
+	 * @frag_nid: NUMA node to which the fragments should be
+	 * returned when freed.
+	 */
+	int frag_nid;
+
+	/**
 	 * @frag: @frags will point here if the message data all fits in a
 	 * single fragment (avoid alloc/free overhead).
 	 */

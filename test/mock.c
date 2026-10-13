@@ -253,8 +253,11 @@ int mock_mtu;
 /* Used instead of MAX_SKB_FRAGS when running some unit tests. */
 int mock_max_skb_frags = 10;
 
-/* Each bit gives the NUMA node (0 or 1) for a particular core.*/
-int mock_numa_mask = 5;
+/* Indices are core numbers, value is NUMA node for that core. */
+int mock_numa_nodes[20];
+
+/* Defines range of NUMA ids. */
+int mock_num_numas = 5;
 
 /* Bits determine the result of successive calls to compound order, starting
  * at the lowest bit. 0 means return HOMA_SKB_PAGE_ORDER, 1 means return 0.
@@ -2047,9 +2050,7 @@ void mock_cpu_relax(void)
  */
 int mock_cpu_to_node(int core)
 {
-	if (mock_numa_mask & (1<<core))
-		return 1;
-	return 0;
+	return mock_numa_nodes[core];
 }
 
 /**
@@ -2250,7 +2251,7 @@ int mock_page_to_nid(struct page *page)
 	int result;
 
 	if (mock_page_nid_mask & 1)
-		result = 1;
+		result = 2;
 	else
 		result = 0;
 	mock_page_nid_mask >>= 1;
@@ -2869,7 +2870,8 @@ void mock_teardown(void)
 	mock_log_wakeups = 0;
 	mock_mtu = 0;
 	mock_max_skb_frags = 10;
-	mock_numa_mask = 5;
+	memset(mock_numa_nodes, 0, sizeof(mock_numa_nodes));
+	mock_num_numas = 5;
 	mock_compound_order_mask = 0;
 	mock_page_nid_mask = 0;
 	mock_printk_output[0] = 0;

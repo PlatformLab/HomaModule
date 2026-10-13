@@ -13,10 +13,10 @@ static inline struct homa_tx_pool_core *get_tx_pool_core(int core)
 	return &per_cpu(homa_tx_pool_core, core);
 }
 
-/* Add a given number of pages to the pool for a given core. */
-static void add_to_pool(struct homa *homa, int num_pages, int core)
+/* Add a given number of pages to the pool for a given NUMA node. */
+static void add_to_pool(struct homa *homa, int num_pages, int nid)
 {
-	struct homa_tx_pool *pool = get_tx_pool_core(core)->pool;
+	struct homa_tx_pool *pool = homa->tx_pools[nid];
 	int i;
 
 	for (i = 0; i < num_pages; i++) {
@@ -56,23 +56,25 @@ TEST_F(homa_tx_pool, homa_tx_pool_init__success)
 {
 	homa_tx_pool_cleanup(&self->homa);
 	EXPECT_EQ(NULL, self->homa.tx_pools[0]);
-	mock_numa_mask = 0x83;
+	mock_numa_nodes[0] = 1;
+	mock_numa_nodes[1] = 1;
+	mock_numa_nodes[7] = 1;
 	EXPECT_EQ(0, homa_tx_pool_init(&self->homa));
 	EXPECT_NE(NULL, self->homa.tx_pools[0]);
 	EXPECT_NE(NULL, self->homa.tx_pools[1]);
-	EXPECT_EQ(NULL, self->homa.tx_pools[2]);
-	EXPECT_EQ(self->homa.tx_pools[1], get_tx_pool_core(0)->pool);
-	EXPECT_EQ(self->homa.tx_pools[1], get_tx_pool_core(1)->pool);
-	EXPECT_EQ(self->homa.tx_pools[0], get_tx_pool_core(2)->pool);
-	EXPECT_EQ(self->homa.tx_pools[0], get_tx_pool_core(6)->pool);
-	EXPECT_EQ(self->homa.tx_pools[1], get_tx_pool_core(7)->pool);
-	EXPECT_EQ(1, self->homa.max_numa);
+	EXPECT_EQ(NULL, self->homa.tx_pools[5]);
+	EXPECT_EQ(1, get_tx_pool_core(0)->nid);
+	EXPECT_EQ(1, get_tx_pool_core(1)->nid);
+	EXPECT_EQ(0, get_tx_pool_core(2)->nid);
+	EXPECT_EQ(0, get_tx_pool_core(6)->nid);
+	EXPECT_EQ(1, get_tx_pool_core(7)->nid);
+	EXPECT_EQ(4, self->homa.max_numa);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_init__kmalloc_failure)
 {
 	homa_tx_pool_cleanup(&self->homa);
 	EXPECT_EQ(NULL, self->homa.tx_pools[0]);
-	mock_numa_mask = 0x2;
+	mock_numa_nodes[1] = 1;
 	mock_kmalloc_errors = 0x2;
 	EXPECT_EQ(ENOMEM, -homa_tx_pool_init(&self->homa));
 	EXPECT_EQ(NULL, self->homa.tx_pools[0]);
@@ -82,21 +84,26 @@ TEST_F(homa_tx_pool, homa_tx_pool_init__kmalloc_failure)
 
 TEST_F(homa_tx_pool, homa_tx_pool_cleanup)
 {
-	struct homa_tx_pool_core *tx_core = get_tx_pool_core(2);
-
-	tx_core->page = alloc_pages(GFP_KERNEL, 2);
-	add_to_pool(&self->homa, 5, 2);
-	add_to_pool(&self->homa, 4, 3);
-	mock_set_core(2);
-	EXPECT_EQ(5, get_tx_pool_core(2)->pool->avail);
-	EXPECT_EQ(4, get_tx_pool_core(3)->pool->avail);
+	struct homa_tx_pool_core *tx_core;
 
 	homa_tx_pool_cleanup(&self->homa);
-	EXPECT_EQ(NULL, tx_core->pool);
-	EXPECT_EQ(NULL, tx_core->page);
+	EXPECT_EQ(NULL, self->homa.tx_pools[0]);
+	mock_numa_nodes[0] = 1;
+	mock_numa_nodes[2] = 1;
+	EXPECT_EQ(0, homa_tx_pool_init(&self->homa));
 
-	tx_core = get_tx_pool_core(nr_cpu_ids - 1);
-	EXPECT_EQ(NULL, tx_core->pool);
+	tx_core = get_tx_pool_core(2);
+	tx_core->page = alloc_pages(GFP_KERNEL, 2);
+	add_to_pool(&self->homa, 5, 1);
+	add_to_pool(&self->homa, 4, 0);
+	mock_set_core(2);
+	EXPECT_EQ(5, self->homa.tx_pools[1]->avail);
+	EXPECT_EQ(4, self->homa.tx_pools[0]->avail);
+
+	homa_tx_pool_cleanup(&self->homa);
+	EXPECT_EQ(NULL, self->homa.tx_pools[0]);
+	EXPECT_EQ(NULL, self->homa.tx_pools[mock_num_numas - 1]);
+	EXPECT_EQ(NULL, tx_core->page);
 
 	/* Test for idempotency. */
 	homa_tx_pool_cleanup(&self->homa);
@@ -117,7 +124,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc__single_frag)
 	EXPECT_EQ(0, frag.offset);
 	EXPECT_EQ(100, skb_frag_size(&frag));
 
-	homa_tx_pool_free(&self->homa, num_frags, &frag);
+	homa_tx_pool_free(&self->homa, 0, num_frags, &frag);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc__multiple_frags_reallocate_frags_array)
 {
@@ -140,7 +147,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc__multiple_frags_reallocate_frags_array)
 	EXPECT_EQ(0, frags[2].offset);
 	EXPECT_EQ(500, skb_frag_size(&frags[2]));
 
-	homa_tx_pool_free(&self->homa, num_frags, frags);
+	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
 	kfree(frags);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc__cant_reallocate_frags_array)
@@ -181,8 +188,27 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc__reallocate_frags_array_multiple_times)
 	EXPECT_EQ(0, frags[4].offset);
 	EXPECT_EQ(50000 - 4 * PAGE_SIZE, skb_frag_size(&frags[4]));
 
-	homa_tx_pool_free(&self->homa, num_frags, frags);
+	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
 	kfree(frags);
+}
+TEST_F(homa_tx_pool, homa_tx_pool_alloc__return_nid)
+{
+	skb_frag_t frag;
+	skb_frag_t *frags;
+	int num_frags;
+
+	homa_tx_pool_cleanup(&self->homa);
+	EXPECT_EQ(NULL, self->homa.tx_pools[0]);
+	mock_numa_nodes[cpu_number] = 3;
+	EXPECT_EQ(0, homa_tx_pool_init(&self->homa));
+
+	num_frags = 1;
+	frags = &frag;
+	EXPECT_EQ(3, homa_tx_pool_alloc(&self->homa, 100, &num_frags, &frags));
+	EXPECT_EQ(1, num_frags);
+	EXPECT_EQ(100, skb_frag_size(&frag));
+
+	homa_tx_pool_free(&self->homa, 3, num_frags, &frag);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc__cleanup_after_error)
 {
@@ -219,7 +245,8 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_frag__basics)
 	skb_frag_t frag, frag2, frag3;
 
 	/* First call allocates cached page. */
-	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, 100, &frag));
+	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, self->homa.tx_pools[0],
+					       100, &frag));
 	EXPECT_NE(NULL, skb_frag_page(&frag));
 	EXPECT_EQ(0, frag.offset);
 	EXPECT_EQ(100, skb_frag_size(&frag));
@@ -228,7 +255,8 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_frag__basics)
 	EXPECT_EQ(100, tx_core->allocated);
 
 	/* Second call allocates another frag from cached page. */
-	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, 500, &frag2));
+	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, self->homa.tx_pools[0],
+					       500, &frag2));
 	EXPECT_EQ(skb_frag_page(&frag), skb_frag_page(&frag2));
 	EXPECT_EQ(100, frag2.offset);
 	EXPECT_EQ(500, skb_frag_size(&frag2));
@@ -236,8 +264,9 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_frag__basics)
 	EXPECT_EQ(600, tx_core->allocated);
 
 	/* Third call doesn't fit; allocate new page (retain old cached). */
-	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, HOMA_TX_PAGE_SIZE - 200,
-		  &frag3));
+	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, self->homa.tx_pools[0],
+					       HOMA_TX_PAGE_SIZE - 200,
+					       &frag3));
 	EXPECT_NE(skb_frag_page(&frag), skb_frag_page(&frag3));
 	EXPECT_EQ(0, frag3.offset);
 	EXPECT_EQ(HOMA_TX_PAGE_SIZE - 200, skb_frag_size(&frag3));
@@ -249,36 +278,44 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_frag__basics)
 TEST_F(homa_tx_pool, homa_tx_pool_alloc_frag__retain_leftovers_from_new)
 {
 	struct homa_tx_pool_core *tx_core = get_tx_pool_core(2);
-	skb_frag_t frag, frag2;
+	skb_frag_t frag, frag2, frag3;
 
-	/* First call allocates nearly a full page. */
-	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, HOMA_TX_PAGE_SIZE - 200,
-		  &frag));
+	/* First call allocates a full page, so no leftovers. */
+	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, self->homa.tx_pools[0],
+					       HOMA_TX_PAGE_SIZE, &frag));
+	EXPECT_EQ(0, tx_core->allocated);
 
-	/* Second allocation doesn't fit in remnant, but leaves most of its
+	/* Second call allocates nearly a full page. */
+	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, self->homa.tx_pools[0],
+		  HOMA_TX_PAGE_SIZE - 200, &frag2));
+	EXPECT_EQ(HOMA_TX_PAGE_SIZE - 200, tx_core->allocated);
+
+	/* Third allocation doesn't fit in remnant, but leaves most of its
 	 * page unoccupied.
 	 */
-	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, 500, &frag2));
-	EXPECT_NE(skb_frag_page(&frag), skb_frag_page(&frag2));
-	EXPECT_EQ(0, frag2.offset);
-	EXPECT_EQ(500, skb_frag_size(&frag2));
-	EXPECT_EQ(skb_frag_page(&frag2), tx_core->page);
+	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, self->homa.tx_pools[0],
+					       500, &frag3));
+	EXPECT_NE(skb_frag_page(&frag2), skb_frag_page(&frag3));
+	EXPECT_EQ(0, frag3.offset);
+	EXPECT_EQ(500, skb_frag_size(&frag3));
+	EXPECT_EQ(skb_frag_page(&frag3), tx_core->page);
 	EXPECT_EQ(500, tx_core->allocated);
 
 	put_page(skb_frag_page(&frag));
 	put_page(skb_frag_page(&frag2));
+	put_page(skb_frag_page(&frag3));
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc_frag__reduce_length)
 {
 	struct homa_tx_pool_core *tx_core = get_tx_pool_core(2);
 	skb_frag_t frag;
 
-	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, HOMA_TX_PAGE_SIZE + 1,
-		  &frag));
+	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, self->homa.tx_pools[0],
+		  HOMA_TX_PAGE_SIZE + 1, &frag));
 	EXPECT_EQ(0, frag.offset);
 	EXPECT_EQ(HOMA_TX_PAGE_SIZE, skb_frag_size(&frag));
-	EXPECT_EQ(skb_frag_page(&frag), tx_core->page);
-	EXPECT_EQ(HOMA_TX_PAGE_SIZE, tx_core->allocated);
+	EXPECT_EQ(NULL, tx_core->page);
+	EXPECT_EQ(0, tx_core->allocated);
 
 	put_page(skb_frag_page(&frag));
 }
@@ -293,7 +330,9 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__use_cached_page)
 	tx_core->page = cached_page;
 	tx_core->page_size = HOMA_TX_PAGE_SIZE;
 	tx_core->allocated = 1000;
-	EXPECT_EQ(cached_page, homa_tx_pool_alloc_page(tx_core, &length));
+	EXPECT_EQ(cached_page, homa_tx_pool_alloc_page(tx_core,
+						       self->homa.tx_pools[0],
+						       &length));
 	EXPECT_EQ(NULL, tx_core->page);
 	EXPECT_EQ(0, tx_core->page_size);
 	EXPECT_EQ(0, tx_core->allocated);
@@ -310,7 +349,8 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__cached_page_ref_count_too_high)
 	tx_core->page_size = HOMA_TX_PAGE_SIZE;
 	tx_core->allocated = 1000;
 	get_page(cached_page);
-	page = homa_tx_pool_alloc_page(tx_core, &length);
+	page = homa_tx_pool_alloc_page(tx_core, self->homa.tx_pools[0],
+				       &length);
 	EXPECT_NE(cached_page, page);
 	put_page(cached_page);
 	put_page(page);
@@ -318,32 +358,36 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__cached_page_ref_count_too_high)
 TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__from_pool)
 {
 	struct homa_tx_pool_core *tx_core = get_tx_pool_core(smp_processor_id());
+	struct homa_tx_pool *pool;
 	struct page *page;
 	int length;
 
-	add_to_pool(&self->homa, 5, smp_processor_id());
-	EXPECT_EQ(5, tx_core->pool->avail);
-	tx_core->pool->low_mark = 100;
-	page = homa_tx_pool_alloc_page(tx_core, &length);
-	EXPECT_EQ(tx_core->pool->pages[4], page);
-	EXPECT_EQ(4, tx_core->pool->avail);
+	pool = self->homa.tx_pools[0];
+	add_to_pool(&self->homa, 5, 0);
+	EXPECT_EQ(5, pool->avail);
+	pool->low_mark = 100;
+	page = homa_tx_pool_alloc_page(tx_core, pool, &length);
+	EXPECT_EQ(pool->pages[4], page);
+	EXPECT_EQ(4, pool->avail);
 	EXPECT_EQ(HOMA_TX_PAGE_SIZE, length);
-	EXPECT_EQ(4, tx_core->pool->low_mark);
+	EXPECT_EQ(4, pool->low_mark);
 	put_page(page);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__pool_page_taken_while_locking)
 {
 	struct homa_tx_pool_core *tx_core = get_tx_pool_core(smp_processor_id());
+	struct homa_tx_pool *pool;
 	int length;
 
-	add_to_pool(&self->homa, 1, smp_processor_id());
-	EXPECT_EQ(1, tx_core->pool->avail);
-	hook_pool = tx_core->pool;
+	pool = self->homa.tx_pools[0];
+	add_to_pool(&self->homa, 1, 0);
+	EXPECT_EQ(1, pool->avail);
+	hook_pool = pool;
 	unit_hook_register(page_race_hook);
 	mock_alloc_page_errors = 3;
 
-	EXPECT_EQ(NULL, homa_tx_pool_alloc_page(tx_core, &length));
-	EXPECT_EQ(0, tx_core->pool->avail);
+	EXPECT_EQ(NULL, homa_tx_pool_alloc_page(tx_core, pool, &length));
+	EXPECT_EQ(0, pool->avail);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__new_large_page)
 {
@@ -352,8 +396,9 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__new_large_page)
 	int length;
 
 	mock_clock_tick = 100;
-	EXPECT_EQ(0, tx_core->pool->avail);
-	page = homa_tx_pool_alloc_page(tx_core, &length);
+	EXPECT_EQ(0, self->homa.tx_pools[0]->avail);
+	page = homa_tx_pool_alloc_page(tx_core, self->homa.tx_pools[0],
+				       &length);
 	EXPECT_NE(NULL, page);
 	EXPECT_EQ(HOMA_TX_PAGE_SIZE, length);
 #ifndef __STRIP__ /* See strip.py */
@@ -370,7 +415,8 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__high_order_page_not_available)
 
 	mock_clock_tick = 50;
 	mock_alloc_page_errors = 1;
-	page = homa_tx_pool_alloc_page(tx_core, &length);
+	page = homa_tx_pool_alloc_page(tx_core, self->homa.tx_pools[0],
+				       &length);
 	EXPECT_NE(NULL, page);
 	EXPECT_EQ(PAGE_SIZE, length);
 #ifndef __STRIP__ /* See strip.py */
@@ -386,7 +432,8 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__no_pages_available)
 	int length;
 
 	mock_alloc_page_errors = 3;
-	page = homa_tx_pool_alloc_page(tx_core, &length);
+	page = homa_tx_pool_alloc_page(tx_core, self->homa.tx_pools[0],
+				       &length);
 	EXPECT_EQ(NULL, page);
 }
 
@@ -396,7 +443,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_free__basics)
 	skb_frag_t *frags;
 	int num_frags;
 
-	tx_pool = get_tx_pool_core(smp_processor_id())->pool;
+	tx_pool = self->homa.tx_pools[0];
 	num_frags = 0;
 	frags = NULL;
 
@@ -419,7 +466,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_free__basics)
 	get_page(skb_frag_page(&frags[0]));
 	EXPECT_EQ(0, tx_pool->avail);
 	mock_compound_order_mask = 2;
-	homa_tx_pool_free(&self->homa, num_frags, frags);
+	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
 
 	EXPECT_EQ(2, tx_pool->avail);
 	EXPECT_EQ(skb_frag_page(&frags[2]), tx_pool->pages[0]);
@@ -428,13 +475,32 @@ TEST_F(homa_tx_pool, homa_tx_pool_free__basics)
 	put_page(skb_frag_page(&frags[0]));
 	kfree(frags);
 }
+TEST_F(homa_tx_pool, homa_tx_pool_free__pages_not_in_right_numa)
+{
+	struct homa_tx_pool *tx_pool;
+	skb_frag_t *frags;
+	int num_frags;
+
+	tx_pool = self->homa.tx_pools[0];
+	num_frags = 0;
+	frags = NULL;
+
+	EXPECT_EQ(0, homa_tx_pool_alloc(&self->homa, 4 * HOMA_TX_PAGE_SIZE,
+					&num_frags, &frags));
+	EXPECT_EQ(4, num_frags);
+	EXPECT_EQ(0, tx_pool->avail);
+	mock_page_nid_mask = 5;
+	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
+	EXPECT_EQ(2, tx_pool->avail);
+	kfree(frags);
+}
 TEST_F(homa_tx_pool, homa_tx_pool_free__pool_overflow)
 {
 	struct homa_tx_pool *tx_pool;
 	skb_frag_t *frags;
 	int num_frags;
 
-	tx_pool = get_tx_pool_core(smp_processor_id())->pool;
+	tx_pool = self->homa.tx_pools[0];
 	num_frags = 0;
 	frags = NULL;
 
@@ -445,7 +511,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_free__pool_overflow)
 
 	EXPECT_EQ(0, tx_pool->avail);
 	tx_pool->avail = HOMA_TX_POOL_LIMIT - 2;
-	homa_tx_pool_free(&self->homa, num_frags, frags);
+	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
 
 	EXPECT_EQ(HOMA_TX_POOL_LIMIT, tx_pool->avail);
 	EXPECT_EQ(skb_frag_page(&frags[0]),
@@ -459,24 +525,29 @@ TEST_F(homa_tx_pool, homa_tx_pool_free__pool_overflow)
 	kfree(frags);
 }
 
-
 TEST_F(homa_tx_pool, homa_tx_pool_gc__basics)
 {
+	homa_tx_pool_cleanup(&self->homa);
+	EXPECT_EQ(NULL, self->homa.tx_pools[0]);
+	mock_numa_nodes[0] = 1;
+	mock_numa_nodes[2] = 1;
+	EXPECT_EQ(0, homa_tx_pool_init(&self->homa));
+
 	EXPECT_EQ(0UL, self->homa.tx_page_free_time);
 	mock_clock = 1000000;
 	self->homa.tx_page_free_time = 500000;
 	self->homa.tx_page_frees_per_sec = 10;
 	self->homa.tx_page_pool_min_kb = 0;
-	add_to_pool(&self->homa, 10, 0);
-	get_tx_pool_core(0)->pool->low_mark = 7;
-	add_to_pool(&self->homa, 3, 1);
-	get_tx_pool_core(1)->pool->low_mark = 2;
+	add_to_pool(&self->homa, 10, 1);
+	self->homa.tx_pools[1]->low_mark = 7;
+	add_to_pool(&self->homa, 3, 0);
+	self->homa.tx_pools[0]->low_mark = 2;
 
 	homa_tx_pool_gc(&self->homa);
-	EXPECT_EQ(5, get_tx_pool_core(0)->pool->avail);
-	EXPECT_EQ(3, get_tx_pool_core(1)->pool->avail);
-	EXPECT_EQ(5, get_tx_pool_core(0)->pool->low_mark);
-	EXPECT_EQ(3, get_tx_pool_core(1)->pool->low_mark);
+	EXPECT_EQ(5, self->homa.tx_pools[1]->avail);
+	EXPECT_EQ(5, self->homa.tx_pools[1]->low_mark);
+	EXPECT_EQ(3, self->homa.tx_pools[0]->avail);
+	EXPECT_EQ(3, self->homa.tx_pools[0]->low_mark);
 	EXPECT_EQ(501000000UL, self->homa.tx_page_free_time);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_gc__not_time_to_free)
@@ -487,9 +558,9 @@ TEST_F(homa_tx_pool, homa_tx_pool_gc__not_time_to_free)
 	self->homa.tx_page_frees_per_sec = 10;
 	self->homa.tx_page_pool_min_kb = 0;
 	add_to_pool(&self->homa, 10, 0);
-	get_tx_pool_core(0)->pool->low_mark = 7;
+	self->homa.tx_pools[0]->low_mark = 7;
 	homa_tx_pool_gc(&self->homa);
-	EXPECT_EQ(10, get_tx_pool_core(0)->pool->avail);
+	EXPECT_EQ(10, self->homa.tx_pools[0]->avail);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_gc__allocate_tx_pages_to_free)
 {
@@ -518,7 +589,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_gc__cant_reallocate_tx_pages_to_free)
 	self->homa.tx_page_frees_per_sec = 20;
 	self->homa.tx_page_pool_min_kb = 0;
 	add_to_pool(&self->homa, 20, 0);
-	pool = get_tx_pool_core(0)->pool;
+	pool = self->homa.tx_pools[0];
 	pool->low_mark = 15;
 
 	EXPECT_EQ(0, self->homa.tx_pages_to_free_slots);
@@ -539,10 +610,10 @@ TEST_F(homa_tx_pool, homa_tx_pool_gc__limited_by_min_kb)
 	self->homa.tx_page_frees_per_sec = 20;
 	self->homa.tx_page_pool_min_kb = (5 * HOMA_TX_PAGE_SIZE) / 1000;
 	add_to_pool(&self->homa, 10, 0);
-	get_tx_pool_core(0)->pool->low_mark = 9;
+	self->homa.tx_pools[0]->low_mark = 9;
 
 	homa_tx_pool_gc(&self->homa);
-	EXPECT_EQ(6, get_tx_pool_core(0)->pool->avail);
+	EXPECT_EQ(6, self->homa.tx_pools[0]->avail);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_gc__ensure_64_bit_arithmetic_for_min_pages)
 {
@@ -552,16 +623,16 @@ TEST_F(homa_tx_pool, homa_tx_pool_gc__ensure_64_bit_arithmetic_for_min_pages)
 	self->homa.tx_page_pool_min_kb = 3000000;
 
 	add_to_pool(&self->homa, 10, 0);
-	get_tx_pool_core(0)->pool->low_mark = 10;
+	self->homa.tx_pools[0]->low_mark = 10;
 
 	homa_tx_pool_gc(&self->homa);
-	EXPECT_EQ(10, get_tx_pool_core(0)->pool->avail);
+	EXPECT_EQ(10, self->homa.tx_pools[0]->avail);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_gc__race_invalidates_max_low_mark)
 {
 	struct homa_tx_pool *tx_pool;
 
-	tx_pool = get_tx_pool_core(0)->pool;
+	tx_pool = self->homa.tx_pools[0];
 	EXPECT_EQ(0UL, self->homa.tx_page_free_time);
 	mock_clock = 1000000;
 	self->homa.tx_page_free_time = 500000;
@@ -583,10 +654,27 @@ TEST_F(homa_tx_pool, homa_tx_pool_gc__empty_pool)
 	self->homa.tx_page_frees_per_sec = 1000;
 	self->homa.tx_page_pool_min_kb = 0;
 	add_to_pool(&self->homa, 5, 0);
-	get_tx_pool_core(0)->pool->low_mark = 5;
+	self->homa.tx_pools[0]->low_mark = 5;
 
 	homa_tx_pool_gc(&self->homa);
-	EXPECT_EQ(0, get_tx_pool_core(0)->pool->avail);
+	EXPECT_EQ(0, self->homa.tx_pools[0]->avail);
+}
+TEST_F(homa_tx_pool, homa_tx_pool_gc__update_tx_core_nid)
+{
+	struct homa_tx_pool_core *core1, *core2, *core3;
+
+	core1 = get_tx_pool_core(1);
+	core2 = get_tx_pool_core(2);
+	core3 = get_tx_pool_core(3);
+	mock_numa_nodes[1] = 6;
+	mock_numa_nodes[2] = 3;
+	EXPECT_EQ(mock_numa_nodes[3], 0);
+	EXPECT_EQ(0, core3->nid);
+
+	homa_tx_pool_gc(&self->homa);
+	EXPECT_EQ(6, core1->nid);
+	EXPECT_EQ(3, core2->nid);
+	EXPECT_EQ(0, core3->nid);
 }
 
 TEST_F(homa_tx_pool, homa_copy_to_frags)
@@ -623,7 +711,7 @@ TEST_F(homa_tx_pool, homa_copy_to_frags)
 	/** Third copy: no room in frags. */
 	EXPECT_EQ(EINVAL, -homa_copy_to_frags(&filler, data, 1));
 
-	homa_tx_pool_free(&self->homa, 3, frags);
+	homa_tx_pool_free(&self->homa, 0, 3, frags);
 }
 
 TEST_F(homa_tx_pool, homa_copy_iter_to_frags)
@@ -664,5 +752,5 @@ TEST_F(homa_tx_pool, homa_copy_iter_to_frags)
 	/** Third copy: no room in frags. */
 	EXPECT_EQ(EINVAL, -homa_copy_iter_to_frags(&filler, iter, 860));
 
-	homa_tx_pool_free(&self->homa, 3, frags);
+	homa_tx_pool_free(&self->homa, 0, 3, frags);
 }

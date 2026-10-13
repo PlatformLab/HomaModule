@@ -593,8 +593,8 @@ release:
 			rpc->route = NULL;
 		}
 		homa_pool_release(rpc);
-		homa_tx_pool_free(hsk->homa, rpc->msgout.num_frags,
-				  rpc->msgout.frags);
+		homa_tx_pool_free(hsk->homa, rpc->msgout.frag_nid,
+				  rpc->msgout.num_frags, rpc->msgout.frags);
 		WARN_ON(refcount_sub_and_test(rpc->msgout.frag_bytes,
 					      &hsk->sock.sk_wmem_alloc));
 		if (rpc->msgout.frags != &rpc->msgout.frag)

@@ -4,6 +4,7 @@
 #include "homa_grant.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+#include "homa_tx_pool.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "ccutils.h"
@@ -240,6 +241,29 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__cant_allocate_frags)
 	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
 	EXPECT_EQ(-ENOMEM, homa_tx_copy_from_user(crpc, iter, false));
 	EXPECT_EQ(0, crpc->msgout.num_frags);
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_copy_from_user__nonzero_nid)
+{
+	struct homa_tx_pool_core *tx_core;
+	struct homa_rpc *crpc;
+	struct iov_iter *iter;
+	u8 data[1000];
+
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	unit_fill_data(data, sizeof(data), 5000);
+	iter = unit_iov_iter(data, sizeof(data));
+	tx_core = &per_cpu(homa_tx_pool_core, cpu_number);
+	tx_core->nid = 4;
+
+	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
+	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, false));
+	EXPECT_EQ(1, crpc->msgout.num_frags);
+	unit_log_clear();
+	EXPECT_STREQ("offset 0, data in frag 0: 5000-5999",
+		     log_frags(crpc->msgout.frags, crpc->msgout.num_frags,
+			       crpc->msgout.max_seg_data, true));
+	EXPECT_EQ(4, crpc->msgout.frag_nid);
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_outgoing, homa_tx_copy_from_user__homa_copy_to_frags_fails)

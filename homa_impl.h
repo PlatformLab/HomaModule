@@ -155,7 +155,6 @@ struct homa {
 
 	/**
 	 * @tx_pools: One tx_page_pool for each NUMA node on the machine.
-	 * If there are no cores for a node, then its value is NULL.
 	 */
 	struct homa_tx_pool *tx_pools[MAX_NUMNODES];
 

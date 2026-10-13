@@ -93,6 +93,7 @@ int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
 	int err, hdr_space;
 	u64 num_segs;
 	int offset;
+	int nid;
 
 	/* Allocate kernel memory to hold the message data (note that we
 	 * need to allocate extra space for homa_seg_hdrs).
@@ -102,11 +103,12 @@ int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
 	hdr_space = num_segs * sizeof(struct homa_seg_hdr);
 	rpc->msgout.frags = &rpc->msgout.frag;
 	rpc->msgout.num_frags = 1;
-	err = homa_tx_pool_alloc(rpc->hsk->homa, rpc->msgout.length + hdr_space,
+	nid = homa_tx_pool_alloc(rpc->hsk->homa, rpc->msgout.length + hdr_space,
 				 &rpc->msgout.num_frags, &rpc->msgout.frags);
-	if (err != 0)
-		return err;
+	if (nid < 0)
+		return nid;
 	rpc->msgout.frag_bytes = rpc->msgout.length + hdr_space;
+	rpc->msgout.frag_nid = nid;
 	refcount_add(rpc->msgout.frag_bytes, &rpc->hsk->sock.sk_wmem_alloc);
 
 	/* Copy the data in from user space, preceding each segment of data
