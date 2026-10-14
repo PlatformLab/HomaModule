@@ -866,9 +866,9 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	struct homa_resend_hdr *h = (struct homa_resend_hdr *)skb->data;
 	int offset = ntohl(h->offset);
 	int length = ntohl(h->length);
-	int end = offset + length;
 	struct homa_busy_hdr busy;
 	int tx_end;
+	int end;
 
 	/* See the comment "Homa Retransmission Strategy" at the beginning
 	 * of homa_timer.c for info about the overall strategy for retrying
@@ -903,10 +903,13 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		goto done;
 	}
 
+	if (offset < 0 || offset > rpc->msgout.length)
+		/* Malformed packet. */
+		goto done;
 	if (length == -1) {
-		/* The other side has not received any data for the message.
-		 * Retransmit everything we previously sent.
-		 */
+		/* The other side has not received any data for the
+		 * message. Retransmit everything we previously sent.
+		*/
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.granted == 0) {
 			homa_xmit_start_msg(rpc, rpc->msgout.length);
@@ -914,6 +917,13 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		}
 #endif /* See strip.py */
 		end = tx_end;
+	} else if (length < 0) {
+		/* Malformed packet. */
+		goto done;
+	} else if (length > rpc->msgout.length - offset) {
+		end = rpc->msgout.length;
+	} else {
+		end = offset + length;
 	}
 
 	/* This is now the "normal" case where we need to transmit packets
@@ -931,8 +941,6 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		 * granted previously.
 		 */
 		rpc->msgout.granted = end;
-		if (rpc->msgout.granted > rpc->msgout.length)
-			rpc->msgout.granted = rpc->msgout.length;
 		homa_xmit_data(rpc);
 	}
 #endif /* See strip.py */

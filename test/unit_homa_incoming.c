@@ -1983,6 +1983,32 @@ TEST_F(homa_incoming, homa_resend_pkt__response_not_ready_server_sends_busy)
 					  &h.common, 0, 0));
 	EXPECT_STREQ("xmit BUSY", unit_log_get());
 }
+TEST_F(homa_incoming, homa_resend_pkt__bogus_offset)
+{
+	struct homa_resend_hdr h = {{.sport = htons(self->server_port),
+			.dport = htons(self->hsk.port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.type = RESEND},
+			.offset = htonl(-10),
+			.length = htonl(300)};
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 100);
+
+	ASSERT_NE(NULL, crpc);
+	unit_log_clear();
+	IF_NO_STRIP(crpc->msgout.granted = 500);
+	crpc->msgout.next_xmit_offset = 500;
+
+	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
+					  &h.common, 0, 0));
+	EXPECT_STREQ("", unit_log_get());
+
+	h.offset = htonl(6000);
+	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
+					  &h.common, 0, 0));
+	EXPECT_STREQ("", unit_log_get());
+}
 TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend_send_start_msg)
 {
 	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
@@ -2028,6 +2054,29 @@ TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend_send_data)
 	EXPECT_STREQ("xmit DATA retrans 1400@0; "
 		     "xmit DATA retrans 1400@1400", unit_log_get());
 }
+TEST_F(homa_incoming, homa_resend_pkt__clamp_end_to_message_length)
+{
+	struct homa_resend_hdr h = {{.sport = htons(self->server_port),
+			.dport = htons(self->hsk.port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.type = RESEND},
+			.offset = htonl(4000),
+			.length = htonl(2000)};
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 100);
+
+	ASSERT_NE(NULL, crpc);
+	unit_log_clear();
+	IF_NO_STRIP(crpc->msgout.granted = 5000);
+	crpc->msgout.next_xmit_offset = 5000;
+
+	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
+					  &h.common, 0, 0));
+	EXPECT_STREQ("xmit DATA retrans 1400@2800; xmit DATA retrans 800@4200",
+		     unit_log_get());
+	EXPECT_EQ(5000, crpc->msgout.granted);
+}
 TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 {
 	/* Important to respond to resends even if client thinks the
@@ -2050,7 +2099,7 @@ TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 					  &h.common, 0, 0));
 	EXPECT_STREQ("xmit DATA retrans 1400@0", unit_log_get());
 }
-TEST_F(homa_incoming, homa_resend_pkt__clip_range_to_tx_end)
+TEST_F(homa_incoming, homa_resend_pkt__clamp_range_to_tx_end)
 {
 	struct homa_resend_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
@@ -2071,7 +2120,7 @@ TEST_F(homa_incoming, homa_resend_pkt__clip_range_to_tx_end)
 					  &h.common, 0, 0));
 	EXPECT_STREQ("xmit DATA retrans 1400@0", unit_log_get());
 }
-TEST_F(homa_incoming, homa_resend_pkt__no_need_to_clip_range)
+TEST_F(homa_incoming, homa_resend_pkt__no_need_to_clamp_range)
 {
 	struct homa_resend_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
@@ -2139,24 +2188,6 @@ TEST_F(homa_incoming, homa_resend_pkt__update_granted_and_xmit)
 					  &h.common, 0, 0));
 	EXPECT_EQ(3400, crpc->msgout.granted);
 	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
-}
-TEST_F(homa_incoming, homa_resend_pkt__clip_granted_to_message_length)
-{
-	struct homa_resend_hdr h = {{.sport = htons(self->server_port),
-			.dport = htons(self->hsk.port),
-			.sender_id = cpu_to_be64(self->server_id),
-			.type = RESEND},
-			.offset = htonl(1400),
-			.length = htonl(6000)};
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 5000, 100);
-
-	ASSERT_NE(NULL, crpc);
-
-	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
-					  &h.common, 0, 0));
-	EXPECT_EQ(5000, crpc->msgout.granted);
 }
 #endif /* See strip.py */
 TEST_F(homa_incoming, homa_resend_pkt__requested_data_hasnt_been_sent_yet)
