@@ -883,6 +883,9 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		homa_xmit_unknown(skb, hsk);
 		goto done;
 	}
+	/* A client requesting response recovery is still alive. */
+	if (!homa_is_client(rpc->id) && rpc->state == RPC_OUTGOING)
+		rpc->silent_ticks = 0;
 #ifndef __STRIP__ /* See strip.py */
 	tt_record4("resend request for id %llu, offset %d, length %d, prio %d",
 		   rpc->id, offset, length, h->priority);

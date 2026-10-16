@@ -793,7 +793,16 @@ If the server doesn't receive an ack within
 .IR request_ack_ticks
 timer ticks, then it will request an explicit ack. Larger values for
 this parameter reduce packet traffic but cause RPC state to be held longer
-on servers.
+on servers. Completed server RPCs still honor
+.IR timeout_ticks :
+if the client stops providing feedback, Homa aborts the RPC and queues
+its response buffers for normal reaping. Sending NEED_ACK does not reset
+this silence timeout; receiving a client RESEND for the response does.
+The default values are 2 ticks for
+.I request_ack_ticks
+and 100 ticks for
+.IR timeout_ticks ,
+with ticks occurring nominally once per millisecond.
 .TP
 .IR resend_interval
 An integer value specifying how frequently resend requests may be sent

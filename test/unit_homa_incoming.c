@@ -1462,6 +1462,33 @@ TEST_F(homa_incoming, homa_dispatch_pkts__dont_reset_silent_ticks_on_NEED_ACK)
 					  &h.common, 0, 0));
 	EXPECT_EQ(2, crpc->silent_ticks);
 }
+TEST_F(homa_incoming, homa_dispatch_pkts__resend_resets_server_silence)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 100);
+	struct homa_resend_hdr h = {.common = {
+			.sport = htons(self->client_port),
+			.dport = htons(self->hsk.port),
+			.sender_id = cpu_to_be64(self->client_id),
+			.type = RESEND},
+			.offset = 0, .length = htonl(100)};
+
+	ASSERT_NE(NULL, srpc);
+	homa_rpc_lock(srpc);
+	homa_xmit_data(srpc);
+	homa_rpc_unlock(srpc);
+	srpc->silent_ticks = self->homa.timeout_ticks - 1;
+	unit_log_clear();
+	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
+					  &h.common, 0, 0));
+	EXPECT_EQ(0, srpc->silent_ticks);
+	EXPECT_EQ(RPC_OUTGOING, srpc->state);
+	EXPECT_SUBSTR("retrans", unit_log_get());
+	homa_timer(&self->homa);
+	EXPECT_EQ(1, srpc->silent_ticks);
+	EXPECT_EQ(RPC_OUTGOING, srpc->state);
+}
 TEST_F(homa_incoming, homa_dispatch_pkts__multiple_ack_packets)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,

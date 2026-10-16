@@ -137,6 +137,15 @@ data has been transmitted for a response but no ack has been received.
 The server sends a NEED_ACK packet to request the ack, and the client
 will then respond with an ACK packet.
 
+Completed server RPCs waiting for ACKs also honor the ordinary
+`timeout_ticks` silence timeout (default 100 ticks, nominally 100 ms).
+Sending NEED_ACK does not reset this timeout; client feedback, including
+RESEND requests for response recovery, can reset it. If the timeout expires,
+the server aborts the RPC and queues its response buffers for normal reaping.
+This is a silence timeout, not an absolute retention deadline. Once the
+state is discarded, it no longer supports retransmission or duplicate
+suppression for that RPC.
+
 ## Priorities
 Homa attempts to implement an SRPT (shortest remaining processing time)
 priority mechanism as closely as possible, favoring messages that

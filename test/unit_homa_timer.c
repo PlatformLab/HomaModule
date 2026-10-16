@@ -87,6 +87,93 @@ TEST_F(homa_timer, homa_timer_check_rpc__request_ack)
 	EXPECT_EQ(100, srpc->done_timer_ticks);
 	EXPECT_STREQ("xmit NEED_ACK", unit_log_get());
 }
+TEST_F(homa_timer, homa_timer__server_ack_timeout)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 100);
+	int tick;
+
+	ASSERT_NE(NULL, srpc);
+	EXPECT_EQ(100, self->homa.timeout_ticks);
+	homa_rpc_lock(srpc);
+	homa_xmit_data(srpc);
+	homa_rpc_unlock(srpc);
+	srpc->silent_ticks = 0;
+
+	for (tick = 1; tick < self->homa.timeout_ticks; tick++) {
+		unit_log_clear();
+		homa_timer(&self->homa);
+		EXPECT_EQ(tick, srpc->silent_ticks);
+		EXPECT_EQ(RPC_OUTGOING, srpc->state);
+		if (tick <= self->homa.request_ack_ticks)
+			EXPECT_STREQ("", unit_log_get());
+		else
+			EXPECT_STREQ("xmit NEED_ACK", unit_log_get());
+	}
+
+	unit_log_clear();
+	homa_timer(&self->homa);
+	EXPECT_EQ(RPC_DEAD, srpc->state);
+	EXPECT_SUBSTR("homa_rpc_end invoked", unit_log_get());
+	EXPECT_NOSUBSTR("RESEND", unit_log_get());
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(1, homa_metrics_per_cpu()->rpc_timeouts);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->server_rpc_discards);
+#endif /* See strip.py */
+	EXPECT_EQ(NULL, homa_rpc_find_server(&self->hsk, self->client_ip,
+					    self->server_id));
+}
+TEST_F(homa_timer, homa_timer_check_rpc__server_response_not_transmitted)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 100);
+
+	ASSERT_NE(NULL, srpc);
+	srpc->silent_ticks = self->homa.timeout_ticks;
+	unit_log_clear();
+	homa_rpc_lock(srpc);
+	homa_timer_check_rpc(srpc);
+	homa_rpc_unlock(srpc);
+	EXPECT_EQ(0, srpc->silent_ticks);
+	EXPECT_EQ(RPC_OUTGOING, srpc->state);
+	EXPECT_EQ(0, srpc->done_timer_ticks);
+	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_timer, homa_timer__server_ack_wait_client_activity)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 100);
+	struct homa_busy_hdr busy = {.common = {
+			.sport = htons(self->client_port),
+			.dport = htons(self->hsk.port),
+			.sender_id = cpu_to_be64(self->client_id),
+			.type = BUSY}};
+	int tick;
+
+	ASSERT_NE(NULL, srpc);
+	self->homa.timeout_ticks = 5;
+	homa_rpc_lock(srpc);
+	homa_xmit_data(srpc);
+	homa_rpc_unlock(srpc);
+	srpc->silent_ticks = 0;
+	for (tick = 0; tick < 4; tick++)
+		homa_timer(&self->homa);
+	EXPECT_EQ(4, srpc->silent_ticks);
+
+	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
+					  &busy.common, 0, 0));
+	EXPECT_EQ(0, srpc->silent_ticks);
+	for (tick = 1; tick < 5; tick++) {
+		homa_timer(&self->homa);
+		EXPECT_EQ(tick, srpc->silent_ticks);
+		EXPECT_EQ(RPC_OUTGOING, srpc->state);
+	}
+	homa_timer(&self->homa);
+	EXPECT_EQ(RPC_DEAD, srpc->state);
+}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_timer, homa_timer_check_rpc__all_granted_bytes_received)
 {
@@ -132,7 +219,7 @@ TEST_F(homa_timer, homa_timer_check_rpc__server_has_received_request)
 
 	ASSERT_NE(NULL, srpc);
 	unit_log_clear();
-	srpc->silent_ticks = 10;
+	srpc->silent_ticks = self->homa.timeout_ticks;
 	homa_rpc_lock(srpc);
 	homa_timer_check_rpc(srpc);
 	homa_rpc_unlock(srpc);
