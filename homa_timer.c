@@ -81,10 +81,12 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	int tx_end = homa_rpc_tx_end(rpc);
+	bool awaiting_ack = !homa_is_client(rpc->id) &&
+			    rpc->state == RPC_OUTGOING &&
+			    tx_end == rpc->msgout.length;
 
 	/* See if we need to request an ack for this RPC. */
-	if (!homa_is_client(rpc->id) && rpc->state == RPC_OUTGOING &&
-	    tx_end == rpc->msgout.length) {
+	if (awaiting_ack) {
 		if (rpc->done_timer_ticks == 0) {
 			rpc->done_timer_ticks = homa->timer_ticks;
 		} else {
@@ -122,9 +124,9 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 			rpc->silent_ticks = 0;
 			return;
 		}
-	} else if (!homa_is_client(rpc->id)) {
-		/* We're the server and we've received the input message;
-		 * no need to worry about retries.
+	} else if (!homa_is_client(rpc->id) && !awaiting_ack) {
+		/* Wait for local response processing/transmission, but keep
+		 * checking for timeouts once the response is fully sent.
 		 */
 		rpc->silent_ticks = 0;
 		return;
@@ -166,6 +168,8 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 		homa_rpc_abort(rpc, -ETIMEDOUT);
 		return;
 	}
+	if (awaiting_ack)
+		return;
 	if (((rpc->silent_ticks - homa->resend_ticks) % homa->resend_interval)
 			== 0)
 		homa_request_retrans(rpc);
