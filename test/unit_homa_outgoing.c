@@ -700,6 +700,29 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__shinfo_gso_fields)
 	EXPECT_EQ(SKB_GSO_TCPV6, shinfo->gso_type);
 	kfree_skb(skb);
 }
+TEST_F(homa_outgoing, homa_tx_skb_alloc__gso_force_software)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end;
+
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 5000, 100);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.max_gso_segs = 3;
+	self->homa.gso_force_software = 1;
+
+	end = 3000;
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	if (IS_ERR(skb))
+		EXPECT_EQ(0, -PTR_ERR(skb));
+	EXPECT_EQ(3, skb_shinfo(skb)->gso_segs);
+	EXPECT_EQ(SKB_GSO_TCPV4 | SKB_GSO_TCP_ECN | SKB_GSO_TCP_FIXEDID,
+		  skb_shinfo(skb)->gso_type);
+	kfree_skb(skb);
+}
 TEST_F(homa_outgoing, homa_tx_skb_alloc__homa_info_fields)
 {
 	struct homa_skb_info *homa_info;

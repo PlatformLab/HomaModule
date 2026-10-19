@@ -345,6 +345,18 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 		shinfo->gso_type = (hsk->inet.sk.sk_family ==
 				    AF_INET6) ? SKB_GSO_TCPV6 :
 				    SKB_GSO_TCPV4;
+
+#ifndef __STRIP__ /* See strip.py */
+		/* To force software GSO, ask for a gso_type whose features the
+		 * device doesn't have: net_gso_ok() needs NETIF_F_TSO_ECN and
+		 * NETIF_F_TSO_MANGLEID for these flags, and TSO_MANGLEID is
+		 * normally off (e.g. on virtio), so the stack segments the
+		 * packet itself.
+		 */
+		if (hsk->homa->gso_force_software)
+			shinfo->gso_type = SKB_GSO_TCPV4 | SKB_GSO_TCP_ECN |
+					   SKB_GSO_TCP_FIXEDID;
+#endif /* See strip.py */
 	}
 
 	/* Initialize homa_skb_info for the packet. */
