@@ -2,7 +2,8 @@
 
 CFLAGS := -Wall -Werror -fno-strict-aliasing -O3 -I..
 
-BINS := buffer_client buffer_server cp_node dist_test dist_to_proto \
+BINS := buffer_client buffer_server cp_node demo_client1 demo_client2 \
+	demo_server1 demo_server2 dist_test dist_to_proto \
 	get_time_trace homa_prio homa_test inc_tput receive_raw scratch \
 	send_raw server smi use_memory
 
