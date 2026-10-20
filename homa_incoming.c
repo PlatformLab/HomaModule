@@ -601,11 +601,6 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 					INC_METRIC(unknown_rpcs, 1);
 				goto discard;
 			}
-		} else {
-			if (h->type == DATA ||
-			    h->type == GRANT ||
-			    h->type == BUSY)
-				rpc->silent_ticks = 0;
 		}
 #else /* See strip.py */
 		if (unlikely(!rpc)) {
@@ -617,10 +612,6 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 					   ntohs(h->sport));
 				goto discard;
 			}
-		} else {
-			if (h->type == DATA ||
-			    h->type == BUSY)
-				rpc->silent_ticks = 0;
 		}
 #endif /* See strip.py */
 
@@ -645,12 +636,8 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 			break;
 		case BUSY:
 			INC_METRIC(packets_received[BUSY - DATA], 1);
-			tt_record2("received BUSY for id %d, peer 0x%x",
-				   id, tt_addr(rpc->route->peer->addr));
-			/* Nothing to do for these packets except reset
-			 * silent_ticks, which happened above.
-			 */
-			goto discard;
+			homa_busy_pkt(skb, rpc);
+			break;
 #ifndef __STRIP__ /* See strip.py */
 		case CUTOFFS:
 			INC_METRIC(packets_received[CUTOFFS - DATA], 1);
@@ -730,6 +717,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		   homa_local_id(h->common.sender_id),
 		   tt_addr(rpc->route->peer->addr), ntohl(h->seg.offset),
 		   ntohl(h->msg_length));
+	rpc->silent_ticks = 0;
 
 	if (rpc->state != RPC_INCOMING && homa_is_client(rpc->id)) {
 		if (unlikely(rpc->state != RPC_OUTGOING))
@@ -839,6 +827,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	tt_record4("processing grant for id %llu, offset %d, priority %d, increment %d",
 		   homa_local_id(h->common.sender_id), ntohl(h->offset),
 		   h->priority, new_offset - rpc->msgout.granted);
+	rpc->silent_ticks = 0;
 	if (rpc->state == RPC_OUTGOING) {
 		if (new_offset > rpc->msgout.granted)
 			rpc->msgout.granted = min_t(u32, new_offset,
@@ -1027,6 +1016,24 @@ void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 #endif /* See strip.py */
 	}
 done:
+	consume_skb(skb);
+}
+
+/**
+ * homa_busy_pkt() - Handler for incoming RPC_BUSY packets.
+ * @skb:     Incoming packet; size known to be large enough for the header.
+ *           This function now owns the packet.
+ * @rpc:     Information about the RPC corresponding to this packet. Must
+ *           be locked by caller.
+ */
+void homa_busy_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
+{
+	tt_record2("received BUSY for id %d, peer 0x%x", rpc->id,
+		   tt_addr(rpc->route->peer->addr));
+
+	/* Nothing to do here except clear silent_ticks. */
+	rpc->silent_ticks = 0;
 	consume_skb(skb);
 }
 

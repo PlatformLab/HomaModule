@@ -650,6 +650,7 @@ void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 enum skb_drop_reason homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 int      homa_bind(struct socket *sk, struct SOCKADDR *addr,
 		   int addr_len);
+void     homa_busy_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_close(struct sock *sock, long timeout);
 int      homa_copy_to_user(struct homa_rpc *rpc);
 void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
