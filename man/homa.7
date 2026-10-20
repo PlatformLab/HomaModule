@@ -487,7 +487,7 @@ argument and disables the socket,
 so that it may no longer be used for either sending or receiving messages.
 If any threads are blocked waiting on the socket, they will be unblocked
 and their current operations will fail with an
-.I errno
+.B errno
 value of
 .BR ESHUTDOWN .
 .SH SYSCTL PARAMETERS
@@ -839,6 +839,19 @@ into two different parameters:
 .IR unsched_bytes
 and
 .IR window .
+.TP
+.IR timeout_ticks
+If this much time elapses without any signs of life from a node (such as
+sending a DATA or GRANT packet), its peers may declare it nonresponsive
+and abort any RPCs to/from that node. On clients, if an RPC is aborted
+in this way the RPC will complete with an
+.B errno
+value of
+.BR ETIMEDOUT .
+On servers, if an RPC is aborted in this way the server will discard its
+state for the RPC (the RPC may or may not have executed).
+The units for this parameter are ``timer ticks'' (the interval between
+invocations of the Homa timer function, currently 1 millisecond).
 .TP
 .IR tx_page_frees_per_sec
 Homa maintains a pool of free pages on each NUMA node to hold outgoing
