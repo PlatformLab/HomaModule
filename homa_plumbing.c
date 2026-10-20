@@ -1644,7 +1644,7 @@ int homa_softirq(struct sk_buff *skb)
 					homa_print_ipv6_addr(&saddr),
 					skb->len - header_offset);
 #endif /* See strip.py */
-			INC_METRIC(short_packets, 1);
+			INC_METRIC(malformed_packets, 1);
 			reason = SKB_DROP_REASON_PKT_TOO_SMALL;
 			goto discard;
 		}

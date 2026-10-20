@@ -901,9 +901,10 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		goto done;
 	}
 
-	if (offset < 0 || offset > rpc->msgout.length)
-		/* Malformed packet. */
+	if (offset < 0 || offset > rpc->msgout.length) {
+		INC_METRIC(malformed_packets, 1);
 		goto done;
+	}
 	if (length == -1) {
 		/* The other side has not received any data for the
 		 * message. Retransmit everything we previously sent.
@@ -916,7 +917,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 #endif /* See strip.py */
 		end = tx_end;
 	} else if (length < 0) {
-		/* Malformed packet. */
+		INC_METRIC(malformed_packets, 1);
 		goto done;
 	} else if (length > rpc->msgout.length - offset) {
 		end = rpc->msgout.length;

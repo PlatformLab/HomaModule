@@ -571,10 +571,11 @@ struct homa_metrics {
 	u64 unknown_packet_types;
 
 	/**
-	 * @short_packets: total number of times a packet was discarded
-	 * because it was too short to hold all the required information.
+	 * @malformed_packets: total number of times a packet was discarded
+	 * because it was incorrectly formatted: too short, illegal field
+	 * value, etc.
 	 */
-	u64 short_packets;
+	u64 malformed_packets;
 
 	/**
 	 * @packet_discards: total number of times a normal (non-retransmitted)

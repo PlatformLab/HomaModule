@@ -1512,7 +1512,7 @@ TEST_F(homa_plumbing, homa_softirq__packet_too_short)
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(1, homa_metrics_per_cpu()->short_packets);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->malformed_packets);
 #endif /* See strip.py */
 }
 TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
@@ -1525,7 +1525,7 @@ TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(1, homa_metrics_per_cpu()->short_packets);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->malformed_packets);
 #endif /* See strip.py */
 }
 TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)

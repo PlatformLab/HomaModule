@@ -358,8 +358,8 @@ char *homa_metrics_print(void)
 		  "Packets discarded because server couldn't create RPC\n");
 		M("unknown_packet_types", m->unknown_packet_types,
 		  "Packets discarded because of unsupported type\n");
-		M("short_packets", m->short_packets,
-		  "Packets discarded because too short\n");
+		M("malformed_packets", m->malformed_packets,
+		  "Packets discarded because of invalid format\n");
 		M("packet_discards", m->packet_discards,
 		  "Non-resent packets discarded because data already received\n");
 		M("resent_discards", m->resent_discards,

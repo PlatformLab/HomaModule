@@ -1917,9 +1917,8 @@ TEST_F(homa_incoming, homa_grant_pkt__offset_has_sign_bit_set)
 	EXPECT_NE(NULL, crpc);
 	crpc->msgout.granted = 5000;
 	unit_log_clear();
-	homa_dispatch_pkts(mock_skb_alloc(self->client_ip,
-						self->server_ip,
-						&h.common, 0, 0));
+	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
+					  &h.common, 0, 0));
 	EXPECT_EQ(20000, crpc->msgout.granted);
 }
 #endif /* See strip.py */
@@ -2001,14 +2000,18 @@ TEST_F(homa_incoming, homa_resend_pkt__bogus_offset)
 	IF_NO_STRIP(crpc->msgout.granted = 500);
 	crpc->msgout.next_xmit_offset = 500;
 
+	/* First packet: offset negative. */
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0));
 	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1, homa_metrics_per_cpu()->malformed_packets);
 
+	/* Second packet: offset past end of message. */
 	h.offset = htonl(6000);
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
 					  &h.common, 0, 0));
 	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(2, homa_metrics_per_cpu()->malformed_packets);
 }
 TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend_send_start_msg)
 {
