@@ -806,7 +806,7 @@ for a given missing packet. This is in units
 of "ticks" (see
 .I resend_ticks
 below). This value and
-.I timeout_resends
+.I timeout_ticks
 should be chosen together.
 .TP
 .IR resend_ticks
@@ -839,13 +839,6 @@ into two different parameters:
 .IR unsched_bytes
 and
 .IR window .
-.TP
-.I timeout_resends
-An integer value specifying how long to wait before considering a peer
-to be dead. If this many resend requests have been issued to a peer without
-receiving any packets from the peer, then Homa will consider the peer
-dead and abort all RPCs involving that peer with
-.BR ETIMEDOUT .
 .TP
 .IR tx_page_frees_per_sec
 Homa maintains a pool of free pages on each NUMA node to hold outgoing

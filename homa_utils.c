@@ -87,7 +87,6 @@ int homa_init(struct homa *homa)
 	homa->resend_ticks = 5;
 	homa->resend_interval = 5;
 	homa->timeout_ticks = 100;
-	homa->timeout_resends = 5;
 	homa->request_ack_ticks = 2;
 	homa->dead_frags_limit = 100;
 #ifndef __STRIP__ /* See strip.py */

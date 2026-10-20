@@ -287,12 +287,6 @@ struct homa {
 	int timeout_ticks;
 
 	/**
-	 * @timeout_resends: Assume that a server is dead if it has not
-	 * responded after this many RESENDs have been sent to it.
-	 */
-	int timeout_resends;
-
-	/**
 	 * @request_ack_ticks: How many timer ticks we'll wait for the
 	 * client to ack an RPC before explicitly requesting an ack.
 	 * Set externally via sysctl.

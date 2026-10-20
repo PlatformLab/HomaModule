@@ -343,13 +343,6 @@ struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "timeout_resends",
-		.data		= OFFSET(timeout_resends),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "timeout_ticks",
 		.data		= OFFSET(timeout_ticks),
 		.maxlen		= sizeof(int),
@@ -1927,7 +1920,6 @@ int homa_dointvec(const struct ctl_table *table, int write,
 		/* request_ack_ticks:   no constraints */
 		if (homa->resend_interval < 1)
 			homa->resend_interval = 1;
-		/* timeout_resends:     no constraints */
 		/* timeout_ticks:       no constraints */
 		if (homa->tx_page_frees_per_sec < 1)
 			homa->tx_page_frees_per_sec = 1;
