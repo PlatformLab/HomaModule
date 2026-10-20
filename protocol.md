@@ -135,7 +135,9 @@ if that storage overflows. In addition, the server
 will use its timeout mechanism to request an explicit ack if all of the
 data has been transmitted for a response but no ack has been received.
 The server sends a NEED_ACK packet to request the ack, and the client
-will then respond with an ACK packet.
+will then respond with an ACK packet. If a client does not respond to
+multiple NEED_ACK requests, the server will eventually discard the RPC
+state without receiving an ack.
 
 ## Priorities
 Homa attempts to implement an SRPT (shortest remaining processing time)

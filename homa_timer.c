@@ -69,6 +69,31 @@
 #endif /* See strip.py */
 
 /**
+ * homa_timer_check_ack() - See if the ack for a server RPC is overdue;
+ * if so, send a NEED_ACK packet for it.
+ * @rpc:     RPC to check; must be a server RPC whose response has been
+ *           fully transmitted.
+ */
+void homa_timer_check_ack(struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
+{
+	struct homa *homa = rpc->hsk->homa;
+
+	if (rpc->done_timer_ticks == 0) {
+		rpc->done_timer_ticks = homa->timer_ticks;
+	} else if (homa->timer_ticks - rpc->done_timer_ticks >=
+		   homa->request_ack_ticks) {
+		struct homa_need_ack_hdr h;
+
+		homa_xmit_control(NEED_ACK, &h, sizeof(h), rpc);
+		tt_record4("Sent NEED_ACK for RPC id %d to peer 0x%x, port %d, ticks %d",
+			   rpc->id, tt_addr(rpc->route->peer->addr),
+			   rpc->dport,
+			   homa->timer_ticks - rpc->done_timer_ticks);
+	}
+}
+
+/**
  * homa_timer_check_rpc() -  Invoked for each RPC during each timer pass; does
  * most of the work of checking for time-related actions such as sending
  * resends, aborting RPCs for which there is no response, and sending
@@ -82,93 +107,79 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 	struct homa *homa = rpc->hsk->homa;
 	int tx_end = homa_rpc_tx_end(rpc);
 
-	/* See if we need to request an ack for this RPC. */
-	if (!homa_is_client(rpc->id) && rpc->state == RPC_OUTGOING &&
-	    tx_end == rpc->msgout.length) {
-		if (rpc->done_timer_ticks == 0) {
-			rpc->done_timer_ticks = homa->timer_ticks;
-		} else {
-			/* >= comparison that handles tick wrap-around. */
-			if ((rpc->done_timer_ticks + homa->request_ack_ticks
-					- 1 - homa->timer_ticks) & 1U << 31) {
-				struct homa_need_ack_hdr h;
-
-				homa_xmit_control(NEED_ACK, &h, sizeof(h), rpc);
-				tt_record4("Sent NEED_ACK for RPC id %d to peer 0x%x, port %d, ticks %d",
-					   rpc->id,
-					   tt_addr(rpc->route->peer->addr),
-					   rpc->dport, homa->timer_ticks
-					   - rpc->done_timer_ticks);
-			}
-		}
-	}
-
 	/* Check for conditions under which it isn't a problem if we haven't
 	 * heard from the peer.
 	 */
 	if (rpc->state == RPC_INCOMING) {
 #ifndef __STRIP__ /* See strip.py */
-		if ((rpc->msgin.length - rpc->msgin.bytes_remaining)
-				>= rpc->msgin.granted) {
+		if (rpc->msgin.length - rpc->msgin.bytes_remaining >=
+		    rpc->msgin.granted)
 			/* We've received everything that we've granted, so we
 			 * shouldn't expect to hear anything until we grant more.
 			 */
-			rpc->silent_ticks = 0;
-			return;
-		}
+			goto not_waiting;
 #endif /* See strip.py */
-		if (rpc->msgin.num_bpages == 0) {
-			/* Waiting for buffer space, so no problem. */
-			rpc->silent_ticks = 0;
-			return;
-		}
-	} else if (!homa_is_client(rpc->id)) {
-		/* We're the server and we've received the input message;
-		 * no need to worry about retries.
-		 */
-		rpc->silent_ticks = 0;
-		return;
-	}
-
-	if (rpc->state == RPC_OUTGOING) {
+		if (rpc->msgin.num_bpages == 0)
+			/* Waiting for buffer space. */
+			goto not_waiting;
+	} else if (rpc->state == RPC_OUTGOING) {
 #ifndef __STRIP__ /* See strip.py */
-		if (tx_end < rpc->msgout.granted) {
+		if (tx_end < rpc->msgout.granted)
 #else /* See strip.py */
-		if (tx_end < rpc->msgout.length) {
+		if (tx_end < rpc->msgout.length)
 #endif /* See strip.py */
 			/* There are granted bytes that we haven't transmitted,
 			 * so no need to be concerned; the ball is in our court.
 			 */
-			rpc->silent_ticks = 0;
+			goto not_waiting;
+		if (!homa_is_client(rpc->id)) {
+#ifndef __STRIP__ /* See strip.py */
+			if (tx_end < rpc->msgout.length)
+				goto not_waiting;
+#endif /* See strip.py */
+			if (rpc->silent_ticks >= homa->timeout_ticks)
+				goto timeout;
+			homa_timer_check_ack(rpc);
 			return;
 		}
+	} else {
+		/* We're waiting for the server application to generate a
+		 * response, so nothing to do here.
+		 */
+		goto not_waiting;
 	}
 
-	if (rpc->silent_ticks < homa->resend_ticks)
-		return;
-	if (rpc->silent_ticks >= homa->timeout_ticks) {
-		INC_METRIC(rpc_timeouts, 1);
-		tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, state %d",
-			   rpc->id, tt_addr(rpc->route->peer->addr), rpc->state);
+	if (rpc->silent_ticks >= homa->timeout_ticks)
+		goto timeout;
+
+	if (rpc->silent_ticks >= homa->resend_ticks &&
+	    ((rpc->silent_ticks - homa->resend_ticks) %
+	     homa->resend_interval) == 0)
+		homa_request_retrans(rpc);
+	return;
+
+not_waiting:
+	rpc->silent_ticks = 0;
+	return;
+
+timeout:
+	INC_METRIC(rpc_timeouts, 1);
+	tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, state %d",
+		   rpc->id, tt_addr(rpc->route->peer->addr), rpc->state);
 #ifndef __STRIP__ /* See strip.py */
 #if 0
-		homa_rpc_log_active_tt(homa, 0);
-		tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
-		homa_freeze_peers();
-		tt_freeze();
+	homa_rpc_log_active_tt(homa, 0);
+	tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
+	homa_freeze_peers();
+	tt_freeze();
 #endif
-		if (homa->verbose)
-			pr_notice("RPC id %llu, peer %s, aborted because of timeout, state %d\n",
-				  rpc->id,
-				  homa_print_ipv6_addr(&rpc->route->peer->addr),
-				  rpc->state);
+	if (homa->verbose)
+		pr_notice("RPC id %llu, peer %s, aborted because of timeout, state %d\n",
+			  rpc->id,
+			  homa_print_ipv6_addr(&rpc->route->peer->addr),
+			  rpc->state);
 #endif /* See strip.py */
-		homa_rpc_abort(rpc, -ETIMEDOUT);
-		return;
-	}
-	if (((rpc->silent_ticks - homa->resend_ticks) % homa->resend_interval)
-			== 0)
-		homa_request_retrans(rpc);
+	homa_rpc_abort(rpc, -ETIMEDOUT);
 }
 
 /**

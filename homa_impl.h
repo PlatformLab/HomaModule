@@ -700,6 +700,7 @@ int      homa_socket(struct sock *sk);
 int      homa_softirq(struct sk_buff *skb);
 void     homa_spin(int ns);
 void     homa_timer(struct homa *homa);
+void     homa_timer_check_ack(struct homa_rpc *rpc);
 void     homa_timer_check_rpc(struct homa_rpc *rpc);
 int      homa_timer_main(void *transport);
 int      homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,

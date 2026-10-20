@@ -787,11 +787,16 @@ Each value must be an integer less than 8.
 .TP
 .IR request_ack_ticks
 Servers maintain state for an RPC until the client has acknowledged receipt
-of the complete response message. Clients piggyback these acks on
+of the complete response message.
+Clients normally piggyback acks on
 data packets, but won't send acks if there is no traffic to the server.
 If the server doesn't receive an ack within
 .IR request_ack_ticks
-timer ticks, then it will request an explicit ack. Larger values for
+timer ticks, then it will request an explicit ack; it wil resend the request
+on each subsequent timer tick until either an acknowledgment has been
+received or the client has timed out (see
+.IR timeout_ticks ).
+Larger values for
 this parameter reduce packet traffic but cause RPC state to be held longer
 on servers.
 .TP
