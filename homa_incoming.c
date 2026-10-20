@@ -891,6 +891,15 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		   rpc->id, offset, length);
 #endif /* See strip.py */
 
+	if (rpc->state == RPC_OUTGOING)
+		/* A RESEND packet for an outgoing message is a sign of
+		 * progress; a RESEND packet for an incoming message is not
+		 * (if we are the server and the client sends RESEND, we can't
+		 * reset silent_ticks since that could keep us from sending
+		 * our own RESEND to retransmit lost packets).
+		 */
+		rpc->silent_ticks = 0;
+
 	tx_end = homa_rpc_tx_end(rpc);
 	if (!homa_is_client(rpc->id) && !homa_rpc_msgout_complete(rpc)) {
 		/* We are the server for this RPC and don't yet have a

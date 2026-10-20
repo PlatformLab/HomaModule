@@ -1964,6 +1964,34 @@ TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc)
 					  &h.common, 0, 0));
 	EXPECT_STREQ("xmit RPC_UNKNOWN", unit_log_get());
 }
+TEST_F(homa_incoming, homa_resend_pkt__reset_silent_ticks)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 100);
+	struct homa_resend_hdr h = {.common = {
+			.sport = htons(self->client_port),
+			.dport = htons(self->hsk.port),
+			.sender_id = cpu_to_be64(self->client_id),
+			.type = RESEND},
+			.offset = 0, .length = htonl(100)};
+
+	ASSERT_NE(NULL, srpc);
+	srpc->silent_ticks = 10;
+	unit_log_clear();
+
+	/* First call: incoming state, so don't reset. */
+	srpc->state = RPC_INCOMING;
+	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
+					  &h.common, 0, 0));
+	EXPECT_EQ(10, srpc->silent_ticks);
+
+	/* Second call: outgoing state, so reset. */
+	srpc->state = RPC_OUTGOING;
+	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
+					  &h.common, 0, 0));
+	EXPECT_EQ(0, srpc->silent_ticks);
+}
 TEST_F(homa_incoming, homa_resend_pkt__response_not_ready_server_sends_busy)
 {
 	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
