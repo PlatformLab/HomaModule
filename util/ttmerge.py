@@ -103,5 +103,5 @@ while True:
         break
     time = best["time"]
     print("%9.3f us (+%8.3f us) %s" % (time, time - prevTime, best["suffix"]))
-    prev_time = time
+    prevTime = time
     next_line(best)

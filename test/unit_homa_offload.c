@@ -104,6 +104,24 @@ FIXTURE_TEARDOWN(homa_offload)
 	unit_teardown();
 }
 
+TEST_F(homa_offload, homa_offload_init__ipv4_registration_failure)
+{
+	homa_offload_end();
+	mock_inet_add_offload_errors = 1;
+	EXPECT_EQ(-EEXIST, homa_offload_init());
+	EXPECT_EQ(0, mock_offload_registered);
+}
+
+TEST_F(homa_offload, homa_offload_init__ipv6_failure_rolls_back_ipv4)
+{
+	homa_offload_end();
+	mock_inet6_add_offload_errors = 1;
+	EXPECT_EQ(-EEXIST, homa_offload_init());
+	EXPECT_EQ(0, mock_offload_registered);
+	EXPECT_EQ(0, homa_offload_init());
+	EXPECT_EQ(3, mock_offload_registered);
+}
+
 TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 {
 	struct sk_buff *skb, *segs;
@@ -123,6 +141,61 @@ TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 	kfree_skb(skb);
 	kfree_skb(segs->next);
 	kfree_skb(segs);
+}
+
+TEST_F(homa_offload, homa_gso_segment__allocation_failure)
+{
+	struct sk_buff *skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			&self->header.common, 1400, 2000);
+	struct sk_buff *segs;
+
+	mock_skb_segment_errors = 1;
+	segs = homa_gso_segment(skb, 0);
+	EXPECT_TRUE(IS_ERR(segs));
+	EXPECT_EQ(-ENOMEM, PTR_ERR(segs));
+	kfree_skb(skb);
+}
+
+TEST_F(homa_offload, homa_gro_receive__cannot_pull_header)
+{
+	struct sk_buff *skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			&self->header.common, 1400, 2000);
+
+	skb->data_len = skb->len - 20;
+	EXPECT_EQ(-EINPROGRESS,
+		PTR_ERR(homa_gro_receive(&self->empty_list, skb)));
+	EXPECT_EQ(NULL, cur_offload_core->held_skb);
+}
+
+TEST_F(homa_offload, homa_gro_receive__truncated_headers)
+{
+	struct sk_buff *skb;
+	int lengths[] = {sizeof(struct homa_common_hdr) - 1,
+			 sizeof(struct homa_data_hdr) - 1};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(lengths); i++) {
+		skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+				     &self->header.common, 1400, 2000);
+		skb->len = skb_transport_offset(skb) + lengths[i];
+		EXPECT_EQ(-EINPROGRESS,
+			PTR_ERR(homa_gro_receive(&self->empty_list, skb)));
+		EXPECT_EQ(NULL, cur_offload_core->held_skb);
+	}
+	EXPECT_EQ(2, homa_metrics_per_cpu()->short_packets);
+}
+
+TEST_F(homa_offload, homa_gro_receive__invalid_type)
+{
+	struct sk_buff *skb;
+
+	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			    &self->header.common, 1400, 2000);
+	((struct homa_common_hdr *)skb_transport_header(skb))->type = DATA - 1;
+	EXPECT_EQ(-EINPROGRESS,
+		PTR_ERR(homa_gro_receive(&self->empty_list, skb)));
+	EXPECT_EQ(NULL, cur_offload_core->held_skb);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->short_packets);
 }
 
 TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)

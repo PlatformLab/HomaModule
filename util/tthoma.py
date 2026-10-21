@@ -3936,9 +3936,9 @@ class AnalyzeDelay:
         self.app_queue_rsp_wakeups = []
 
     def init_trace(self, trace: dict[str, Any]) -> None:
-        # Target core id -> list of times when gro chose that core but
+        # Target core id -> queue of times when gro chose that core but
         # SoftIRQ hasn't yet woken up
-        self.gro_handoffs = defaultdict(list)
+        self.gro_handoffs = defaultdict(deque)
 
     def tt_gro_handoff(self, trace: dict[str, Any], time: float, core: int,
             softirq_core: int) -> None:
@@ -3947,9 +3947,8 @@ class AnalyzeDelay:
     def tt_softirq_invoked(self, trace: dict[str, Any], time: float, core: int) -> None:
         if not self.gro_handoffs[core]:
             return
-        self.softirq_wakeups.append([time - self.gro_handoffs[core][0], time,
+        self.softirq_wakeups.append([time - self.gro_handoffs[core].popleft(), time,
                 trace['node']])
-        self.gro_handoffs[core].pop(0)
 
     def tt_rpc_handoff(self, trace: dict[str, Any], time: float, core: int,
             id: int, port: int) -> None:
@@ -12614,10 +12613,11 @@ class AnalyzeSync:
         delays = self.find_delays()
         self.find_delays_alt(delays)
 
-        # Sort the data points to in increasing order of delay.
+        # Sort by increasing delay, then use queues to discard minima in O(1).
         for i in range(len(delays)):
             for j in range(len(delays)):
                 delays[i][j].sort()
+                delays[i][j] = deque(delays[i][j])
 
         # Remove minima that lead to negative RTTs, so that we know no
         # negative RTTs will result from using the first point in each
@@ -12634,8 +12634,8 @@ class AnalyzeSync:
                             nodes[j], forward[0][2],
                             nodes[j], reverse[0][1],
                             nodes[i], reverse[0][2]), file=sys.stderr)
-                    forward.pop(0)
-                    reverse.pop(0)
+                    forward.popleft()
+                    reverse.popleft()
 
         min_offsets, max_offsets, stats = self.get_offsets(delays)
 
