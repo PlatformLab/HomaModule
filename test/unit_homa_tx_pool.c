@@ -238,8 +238,6 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc__growth_retries_smaller_array)
 	kfree(frags);
 }
 
-	kfree(frags);
-}
 TEST_F(homa_tx_pool, homa_tx_pool_alloc__return_nid)
 {
 	skb_frag_t frag;
@@ -328,17 +326,6 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_frag__retain_leftovers_from_new)
 {
 	struct homa_tx_pool_core *tx_core = get_tx_pool_core(2);
 	skb_frag_t frag, frag2, frag3;
-
-	/* First call allocates a full page, so no leftovers. */
-	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, self->homa.tx_pools[0],
-					       HOMA_TX_PAGE_SIZE, &frag));
-	EXPECT_EQ(0, tx_core->allocated);
-
-	/* Second call allocates nearly a full page. */
-	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, self->homa.tx_pools[0],
-		  HOMA_TX_PAGE_SIZE - 200, &frag2));
-	EXPECT_EQ(HOMA_TX_PAGE_SIZE - 200, tx_core->allocated);
-
 
 	/* First call allocates a full page, so no leftovers. */
 	EXPECT_EQ(0, __homa_tx_pool_alloc_frag(tx_core, self->homa.tx_pools[0],
