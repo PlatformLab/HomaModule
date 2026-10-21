@@ -697,7 +697,39 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__shinfo_gso_fields)
 	shinfo = skb_shinfo(skb);
 	EXPECT_EQ(3, shinfo->gso_segs);
 	EXPECT_EQ(1400 + sizeof(struct homa_seg_hdr), shinfo->gso_size);
-	EXPECT_EQ(SKB_GSO_TCPV6, shinfo->gso_type);
+	EXPECT_EQ(SKB_GSO_TCPV4, shinfo->gso_type);
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_tx_skb_alloc__gso_type_depends_on_peer)
+{
+	struct in6_addr server_ip6 = unit_get_in_addr("1::3:5:7");
+	struct homa_rpc *crpc4, *crpc6;
+	struct sk_buff *skb;
+	u32 end;
+
+	/* An IPv6 socket sends IPv4 packets to IPv4 peers. */
+	mock_set_ipv6(&self->hsk);
+	crpc4 = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+				self->server_ip, self->server_port,
+				self->client_id, 5000, 100);
+	crpc6 = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+				&server_ip6, self->server_port,
+				self->client_id + 2, 5000, 100);
+	ASSERT_NE(NULL, crpc4);
+	ASSERT_NE(NULL, crpc6);
+	crpc4->msgout.max_gso_segs = 3;
+	crpc6->msgout.max_gso_segs = 3;
+
+	end = 3000;
+	skb = homa_tx_skb_alloc(crpc4, 0, &end);
+	ASSERT_FALSE(IS_ERR(skb));
+	EXPECT_EQ(SKB_GSO_TCPV4, skb_shinfo(skb)->gso_type);
+	kfree_skb(skb);
+
+	end = 3000;
+	skb = homa_tx_skb_alloc(crpc6, 0, &end);
+	ASSERT_FALSE(IS_ERR(skb));
+	EXPECT_EQ(SKB_GSO_TCPV6, skb_shinfo(skb)->gso_type);
 	kfree_skb(skb);
 }
 TEST_F(homa_outgoing, homa_tx_skb_alloc__gso_force_software)
