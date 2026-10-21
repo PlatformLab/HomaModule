@@ -243,7 +243,6 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 	peer->ht_key.addr = *addr;
 	peer->ht_key.hnet = hsk->hnet;
 	refcount_set(&peer->refs, 1);
-	spin_lock_init(&peer->lock);
 #ifndef __STRIP__ /* See strip.py */
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 2] = INT_MAX;
@@ -442,15 +441,31 @@ struct homa_route *homa_route_get(struct homa_sock *hsk,
 	route = rhashtable_lookup(&peertab->route_ht, &route_key,
 				  route_ht_params);
 	tt_record("rhashtable_lookup for route key returned");
+
+	/* Note: if the refcount is zero below we don't have to remove
+	 * the entry from the table: the fact that the reference count
+	 * is zero means the entry has already been removed from the
+	 * table.
+	 */
 	if (route && refcount_inc_not_zero(&route->refs)) {
-		/* jiffies advances every few ms; an unconditional store here
-		 * dirties the line ~1M times/s under load for no extra
-		 * freshness.
+		/* Make sure the route is still valid. */
+		if (dst_check(rcu_dereference_protected(route->dst, 1),
+							route->dst_cookie)) {
+			/* jiffies advances every few ms; an unconditional
+			 * store here dirties the line ~1M times/s under load
+			 * for no extra freshness.
+			*/
+			if (route->access_jiffies != jiffies)
+				route->access_jiffies = jiffies;
+			rcu_read_unlock();
+			return route;
+		}
+
+		/* Drop the reference we just acquired above, then remove
+		 * the entry from the table.
 		 */
-		if (route->access_jiffies != jiffies)
-			route->access_jiffies = jiffies;
-		rcu_read_unlock();
-		return route;
+		homa_route_release(route);
+		homa_route_remove(route, peertab);
 	}
 
 	/* No existing entry, so we have to create a new one. Switch from
@@ -505,6 +520,27 @@ struct homa_route *homa_route_get(struct homa_sock *hsk,
 }
 
 /**
+ * homa_route_remove() - Remove a route entry from its hash table.
+ * @route:     Route to remove (if for some reason this route is no longer
+ *             in @peertab than this function does nothing).
+ * @peertab:   Contains the table from which to remove route. Must not
+ *             be locked by caller.
+ */
+void homa_route_remove(struct homa_route *route, struct homa_peertab *peertab)
+{
+	spin_lock_bh(&peertab->lock);
+	if (rhashtable_remove_fast(&peertab->route_ht, &route->ht_linkage,
+				   route_ht_params) == 0) {
+		homa_route_release(route);
+		peertab->num_routes--;
+		route->key.hnet->num_routes--;
+		tt_record1("homa_route_remove removed invalid route for 0x%x",
+			   tt_addr(route->peer->addr));
+	}
+	spin_unlock_bh(&peertab->lock);
+}
+
+/**
  * homa_route_validate() - Check to be sure that the information in the
  * route for an RPC is still valid; if not, try to allocate a new route
  * for the RPC.
@@ -528,16 +564,7 @@ int homa_route_validate(struct homa_rpc *rpc)
 		/* Existing route is no longer valid; remove it from
 		 * the hash table and try to create a new one.
 		 */
-		spin_lock_bh(&peertab->lock);
-		if (rhashtable_remove_fast(&peertab->route_ht, &old->ht_linkage,
-					   route_ht_params) == 0) {
-			homa_route_release(old);
-			peertab->num_routes--;
-			old->key.hnet->num_routes--;
-			tt_record1("homa_route_validate removed invalid route for 0x%x",
-				   tt_addr(rpc->route->peer->addr));
-		}
-		spin_unlock_bh(&peertab->lock);
+		homa_route_remove(old, peertab);
 		route = homa_route_get(rpc->hsk, &rpc->route->peer->addr);
 		if (IS_ERR(route))
 			return PTR_ERR(route);
@@ -741,81 +768,82 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
 }
 
 /**
- * homa_peer_lock_slow() - This function implements the slow path for
- * acquiring a peer's @lock. It is invoked when the lock isn't
+ * homa_route_lock_slow() - This function implements the slow path for
+ * acquiring a route's @lock. It is invoked when the lock isn't
  * immediately available. It waits for the lock, but also records statistics
  * about the waiting time.
- * @peer:    Peer to  lock.
+ * @route:   Route to lock.
  */
-void homa_peer_lock_slow(struct homa_peer *peer)
-	__acquires(peer->lock)
+void homa_route_lock_slow(struct homa_route *route)
+	__acquires(route->lock)
 {
 	u64 start = homa_clock();
 
-	tt_record("beginning wait for peer lock");
-	spin_lock_bh(&peer->lock);
-	tt_record("ending wait for peer lock");
-	INC_METRIC(peer_ack_lock_misses, 1);
-	INC_METRIC(peer_ack_lock_miss_cycles, homa_clock() - start);
+	tt_record("beginning wait for route lock");
+	spin_lock_bh(&route->lock);
+	tt_record("ending wait for route lock");
+	INC_METRIC(route_ack_lock_misses, 1);
+	INC_METRIC(route_ack_lock_miss_cycles, homa_clock() - start);
 }
 #endif /* See strip.py */
 
 /**
- * homa_peer_add_ack() - Add a given RPC to the list of unacked
- * RPCs for its server. Once this method has been invoked, it's safe
+ * homa_route_add_ack() - Add a given RPC to the list of unacked
+ * RPCs for its route. Once this method has been invoked, it's safe
  * to delete the RPC, since it will eventually be acked to the server.
  * @rpc:    Client RPC that has now completed. Must be locked by caller.
  */
-void homa_peer_add_ack(struct homa_rpc *rpc)
+void homa_route_add_ack(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
-	struct homa_peer *peer = rpc->route->peer;
+	struct homa_route *route = rpc->route;
 	struct homa_ack_hdr ack;
 
-	homa_peer_lock(peer);
-	if (peer->num_acks < HOMA_MAX_ACKS_PER_PKT) {
-		peer->acks[peer->num_acks].client_id = cpu_to_be64(rpc->id);
-		peer->acks[peer->num_acks].server_port = htons(rpc->dport);
-		peer->num_acks++;
-		homa_peer_unlock(peer);
+	homa_route_lock(route);
+	if (route->num_acks < HOMA_MAX_ACKS_PER_PKT) {
+		route->acks[route->num_acks].client_id = cpu_to_be64(rpc->id);
+		route->acks[route->num_acks].server_port = htons(rpc->dport);
+		route->num_acks++;
+		homa_route_unlock(route);
 		return;
 	}
 
-	/* The peer has filled up; send an ACK message to empty it. The
+	/* The route has filled up; send an ACK message to empty it. The
 	 * RPC in the message header will also be considered ACKed.
 	 */
 	INC_METRIC(ack_overflows, 1);
-	memcpy(ack.acks, peer->acks, sizeof(peer->acks));
-	ack.num_acks = htons(peer->num_acks);
-	peer->num_acks = 0;
-	homa_peer_unlock(peer);
+	memcpy(ack.acks, route->acks, sizeof(route->acks));
+	ack.num_acks = htons(route->num_acks);
+	route->num_acks = 0;
+	homa_route_unlock(route);
 	homa_xmit_control(ACK, &ack, sizeof(ack), rpc);
 }
 
 /**
- * homa_peer_get_acks() - Copy acks out of a peer, and remove them from the
- * peer.
- * @peer:    Peer to check for possible unacked RPCs.
+ * homa_route_get_acks() - Copy acks out of a route, and remove them from the
+ * route.
+ * @route:   Route to check for possible unacked RPCs.
  * @count:   Maximum number of acks to return.
  * @dst:     The acks are copied to this location.
  *
- * Return:   The number of acks extracted from the peer (<= count).
+ * Return:   The number of acks extracted from the route (<= count).
  */
-int homa_peer_get_acks(struct homa_peer *peer, int count, struct homa_ack *dst)
+int homa_route_get_acks(struct homa_route *route, int count,
+			struct homa_ack *dst)
 {
 	/* Don't waste time acquiring the lock if there are no ids available. */
-	if (peer->num_acks == 0)
+	if (route->num_acks == 0)
 		return 0;
 
-	homa_peer_lock(peer);
+	homa_route_lock(route);
 
-	if (count > peer->num_acks)
-		count = peer->num_acks;
-	memcpy(dst, &peer->acks[peer->num_acks - count],
-	       count * sizeof(peer->acks[0]));
-	peer->num_acks -= count;
+	if (count > route->num_acks)
+		count = route->num_acks;
+	memcpy(dst, &route->acks[route->num_acks - count],
+	       count * sizeof(route->acks[0]));
+	route->num_acks -= count;
 
-	homa_peer_unlock(peer);
+	homa_route_unlock(route);
 	return count;
 }
 
@@ -827,6 +855,10 @@ int homa_peer_get_acks(struct homa_peer *peer, int count, struct homa_ack *dst)
  */
 void homa_peer_update_sysctl_deps(struct homa_peertab *peertab)
 {
+	/* Note: no need to clamp values to safe ranges: all values are "safe"
+	 * for all params.
+	 */
+
 	peertab->idle_jiffies_min = peertab->idle_secs_min * HZ;
 	peertab->idle_jiffies_max = peertab->idle_secs_max * HZ;
 }
@@ -837,9 +869,11 @@ void homa_peer_update_sysctl_deps(struct homa_peertab *peertab)
  * is invoked to read and write peer-related sysctl values.
  * @table:    sysctl table describing value to be read or written.
  * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space of the input/output data.
- * @lenp:     Not exactly sure.
- * @ppos:     Not exactly sure.
+ * @buffer:   Address in kernel space of the input/output data.
+ * @lenp:     Points to available space in buffer; must be modified to hold
+ *            number of bytes actually read or written.
+ * @ppos:     File pointer; must be incremented by number of bytes read
+ *            or written.
  *
  * Return: 0 for success, nonzero for error.
  */

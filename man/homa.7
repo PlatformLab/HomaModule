@@ -487,7 +487,7 @@ argument and disables the socket,
 so that it may no longer be used for either sending or receiving messages.
 If any threads are blocked waiting on the socket, they will be unblocked
 and their current operations will fail with an
-.I errno
+.B errno
 value of
 .BR ESHUTDOWN .
 .SH SYSCTL PARAMETERS
@@ -787,11 +787,16 @@ Each value must be an integer less than 8.
 .TP
 .IR request_ack_ticks
 Servers maintain state for an RPC until the client has acknowledged receipt
-of the complete response message. Clients piggyback these acks on
+of the complete response message.
+Clients normally piggyback acks on
 data packets, but won't send acks if there is no traffic to the server.
 If the server doesn't receive an ack within
 .IR request_ack_ticks
-timer ticks, then it will request an explicit ack. Larger values for
+timer ticks, then it will request an explicit ack; it wil resend the request
+on each subsequent timer tick until either an acknowledgment has been
+received or the client has timed out (see
+.IR timeout_ticks ).
+Larger values for
 this parameter reduce packet traffic but cause RPC state to be held longer
 on servers.
 .TP
@@ -801,7 +806,7 @@ for a given missing packet. This is in units
 of "ticks" (see
 .I resend_ticks
 below). This value and
-.I timeout_resends
+.I timeout_ticks
 should be chosen together.
 .TP
 .IR resend_ticks
@@ -835,12 +840,18 @@ into two different parameters:
 and
 .IR window .
 .TP
-.I timeout_resends
-An integer value specifying how long to wait before considering a peer
-to be dead. If this many resend requests have been issued to a peer without
-receiving any packets from the peer, then Homa will consider the peer
-dead and abort all RPCs involving that peer with
+.IR timeout_ticks
+If this much time elapses without any signs of life from a node (such as
+sending a DATA or GRANT packet), its peers may declare it nonresponsive
+and abort any RPCs to/from that node. On clients, if an RPC is aborted
+in this way the RPC will complete with an
+.B errno
+value of
 .BR ETIMEDOUT .
+On servers, if an RPC is aborted in this way the server will discard its
+state for the RPC (the RPC may or may not have executed).
+The units for this parameter are ``timer ticks'' (the interval between
+invocations of the Homa timer function, currently 1 millisecond).
 .TP
 .IR tx_page_frees_per_sec
 Homa maintains a pool of free pages on each NUMA node to hold outgoing

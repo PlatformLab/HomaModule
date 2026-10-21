@@ -603,11 +603,6 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 					INC_METRIC(unknown_rpcs, 1);
 				goto discard;
 			}
-		} else {
-			if (h->type == DATA ||
-			    h->type == GRANT ||
-			    h->type == BUSY)
-				rpc->silent_ticks = 0;
 		}
 #else /* See strip.py */
 		if (unlikely(!rpc)) {
@@ -619,10 +614,6 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 					   ntohs(h->sport));
 				goto discard;
 			}
-		} else {
-			if (h->type == DATA ||
-			    h->type == BUSY)
-				rpc->silent_ticks = 0;
 		}
 #endif /* See strip.py */
 
@@ -647,12 +638,8 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 			break;
 		case BUSY:
 			INC_METRIC(packets_received[BUSY - DATA], 1);
-			tt_record2("received BUSY for id %d, peer 0x%x",
-				   id, tt_addr(rpc->route->peer->addr));
-			/* Nothing to do for these packets except reset
-			 * silent_ticks, which happened above.
-			 */
-			goto discard;
+			homa_busy_pkt(skb, rpc);
+			break;
 #ifndef __STRIP__ /* See strip.py */
 		case CUTOFFS:
 			INC_METRIC(packets_received[CUTOFFS - DATA], 1);
@@ -732,6 +719,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		   homa_local_id(h->common.sender_id),
 		   tt_addr(rpc->route->peer->addr), ntohl(h->seg.offset),
 		   ntohl(h->msg_length));
+	rpc->silent_ticks = 0;
 
 	if (rpc->state != RPC_INCOMING && homa_is_client(rpc->id)) {
 		if (unlikely(rpc->state != RPC_OUTGOING))
@@ -847,6 +835,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	tt_record4("processing grant for id %llu, offset %d, priority %d, increment %d",
 		   homa_local_id(h->common.sender_id), ntohl(h->offset),
 		   h->priority, new_offset - rpc->msgout.granted);
+	rpc->silent_ticks = 0;
 	if (rpc->state == RPC_OUTGOING) {
 		if (new_offset > rpc->msgout.granted)
 			rpc->msgout.granted = min_t(u32, new_offset,
@@ -874,9 +863,9 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	struct homa_resend_hdr *h = (struct homa_resend_hdr *)skb->data;
 	int offset = ntohl(h->offset);
 	int length = ntohl(h->length);
-	int end = offset + length;
 	struct homa_busy_hdr busy;
 	int tx_end;
+	int end;
 
 #ifndef __STRIP__ /* See strip.py */
 	if (unlikely(h->priority >= HOMA_MAX_PRIORITIES))
@@ -904,6 +893,15 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		   rpc->id, offset, length);
 #endif /* See strip.py */
 
+	if (rpc->state == RPC_OUTGOING)
+		/* A RESEND packet for an outgoing message is a sign of
+		 * progress; a RESEND packet for an incoming message is not
+		 * (if we are the server and the client sends RESEND, we can't
+		 * reset silent_ticks since that could keep us from sending
+		 * our own RESEND to retransmit lost packets).
+		 */
+		rpc->silent_ticks = 0;
+
 	tx_end = homa_rpc_tx_end(rpc);
 	if (!homa_is_client(rpc->id) && !homa_rpc_msgout_complete(rpc)) {
 		/* We are the server for this RPC and don't yet have a
@@ -916,10 +914,13 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		goto done;
 	}
 
+	if (offset < 0 || offset > rpc->msgout.length)
+		/* Malformed packet. */
+		goto done;
 	if (length == -1) {
-		/* The other side has not received any data for the message.
-		 * Retransmit everything we previously sent.
-		 */
+		/* The other side has not received any data for the
+		 * message. Retransmit everything we previously sent.
+		*/
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.granted == 0) {
 			homa_xmit_start_msg(rpc, rpc->msgout.length);
@@ -927,6 +928,13 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		}
 #endif /* See strip.py */
 		end = tx_end;
+	} else if (length < 0) {
+		/* Malformed packet. */
+		goto done;
+	} else if (length > rpc->msgout.length - offset) {
+		end = rpc->msgout.length;
+	} else {
+		end = offset + length;
 	}
 
 	/* This is now the "normal" case where we need to transmit packets
@@ -944,8 +952,6 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		 * granted previously.
 		 */
 		rpc->msgout.granted = end;
-		if (rpc->msgout.granted > rpc->msgout.length)
-			rpc->msgout.granted = rpc->msgout.length;
 		homa_xmit_data(rpc);
 	}
 #endif /* See strip.py */
@@ -1026,6 +1032,24 @@ done:
 	consume_skb(skb);
 }
 
+/**
+ * homa_busy_pkt() - Handler for incoming RPC_BUSY packets.
+ * @skb:     Incoming packet; size known to be large enough for the header.
+ *           This function now owns the packet.
+ * @rpc:     Information about the RPC corresponding to this packet. Must
+ *           be locked by caller.
+ */
+void homa_busy_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
+	__must_hold(rpc->bucket->lock)
+{
+	tt_record2("received BUSY for id %d, peer 0x%x", rpc->id,
+		   tt_addr(rpc->route->peer->addr));
+
+	/* Nothing to do here except clear silent_ticks. */
+	rpc->silent_ticks = 0;
+	consume_skb(skb);
+}
+
 #ifndef __STRIP__ /* See strip.py */
 /**
  * homa_cutoffs_pkt() - Handler for incoming CUTOFFS packets
@@ -1098,9 +1122,8 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	ack.common.sport = h->dport;
 	ack.common.dport = h->sport;
 	ack.common.sender_id = cpu_to_be64(id);
-	ack.num_acks = htons(homa_peer_get_acks(route->peer,
-						HOMA_MAX_ACKS_PER_PKT,
-						ack.acks));
+	ack.num_acks = htons(homa_route_get_acks(route, HOMA_MAX_ACKS_PER_PKT,
+						 ack.acks));
 	if (rpc)
 		homa_rpc_unlock(rpc);
 	__homa_xmit_control(&ack, sizeof(ack), route, hsk);
@@ -1287,7 +1310,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
  *            must release the lock and the reference.
  */
 struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
-	__cond_acquires(rpc->bucket->lock)
+	__COND_ACQUIRES(rpc->bucket->lock)
 {
 	struct homa_interest interest;
 	struct homa_rpc *rpc;

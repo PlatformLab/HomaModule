@@ -57,12 +57,6 @@ struct homa_tx_pool {
  */
 struct homa_tx_pool_core {
 	/**
-	 * @pool: NUMA-specific page pool from which to allocate skb pages
-	 * for this core.
-	 */
-	struct homa_tx_pool *pool;
-
-	/**
 	 * @page: a page of data that is "owned" by this core and used for
 	 * allocation on this core (or NULL). This pointer is included in
 	 * the page's reference count.
@@ -80,6 +74,14 @@ struct homa_tx_pool_core {
 	 * been allocated for use.
 	 */
 	int allocated;
+
+	/**
+	 * @nid: The identifier for the preferred NUMA node that will be
+	 * used to allocate memory for this core (index of pool within
+	 * homa->tx_pools). This value only affects performance: if it is
+	 * incorrect then pages may not be cached for the core.
+	 */
+	int nid;
 };
 DECLARE_PER_CPU(struct homa_tx_pool_core, homa_tx_pool_core);
 
@@ -125,15 +127,15 @@ int          homa_copy_to_frags(struct homa_frag_filler *filler, void *src,
 int          homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 				skb_frag_t **frags);
 int          __homa_tx_pool_alloc_frag(struct homa_tx_pool_core *tx_core,
-				       int length, skb_frag_t *frag);
-int          homa_tx_pool_alloc_frag(struct homa *homa, int length,
-				     skb_frag_t *frag);
+				       struct homa_tx_pool *pool, int length,
+				       skb_frag_t *frag);
 struct page *homa_tx_pool_alloc_page(struct homa_tx_pool_core *tx_core,
-				     int *length);
+				     struct homa_tx_pool *pool, int *length);
 void         homa_tx_pool_cleanup(struct homa *homa);
-void         homa_tx_pool_free(struct homa *homa, int num_frags,
+void         homa_tx_pool_free(struct homa *homa, int nid, int num_frags,
 			       skb_frag_t *frags);
 void         homa_tx_pool_gc(struct homa *homa);
 int          homa_tx_pool_init(struct homa *homa);
+int          homa_tx_pool_mem_nid(int core);
 
 #endif /* _HOMA_TX_POOL_H */

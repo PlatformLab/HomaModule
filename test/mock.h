@@ -37,6 +37,15 @@
 #undef DEFINE_PER_CPU
 #define DEFINE_PER_CPU(type, name) type name[10]
 
+#undef first_node
+#define first_node(...) 0
+
+#undef for_each_node
+#define for_each_node(nid) for (nid = 0; nid < mock_num_numas; nid++)
+
+#undef for_each_possible_cpu
+#define for_each_possible_cpu(i) for (i = 0; i < nr_cpu_ids; i++)
+
 #undef free_percpu
 #define free_percpu(name) kfree(name)
 
@@ -106,6 +115,9 @@
 
 #define put_page mock_put_page
 
+#undef raw_smp_processor_id
+#define raw_smp_processor_id() (cpu_number)
+
 #define rcu_read_lock mock_rcu_read_lock
 
 #define rcu_read_lock_bh mock_rcu_read_lock
@@ -157,7 +169,13 @@
 #define this_cpu_ptr(name) (&name[cpu_number])
 
 #undef __this_cpu_read
-#define __this_cpu_read(name) (name)
+#define __this_cpu_read(name) (name[cpu_number])
+
+#undef this_cpu_read
+#define this_cpu_read(name) (name[cpu_number])
+
+#undef this_cpu_write
+#define this_cpu_write(name, val) (name[cpu_number] = (val))
 
 #undef vmalloc
 #define vmalloc mock_vmalloc
@@ -189,6 +207,7 @@ extern int         mock_copy_to_frags_errors;
 extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
+extern int         mock_numa_nodes[20];
 extern struct net_device
 		   mock_devices[];
 extern enum skb_drop_reason
@@ -215,9 +234,9 @@ extern struct netdev_queue
 		   mock_net_queue;
 extern int         mock_netif_schedule_calls;
 extern struct net  mock_nets[];
+extern int         mock_num_numas;
 extern bool        mock_no_high_order_pages;
 extern int         mock_num_drop_reasons;
-extern int         mock_numa_mask;
 extern int         mock_page_nid_mask;
 extern int         mock_peer_free_no_fail;
 extern int         mock_prepare_to_wait_errors;
@@ -234,6 +253,7 @@ extern int         mock_rht_num_walk_results;
 extern int         mock_route_errors;
 extern int         mock_signal_pending;
 extern int         mock_sock_holds;
+extern int         mock_sysctl_intval;
 extern struct task_struct
 		   mock_task;
 extern int         mock_total_spin_locks;

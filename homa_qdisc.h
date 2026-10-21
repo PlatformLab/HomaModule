@@ -301,10 +301,11 @@ struct homa_qdisc_shared {
 
 	/**
 	 * @max_nic_queue_usecs: An additional limit on NIC queue buildup:
-	 * if any individual NIC queue reaches a length where it would
-	 * take at least this many microseconds to transmit all of its packets,
-	 * then no more packets will be queued for *any* NIC queue until
-	 * the queue gets below this limit. Set externally via sysctl.
+	 * if the total number of bytes in all packets that have been handed
+	 * off to the NIC but not yet returned after transmission would take
+	 * at least this many microseconds to transmit, then no more packets
+	 * will be queued for the NIC queue until the packets in its
+	 * posession get below this limit. Set externally via sysctl.
 	 */
 	int max_nic_queue_usecs;
 
@@ -400,6 +401,17 @@ int             homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev);
 int             homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev);
 void            homa_rcu_kfree(void *object);
 void            homa_rcu_kfree_callback(struct rcu_head *head);
+
+/**
+ * homa_qdisc_from_priv() - Given a pointer to qdisc private data (e.g. a
+ * struct homa_disc *), return a pointer to the Qdisc.
+ * @priv:    Private data associated with a qdisc.
+ * Return:   See above.
+ */
+static inline struct Qdisc *homa_qdisc_from_priv(void *priv)
+{
+	return container_of(priv, struct Qdisc, privdata);
+}
 
 /**
  * homa_qdisc_active() - Return true if homa qdiscs are enabled for @hnet

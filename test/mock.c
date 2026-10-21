@@ -16,6 +16,8 @@
 
 #include <linux/rhashtable.h>
 
+#include <errno.h>
+
 /* It isn't safe to include some header files, such as stdlib, because
  * they conflict with kernel header files. The explicit declarations
  * below replace those header files.
@@ -71,9 +73,6 @@ int mock_prepare_to_wait_status = -ERESTARTSYS;
 
 /* The return value from calls to signal_pending(). */
 int mock_signal_pending;
-
-/* Used as current task during tests. Also returned by kthread_run. */
-struct task_struct mock_task;
 
 /* If a test sets this variable to nonzero, ip*xmit will log
  * outgoing packets using the long format rather than short.
@@ -258,8 +257,11 @@ int mock_mtu;
 /* Used instead of MAX_SKB_FRAGS when running some unit tests. */
 int mock_max_skb_frags = 10;
 
-/* Each bit gives the NUMA node (0 or 1) for a particular core.*/
-int mock_numa_mask = 5;
+/* Indices are core numbers, value is NUMA node for that core. */
+int mock_numa_nodes[20];
+
+/* Defines range of NUMA ids. */
+int mock_num_numas = 5;
 
 /* Bits determine the result of successive calls to compound order, starting
  * at the lowest bit. 0 means return HOMA_SKB_PAGE_ORDER, 1 means return 0.
@@ -292,6 +294,12 @@ static struct socket mock_socket;
 struct net mock_nets[MOCK_MAX_NETS];
 struct homa_net *mock_hnets[MOCK_MAX_NETS];
 struct net_device mock_devices[MOCK_MAX_NETS];
+
+/* Connects mock_task to mock_nets. */
+struct nsproxy mock_nsproxy = {.net_ns = &mock_nets[0]};
+
+/* Used as current task during tests. Also returned by kthread_run. */
+struct task_struct mock_task = {.nsproxy = &mock_nsproxy};
 
 /* Nonzero means don't generate a unit test failure when freeing peers
  * if the reference count isn't zero (log a message instead).
@@ -331,6 +339,11 @@ int mock_num_socks;
 enum skb_drop_reason mock_drop_reasons[MAX_DROP_REASONS];
 int mock_num_drop_reasons;
 
+/* Integer value that will be used for the value of the sysctl variable
+ * in calls to functions like proc_dointvec.
+ */
+int mock_sysctl_intval;
+
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
 struct net_offload tcp_offload;
@@ -348,6 +361,7 @@ unsigned long vmemmap_base;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
 #endif
+unsigned long random_kmalloc_seed;
 int __preempt_count;
 int cpu_number = 1;
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
@@ -359,8 +373,10 @@ int debug_locks;
 struct static_call_key __SCK__cond_resched;
 struct static_call_key __SCK__might_resched;
 struct static_call_key __SCK__preempt_schedule;
+struct static_call_key __SCK__WARN_trap;
 struct paravirt_patch_template pv_ops;
 struct workqueue_struct *system_wq;
+struct workqueue_struct *system_percpu_wq;
 struct static_key_true validate_usercopy_range;
 unsigned long __per_cpu_offset[NR_CPUS];
 struct tracepoint __tracepoint_sched_set_state_tp;
@@ -533,12 +549,14 @@ void __copy_overflow(int size, unsigned long count)
 	abort();
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
 __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 			const struct in6_addr *daddr,
 			__u32 len, __u8 proto, __wsum csum)
 {
 	return 0;
 }
+#endif
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 int debug_lockdep_rcu_enabled(void)
@@ -605,16 +623,21 @@ u64 hrtimer_forward(struct hrtimer *timer, ktime_t now,
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
 ktime_t hrtimer_get_time(void)
 {
 	return 0;
 }
+#endif
 
 void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 		  enum hrtimer_mode mode)
 {
 	timer->base = &clock_base;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+	/* struct hrtimer_clock_base lost its get_time member in 6.18. */
 	clock_base.get_time = &hrtimer_get_time;
+#endif
 }
 
 void hrtimer_setup(struct hrtimer *timer,
@@ -622,7 +645,9 @@ void hrtimer_setup(struct hrtimer *timer,
 		   clockid_t clock_id, enum hrtimer_mode mode)
 {
 	timer->base = &clock_base;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
 	clock_base.get_time = &hrtimer_get_time;
+#endif
 	timer->function = function;
 }
 
@@ -630,8 +655,13 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode)
 {}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
+		const struct inet_skb_parm *parm)
+#else
 void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
 		const struct ip_options *opt)
+#endif
 {
 	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
 }
@@ -752,7 +782,7 @@ int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
 	return 0;
 }
 
-int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
+int inet_dgram_connect(struct socket *sock, struct SOCKADDR *uaddr,
 		       int addr_len, int flags)
 {
 	return 0;
@@ -820,7 +850,7 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
-int ip6_datagram_connect(struct sock *sk, struct sockaddr *addr, int addr_len)
+int ip6_datagram_connect(struct sock *sk, struct SOCKADDR *addr, int addr_len)
 {
 	return 0;
 }
@@ -847,7 +877,12 @@ struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 	rcuref_init(&route->dst.__rcuref, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_devices[0];
-	route->dst.obsolete = 0;
+
+	/* This forces all calls to dst_check to invoke mock_dst_check,
+	 * which gives us control over whether an error is returned
+	 * (via mock_dst_check_errors).
+	 */
+	route->dst.obsolete = 1;
 	if (!routes_in_use)
 		routes_in_use = unit_hash_new();
 	unit_hash_set(routes_in_use, route, "used");
@@ -963,14 +998,19 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 	rcuref_init(&route->dst.__rcuref, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_devices[0];
-	route->dst.obsolete = 0;
+
+	/* This forces all calls to dst_check to invoke mock_dst_check,
+	 * which gives us control over whether an error is returned
+	 * (via mock_dst_check_errors).
+	 */
+	route->dst.obsolete = 1;
 	if (!routes_in_use)
 		routes_in_use = unit_hash_new();
 	unit_hash_set(routes_in_use, route, "used");
 	return route;
 }
 
-int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
+int ip4_datagram_connect(struct sock *sk, struct SOCKADDR *uaddr,
 		int addr_len)
 {
 	return 0;
@@ -1129,12 +1169,29 @@ void *__kmalloc_noprof(size_t size, gfp_t flags)
 	return mock_kmalloc(size, flags);
 }
 
+int kstrtoint(const char *s, unsigned int base, int *res)
+{
+	long int strtol(const char *nptr, char **endptr, int base);
+	char *end;
+
+	errno = 0;
+	*res = strtol(s, &end, base);
+	if (end == s)
+		return -EINVAL;
+	return -errno;
+}
+
 void kvfree(const void *addr)
 {
 	kfree(addr);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), unsigned long align,
+			     gfp_t flags, int node)
+#else
 void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), gfp_t flags, int node)
+#endif
 {
 	return mock_kmalloc(size, flags);
 }
@@ -1220,8 +1277,14 @@ ssize_t __modver_version_show(const struct module_attribute *a,
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)
 void __mutex_init(struct mutex *lock, const char *name,
 			 struct lock_class_key *key)
+{}
+#endif
+
+/* since 6.19, static inline __mutex_init() calls mutex_init_generic(). */
+void mutex_init_generic(struct mutex *lock)
 {}
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
@@ -1337,6 +1400,10 @@ int proc_dointvec(const struct ctl_table *table, int write,
 		     void __user *buffer, size_t *lenp, loff_t *ppos)
 #endif
 {
+	if (table->maxlen == sizeof(int))
+		*((int *)table->data) = mock_sysctl_intval;
+	else
+		*((int64_t *)table->data) = mock_sysctl_intval;
 	return 0;
 }
 
@@ -1351,6 +1418,11 @@ void proc_remove(struct proc_dir_entry *de)
 	}
 	unit_hash_erase(proc_files_in_use, de);
 	free(de);
+
+}
+
+void proc_set_user(struct proc_dir_entry *de, kuid_t uid, kgid_t gid)
+{
 
 }
 
@@ -1565,6 +1637,10 @@ int __SCT__might_resched(void)
 }
 
 void __SCT__preempt_schedule(void)
+{}
+
+/* since 6.19, x86 asm/bug.h routes WARN() through a static call (WARN_trap). */
+void __SCT__WARN_trap(struct bug_entry *bug, ...)
 {}
 
 void security_sk_classify_flow(const struct sock *sk,
@@ -1834,6 +1910,16 @@ int vfs_fsync(struct file *file, int datasync)
 	return 0;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+struct vlan_type_depth __vlan_get_protocol_offset(const struct sk_buff *skb,
+						  __be16 type,
+						  int mac_offset)
+{
+	struct vlan_type_depth result = {0, 0};
+	return result;
+}
+#endif
+
 void wait_for_completion(struct completion *x) {}
 
 long wait_woken(struct wait_queue_entry *wq_entry, unsigned int mode,
@@ -1979,9 +2065,7 @@ void mock_cpu_relax(void)
  */
 int mock_cpu_to_node(int core)
 {
-	if (mock_numa_mask & (1<<core))
-		return 1;
-	return 0;
+	return mock_numa_nodes[core];
 }
 
 /**
@@ -2182,7 +2266,7 @@ int mock_page_to_nid(struct page *page)
 	int result;
 
 	if (mock_page_nid_mask & 1)
-		result = 1;
+		result = 2;
 	else
 		result = 0;
 	mock_page_nid_mask >>= 1;
@@ -2794,7 +2878,10 @@ void mock_teardown(void)
 	mock_route_errors = 0;
 	mock_trylock_errors = 0;
 	mock_vmalloc_errors = 0;
+	memset(&mock_nsproxy, 0, sizeof(mock_nsproxy));
+	mock_nsproxy.net_ns = &mock_nets[0];
 	memset(&mock_task, 0, sizeof(mock_task));
+	mock_task.nsproxy = &mock_nsproxy;
 	mock_prepare_to_wait_status = -ERESTARTSYS;
 	mock_signal_pending = 0;
 	mock_xmit_log_verbose = 0;
@@ -2802,7 +2889,8 @@ void mock_teardown(void)
 	mock_log_wakeups = 0;
 	mock_mtu = 0;
 	mock_max_skb_frags = 10;
-	mock_numa_mask = 5;
+	memset(mock_numa_nodes, 0, sizeof(mock_numa_nodes));
+	mock_num_numas = 5;
 	mock_compound_order_mask = 0;
 	mock_page_nid_mask = 0;
 	mock_printk_output[0] = 0;
@@ -2827,12 +2915,14 @@ void mock_teardown(void)
 	mock_num_drop_reasons = 0;
 	for (i = 0; i < MAX_DROP_REASONS; i++)
 		mock_drop_reasons[i] = -1;
+	mock_sysctl_intval = 0;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));
 	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
 			&tcp_v6_offload;
 	jiffies = 1100;
+	nr_cpu_ids = 8;
 
 	count = unit_hash_size(skbs_in_use);
 	if (count > 0)

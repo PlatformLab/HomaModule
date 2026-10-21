@@ -49,8 +49,8 @@
  * maintained by the dynamic queue limits mechanism (DQL). DQL keeps
  * counters for each netdev_queue that indicate how many bytes are in the
  * NIC's possession for each queue (i.e. packets that have been passed
- * to the NIC but not yet returned after transmission). If the number of
- * outstanding bytes for any queue exceeds a limit (determined by the
+ * to the NIC but not yet returned after transmission). If the total number of
+ * outstanding bytes in the NIC exceeds a limit (determined by the
  * max_nic_queue_usecs sysctl parameter) then the NIC is considered
  * congested and Homa will stop queuing more packets until the congestion
  * subsides. This reduces worst-case total NIC queuing by 2-3x (as of
@@ -861,7 +861,7 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 	 * will choose a new output queue for the skb, which could result
 	 * in undesirable packet reordering.
 	 */
-	qdisc = qdisc_from_priv(q);
+	qdisc = homa_qdisc_from_priv(q);
 	spin_lock_bh(qdisc_lock(qdisc));
 	qdisc_enqueue_tail(skb, qdisc);
 	spin_unlock_bh(qdisc_lock(qdisc));
@@ -1356,10 +1356,11 @@ void homa_qdisc_refresh_from_dql(struct homa_qdisc_dev *qdev)
  * homa_qdisc_dointvec() - This function is a wrapper around proc_dointvec. It
  * is invoked to read and write pacer-related sysctl values.
  * @table:    sysctl table describing value to be read or written.
- * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space of the input/output data.
- * @lenp:     Not exactly sure.
- * @ppos:     Not exactly sure.
+ * @buffer:   Address in kernel space of the input/output data.
+ * @lenp:     Points to available space in buffer; must be modified to hold
+ *            number of bytes actually read or written.
+ * @ppos:     File pointer; must be incremented by number of bytes read
+ *            or written.
  *
  * Return: 0 for success, nonzero for error.
  */
@@ -1445,15 +1446,17 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 	struct homa_qdisc_dev *qdev;
 	u64 tmp;
 
-	if (qshared->fifo_fraction > 0) {
-		tmp = (1000 - qshared->fifo_fraction) << HOMA_FIFO_WEIGHT_SHIFT;
-		do_div(tmp, qshared->fifo_fraction);
-		qshared->fifo_weight = tmp;
-	}
-
-	qshared->max_nic_est_backlog_cycles = homa_ns_to_cycles(1000 *
-			qshared->max_nic_est_backlog_usecs);
-
+	/* Clamp values to safe ranges. */
+	if (qshared->max_nic_est_backlog_usecs < 0)
+		qshared->max_nic_est_backlog_usecs = 0;
+	if (qshared->max_nic_queue_usecs < 0)
+		qshared->max_nic_queue_usecs = 0;
+	if (qshared->fifo_fraction > 500)
+		qshared->fifo_fraction = 500;
+	if (qshared->fifo_fraction < 0)
+		qshared->fifo_fraction = 0;
+	if (qshared->defer_min_bytes < 0)
+		qshared->defer_min_bytes = 0;
 	if (qshared->homa_share < 0)
 		qshared->homa_share = 0;
 	if (qshared->homa_share > 100)
@@ -1462,6 +1465,15 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 		qshared->max_link_usage = 5;
 	if (qshared->max_link_usage > 100)
 		qshared->max_link_usage = 100;
+
+	if (qshared->fifo_fraction > 0) {
+		tmp = (1000 - qshared->fifo_fraction) << HOMA_FIFO_WEIGHT_SHIFT;
+		do_div(tmp, qshared->fifo_fraction);
+		qshared->fifo_weight = tmp;
+	}
+
+	qshared->max_nic_est_backlog_cycles = homa_ns_to_cycles(1000 *
+			qshared->max_nic_est_backlog_usecs);
 
 	/* Use a mutex rather than RCU to prevent qdev deletion while we
 	 * traverse the list. This is more expensive, but RCU isn't safe

@@ -30,15 +30,17 @@ CCINCLUDES := \
 
 DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
-	     -D KBUILD_MODNAME='"homa"'
+	     -D KBUILD_MODNAME='"homa"' \
+	     -DCC_USING_FENTRY
 ifneq ($(__STRIP__),)
 DEFS +=      -D__STRIP__
 endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS) \
-		-fsanitize=address -fno-omit-frame-pointer
+CFLAGS :=    -std=gnu11 $(WARNS) -Wstrict-prototypes -MD -no-pie -g \
+		$(CINCLUDES) $(DEFS) -fsanitize=address \
+		-fno-omit-frame-pointer -fms-extensions
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) \
 		-fsanitize=address -fno-omit-frame-pointer
 
@@ -83,7 +85,10 @@ HOMA_SRCS +=  homa_grant.c \
 	      homa_offload.c \
 	      homa_qdisc.c
 endif
-HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS)) rbtree.o rhashtable.o xxhash.o
+
+HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS))
+
+LINUX_OBJS := $(shell ./linux_objs $(KDIR)/include/generated/uapi/linux/version.h)
 
 OTHER_SRCS := ccutils.cc \
 	      main.c \
@@ -91,7 +96,7 @@ OTHER_SRCS := ccutils.cc \
 	      utils.c
 OTHER_OBJS := $(patsubst %.c,%.o,$(patsubst %.cc,%.o,$(OTHER_SRCS)))
 
-OBJS := $(TEST_OBJS) $(HOMA_OBJS) $(OTHER_OBJS)
+OBJS := $(TEST_OBJS) $(HOMA_OBJS) $(LINUX_OBJS) $(OTHER_OBJS)
 
 CLEANS = unit $(OBJS) *.d .deps
 
@@ -122,10 +127,10 @@ dummyFile:
 
 # Note: Without -O2 there will be strange compiler errors such as
 # 'asm operand 2 probably does not match constraints'.
-rhashtable.o: rhashtable.c
+rhashtable%.o: rhashtable%.c
 	$(CC) -c $(CFLAGS) -O2 -fno-sanitize=address $< -o $@
 
-xxhash.o: xxhash.c
+xxhash%.o: xxhash%.c
 	$(CC) -c $(CFLAGS) -O2 -fno-sanitize=address $< -o $@
 
 unit: $(OBJS)

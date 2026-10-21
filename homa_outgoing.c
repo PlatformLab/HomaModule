@@ -23,12 +23,14 @@
  *             locked by caller. Fields in rpc->msgout should have been
  *             zeroed by the caller.
  * @length:    Number of bytes that will eventually be in rpc->msgout.
+ * Return:     0 on success, negative errno on failure.
  */
-void homa_message_out_init(struct homa_rpc *rpc, int length)
+int homa_message_out_init(struct homa_rpc *rpc, int length)
 	__must_hold(rpc->bucket->lock)
 {
 	struct dst_entry *dst;
 	u64 max_segs;
+	int err = 0;
 	int mtu;
 
 	memset(&rpc->msgout, 0, sizeof(rpc->msgout));
@@ -48,18 +50,28 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 	mtu = dst_mtu(dst);
 	rpc->msgout.max_seg_data = mtu - rpc->hsk->ip_header_length -
 				   sizeof(struct homa_data_hdr);
+	if (rpc->msgout.max_seg_data < HOMA_MIN_SEG_DATA) {
+		err = -EHOSTUNREACH;
+		rpc->hsk->error_msg = "route has MTU too small for Homa";
+		goto done;
+	}
 	max_segs = min_t(u32, rpc->hsk->homa->max_gso_size,
 			 dst->dev->gso_max_size) -
 		   (sizeof(struct homa_data_hdr) + HOMA_SKB_EXTRA);
-	do_div(max_segs, rpc->msgout.max_seg_data +
-			 sizeof(struct homa_seg_hdr));
-	if (max_segs > dst->dev->gso_max_segs)
-		max_segs = dst->dev->gso_max_segs;
+	if (likely(max_segs > 0)) {
+		do_div(max_segs, rpc->msgout.max_seg_data +
+				sizeof(struct homa_seg_hdr));
+		if (max_segs > dst->dev->gso_max_segs)
+			max_segs = dst->dev->gso_max_segs;
+	}
 	if (max_segs < 1)
 		max_segs = 1;
 	rpc->msgout.max_gso_segs = max_segs;
 	rpc->msgout.max_gso_data = max_segs * rpc->msgout.max_seg_data;
+
+done:
 	rcu_read_unlock();
+	return err;
 }
 
 /**
@@ -81,6 +93,7 @@ int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
 	int err, hdr_space;
 	u64 num_segs;
 	int offset;
+	int nid;
 
 	/* Allocate kernel memory to hold the message data (note that we
 	 * need to allocate extra space for homa_seg_hdrs).
@@ -90,11 +103,12 @@ int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
 	hdr_space = num_segs * sizeof(struct homa_seg_hdr);
 	rpc->msgout.frags = &rpc->msgout.frag;
 	rpc->msgout.num_frags = 1;
-	err = homa_tx_pool_alloc(rpc->hsk->homa, rpc->msgout.length + hdr_space,
+	nid = homa_tx_pool_alloc(rpc->hsk->homa, rpc->msgout.length + hdr_space,
 				 &rpc->msgout.num_frags, &rpc->msgout.frags);
-	if (err != 0)
-		return err;
+	if (nid < 0)
+		return nid;
 	rpc->msgout.frag_bytes = rpc->msgout.length + hdr_space;
+	rpc->msgout.frag_nid = nid;
 	refcount_add(rpc->msgout.frag_bytes, &rpc->hsk->sock.sk_wmem_alloc);
 
 	/* Copy the data in from user space, preceding each segment of data
@@ -270,7 +284,7 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 			   sizeof(struct homa_seg_hdr));
 	h->common.sender_id = cpu_to_be64(rpc->id);
 	h->msg_length = htonl(rpc->msgout.length);
-	homa_peer_get_acks(rpc->route->peer, 1, &h->ack);
+	homa_route_get_acks(rpc->route, 1, &h->ack);
 	IF_NO_STRIP(h->cutoff_version = rpc->route->peer->cutoff_version);
 	if (offset < rpc->msgout.next_xmit_offset)
 		h->retransmit = 1;
@@ -344,6 +358,18 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 		shinfo->gso_type = (hsk->inet.sk.sk_family ==
 				    AF_INET6) ? SKB_GSO_TCPV6 :
 				    SKB_GSO_TCPV4;
+
+#ifndef __STRIP__ /* See strip.py */
+		/* To force software GSO, ask for a gso_type whose features the
+		 * device doesn't have: net_gso_ok() needs NETIF_F_TSO_ECN and
+		 * NETIF_F_TSO_MANGLEID for these flags, and TSO_MANGLEID is
+		 * normally off (e.g. on virtio), so the stack segments the
+		 * packet itself.
+		 */
+		if (hsk->homa->gso_force_software)
+			shinfo->gso_type = SKB_GSO_TCPV4 | SKB_GSO_TCP_ECN |
+					   SKB_GSO_TCP_FIXEDID;
+#endif /* See strip.py */
 	}
 
 	/* Initialize homa_skb_info for the packet. */
@@ -631,7 +657,8 @@ void homa_xmit_data(struct homa_rpc *rpc)
 		if (xmit_offset >= rpc->msgout.length)
 			break;
 		end = rpc->msgout.length;
-		homa_tx_skb_send(rpc, xmit_offset, &end);
+		if (homa_tx_skb_send(rpc, xmit_offset, &end) != 0)
+			break;
 #ifndef __STRIP__ /* See strip.py */
 		if (homa_is_client(rpc->id)) {
 			INC_METRIC(client_request_bytes_done, end - xmit_offset);

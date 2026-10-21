@@ -159,7 +159,7 @@ static struct inet6_protocol homav6_protocol = {
  * to pointers into a net-specific struct homa later.
  */
 #define OFFSET(field) ((void *)offsetof(struct homa, field))
-static struct ctl_table homa_ctl_table[] = {
+struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "accept_bits",
 		.data		= OFFSET(accept_bits),
@@ -339,13 +339,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.procname	= "temp",
 		.data		= OFFSET(temp[0]),
 		.maxlen		= sizeof(((struct homa *)0)->temp),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "timeout_resends",
-		.data		= OFFSET(timeout_resends),
-		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
@@ -747,7 +740,7 @@ void homa_net_exit(struct net *net)
  * Return:    0 on success, otherwise a negative errno. Sets hsk->error_msg
  *            on errors.
  */
-int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
+int homa_bind(struct socket *sock, struct SOCKADDR *addr, int addr_len)
 {
 	union sockaddr_in_union *addr_in = (union sockaddr_in_union *)addr;
 	struct homa_sock *hsk = homa_sk(sock->sk);
@@ -868,7 +861,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 	struct homa_info hinfo;
 	struct homa_rpc *rpc;
 	int result = 0;
-	int bytes_avl;
+	u64 bytes_avl;
 	int num_rpcs;
 	char *dst;
 	int i;
@@ -1309,7 +1302,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			   : tt_addr(addr->in6.sin6_addr),
 			   ntohs(addr->in6.sin6_port), rpc->id, length);
 		rpc->completion_cookie = args.completion_cookie;
-		homa_message_out_init(rpc, msg->msg_iter.count);
+		result = homa_message_out_init(rpc, msg->msg_iter.count);
+		if (result)
+			goto error;
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.granted == 0)
 			homa_xmit_start_msg(rpc, msg->msg_iter.count);
@@ -1370,7 +1365,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		rpc->state = RPC_OUTGOING;
 
-		homa_message_out_init(rpc, msg->msg_iter.count);
+		result = homa_message_out_init(rpc, msg->msg_iter.count);
+		if (result)
+			goto error;
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.granted == 0)
 			homa_xmit_start_msg(rpc, msg->msg_iter.count);
@@ -1568,7 +1565,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		 */
 		rpc->msgin.num_bpages = 0;
 		if (homa_is_client(rpc->id)) {
-			homa_peer_add_ack(rpc);
+			homa_route_add_ack(rpc);
 			homa_rpc_end(rpc);
 		} else {
 			rpc->state = RPC_IN_SERVICE;
@@ -1916,9 +1913,11 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
  * that depend on the modified value.
  * @table:    sysctl table describing value to be read or written.
  * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space of the input/output data.
- * @lenp:     Not exactly sure.
- * @ppos:     Not exactly sure.
+ * @buffer:   Address in kernel space of the input/output data.
+ * @lenp:     Points to available space in buffer; must be modified to hold
+ *            number of bytes actually read or written.
+ * @ppos:     File pointer; must be incremented by number of bytes read
+ *            or written.
  *
  * Return: 0 for success, nonzero for error.
  */
@@ -1937,6 +1936,50 @@ int homa_dointvec(const struct ctl_table *table, int write,
 
 	result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
 	if (write) {
+		/* Clamp values to appropriate ranges to avoid errors. */
+		if (homa->accept_bits < 0)
+			homa->accept_bits = 0;
+		if (homa->bpage_lease_usecs < 0)
+			homa->bpage_lease_usecs = 0;
+		/* busy_usecs:          no constraints */
+		/* cutoff_version:      no constraints */
+		/* dead_frags_limit:    no constraints */
+		if (homa->drop_bits < 0)
+			homa->drop_bits = 0;
+		/* gro_busy_usecs:      no constraints */
+		/* gro_policy:          no constraints */
+		/* gso_force_software:  no constraints */
+		/* hijack_tcp:          no constraints */
+		if (homa->link_mbps < 1)
+			homa->link_mbps = 1;
+		/* max_dead_frags:      no constraints */
+		if (homa->max_gro_skbs < 1)
+			homa->max_gro_skbs = 1;
+		/* max_gso_size:        no constraints */
+		if (homa->max_sched_prio < 0)
+			homa->max_sched_prio = 0;
+		/* next_id:             no constraints */
+		if (homa->num_priorities < 1)
+			homa->num_priorities = 1;
+		if (homa->num_priorities > HOMA_MAX_PRIORITIES)
+			homa->num_priorities = HOMA_MAX_PRIORITIES;
+		if (homa->poll_usecs < 0)
+			homa->poll_usecs = 0;
+		/* priority_map:        no constraints */
+		/* request_ack_ticks:   no constraints */
+		if (homa->resend_interval < 1)
+			homa->resend_interval = 1;
+		/* timeout_ticks:       no constraints */
+		if (homa->tx_page_frees_per_sec < 1)
+			homa->tx_page_frees_per_sec = 1;
+		if (homa->tx_page_pool_min_kb < 0)
+			homa->tx_page_pool_min_kb = 0;
+		if (homa->unsched_bytes < 0)
+			homa->unsched_bytes = 0;
+		/* unsched_cutoffs:     no constraints */
+		if (homa->wmem_max < 1000)
+			homa->wmem_max = 1000;
+
 		/* Update any information that is dependent on sysctl values
 		 * (don't worry about which value changed, just refresh all
 		 * dependent information).
@@ -2005,9 +2048,11 @@ int homa_dointvec(const struct ctl_table *table, int write,
  * processing.
  * @table:    sysctl table describing value to be read or written.
  * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space of the input/output data.
- * @lenp:     Not exactly sure.
- * @ppos:     Not exactly sure.
+ * @buffer:   Address in kernel space of the input/output data.
+ * @lenp:     Points to available space in buffer; must be modified to hold
+ *            number of bytes actually read or written.
+ * @ppos:     File pointer; must be incremented by number of bytes read
+ *            or written.
  *
  * Return: 0 for success, nonzero for error.
  */
@@ -2015,62 +2060,73 @@ int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
 			      void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct homa_offload_core *offload_core;
-	struct ctl_table table_copy;
-	int max_values, *values;
-	int result, i;
+	int i, err, out_len;
+	char *p;
 
-	max_values = (NUM_GEN3_SOFTIRQ_CORES + 1) * nr_cpu_ids;
-	values = kmalloc_array(max_values, sizeof(int), GFP_KERNEL_ACCOUNT);
-	if (!values)
-		return -ENOMEM;
+	if (*ppos != 0) {
+		*lenp = 0;
+		return 0;
+	}
 
-	table_copy = *table;
-	table_copy.data = values;
+	err = 0;
 	if (write) {
-		/* First value is core id, others are contents of its
-		 * gen3_softirq_cores.
+		/* Note: buffer is a temporary copy that we can modify. */
+
+		/* Each iteration of this loop scans the information for
+		 * one core.
 		 */
-		for (i = 0; i < max_values ; i++)
-			values[i] = -1;
-		table_copy.maxlen = max_values;
-		result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
-		if (result != 0)
-			goto done;
-		for (i = 0; i < max_values;
-				i += NUM_GEN3_SOFTIRQ_CORES + 1) {
-			int j;
+		p = buffer;
+		while (1) {
+			int core;
 
-			if (values[i] < 0)
-				break;
-			offload_core = &per_cpu(homa_offload_core, values[i]);
-			for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++)
-				offload_core->gen3_softirq_cores[j] =
-						values[i +  j + 1];
-		}
-	} else {
-		/* Read: return values from all of the cores. */
-		int *dst;
+			err = next_int_from_string(&p, &core);
+			if (err != 0)
+				goto write_done;
+			if (core >= nr_cpu_ids) {
+				err = -EINVAL;
+				goto write_done;
+			}
+			offload_core = &per_cpu(homa_offload_core, core);
 
-		table_copy.maxlen = 0;
-		dst = values;
-		for (i = 0; i < nr_cpu_ids; i++) {
-			int j;
+			for (i = 0; i < NUM_GEN3_SOFTIRQ_CORES; i++) {
+				int value;
 
-			*dst = i;
-			dst++;
-			table_copy.maxlen += sizeof(int);
-			offload_core = &per_cpu(homa_offload_core, i);
-			for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++) {
-				*dst = offload_core->gen3_softirq_cores[j];
-				dst++;
-				table_copy.maxlen += sizeof(int);
+				err = next_int_from_string(&p, &value);
+				if (err != 0)
+					goto write_done;
+				offload_core->gen3_softirq_cores[i] = value;
 			}
 		}
-		result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
+write_done:
+		if (p)
+			*lenp = p - (char *)buffer;
+		*ppos += *lenp;
+		return err == -ENOMSG ? 0 : err;
 	}
-done:
-	kfree(values);
-	return result;
+
+	/* Read: return values from all of the cores. */
+	p = buffer;
+	out_len = 0;
+	for (i = 0; i < nr_cpu_ids; i++) {
+		int j;
+
+		offload_core = &per_cpu(homa_offload_core, i);
+		if (i != 0)
+			out_len += snprintf(p + out_len, *lenp - out_len, " ");
+		out_len += snprintf(p + out_len, *lenp - out_len, "%d", i);
+		for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++)
+			out_len += snprintf(p + out_len, *lenp - out_len,
+				    	    " %d",
+					    offload_core->gen3_softirq_cores[j]);
+	}
+	out_len += snprintf(p + out_len, *lenp - out_len, "\n");
+	if (out_len < *lenp)
+		*lenp = out_len;
+	else
+		/* snprintf used the last byte for a NULL terminator. */
+		*lenp -= 1;
+	*ppos += *lenp;
+	return err;
 }
 #endif /* See strip.py */
 

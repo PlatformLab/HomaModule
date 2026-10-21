@@ -27,15 +27,23 @@ struct homa_metrics_output homa_mout;
  */
 int homa_metrics_init(void)
 {
+	kuid_t root_uid = KUIDT_INIT(0);
+	kgid_t root_gid = KGIDT_INIT(0);
+
+	/* The metrics file (/proc/homa_metrics) restricts access to
+	 * root only, since it contains information that is private to
+	 * a network namespace.
+	 */
 	mutex_init(&homa_mout.mutex);
 	homa_mout.output = NULL;
-	homa_mout.dir_entry = proc_create("homa_metrics", 0444,
+	homa_mout.dir_entry = proc_create("homa_metrics", 0400,
 					  init_net.proc_net,
 					  &homa_metrics_ops);
 	if (!homa_mout.dir_entry) {
 		pr_err("couldn't create /proc/net/homa_metrics\n");
 		return -ENOMEM;
 	}
+	proc_set_user(homa_mout.dir_entry, root_uid, root_gid);
 	return 0;
 }
 
@@ -376,10 +384,10 @@ char *homa_metrics_print(void)
 		  "Socket lock misses\n");
 		M("socket_lock_miss_cycles", m->socket_lock_miss_cycles,
 		  "Time lost waiting for socket locks\n");
-		M("peer_ack_lock_misses", m->peer_ack_lock_misses,
-		  "Misses on peer ack locks\n");
-		M("peer_ack_lock_miss_cycles", m->peer_ack_lock_miss_cycles,
-		  "Time lost waiting for peer ack locks\n");
+		M("route_ack_lock_misses", m->route_ack_lock_misses,
+		  "Misses on route ack locks\n");
+		M("route_ack_lock_miss_cycles", m->route_ack_lock_miss_cycles,
+		  "Time lost waiting for route ack locks\n");
 		M("grant_locks", m->grant_locks,
 		  "Grant lock acquisitions\n");
 		M("grant_lock_misses", m->grant_lock_misses,
@@ -401,7 +409,7 @@ char *homa_metrics_print(void)
 		M("reaper_calls", m->reaper_calls,
 		  "Reaper invocations that were not disabled\n");
 		M("ack_overflows", m->ack_overflows,
-		  "Explicit ACKs sent because peer->acks was full\n");
+		  "Explicit ACKs sent because route->acks was full\n");
 		M("ignored_need_acks", m->ignored_need_acks,
 		  "NEED_ACKs ignored because RPC result not yet received\n");
 		M("bpool_lock_misses", m->bpool_lock_misses,

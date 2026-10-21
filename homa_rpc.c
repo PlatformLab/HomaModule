@@ -26,7 +26,7 @@
  */
 struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 				       const union sockaddr_in_union *dest)
-	__cond_acquires(crpc->bucket->lock)
+	__COND_ACQUIRES(crpc->bucket->lock)
 {
 	struct in6_addr dest_addr_as_ipv6 = canonical_ipv6_addr(dest);
 	struct homa_rpc_bucket *bucket;
@@ -112,7 +112,7 @@ error:
 struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 				       const struct in6_addr *source,
 				       struct homa_common_hdr *h)
-	__cond_acquires(srpc->bucket->lock)
+	__COND_ACQUIRES(srpc->bucket->lock)
 {
 	u64 id = homa_local_id(h->sender_id);
 	struct homa_rpc_bucket *bucket;
@@ -593,8 +593,8 @@ release:
 			rpc->route = NULL;
 		}
 		homa_pool_release(rpc);
-		homa_tx_pool_free(hsk->homa, rpc->msgout.num_frags,
-				  rpc->msgout.frags);
+		homa_tx_pool_free(hsk->homa, rpc->msgout.frag_nid,
+				  rpc->msgout.num_frags, rpc->msgout.frags);
 		WARN_ON(refcount_sub_and_test(rpc->msgout.frag_bytes,
 					      &hsk->sock.sk_wmem_alloc));
 		if (rpc->msgout.frags != &rpc->msgout.frag)
@@ -686,7 +686,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
  *            by invoking homa_rpc_unlock.
  */
 struct homa_rpc *homa_rpc_find_client(struct homa_sock *hsk, u64 id)
-	__cond_acquires(crpc->bucket->lock)
+	__COND_ACQUIRES(crpc->bucket->lock)
 {
 	struct homa_rpc_bucket *bucket = homa_client_rpc_bucket(hsk, id);
 	struct homa_rpc *crpc;
@@ -713,7 +713,7 @@ struct homa_rpc *homa_rpc_find_client(struct homa_sock *hsk, u64 id)
  */
 struct homa_rpc *homa_rpc_find_server(struct homa_sock *hsk,
 				      const struct in6_addr *saddr, u64 id)
-	__cond_acquires(srpc->bucket->lock)
+	__COND_ACQUIRES(srpc->bucket->lock)
 {
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 	struct homa_rpc *srpc;

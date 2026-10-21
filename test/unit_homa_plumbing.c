@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 #include "homa_impl.h"
+#include "homa_offload.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 #define KSELFTEST_NOT_MAIN 1
@@ -8,6 +9,8 @@
 #include "ccutils.h"
 #include "mock.h"
 #include "utils.h"
+
+extern struct ctl_table homa_ctl_table[];
 
 FIXTURE(homa_plumbing) {
 	struct in6_addr client_ip[1];
@@ -221,7 +224,7 @@ TEST_F(homa_plumbing, homa_net_exit__free_route)
 
 TEST_F(homa_plumbing, homa_bind__version_mismatch)
 {
-	struct sockaddr addr = {};
+	struct SOCKADDR addr = {};
 	struct socket sock = {};
 	int result;
 
@@ -231,7 +234,7 @@ TEST_F(homa_plumbing, homa_bind__version_mismatch)
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	addr.sa_family = AF_INET6;
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr, sizeof(addr));
+	result = homa_bind(&sock, (struct SOCKADDR *)&addr, sizeof(addr));
 	EXPECT_EQ(EAFNOSUPPORT, -result);
 	EXPECT_STREQ("address family in bind address didn't match socket",
 		     self->hsk.error_msg);
@@ -249,7 +252,7 @@ TEST_F(homa_plumbing, homa_bind__ipv6_address_too_short)
 
 	addr.in6.sin6_family = AF_INET6;
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in6)-1);
+	result = homa_bind(&sock, (struct SOCKADDR *)&addr.sa, sizeof(addr.in6)-1);
 	EXPECT_EQ(EINVAL, -result);
 	EXPECT_STREQ("ipv6 address too short", self->hsk.error_msg);
 }
@@ -268,7 +271,7 @@ TEST_F(homa_plumbing, homa_bind__ipv6_ok)
 	addr.in6.sin6_family = AF_INET6;
 	addr.in6.sin6_port = htons(123);
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in6));
+	result = homa_bind(&sock, (struct SOCKADDR *)&addr.sa, sizeof(addr.in6));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(123, self->hsk.port);
 	EXPECT_EQ(1, self->hsk.is_server);
@@ -286,7 +289,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_address_too_short)
 
 	addr.in4.sin_family = AF_INET;
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in4)-1);
+	result = homa_bind(&sock, (struct SOCKADDR *)&addr.sa, sizeof(addr.in4)-1);
 	EXPECT_EQ(EINVAL, -result);
 	EXPECT_STREQ("ipv4 address too short", self->hsk.error_msg);
 }
@@ -305,7 +308,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 	addr.in4.sin_family = AF_INET;
 	addr.in4.sin_port = htons(345);
 	sock.sk = &self->hsk.inet.sk;
-	result = homa_bind(&sock, &addr.sa, sizeof(addr.in4));
+	result = homa_bind(&sock, (struct SOCKADDR *)&addr.sa, sizeof(addr.in4));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(345, self->hsk.port);
 	EXPECT_EQ(1, self->hsk.is_server);
@@ -977,6 +980,14 @@ TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_alloc_client)
 		     self->hsk.error_msg);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_message_out_init_for_request)
+{
+	mock_mtu = 50;
+	EXPECT_EQ(EHOSTUNREACH, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_STREQ("route has MTU too small for Homa", self->hsk.error_msg);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_sendmsg__cant_update_user_arguments)
 {
 	mock_copy_to_user_errors = 1;
@@ -1076,6 +1087,20 @@ TEST_F(homa_plumbing, homa_sendmsg__response_wrong_state)
 		     self->hsk.error_msg);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_message_out_init_for_response)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 2000, 100);
+
+	mock_mtu = 50;
+	self->sendmsg_args.id = self->server_id;
+	EXPECT_EQ(EHOSTUNREACH, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_STREQ("route has MTU too small for Homa", self->hsk.error_msg);
+	EXPECT_EQ(RPC_DEAD, srpc->state);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_for_scheduled_response)
 {
@@ -1393,16 +1418,16 @@ TEST_F(homa_plumbing, homa_recvmsg__add_ack)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->server_port,
 			self->client_id, 100, 2000);
-	struct homa_peer *peer;
+	struct homa_route *route;
 
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
 
-	peer = crpc->route->peer;
+	route = crpc->route;
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
-	EXPECT_EQ(1, peer->num_acks);
+	EXPECT_EQ(1, route->num_acks);
 }
 TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 {
@@ -1415,7 +1440,7 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-	EXPECT_EQ(0, srpc->route->peer->num_acks);
+	EXPECT_EQ(0, srpc->route->num_acks);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
@@ -1834,4 +1859,209 @@ TEST_F(homa_plumbing, homa_poll__socket_readable)
 			       self->client_id, 100, 100);
 	EXPECT_EQ(POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM,
 		  homa_poll(NULL, &sock, NULL));
+}
+
+TEST_F(homa_plumbing, homa_dointvec__clamp_values)
+{
+	unit_sysctl(homa_dointvec, homa_ctl_table, "accept_bits", 10);
+	EXPECT_EQ(10, self->homa.accept_bits);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "accept_bits", -100);
+	EXPECT_EQ(0, self->homa.accept_bits);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "bpage_lease_usecs", 10);
+	EXPECT_EQ(10, self->homa.bpage_lease_usecs);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "bpage_lease_usecs", -100);
+	EXPECT_EQ(0, self->homa.bpage_lease_usecs);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "drop_bits", 10);
+	EXPECT_EQ(10, self->homa.drop_bits);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "drop_bits", -100);
+	EXPECT_EQ(0, self->homa.drop_bits);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "link_mbps", 100);
+	EXPECT_EQ(100, self->homa.link_mbps);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "link_mbps", -100);
+	EXPECT_EQ(1, self->homa.link_mbps);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "max_gro_skbs", 10);
+	EXPECT_EQ(10, self->homa.max_gro_skbs);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "max_gro_skbs", -100);
+	EXPECT_EQ(1, self->homa.max_gro_skbs);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "max_gro_skbs", 10);
+	EXPECT_EQ(10, self->homa.max_gro_skbs);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "max_gro_skbs", -100);
+	EXPECT_EQ(1, self->homa.max_gro_skbs);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "num_priorities", 10);
+	EXPECT_EQ(8, self->homa.num_priorities);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "num_priorities", -100);
+	EXPECT_EQ(1, self->homa.num_priorities);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "poll_usecs", 10);
+	EXPECT_EQ(10, self->homa.poll_usecs);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "poll_usecs", -100);
+	EXPECT_EQ(0, self->homa.poll_usecs);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "resend_interval", 10);
+	EXPECT_EQ(10, self->homa.resend_interval);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "resend_interval", -100);
+	EXPECT_EQ(1, self->homa.resend_interval);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "tx_page_frees_per_sec", 10);
+	EXPECT_EQ(10, self->homa.tx_page_frees_per_sec);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "tx_page_frees_per_sec", -100);
+	EXPECT_EQ(1, self->homa.tx_page_frees_per_sec);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "tx_page_pool_min_kb", 10);
+	EXPECT_EQ(10, self->homa.tx_page_pool_min_kb);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "tx_page_pool_min_kb", -100);
+	EXPECT_EQ(0, self->homa.tx_page_pool_min_kb);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "unsched_bytes", 10);
+	EXPECT_EQ(10, self->homa.unsched_bytes);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "unsched_bytes", -100);
+	EXPECT_EQ(0, self->homa.unsched_bytes);
+
+	unit_sysctl(homa_dointvec, homa_ctl_table, "wmem_max", 5000);
+	EXPECT_EQ(5000, self->homa.wmem_max);
+	unit_sysctl(homa_dointvec, homa_ctl_table, "wmem_max", 200);
+	EXPECT_EQ(1000, self->homa.wmem_max);
+}
+
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__write_basics)
+{
+	struct homa_offload_core *offload_core;
+	char buffer[100];
+	size_t length;
+	loff_t pos;
+
+	strcpy(buffer, "2 3 4 5 1 2 3 4");
+	length = strlen(buffer);
+	pos = 0;
+	EXPECT_EQ(0, homa_sysctl_softirq_cores(NULL, 1, buffer, &length, &pos));
+	EXPECT_EQ(15, length);
+	EXPECT_EQ(15, pos);
+	offload_core = &per_cpu(homa_offload_core, 2);
+	EXPECT_EQ(3, offload_core->gen3_softirq_cores[0]);
+	EXPECT_EQ(4, offload_core->gen3_softirq_cores[1]);
+	EXPECT_EQ(5, offload_core->gen3_softirq_cores[2]);
+	offload_core = &per_cpu(homa_offload_core, 1);
+	EXPECT_EQ(2, offload_core->gen3_softirq_cores[0]);
+	EXPECT_EQ(3, offload_core->gen3_softirq_cores[1]);
+	EXPECT_EQ(4, offload_core->gen3_softirq_cores[2]);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__nonzero_pos)
+{
+	char buffer[200];
+	size_t length;
+	loff_t pos;
+
+	length = sizeof(buffer);
+	buffer[0] = '\0';
+	pos = 1;
+
+	EXPECT_EQ(0, homa_sysctl_softirq_cores(NULL, 0, buffer, &length, &pos));
+	EXPECT_EQ(0, length);
+	EXPECT_EQ(1, pos);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__write_no_data)
+{
+	size_t length;
+	char buffer[100];
+	loff_t pos;
+
+	strcpy(buffer, "     ");
+	length = strlen(buffer);
+	pos = 0;
+	EXPECT_EQ(0, -homa_sysctl_softirq_cores(NULL, 1, buffer,
+						     &length, &pos));
+	EXPECT_EQ(5, length);
+	EXPECT_EQ(5, pos);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__write_bad_core)
+{
+	size_t length;
+	char buffer[100];
+	loff_t pos;
+
+	strcpy(buffer, "100 5 6 7");
+	length = strlen(buffer);
+	pos = 0;
+	EXPECT_EQ(EINVAL, -homa_sysctl_softirq_cores(NULL, 1, buffer,
+						     &length, &pos));
+	EXPECT_EQ(4, length);
+	EXPECT_EQ(4, pos);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__write_data_ends_in_middle_of_core)
+{
+	struct homa_offload_core *offload_core;
+	char buffer[100];
+	size_t length;
+	loff_t pos;
+
+	strcpy(buffer, "3 6");
+	length = strlen(buffer);
+	pos = 0;
+	offload_core = &per_cpu(homa_offload_core, 3);
+	memset(offload_core->gen3_softirq_cores, 0,
+	       sizeof(offload_core->gen3_softirq_cores));
+	EXPECT_EQ(0, homa_sysctl_softirq_cores(NULL, 1, buffer, &length, &pos));
+	EXPECT_EQ(3, length);
+	EXPECT_EQ(3, pos);
+	EXPECT_EQ(6, offload_core->gen3_softirq_cores[0]);
+	EXPECT_EQ(0, offload_core->gen3_softirq_cores[1]);
+	EXPECT_EQ(0, offload_core->gen3_softirq_cores[2]);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__read_basics)
+{
+	struct homa_offload_core *offload_core;
+	char buffer[200];
+	size_t length;
+	loff_t pos;
+
+	nr_cpu_ids = 2;
+	offload_core = &per_cpu(homa_offload_core, 0);
+	offload_core->gen3_softirq_cores[0] = 6;
+	offload_core->gen3_softirq_cores[1] = 7;
+	offload_core->gen3_softirq_cores[2] = 8;
+	offload_core = &per_cpu(homa_offload_core, 1);
+	offload_core->gen3_softirq_cores[0] = 9;
+	offload_core->gen3_softirq_cores[1] = 10;
+	offload_core->gen3_softirq_cores[2] = 11;
+
+	length = sizeof(buffer);
+	buffer[0] = '\0';
+	pos = 0;
+
+	EXPECT_EQ(0, homa_sysctl_softirq_cores(NULL, 0, buffer, &length, &pos));
+	EXPECT_STREQ("0 6 7 8 1 9 10 11\n", buffer);
+	EXPECT_EQ(strlen(buffer), length);
+	EXPECT_EQ(strlen(buffer), pos);
+}
+TEST_F(homa_plumbing, homa_sysctl_softirq_cores__read_out_of_space_in_buffer)
+{
+	struct homa_offload_core *offload_core;
+	char buffer[200];
+	size_t length;
+	loff_t pos;
+
+	nr_cpu_ids = 2;
+	offload_core = &per_cpu(homa_offload_core, 0);
+	offload_core->gen3_softirq_cores[0] = 6;
+	offload_core->gen3_softirq_cores[1] = 7;
+	offload_core->gen3_softirq_cores[2] = 8;
+	offload_core = &per_cpu(homa_offload_core, 1);
+	offload_core->gen3_softirq_cores[0] = 10;
+	offload_core->gen3_softirq_cores[1] = 11;
+	offload_core->gen3_softirq_cores[2] = 12;
+
+	length = 10;
+	buffer[0] = '\0';
+	pos = 0;
+
+	EXPECT_EQ(0, homa_sysctl_softirq_cores(NULL, 0, buffer, &length, &pos));
+	EXPECT_STREQ("0 6 7 8 1", buffer);
+	EXPECT_EQ(strlen(buffer), length);
+	EXPECT_EQ(strlen(buffer), pos);
 }

@@ -87,6 +87,18 @@ struct homa_sock;
 #include "homa_metrics.h"
 #endif /* See strip.py */
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#define __COND_ACQUIRES(lock) __cond_acquires(nonnull, lock)
+#else
+#define __COND_ACQUIRES(lock) __cond_acquires(lock)
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0)
+#define SOCKADDR sockaddr_unsized
+#else
+#define SOCKADDR sockaddr
+#endif
+
 /**
  * union sockaddr_in_union - Holds either an IPv4 or IPv6 address (smaller
  * and easier to use than sockaddr_storage).
@@ -143,7 +155,6 @@ struct homa {
 
 	/**
 	 * @tx_pools: One tx_page_pool for each NUMA node on the machine.
-	 * If there are no cores for a node, then its value is NULL.
 	 */
 	struct homa_tx_pool *tx_pools[MAX_NUMNODES];
 
@@ -274,12 +285,6 @@ struct homa {
 	 * @timeout_ticks: abort an RPC if its silent_ticks reaches this value.
 	 */
 	int timeout_ticks;
-
-	/**
-	 * @timeout_resends: Assume that a server is dead if it has not
-	 * responded after this many RESENDs have been sent to it.
-	 */
-	int timeout_resends;
 
 	/**
 	 * @request_ack_ticks: How many timer ticks we'll wait for the
@@ -644,8 +649,9 @@ extern const u16 homa_header_lengths[];
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);
 enum skb_drop_reason homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
-int      homa_bind(struct socket *sk, struct sockaddr *addr,
+int      homa_bind(struct socket *sk, struct SOCKADDR *addr,
 		   int addr_len);
+void     homa_busy_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_close(struct sock *sock, long timeout);
 int      homa_copy_to_user(struct homa_rpc *rpc);
 void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
@@ -664,7 +670,7 @@ int      homa_init(struct homa *homa);
 int      homa_ioc_info(struct socket *sock, unsigned long arg);
 int      homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
 int      homa_load(void);
-void     homa_message_out_init(struct homa_rpc *rpc, int length);
+int      homa_message_out_init(struct homa_rpc *rpc, int length);
 void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			   struct homa_rpc *rpc);
 void     homa_net_destroy(struct homa_net *hnet);
@@ -690,6 +696,7 @@ int      homa_socket(struct sock *sk);
 int      homa_softirq(struct sk_buff *skb);
 void     homa_spin(int ns);
 void     homa_timer(struct homa *homa);
+void     homa_timer_check_ack(struct homa_rpc *rpc);
 void     homa_timer_check_rpc(struct homa_rpc *rpc);
 int      homa_timer_main(void *transport);
 int      homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
@@ -707,6 +714,7 @@ int      __homa_xmit_control(void *contents, size_t length,
 			     struct homa_route *route, struct homa_sock *hsk);
 void     homa_xmit_data(struct homa_rpc *rpc);
 void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
+int      next_int_from_string(char **p, int *value);
 
 #ifndef __STRIP__ /* See strip.py */
 void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);

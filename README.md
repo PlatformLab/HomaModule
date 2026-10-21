@@ -23,6 +23,26 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
 - Please contact me if you have any problems using this repo; I'm happy to
   provide advice and support.
 
+- The head is known to work under Linux 6.17.8; this is where current
+  development occurs. In addition, the head has recently been updated to
+  compile under Linux 7.0.14 (these changes are not actively supported, so
+  they may bit-rot over time; please submit fixes if that happens).
+  The branches `rhel8` and `rhel9.5` are known to
+  run on the corresdponding versions of Red Hat Enterprise Linux and are
+  relatively up to date. They are "officially supported" in that I plan to
+  backport changes from the main branch to them.
+
+- Other versions of Linux have not been tested and may require code changes
+  (typically this is easy to do). If you get Homa working on some other
+  version, please submit a pull request with the required code changes (I'll
+  try to include them, like the 7.0.14 changes, if that can be done in a
+  reasonably clean way).
+
+- In the past, Homa has run under several earlier versions of Linux. There is
+  a separate branch for each of these older versions, with names such as
+  linux_4.15.18. Older branches are generally out of date feature-wise:
+  recent commits have not been backported to them.
+
 - To build and install Homa, see instructions in `INSTALL.md`.
 
 - A collection of man pages is available in the "man" subdirectory. The API for

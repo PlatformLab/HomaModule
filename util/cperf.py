@@ -822,7 +822,7 @@ def run_experiment(name: str, clients: list[int], options: argparse.Namespace) -
         else:
             vlog("Recording initial metrics")
             for id in exp_nodes:
-                do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
+                do_subprocess(["ssh", "node%d" % (id), "sudo bin/metrics.py"])
     if options.protocol == "tcp" or options.protocol == "dctcp":
         log("Waiting for TCP to warm up...")
         time.sleep(10)
@@ -857,7 +857,8 @@ def run_experiment(name: str, clients: list[int], options: argparse.Namespace) -
             vlog("Recording final metrics from nodes %s" % (exp_nodes))
             for id in exp_nodes:
                 f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
-                subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
+                subprocess.run(["ssh", "node%d" % (id), "sudo bin/metrics.py"],
+                        stdout=f)
                 f.close()
             shutil.copyfile("%s/%s-%d.metrics" %
                     (options.log_dir, name, options.servers[0]),
@@ -1013,7 +1014,7 @@ def run_experiments(*args: argparse.Namespace) -> None:
             vlog("Skipping metrics initialization (Homa is stripped)")
         else:
             vlog("Initializing metrics")
-            do_ssh(["metrics.py > /dev/null"], homa_nodes)
+            do_ssh(["sudo bin/metrics.py > /dev/null"], homa_nodes)
     do_cmd("dump_times /dev/null", all_nodes)
     if homa_nodes and exp.tt_freeze and not options.stripped:
         log("Unfreezing timetraces on %s" % (all_nodes))
@@ -1039,7 +1040,8 @@ def run_experiments(*args: argparse.Namespace) -> None:
             for id in homa_nodes:
                 f = open("%s/%s-%d.metrics" % (exp.log_dir, metrics_name, id),
                         'w')
-                subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
+                subprocess.run(["ssh", "node%d" % (id), "sudo bin/metrics.py"],
+                        stdout=f)
                 f.close()
             shutil.copyfile("%s/%s-%d.metrics" %
                     (exp.log_dir, metrics_name, homa_clients[0]),
