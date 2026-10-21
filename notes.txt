@@ -1,6 +1,9 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Why doesn't homa_recvmsg call homa_pool_check_waiting after
+  homa_pool_free_bufs?
+
 * Notes for new granting mechanism:
   * Compile with __STRIP__
   * Reduce tt_record calls in homa_grant.c?
