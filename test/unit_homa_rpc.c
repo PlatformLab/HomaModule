@@ -1422,6 +1422,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__basics)
 			self->server_port, self->client_id, 1000, 20000);
 	struct homa_rpc_info info;
 
+	mock_set_ipv6(&self->hsk);
 	crpc->completion_cookie = 1111;
 	crpc->msgout.priority = 4;
 
