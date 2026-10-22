@@ -180,6 +180,15 @@ TEST_F(homa_incoming, homa_message_in_init__negative_message_length)
 	ASSERT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(EINVAL, -PTR_ERR(srpc));
 }
+TEST_F(homa_incoming, homa_message_in_init__zero_message_length)
+{
+	struct homa_rpc *srpc;
+
+	self->data.msg_length = htonl(0);
+	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip, &self->data.common);
+	ASSERT_TRUE(IS_ERR(srpc));
+	EXPECT_EQ(EINVAL, -PTR_ERR(srpc));
+}
 TEST_F(homa_incoming, homa_message_in_init__no_buffer_region)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
