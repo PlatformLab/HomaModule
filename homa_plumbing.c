@@ -82,6 +82,33 @@ static const struct proto_ops homav6_proto_ops = {
 	.set_peek_off	   = sk_set_peek_off,
 };
 
+#ifdef HOMA_RECVMSG_NO_ADDR_LEN
+/**
+ * homa_recvmsg_proto() - Adapts homa_recvmsg to kernels where
+ * proto.recvmsg has no addr_len argument: the handler must set
+ * msg->msg_namelen itself.
+ * @sk:      Socket on which the system call was invoked.
+ * @msg:     Controlling information for the receive.
+ * @len:     Total bytes of space available in msg->msg_iov.
+ * @flags:   Flags from system call.
+ * Return:   Same as homa_recvmsg.
+ */
+static int homa_recvmsg_proto(struct sock *sk, struct msghdr *msg,
+			      size_t len, int flags)
+{
+	int addr_len = 0;
+	int result;
+
+	result = homa_recvmsg(sk, msg, len, flags, &addr_len);
+	if (result >= 0)
+		msg->msg_namelen = addr_len;
+	return result;
+}
+#define HOMA_PROTO_RECVMSG homa_recvmsg_proto
+#else
+#define HOMA_PROTO_RECVMSG homa_recvmsg
+#endif
+
 /* This structure also defines functions that handle various operations
  * on Homa sockets. However, these functions are lower-level than those
  * in homa_proto_ops: they are specific to the PF_INET or PF_INET6
@@ -98,7 +125,7 @@ static struct proto homa_prot = {
 	.setsockopt	   = homa_setsockopt,
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
-	.recvmsg	   = homa_recvmsg,
+	.recvmsg	   = HOMA_PROTO_RECVMSG,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
 	.obj_size	   = sizeof(struct homa_sock),
@@ -115,7 +142,7 @@ static struct proto homav6_prot = {
 	.setsockopt	   = homa_setsockopt,
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
-	.recvmsg	   = homa_recvmsg,
+	.recvmsg	   = HOMA_PROTO_RECVMSG,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
 	.obj_size	   = sizeof(struct homa_v6_sock),
