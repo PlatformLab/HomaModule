@@ -1,0 +1,44 @@
+# Build homa.ko and run the unit tests against a configured Linux tree.
+name: CI
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    env:
+      LINUX_VERSION: 6.17.8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install kernel build dependencies
+        run: sudo apt-get update && sudo apt-get install -y flex bison bc libelf-dev libssl-dev
+
+      # The unit tests compile against kernel headers, which need a
+      # configured tree; modules_prepare is enough, no vmlinux.
+      - name: Prepare Linux ${{ env.LINUX_VERSION }}
+        run: |
+          curl -sSL https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$LINUX_VERSION.tar.xz | tar xJ -C $RUNNER_TEMP
+          cd $RUNNER_TEMP/linux-$LINUX_VERSION
+          make defconfig
+          # Options the unit tests' mocks assume.
+          scripts/config -e PREEMPT -e DEBUG_PREEMPT -e SECURITY -e SECURITY_NETWORK -d RANDOM_KMALLOC_CACHES
+          make olddefconfig
+          make -j$(nproc) modules_prepare
+          echo "KDIR=$PWD" >> $GITHUB_ENV
+
+      # Without vmlinux there is no Module.symvers, so modpost can't
+      # resolve kernel symbols; report those as warnings.
+      - name: Build homa.ko
+        run: make KBUILD_MODPOST_WARN=1
+
+      # Build only: running these tools needs a loaded Homa module.
+      - name: Build util
+        run: make -C util -j$(nproc)
+
+      - name: Unit tests (IPv6)
+        run: make -C test -j$(nproc) unit && cd test && ./unit
+
+      - name: Unit tests (IPv4)
+        if: ${{ !cancelled() }}
+        run: cd test && ./unit --ipv4

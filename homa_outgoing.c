@@ -342,9 +342,9 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 		shinfo->gso_segs = num_segs;
 		shinfo->gso_size = rpc->msgout.max_seg_data +
 				   sizeof(struct homa_seg_hdr);
-		shinfo->gso_type = (hsk->inet.sk.sk_family ==
-				    AF_INET6) ? SKB_GSO_TCPV6 :
-				    SKB_GSO_TCPV4;
+		shinfo->gso_type =
+			ipv6_addr_v4mapped(&rpc->route->peer->addr) ?
+			SKB_GSO_TCPV4 : SKB_GSO_TCPV6;
 
 #ifndef __STRIP__ /* See strip.py */
 		/* To force software GSO, ask for a gso_type whose features the
