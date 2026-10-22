@@ -169,6 +169,16 @@ TEST_F(homa_incoming, homa_message_in_init__basics)
 	EXPECT_EQ(1, crpc->msgin.num_bpages);
 }
 #endif /* See strip.py */
+TEST_F(homa_incoming, homa_message_in_init__zero_message_length)
+{
+	struct homa_rpc *srpc;
+
+	self->data.msg_length = htonl(0);
+	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip,
+				     &self->data.common);
+	ASSERT_TRUE(IS_ERR(srpc));
+	EXPECT_EQ(EINVAL, -PTR_ERR(srpc));
+}
 TEST_F(homa_incoming, homa_message_in_init__message_too_long)
 {
 	struct homa_rpc *srpc;
