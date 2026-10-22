@@ -76,6 +76,23 @@ int homa_offload_end(void)
  */
 void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
+	struct rps_sock_flow_table *table;
+	rps_tag_ptr tag_ptr;
+	u32 hash, index;
+
+	rcu_read_lock();
+	tag_ptr = READ_ONCE(net_hotdata.rps_sock_flow_table);
+	if (tag_ptr) {
+		table = rps_tag_to_table(tag_ptr);
+		hash = cpu + net_hotdata.rps_cpu_mask + 1;
+		index = hash & rps_tag_to_mask(tag_ptr);
+		if (READ_ONCE(table[index].ent) != hash)
+			WRITE_ONCE(table[index].ent, hash);
+		__skb_set_sw_hash(skb, hash, false);
+	}
+	rcu_read_unlock();
+#else
 	struct rps_sock_flow_table *sock_flow_table;
 	u32 hash, index;
 
@@ -89,6 +106,7 @@ void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 		__skb_set_sw_hash(skb, hash, false);
 	}
 	rcu_read_unlock();
+#endif
 }
 
 /**

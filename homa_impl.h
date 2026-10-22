@@ -99,6 +99,11 @@ struct homa_sock;
 #define SOCKADDR sockaddr
 #endif
 
+/* Linux 7.1 removed the addr_len argument from proto.recvmsg. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
+#define HOMA_RECVMSG_NO_ADDR_LEN
+#endif
+
 /**
  * union sockaddr_in_union - Holds either an IPv4 or IPv6 address (smaller
  * and easier to use than sockaddr_storage).
