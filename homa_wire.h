@@ -167,7 +167,7 @@ struct homa_common_hdr {
 	 * @checksum: occupies the same bytes as the checksum in a TCP
 	 * header. Set by Homa only during TCP hijacking.
 	 */
-	__be16 checksum;
+	__sum16 checksum;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
