@@ -860,10 +860,10 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 	struct homa_rpc_info rinfo;
 	struct homa_info hinfo;
 	struct homa_rpc *rpc;
+	char __user *dst;
 	int result = 0;
 	u64 bytes_avl;
 	int num_rpcs;
-	char *dst;
 	int i;
 
 	if (unlikely(copy_from_user(&hinfo, (void __user *)arg,
@@ -878,7 +878,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 	}
 	hinfo.bpool_avail_bytes = homa_pool_avail_bytes(hsk->buffer_pool);
 	hinfo.port = hsk->port;
-	dst = (char *)hinfo.rpc_info;
+	dst = u64_to_user_ptr(hinfo.rpc_info);
 	bytes_avl = hinfo.rpc_info_length;
 	hinfo.num_rpcs = 0;
 
@@ -940,8 +940,7 @@ int homa_ioc_info(struct socket *sock, unsigned long arg)
 		homa_rpc_get_info(rpc, &rinfo);
 		homa_rpc_unlock(rpc);
 		if (dst && bytes_avl >= sizeof(rinfo) && result == 0) {
-			if (copy_to_user((void __user *)dst, &rinfo,
-					 sizeof(rinfo))) {
+			if (copy_to_user(dst, &rinfo, sizeof(rinfo))) {
 				hsk->error_msg = "couldn't copy homa_rpc_info to user space: invalid or read-only address?";
 				result = -EFAULT;
 			}
@@ -1191,7 +1190,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = -EINVAL;
 		goto error;
 	}
-	if (unlikely(copy_from_user(&args, (void __user *)msg->msg_control,
+	if (unlikely(copy_from_user(&args, msg->msg_control_user,
 				    sizeof(args)))) {
 		hsk->error_msg = "invalid address for msg_control argument to sendmsg";
 		result = -EFAULT;
@@ -1267,7 +1266,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		args.id = rpc->id;
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_alloc_client. */
 
-		if (unlikely(copy_to_user((void __user *)msg->msg_control,
+		if (unlikely(copy_to_user(msg->msg_control_user,
 					  &args, sizeof(args)))) {
 			homa_rpc_lock(rpc);
 			hsk->error_msg = "couldn't update homa_sendmsg_args argument to sendmsg: read-only?";
@@ -1396,7 +1395,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		hsk->error_msg = "invalid msg_controllen in recvmsg";
 		return -EINVAL;
 	}
-	if (unlikely(copy_from_user(&control, (void __user *)msg->msg_control,
+	if (unlikely(copy_from_user(&control, msg->msg_control_user,
 				    sizeof(control)))) {
 		hsk->error_msg = "invalid address for msg_control argument to recvmsg";
 		return -EFAULT;
@@ -1542,7 +1541,7 @@ done:
 			break;
 	}
 
-	if (unlikely(copy_to_user((__force void __user *)msg->msg_control,
+	if (unlikely(copy_to_user(msg->msg_control_user,
 				  &control, sizeof(control)))) {
 		hsk->error_msg = "couldn't update homa_recvmsg_args argument to recvmsg: read-only?";
 		result = -EFAULT;
