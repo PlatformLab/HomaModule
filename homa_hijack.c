@@ -36,14 +36,13 @@ void homa_hijack_init(void)
 	tcp_net_offload = rcu_dereference(inet_offloads[IPPROTO_TCP]);
 	hook_tcp_net_offload = *tcp_net_offload;
 	hook_tcp_net_offload.callbacks.gro_receive = homa_hijack_gro_receive;
-	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
-			&hook_tcp_net_offload;
+	rcu_assign_pointer(inet_offloads[IPPROTO_TCP], &hook_tcp_net_offload);
 
 	tcp6_net_offload = rcu_dereference(inet6_offloads[IPPROTO_TCP]);
 	hook_tcp6_net_offload = *tcp6_net_offload;
 	hook_tcp6_net_offload.callbacks.gro_receive = homa_hijack_gro_receive;
-	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
-			&hook_tcp6_net_offload;
+	rcu_assign_pointer(inet6_offloads[IPPROTO_TCP],
+			   &hook_tcp6_net_offload);
 	rcu_read_unlock();
 }
 
@@ -57,11 +56,9 @@ void homa_hijack_end(void)
 	if (!tcp_net_offload)
 		return;
 	pr_notice("Homa cancelling TCP hijacking\n");
-	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
-			tcp_net_offload;
+	rcu_assign_pointer(inet_offloads[IPPROTO_TCP], tcp_net_offload);
 	tcp_net_offload = NULL;
-	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
-			tcp6_net_offload;
+	rcu_assign_pointer(inet6_offloads[IPPROTO_TCP], tcp6_net_offload);
 	tcp6_net_offload = NULL;
 }
 
