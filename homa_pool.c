@@ -582,14 +582,17 @@ void homa_pool_wakeup_rpc(struct homa_rpc *rpc)
 	}
 #endif /* See strip.py */
 
-	/* Unscheduled: must ask for the message to be retransmitted. Use
-	 * the next-to-highest priority level to provide a priority boost
+	/* Unscheduled: must ask for the message to be retransmitted. */
+	resend.offset = htonl(0);
+	resend.length = htonl(rpc->msgin.length);
+
+#ifndef __STRIP__ /* See strip.py */
+	/* Use the next-to-highest priority level to provide a priority boost
 	 * without interfering with the highest priority traffic such as
 	 * control packets.
 	 */
-	resend.offset = htonl(0);
-	resend.length = htonl(rpc->msgin.length);
 	resend.priority = homa_high_priority(rpc->hsk->homa);
+#endif /* See strip.py */
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 }
 
