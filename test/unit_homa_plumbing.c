@@ -1336,6 +1336,7 @@ TEST_F(homa_plumbing, homa_recvmsg__MSG_DONT_WAIT)
 }
 TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 {
+	char zeros[sizeof(self->addr.in4.sin_zero)] = {};
 	struct homa_rpc *crpc;
 	u32 pages[2];
 
@@ -1351,6 +1352,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
+	memset(&self->addr, 0xff, sizeof(self->addr));
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
@@ -1359,6 +1361,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	EXPECT_EQ(AF_INET, self->addr.in4.sin_family);
 	EXPECT_STREQ("1.2.3.4", homa_print_ipv4_addr(
 			self->addr.in4.sin_addr.s_addr));
+	EXPECT_EQ(0, memcmp(self->addr.in4.sin_zero, zeros, sizeof(zeros)));
 	EXPECT_EQ(sizeof(struct sockaddr_in),
 			self->recvmsg_hdr.msg_namelen);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -1386,6 +1389,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
+	memset(&self->addr, 0xff, sizeof(self->addr));
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
@@ -1394,10 +1398,27 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 	EXPECT_EQ(AF_INET6, self->addr.in6.sin6_family);
 	EXPECT_STREQ("[1::3:5:7]", homa_print_ipv6_addr(
 			&self->addr.in6.sin6_addr));
+	EXPECT_EQ(0, self->addr.in6.sin6_flowinfo);
+	EXPECT_EQ(0, self->addr.in6.sin6_scope_id);
 	EXPECT_EQ(sizeof(struct sockaddr_in6),
 			self->recvmsg_hdr.msg_namelen);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
+}
+TEST_F(homa_plumbing, homa_recvmsg__no_msg_name)
+{
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			100, 2000);
+	EXPECT_NE(NULL, crpc);
+
+	self->recvmsg_hdr.msg_name = NULL;
+	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, 0, &self->recvmsg_hdr.msg_namelen));
+	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
+	EXPECT_EQ(0, self->recvmsg_hdr.msg_namelen);
 }
 TEST_F(homa_plumbing, homa_recvmsg__rpc_has_error)
 {

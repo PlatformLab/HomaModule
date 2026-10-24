@@ -1560,21 +1560,26 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		memcpy(control.bpage_offsets, rpc->msgin.bpage_offsets,
 		       sizeof(rpc->msgin.bpage_offsets));
 	}
-	memset(msg->msg_name, 0, msg->msg_namelen);
-	if (sk->sk_family == AF_INET6) {
-		struct sockaddr_in6 *in6 = msg->msg_name;
+	/* Multishot recvmsg leaves msg_name NULL when namelen is 0. */
+	if (msg->msg_name) {
+		if (sk->sk_family == AF_INET6) {
+			struct sockaddr_in6 *in6 = msg->msg_name;
 
-		in6->sin6_family = AF_INET6;
-		in6->sin6_port = htons(rpc->dport);
-		in6->sin6_addr = rpc->route->peer->addr;
-		*addr_len = sizeof(*in6);
-	} else {
-		struct sockaddr_in *in4 = msg->msg_name;
+			memset(in6, 0, sizeof(*in6));
+			in6->sin6_family = AF_INET6;
+			in6->sin6_port = htons(rpc->dport);
+			in6->sin6_addr = rpc->route->peer->addr;
+			*addr_len = sizeof(*in6);
+		} else {
+			struct sockaddr_in *in4 = msg->msg_name;
 
-		in4->sin_family = AF_INET;
-		in4->sin_port = htons(rpc->dport);
-		in4->sin_addr.s_addr = ipv6_to_ipv4(rpc->route->peer->addr);
-		*addr_len = sizeof(*in4);
+			memset(in4, 0, sizeof(*in4));
+			in4->sin_family = AF_INET;
+			in4->sin_port = htons(rpc->dport);
+			in4->sin_addr.s_addr =
+				ipv6_to_ipv4(rpc->route->peer->addr);
+			*addr_len = sizeof(*in4);
+		}
 	}
 
 	if (result < 0) {
