@@ -87,16 +87,16 @@ struct homa_sock;
 #include "homa_metrics.h"
 #endif /* See strip.py */
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
-#define __COND_ACQUIRES(lock) __cond_acquires(nonnull, lock)
-#else
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
 #define __COND_ACQUIRES(lock) __cond_acquires(lock)
+#else
+#define __COND_ACQUIRES(lock) __cond_acquires(nonnull, lock)
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0)
-#define SOCKADDR sockaddr_unsized
-#else
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)
 #define SOCKADDR sockaddr
+#else
+#define SOCKADDR sockaddr_unsized
 #endif
 
 /**
