@@ -1032,6 +1032,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 
 	if (optname == SO_HOMA_RCVBUF) {
 		struct homa_rcvbuf_args args;
+		char probe;
 #ifndef __STRIP__ /* See strip.py */
 		u64 start = homa_clock();
 #endif /* See strip.py */
@@ -1047,10 +1048,13 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 		}
 
 		/* Do a trivial test to make sure we can at least write the
-		 * first page of the region.
+		 * first page of the region. Write back the byte that is
+		 * already there, so the region is unchanged if we fail below.
 		 */
-		if (copy_to_user(u64_to_user_ptr(args.start), &args,
-				 sizeof(args))) {
+		if (copy_from_user(&probe, u64_to_user_ptr(args.start),
+				   sizeof(probe)) ||
+		    copy_to_user(u64_to_user_ptr(args.start), &probe,
+				 sizeof(probe))) {
 			hsk->error_msg = "receive buffer region is not writable";
 			return -EFAULT;
 		}

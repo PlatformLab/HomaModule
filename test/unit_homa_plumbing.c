@@ -660,8 +660,11 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_copy_from_sockptr_fails)
 }
 TEST_F(homa_plumbing, homa_setsockopt__recvbuf_region_not_writable)
 {
-	struct homa_rcvbuf_args args = {0x100000, 5*HOMA_BPAGE_SIZE};
+	struct homa_rcvbuf_args args;
+	char buffer[100];
 
+	args.start = (uintptr_t)buffer;
+	args.length = 5*HOMA_BPAGE_SIZE;
 	self->optval.user = &args;
 	mock_copy_to_user_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
@@ -669,6 +672,22 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_region_not_writable)
 			sizeof(struct homa_rcvbuf_args)));
 	EXPECT_STREQ("receive buffer region is not writable",
 		     self->hsk.error_msg);
+}
+TEST_F(homa_plumbing, homa_setsockopt__recvbuf_region_unchanged_after_error)
+{
+	struct homa_rcvbuf_args args;
+	char buffer[20];
+
+	memset(buffer, 'x', sizeof(buffer) - 1);
+	buffer[sizeof(buffer) - 1] = 0;
+	args.start = (uintptr_t)(buffer + 1);
+	args.length = 64*HOMA_BPAGE_SIZE;
+	self->optval.user = &args;
+	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
+			SO_HOMA_RCVBUF, self->optval,
+			sizeof(struct homa_rcvbuf_args)));
+	EXPECT_STREQ("buffer pool is not page aligned", self->hsk.error_msg);
+	EXPECT_STREQ("xxxxxxxxxxxxxxxxxxx", buffer);
 }
 TEST_F(homa_plumbing, homa_setsockopt__recvbuf_success)
 {
