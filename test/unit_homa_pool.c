@@ -937,9 +937,28 @@ TEST_F(homa_pool, homa_pool_unlink)
 	ASSERT_NE(NULL, crpc);
 	EXPECT_FALSE(list_empty(&crpc->buf_links));
 
+	mock_trylock_errors = 1;
 	homa_pool_unlink(crpc);
 	EXPECT_TRUE(list_empty(&crpc->buf_links));
+	EXPECT_TRUE(list_empty(&pool->waiting_for_bufs));
+#ifndef __STRIP__ /* See strip.py */
+	EXPECT_EQ(1, homa_metrics_per_cpu()->bpool_lock_misses);
+#endif /* See strip.py */
 	atomic_set(&pool->free_bpages, saved_free);
+}
+TEST_F(homa_pool, homa_pool_unlink__not_waiting_for_buffers)
+{
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			       &self->server_ip, 4000, 98, 1000, 50000);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_TRUE(list_empty(&crpc->buf_links));
+
+	mock_trylock_errors = 1;
+	homa_pool_unlink(crpc);
+	EXPECT_EQ(1, mock_trylock_errors);
+	mock_trylock_errors = 0;
 }
 
 TEST_F(homa_pool, homa_pool_release)
