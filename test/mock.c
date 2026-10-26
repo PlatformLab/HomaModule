@@ -1852,34 +1852,40 @@ int sock_common_setsockopt(struct socket *sock, int level, int optname,
 int sock_no_accept(struct socket *sock, struct socket *newsock,
 		struct proto_accept_arg *arg)
 {
-	return 0;
+	return -EOPNOTSUPP;
+}
+
+int sock_no_connect(struct socket *sock, struct SOCKADDR *saddr, int len,
+		    int flags)
+{
+	return -EOPNOTSUPP;
 }
 
 int sock_no_listen(struct socket *sock, int backlog)
 {
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 int sock_no_mmap(struct file *file, struct socket *sock,
 		struct vm_area_struct *vma)
 {
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 int sock_no_shutdown(struct socket *sock, int how)
 {
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 ssize_t sock_no_sendpage(struct socket *sock, struct page *page, int offset,
 		size_t size, int flags)
 {
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 {
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 void synchronize_rcu(void)
