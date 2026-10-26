@@ -188,14 +188,23 @@ static inline void homa_pool_unlock(struct homa_pool *pool)
 /**
  * homa_pool_unlink() - Remove an RPC from any lists related to buffer
  * pool memory, so the RPC will not be accessed by this module again.
- * @rpc:     RPC to unlink. Must be locked, and the rpc's socket must
- *           also be locked.
+ * @rpc:     RPC to unlink. Must be locked.
  */
 static inline void homa_pool_unlink(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
-	__must_hold(rpc->hsk->lock)
 {
+	struct homa_pool *pool;
+
+	/* An RPC is added to or removed from waiting_for_bufs only by code
+	 * that holds the RPC's lock, so this check needs no pool lock; most
+	 * RPCs never wait for buffers, and they skip the pool lock here.
+	 */
+	if (list_empty(&rpc->buf_links))
+		return;
+	pool = rpc->hsk->buffer_pool;
+	homa_pool_lock(pool);
 	list_del_init(&rpc->buf_links);
+	homa_pool_unlock(pool);
 }
 
 /**

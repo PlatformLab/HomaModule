@@ -14,10 +14,10 @@
 /**
  * set_bpages_needed() - Set the bpages_needed field of @pool based
  * on the length of the first RPC that's waiting for buffer space.
- * The caller must own the lock for @pool->hsk.
- * @pool: Pool to update.
+ * @pool: Pool to update. Must be locked by caller.
  */
 static void set_bpages_needed(struct homa_pool *pool)
+	__must_hold(pool->lock)
 {
 	struct homa_rpc *rpc = list_first_entry(&pool->waiting_for_bufs,
 						struct homa_rpc, buf_links);
