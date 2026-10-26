@@ -93,6 +93,13 @@ int mock_log_wakeups;
  */
 int mock_log_rcu_sched;
 
+/* If set by a test to nonzero, kmalloc will log whenever it is invoked.
+ * The value is the expected "units" of allocation, in bytes (e.g. the size
+ * of each object in an array); the log message will indicate how many
+ * units were requested.
+ */
+int mock_log_mallocs;
+
 /* True means copy_from_iter should not log anything; false means
  * it will log info about what it has copied.
  */
@@ -1154,6 +1161,9 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 	void *block;
 
 	UNIT_HOOK("kmalloc");
+	if (mock_log_mallocs)
+		UNIT_LOG("; ", "kmalloc %lu units",
+			 (size + mock_log_mallocs - 1) / mock_log_mallocs);
 	if (mock_check_error(&mock_kmalloc_errors))
 		return NULL;
 	if (unit_hash_size(spinlocks_held)  > 0 &&
@@ -2883,6 +2893,7 @@ void mock_teardown(void)
 	mock_xmit_prios_offset = 0;
 	mock_xmit_prios[0] = 0;
 	mock_log_rcu_sched = 0;
+	mock_log_mallocs = 0;
 	mock_route_errors = 0;
 	mock_trylock_errors = 0;
 	mock_vmalloc_errors = 0;

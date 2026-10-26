@@ -221,6 +221,7 @@ extern bool        mock_ipv6_default;
 extern int         mock_kmalloc_errors;
 extern int         mock_kthread_create_errors;
 extern int         mock_link_mbps;
+extern int         mock_log_mallocs;
 extern int         mock_log_wakeups;
 extern int         mock_log_rcu_sched;
 extern int         mock_max_grants;

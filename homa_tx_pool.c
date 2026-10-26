@@ -179,11 +179,20 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 		/* Expand the frag array if needed. */
 		if (frags_allocated == max_frags) {
 			skb_frag_t *new_frags;
-			int num_new;
+			int num_new, order;
 
-			num_new = ((bytes_left + HOMA_TX_PAGE_SIZE - 1) >>
-				   (PAGE_SHIFT + HOMA_TX_PAGE_ORDER)) +
-				  frags_allocated;
+			/* If this is the first time we've expanded the array,
+			 * get enough space to meet all our needs with
+			 * high-order pages. If it's the second time, we must
+			 * not have been able to allocate high-order pages, so
+			 * assume fragments will only hold a single page.
+			 */
+			if (cur_frags == *frags)
+				order = HOMA_TX_PAGE_ORDER;
+			else
+				order = 0;
+			num_new = ((bytes_left + (PAGE_SIZE << order) - 1) >>
+				   (PAGE_SHIFT + order)) + frags_allocated;
 			new_frags = kvmalloc_array(num_new, sizeof(*new_frags),
 						   GFP_ATOMIC);
 			if (!new_frags) {

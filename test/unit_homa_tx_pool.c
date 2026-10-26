@@ -126,12 +126,13 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc__single_frag)
 
 	homa_tx_pool_free(&self->homa, 0, num_frags, &frag);
 }
-TEST_F(homa_tx_pool, homa_tx_pool_alloc__multiple_frags_reallocate_frags_array)
+TEST_F(homa_tx_pool, homa_tx_pool_alloc__reallocate_frags_array_large_pages)
 {
 	skb_frag_t frag;
 	skb_frag_t *frags;
 	int num_frags;
 
+	mock_log_mallocs = sizeof(skb_frag_t);
 	num_frags = 1;
 	frags = &frag;
 	EXPECT_EQ(0, homa_tx_pool_alloc(&self->homa,
@@ -146,6 +147,30 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc__multiple_frags_reallocate_frags_array)
 	EXPECT_EQ(HOMA_TX_PAGE_SIZE, skb_frag_size(&frags[1]));
 	EXPECT_EQ(0, frags[2].offset);
 	EXPECT_EQ(500, skb_frag_size(&frags[2]));
+	EXPECT_STREQ("kmalloc 3 units", unit_log_get());
+
+	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
+	kfree(frags);
+}
+TEST_F(homa_tx_pool, homa_tx_pool_alloc__reallocate_frags_array_small_pages)
+{
+	skb_frag_t frag;
+	skb_frag_t *frags;
+	int num_frags;
+
+	mock_log_mallocs = sizeof(skb_frag_t);
+	mock_no_high_order_pages = true;
+	num_frags = 0;
+	frags = &frag;
+	EXPECT_EQ(0, homa_tx_pool_alloc(&self->homa,
+					10 * HOMA_TX_PAGE_SIZE,
+					&num_frags, &frags));
+	EXPECT_NE(NULL, skb_frag_page(&frags[0]));
+	EXPECT_EQ(160, num_frags);
+	EXPECT_NE(frags, &frag);
+	EXPECT_EQ(0, frags[0].offset);
+	EXPECT_EQ(PAGE_SIZE, skb_frag_size(&frags[0]));
+	EXPECT_STREQ("kmalloc 10 units; kmalloc 160 units", unit_log_get());
 
 	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
 	kfree(frags);
@@ -162,34 +187,6 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc__cant_reallocate_frags_array)
 	EXPECT_EQ(ENOMEM, -homa_tx_pool_alloc(&self->homa,
 					      2 * HOMA_TX_PAGE_SIZE,
 					      &num_frags, &frags));
-}
-TEST_F(homa_tx_pool, homa_tx_pool_alloc__reallocate_frags_array_multiple_times)
-{
-	skb_frag_t frag;
-	skb_frag_t *frags;
-	int num_frags;
-
-	num_frags = 1;
-	frags = &frag;
-
-	mock_alloc_page_errors = 0x55;
-	EXPECT_EQ(0, homa_tx_pool_alloc(&self->homa, 50000, &num_frags,
-		  &frags));
-	EXPECT_EQ(5, num_frags);
-	EXPECT_NE(frags, &frag);
-	EXPECT_EQ(0, frags[0].offset);
-	EXPECT_EQ(PAGE_SIZE, skb_frag_size(&frags[0]));
-	EXPECT_EQ(0, frags[1].offset);
-	EXPECT_EQ(PAGE_SIZE, skb_frag_size(&frags[1]));
-	EXPECT_EQ(0, frags[2].offset);
-	EXPECT_EQ(PAGE_SIZE, skb_frag_size(&frags[2]));
-	EXPECT_EQ(0, frags[3].offset);
-	EXPECT_EQ(PAGE_SIZE, skb_frag_size(&frags[3]));
-	EXPECT_EQ(0, frags[4].offset);
-	EXPECT_EQ(50000 - 4 * PAGE_SIZE, skb_frag_size(&frags[4]));
-
-	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
-	kfree(frags);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc__return_nid)
 {
