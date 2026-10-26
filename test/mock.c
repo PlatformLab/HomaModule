@@ -1821,6 +1821,12 @@ int sock_no_accept(struct socket *sock, struct socket *newsock,
 	return 0;
 }
 
+int sock_no_connect(struct socket *sock, struct SOCKADDR *saddr, int len,
+		    int flags)
+{
+	return 0;
+}
+
 int sock_no_listen(struct socket *sock, int backlog)
 {
 	return 0;
