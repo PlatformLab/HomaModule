@@ -82,7 +82,8 @@ static const struct proto_ops homav6_proto_ops = {
 	.set_peek_off	   = sk_set_peek_off,
 };
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 0)
+#else
 /**
  * homa_recvmsg_proto() - Adapts homa_recvmsg to kernels where
  * proto.recvmsg has no addr_len argument: the handler must set
@@ -122,10 +123,10 @@ static struct proto homa_prot = {
 	.setsockopt	   = homa_setsockopt,
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
-	.recvmsg	   = homa_recvmsg_proto,
-#else
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 0)
 	.recvmsg	   = homa_recvmsg,
+#else
+	.recvmsg	   = homa_recvmsg_proto,
 #endif
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
@@ -143,10 +144,10 @@ static struct proto homav6_prot = {
 	.setsockopt	   = homa_setsockopt,
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
-	.recvmsg	   = homa_recvmsg_proto,
-#else
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 0)
 	.recvmsg	   = homa_recvmsg,
+#else
+	.recvmsg	   = homa_recvmsg_proto,
 #endif
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,

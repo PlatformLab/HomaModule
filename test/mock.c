@@ -1929,7 +1929,8 @@ int vfs_fsync(struct file *file, int datasync)
 	return 0;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
+#else
 struct vlan_type_depth __vlan_get_protocol_offset(const struct sk_buff *skb,
 						  __be16 type,
 						  int mac_offset)

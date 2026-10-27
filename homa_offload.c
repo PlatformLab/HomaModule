@@ -79,7 +79,21 @@ int homa_offload_end(void)
  */
 void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 0)
+	struct rps_sock_flow_table *sock_flow_table;
+	u32 hash, index;
+
+	rcu_read_lock();
+	sock_flow_table = rcu_dereference(net_hotdata.rps_sock_flow_table);
+	if (sock_flow_table) {
+		hash = cpu + net_hotdata.rps_cpu_mask + 1;
+		index = hash & sock_flow_table->mask;
+		if (READ_ONCE(sock_flow_table->ents[index]) != hash)
+			WRITE_ONCE(sock_flow_table->ents[index], hash);
+		__skb_set_sw_hash(skb, hash, false);
+	}
+	rcu_read_unlock();
+#else
 	struct rps_sock_flow_table *sock_flow_table;
 	u32 table_index, hash, mask;
 	rps_tag_ptr tagptr;
@@ -114,20 +128,6 @@ void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 		__skb_set_sw_hash(skb, hash, false);
 		tt_record3("homa_set_softirq_cpu set value 0x%x for flow table entry 0x%x, mask 0x%x",
 			   hash, table_index, mask);
-	}
-	rcu_read_unlock();
-#else
-	struct rps_sock_flow_table *sock_flow_table;
-	u32 hash, index;
-
-	rcu_read_lock();
-	sock_flow_table = rcu_dereference(net_hotdata.rps_sock_flow_table);
-	if (sock_flow_table) {
-		hash = cpu + net_hotdata.rps_cpu_mask + 1;
-		index = hash & sock_flow_table->mask;
-		if (READ_ONCE(sock_flow_table->ents[index]) != hash)
-			WRITE_ONCE(sock_flow_table->ents[index], hash);
-		__skb_set_sw_hash(skb, hash, false);
 	}
 	rcu_read_unlock();
 #endif
