@@ -8,11 +8,15 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       LINUX_VERSION: 6.17.8
+      # The base for checkpatch: a pull request's base, or the branch tip before a push.
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # the strip check needs a pull request's base
 
       - name: Install kernel build dependencies
-        run: sudo apt-get update && sudo apt-get install -y flex bison bc libelf-dev libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y flex bison bc libelf-dev libssl-dev codespell
 
       # The unit tests compile against kernel headers, which need a
       # configured tree; modules_prepare is enough, no vmlinux.
@@ -42,3 +46,27 @@ jobs:
       - name: Unit tests (IPv4)
         if: ${{ !cancelled() }}
         run: cd test && ./unit --ipv4
+
+      # The stripped version (__STRIP__=1), with the same kernel.
+      - name: Build homa.ko (stripped)
+        if: ${{ !cancelled() }}
+        run: make KBUILD_MODPOST_WARN=1 __STRIP__=1
+
+      # Clean first: both versions of the unit tests use the same object files.
+      - name: Unit tests, stripped (IPv6)
+        if: ${{ !cancelled() }}
+        run: make -C test clean && make -C test -j$(nproc) __STRIP__=1 unit && cd test && ./unit
+
+      - name: Unit tests, stripped (IPv4)
+        if: ${{ !cancelled() }}
+        run: cd test && ./unit --ipv4
+
+      # checkpatch the change of a pull request or push (see the script):
+      # the module sources as they are, then the files that go upstream.
+      - name: checkpatch
+        if: ${{ !cancelled() }}
+        run: .github/scripts/checkpatch.sh "$BASE_SHA" $KDIR
+
+      - name: checkpatch (stripped)
+        if: ${{ !cancelled() }}
+        run: .github/scripts/checkpatch.sh "$BASE_SHA" $KDIR stripped
