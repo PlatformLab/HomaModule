@@ -261,6 +261,21 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__socket_shutdown)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	self->hsk.shutdown = 0;
 }
+TEST_F(homa_rpc, homa_rpc_alloc_server__socket_shutdown_while_waiting_for_bufs)
+{
+	struct homa_rpc *srpc;
+
+	mock_check_bpool_leaks = false;
+	self->data.msg_length = N(1400);
+	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
+	self->hsk.shutdown = 1;
+	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip,
+				     &self->data.common);
+	EXPECT_TRUE(IS_ERR(srpc));
+	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(srpc));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.buffer_pool->waiting_for_bufs));
+	self->hsk.shutdown = 0;
+}
 TEST_F(homa_rpc, homa_rpc_alloc_server__handoff_rpc)
 {
 	struct homa_rpc *srpc;
