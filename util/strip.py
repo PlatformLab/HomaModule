@@ -329,7 +329,9 @@ def scan(file: str) -> list[str]:
                 in_unit = None
                 continue
             if line.startswith('#else /* __UNIT_TEST__ */'):
-                in_unit = 'else'
+                # Keep the side that isn't for unit tests (after
+                # '#ifndef __UNIT_TEST__' that is the first side).
+                in_unit = 'if' if in_unit == 'else' else 'else'
                 continue
             if in_unit == 'if':
                 continue
