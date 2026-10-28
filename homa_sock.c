@@ -415,6 +415,12 @@ void homa_sock_destroy(struct sock *sk)
 	if (!hsk->homa)
 		return;
 
+	/* Normally homa_close has already done this, but not if socket
+	 * creation failed after homa_socket (inet_create calls only
+	 * sk_common_release).
+	 */
+	homa_sock_shutdown(hsk);
+
 	tt_record1("Starting to destroy socket %d", hsk->port);
 	while (!list_empty(&hsk->dead_rpcs)) {
 #ifndef __STRIP__ /* See strip.py */
