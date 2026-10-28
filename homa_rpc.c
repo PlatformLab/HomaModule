@@ -213,6 +213,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 
 error:
 	if (srpc) {
+		homa_pool_unlink(srpc);
 		homa_pool_release(srpc);
 		if (srpc->route)
 			homa_route_release(srpc->route);
