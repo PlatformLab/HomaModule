@@ -775,6 +775,7 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__gso_type_depends_on_peer)
 	EXPECT_EQ(SKB_GSO_TCPV6, skb_shinfo(skb)->gso_type);
 	kfree_skb(skb);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, homa_tx_skb_alloc__gso_force_software)
 {
 	struct homa_rpc *crpc;
@@ -798,6 +799,7 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__gso_force_software)
 		  skb_shinfo(skb)->gso_type);
 	kfree_skb(skb);
 }
+#endif /* See strip.py */
 TEST_F(homa_outgoing, homa_tx_skb_alloc__homa_info_fields)
 {
 	struct homa_skb_info *homa_info;

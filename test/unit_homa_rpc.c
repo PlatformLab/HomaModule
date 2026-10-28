@@ -140,11 +140,12 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__basics_from_data_packet)
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(10000, srpc->msgin.length);
-	EXPECT_EQ(10000, srpc->msgin.granted);
+	IF_NO_STRIP(EXPECT_EQ(10000, srpc->msgin.granted));
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	homa_rpc_end(srpc);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_alloc_server__basics_from_start_msg_packet)
 {
 	struct homa_start_msg_hdr h;
@@ -166,6 +167,7 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__basics_from_start_msg_packet)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	homa_rpc_end(srpc);
 }
+#endif /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_alloc_server__no_buffer_pool)
 {
 	struct homa_rpc *srpc;
@@ -287,6 +289,7 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__dont_handoff_no_buffers)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 	homa_rpc_end(srpc);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_alloc_server__dont_handoff_rpc_start_msg)
 {
 	struct homa_start_msg_hdr h;
@@ -305,6 +308,7 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__dont_handoff_rpc_start_msg)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 	homa_rpc_end(srpc);
 }
+#endif /* See strip.py */
 
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_bucket_lock_slow)
@@ -437,26 +441,24 @@ TEST_F(homa_rpc, homa_rpc_ack__cant_find_rpc)
 	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_end__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_START_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 20000);
 
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, self->homa.grant->num_grantable_rpcs);
-#endif /* See strip.py */
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	mock_log_rcu_sched = 1;
 	homa_rpc_end(crpc);
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(0, self->homa.grant->num_grantable_rpcs);
-#endif /* See strip.py */
 	EXPECT_EQ(NULL, homa_rpc_find_client(&self->hsk, crpc->id));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
 }
+#endif /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_end__already_dead)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -1418,13 +1420,13 @@ TEST_F(homa_rpc, homa_rpc_find_from_skb__server_ipv4_outgoing)
 TEST_F(homa_rpc, homa_rpc_get_info__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_START_MSG, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 20000);
 	struct homa_rpc_info info;
 
 	mock_set_ipv6(&self->hsk);
 	crpc->completion_cookie = 1111;
-	crpc->msgout.priority = 4;
+	IF_NO_STRIP(crpc->msgout.priority = 4);
 
 	homa_rpc_get_info(crpc, &info);
 	EXPECT_EQ(AF_INET6, info.peer.in6.sin6_family);
@@ -1440,10 +1442,10 @@ TEST_F(homa_rpc, homa_rpc_get_info__basics)
 	EXPECT_EQ(1000, info.tx_granted);
 	IF_NO_STRIP(EXPECT_EQ(4, info.tx_prio));
 	EXPECT_EQ(20000, info.rx_length);
-	EXPECT_EQ(20000, info.rx_remaining);
+	EXPECT_EQ(18600, info.rx_remaining);
 	EXPECT_EQ(0, info.rx_gaps);
 	EXPECT_EQ(0, info.rx_gap_bytes);
-	IF_NO_STRIP(EXPECT_EQ(10000, info.rx_granted));
+	IF_NO_STRIP(EXPECT_EQ(20000, info.rx_granted));
 }
 TEST_F(homa_rpc, homa_rpc_get_info__ipv4_address)
 {

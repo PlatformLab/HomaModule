@@ -145,7 +145,7 @@ TEST_F(homa_timer, homa_timer_check_rpc__dont_check_acks_if_server_response_not_
 			       self->server_id, 100, 10000);
 	ASSERT_NE(NULL, srpc);
 	srpc->msgout.next_xmit_offset = 5000;
-	srpc->msgout.granted = 6000;
+	IF_NO_STRIP(srpc->msgout.granted = 6000);
 	unit_log_clear();
 	homa_rpc_lock(srpc);
 

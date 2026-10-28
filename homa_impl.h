@@ -81,6 +81,7 @@ struct homa_peer;
 struct homa_rpc;
 struct homa_route;
 struct homa_sock;
+struct sockaddr_unsized;
 
 #ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"

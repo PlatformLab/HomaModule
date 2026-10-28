@@ -566,8 +566,12 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 		if (!rpc) {
 			if (!homa_is_client(id)) {
 				/* We are the server for this RPC. */
+#ifndef __STRIP__ /* See strip.py */
 				if (h->type == DATA ||
 				    h->type == START_MSG) {
+#else /* See strip.py */
+				if (h->type == DATA) {
+#endif /* See strip.py */
 					/* Create a new RPC if one doesn't
 					 * already exist.
 					 */

@@ -604,6 +604,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	}
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_xmit_start_msg() - Emit a START_MSG packet for a scheduled outgoing
  * message (this will trigger grant generation on the receiver).
@@ -623,6 +624,7 @@ void homa_xmit_start_msg(struct homa_rpc *rpc, int length)
 		   rpc->msgout.length);
 	homa_xmit_control(START_MSG, &h, sizeof(h), rpc);
 }
+#endif /* See strip.py */
 
 /**
  * homa_xmit_data() - If an RPC has outbound data packets that are permitted

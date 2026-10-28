@@ -18,12 +18,6 @@
 
 #ifdef __STRIP__
 #define INC_METRIC(...)
-
-#undef LINUX_VERSION_CODE
-#define LINUX_VERSION_CODE 100
-
-#undef KERNEL_VERSION
-#define KERNEL_VERSION(...) 100
 #endif /* __STRIP__ */
 
 struct homa;
