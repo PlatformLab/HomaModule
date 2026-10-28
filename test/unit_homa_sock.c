@@ -521,6 +521,21 @@ TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests_and_wmem)
 	unit_sock_destroy(&self->hsk);
 }
 
+TEST_F(homa_sock, homa_sock_destroy__unlink_socket)
+{
+	struct homa_sock hsk;
+	int port;
+
+	/* This is the path taken when inet_create fails after ->init
+	 * (e.g. a cgroup BPF program rejects the socket): ->destroy runs
+	 * without ->close.
+	 */
+	mock_sock_init(&hsk, self->hnet, 0);
+	port = hsk.port;
+	homa_sock_destroy(&hsk.sock);
+	EXPECT_EQ(NULL, homa_sock_find(self->hnet, port));
+	EXPECT_EQ(NULL, hsk.slink);
+}
 TEST_F(homa_sock, homa_sock_bind)
 {
 	struct homa_sock hsk2;
