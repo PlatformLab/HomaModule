@@ -202,7 +202,7 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 			memcpy(new_frags, cur_frags,
 			       frags_allocated * sizeof(*new_frags));
 			if (cur_frags != *frags)
-				kfree(cur_frags);
+				kvfree(cur_frags);
 			cur_frags = new_frags;
 			max_frags = num_new;
 		}
@@ -224,7 +224,7 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 error:
 	homa_tx_pool_free(homa, tx_core->nid, frags_allocated, cur_frags);
 	if (cur_frags != *frags)
-		kfree(cur_frags);
+		kvfree(cur_frags);
 	*num_frags = 0;
 	local_bh_enable();
 	return err;

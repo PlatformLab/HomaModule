@@ -1081,6 +1081,9 @@ void kfree(const void *block)
 		FAIL(" %s on unknown block %p", __func__, block);
 		return;
 	}
+	if (strcmp(unit_hash_get(kmallocs_in_use, block), "kvmalloc") == 0)
+		FAIL(" %s on block %p from kvmalloc (needs kvfree)", __func__,
+		     block);
 	unit_hash_erase(kmallocs_in_use, block);
 	free((void *) block);
 }
@@ -1202,6 +1205,8 @@ int kstrtoint(const char *s, unsigned int base, int *res)
 
 void kvfree(const void *addr)
 {
+	if (addr && kmallocs_in_use && unit_hash_get(kmallocs_in_use, addr))
+		unit_hash_set(kmallocs_in_use, addr, "used");
 	kfree(addr);
 }
 
@@ -1212,7 +1217,12 @@ void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), unsigned long align,
 void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), gfp_t flags, int node)
 #endif
 {
-	return mock_kmalloc(size, flags);
+	void *block = mock_kmalloc(size, flags);
+
+	/* Real kvmalloc may return vmalloc memory, which kfree can't free. */
+	if (block)
+		unit_hash_set(kmallocs_in_use, block, "kvmalloc");
+	return block;
 }
 
 struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
