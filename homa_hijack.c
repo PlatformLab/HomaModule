@@ -76,8 +76,12 @@ struct sk_buff *homa_hijack_gro_receive(struct list_head *held_list,
 	// tt_record4("homa_hijack_gro_receive got type 0x%x, flags 0x%x, "
 	//		"urgent 0x%x, id %d", h->type, h->flags,
 	//		ntohs(h->urgent), homa_local_id(h->sender_id));
-	if (!homa_skb_hijacked(skb))
-		return tcp_net_offload->callbacks.gro_receive(held_list, skb);
+	if (!homa_skb_hijacked(skb)) {
+		const struct net_offload *tcp_offload = skb_is_ipv6(skb) ?
+				tcp6_net_offload : tcp_net_offload;
+
+		return tcp_offload->callbacks.gro_receive(held_list, skb);
+	}
 
 	/* Change the packet's IP protocol to Homa so that it will get
 	 * dispatched directly to Homa in the future.
