@@ -57,6 +57,14 @@ struct homa_tx_pool {
  */
 struct homa_tx_pool_core {
 	/**
+	 * @preempt_lock: used to prevent preemption while accessing the
+	 * fields of this struct. Needed on PREEMPT_RT in addition to disabling
+	 * BHs, since with PREEMPT_RT another task can run on a core while BHs
+	 * are disabled.
+	 */
+	local_lock_t preempt_lock;
+
+	/**
 	 * @page: a page of data that is "owned" by this core and used for
 	 * allocation on this core (or NULL). This pointer is included in
 	 * the page's reference count.

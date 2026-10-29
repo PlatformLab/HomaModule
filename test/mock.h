@@ -89,6 +89,12 @@
 #undef local_irq_save
 #define local_irq_save(flags) (flags) = 0
 
+#undef local_lock_nested_bh
+#define local_lock_nested_bh(lock) mock_local_lock_nested_bh()
+
+#undef local_unlock_nested_bh
+#define local_unlock_nested_bh(lock) mock_local_unlock_nested_bh()
+
 #undef MAX_SKB_FRAGS
 #define MAX_SKB_FRAGS mock_max_skb_frags
 
@@ -297,6 +303,8 @@ struct homa_net
 bool        mock_is_locked(void *lock);
 void        mock_local_bh_disable(void);
 void        mock_local_bh_enable(void);
+void        mock_local_lock_nested_bh(void);
+void        mock_local_unlock_nested_bh(void);
 void       *mock_malloc(size_t size, gfp_t flags, const char *free_type);
 struct net *mock_net_for_hnet(struct homa_net *hnet);
 void       *mock_net_generic(const struct net *net, unsigned int id);
