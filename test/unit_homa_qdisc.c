@@ -929,6 +929,26 @@ TEST_F(homa_qdisc, homa_qdisc_can_bypass__test_address_and_ports)
 
 	kfree_skb(skb);
 }
+TEST_F(homa_qdisc, homa_qdisc_can_bypass__ipv6_address_uses_all_words)
+{
+	struct in6_addr daddr = unit_get_in_addr("1:2:3::4");
+	struct homa_qdisc *q = init_qdisc(self->qdiscs[3]);
+	struct sk_buff *skb;
+
+	mock_ipv6 = true;
+	skb = mock_tcp_skb(&self->addr, &daddr, 4000, 100);
+	homa_qdisc_defer_tcp(q, skb);
+
+	/* Same flow: must not bypass the deferred packet. */
+	skb = mock_tcp_skb(&self->addr, &daddr, 5000, 200);
+	EXPECT_EQ(0, homa_qdisc_can_bypass(skb, q));
+
+	/* Address differs only in the second 32-bit word. */
+	ipv6_hdr(skb)->daddr = unit_get_in_addr("1:2:5::4");
+	EXPECT_EQ(1, homa_qdisc_can_bypass(skb, q));
+
+	kfree_skb(skb);
+}
 TEST_F(homa_qdisc, homa_qdisc_can_bypass__multiple_packets_in_list)
 {
 	struct homa_qdisc *q = init_qdisc(self->qdiscs[3]);
