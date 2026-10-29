@@ -129,7 +129,8 @@ bool mock_no_high_order_pages = false;
 static struct unit_hash *spinlocks_held;
 
 /* Keeps track of all the blocks of memory that have been allocated by
- * kmalloc but not yet freed by kfree. Reset for each test.
+ * kmalloc but not yet freed by kfree. The value is a string indicating
+ * whethher the block must be freed with kfree or kvfree. Reset for each test.
  */
 static struct unit_hash *kmallocs_in_use;
 
@@ -1075,15 +1076,7 @@ ssize_t kernel_write(struct file *file, const void *buf, size_t count,
 
 void kfree(const void *block)
 {
-	if (block == NULL)
-		return;
-	UNIT_HOOK("kfree");
-	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
-		FAIL(" %s on unknown block %p", __func__, block);
-		return;
-	}
-	unit_hash_erase(kmallocs_in_use, block);
-	free((void *) block);
+	mock_free(block, "kfree");
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
@@ -1128,7 +1121,7 @@ void kfree_skb_list_reason(struct sk_buff *segs, enum skb_drop_reason reason)
 
 void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 {
-	return mock_kmalloc(size, gfpflags);
+	return mock_malloc(size, gfpflags, "kfree");
 }
 
 void kvfree_call_rcu(struct rcu_head *head, void *block)
@@ -1136,14 +1129,10 @@ void kvfree_call_rcu(struct rcu_head *head, void *block)
 	if (block == NULL)
 		return;
 	UNIT_HOOK("kfree");
-	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
-		FAIL(" %s on unknown block %p", __func__, block);
-		return;
-	}
-	unit_hash_erase(kmallocs_in_use, block);
 	if (num_rcu_frees >= MAX_RCU_FREES) {
 		FAIL(" num_rcu_frees exceeded MAX_RCU_FREES (%d)",
 		     MAX_RCU_FREES);
+		mock_free(block, "kvfree");
 	} else {
 		rcu_frees[num_rcu_frees] = block;
 		num_rcu_frees++;
@@ -1157,36 +1146,9 @@ void __might_sleep(const char *file, int line)
 }
 #endif
 
-void *mock_kmalloc(size_t size, gfp_t flags)
-{
-	void *block;
-
-	UNIT_HOOK("kmalloc");
-	if (mock_log_mallocs)
-		UNIT_LOG("; ", "kmalloc %lu units",
-			 (size + mock_log_mallocs - 1) / mock_log_mallocs);
-	if (mock_check_error(&mock_kmalloc_errors))
-		return NULL;
-	if (unit_hash_size(spinlocks_held)  > 0 &&
-	    !(flags & GFP_ATOMIC))
-		FAIL(" incorrect flags 0x%x passed to mock_kmalloc; expected GFP_ATOMIC (0x%x)",
-		     flags, GFP_ATOMIC);
-	block = malloc(size);
-	if (!block) {
-		FAIL(" malloc failed");
-		return NULL;
-	}
-	if (flags & __GFP_ZERO)
-		memset(block, 0, size);
-	if (!kmallocs_in_use)
-		kmallocs_in_use = unit_hash_new();
-	unit_hash_set(kmallocs_in_use, block, "used");
-	return block;
-}
-
 void *__kmalloc_noprof(size_t size, gfp_t flags)
 {
-	return mock_kmalloc(size, flags);
+	return mock_malloc(size, flags, "kfree");
 }
 
 int kstrtoint(const char *s, unsigned int base, int *res)
@@ -1203,7 +1165,7 @@ int kstrtoint(const char *s, unsigned int base, int *res)
 
 void kvfree(const void *addr)
 {
-	kfree(addr);
+	mock_free(addr, "kvfree");
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
@@ -1213,7 +1175,7 @@ void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), unsigned long align,
 void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), gfp_t flags, int node)
 #endif
 {
-	return mock_kmalloc(size, flags);
+	return mock_malloc(size, flags, "kvfree");
 }
 
 struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
@@ -2149,6 +2111,36 @@ struct dst_entry *mock_dst_check(struct dst_entry *dst, __u32 cookie)
 }
 
 /**
+ * mock_free() - Called instead of kfree and kvfree when Homa is compiled for
+ * unit testing.
+ * @block:       Pointer to the memory block to free.
+ * @free_type:   Indicates how the block was freed (e.g.,"kfree" or "kvfree").
+ *               Must match the free_type passed to mock_malloc when the
+ *               block was allocated.
+ */
+void mock_free(const void *block, const char *free_type)
+{
+	const char *alloc_type;
+
+	if (block == NULL)
+		return;
+	UNIT_HOOK("kfree");
+	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
+		FAIL(" %s on unknown block %p", __func__, block);
+		return;
+	}
+	alloc_type = unit_hash_get(kmallocs_in_use, block);
+	if (strcmp(alloc_type, free_type) != 0)
+		/* It's OK to use kvfree on something allocated with kmalloc. */
+		if (strcmp(alloc_type, "kfree") != 0 ||
+		    strcmp(free_type, "kvfree") != 0)
+			FAIL(" %s used to free block but should have been %s",
+			     free_type, alloc_type);
+	unit_hash_erase(kmallocs_in_use, block);
+	free((void *) block);
+}
+
+/**
  * mock_free_pool() - Invoked by homa_pool_free during unit tests;
  * checks for leaks of pool memory.
  * @pool:       Structure to check.
@@ -2246,6 +2238,42 @@ void mock_local_bh_enable(void)
 	if (mock_local_bh_disables == 0)
 		FAIL(" lcoal_bh_enable invoked without local_bh_disable");
 	mock_local_bh_disables--;
+}
+
+/**
+ * mock_malloc() - Called instead of kmalloc and kvmalloc when Homa is
+ * compiled for unit testing.
+ * @size:       Number of bytes to allocate.
+ * @flags:      GFP flags for the allocation.
+ * @free_type:  String indicating how the memory will be freed (e.g.,"kfree"
+ *              or "kvfree"). Used to detect bugs such as kfree-ing a block
+ *              that was allocated with kvmalloc.
+ */
+void *mock_malloc(size_t size, gfp_t flags, const char *free_type)
+{
+	void *block;
+
+	UNIT_HOOK("kmalloc");
+	if (mock_log_mallocs)
+		UNIT_LOG("; ", "kmalloc %lu units",
+			 (size + mock_log_mallocs - 1) / mock_log_mallocs);
+	if (mock_check_error(&mock_kmalloc_errors))
+		return NULL;
+	if (unit_hash_size(spinlocks_held)  > 0 &&
+	    !(flags & GFP_ATOMIC))
+		FAIL(" incorrect flags 0x%x passed to mock_malloc; expected GFP_ATOMIC (0x%x)",
+		     flags, GFP_ATOMIC);
+	block = malloc(size);
+	if (!block) {
+		FAIL(" malloc failed");
+		return NULL;
+	}
+	if (flags & __GFP_ZERO)
+		memset(block, 0, size);
+	if (!kmallocs_in_use)
+		kmallocs_in_use = unit_hash_new();
+	unit_hash_set(kmallocs_in_use, block, free_type);
+	return block;
 }
 
 /**
@@ -2426,7 +2454,7 @@ void mock_rcu_free(void)
 
 	while (num_rcu_frees > 0) {
 		num_rcu_frees--;
-		free(rcu_frees[num_rcu_frees]);
+		mock_free(rcu_frees[num_rcu_frees], "kvfree");
 	}
 }
 

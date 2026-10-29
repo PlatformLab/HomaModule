@@ -33,7 +33,7 @@ struct homa_message_out {
 	 * homa_seg_hdr followed by the data for that segment. These
 	 * fragments will be incorporated into skb's to transmit the message.
 	 * If this doesn't point to @frag below then it is dynamically
-	 * allocated and must be freed.  Immutable once allocated.
+	 * allocated and must be freed with kvfree.  Immutable once allocated.
 	 */
 	skb_frag_t *frags;
 

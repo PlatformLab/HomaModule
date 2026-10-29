@@ -150,7 +150,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc__reallocate_frags_array_large_pages)
 	EXPECT_STREQ("kmalloc 3 units", unit_log_get());
 
 	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
-	kfree(frags);
+	kvfree(frags);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc__reallocate_frags_array_small_pages)
 {
@@ -173,7 +173,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc__reallocate_frags_array_small_pages)
 	EXPECT_STREQ("kmalloc 10 units; kmalloc 160 units", unit_log_get());
 
 	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
-	kfree(frags);
+	kvfree(frags);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc__cant_reallocate_frags_array)
 {
@@ -470,7 +470,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_free__basics)
 	EXPECT_EQ(skb_frag_page(&frags[3]), tx_pool->pages[1]);
 
 	put_page(skb_frag_page(&frags[0]));
-	kfree(frags);
+	kvfree(frags);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_free__pages_not_in_right_numa)
 {
@@ -489,7 +489,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_free__pages_not_in_right_numa)
 	mock_page_nid_mask = 5;
 	homa_tx_pool_free(&self->homa, 0, num_frags, frags);
 	EXPECT_EQ(2, tx_pool->avail);
-	kfree(frags);
+	kvfree(frags);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_free__pool_overflow)
 {
@@ -519,7 +519,7 @@ TEST_F(homa_tx_pool, homa_tx_pool_free__pool_overflow)
 	put_page(skb_frag_page(&frags[0]));
 	put_page(skb_frag_page(&frags[1]));
 	tx_pool->avail = 0;
-	kfree(frags);
+	kvfree(frags);
 }
 
 TEST_F(homa_tx_pool, homa_tx_pool_gc__basics)

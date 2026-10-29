@@ -13,7 +13,8 @@
 #define atomic64_cmpxchg_relaxed mock_cmpxchg
 
 #undef alloc_percpu_gfp
-#define alloc_percpu_gfp(type, flags) mock_kmalloc(10 * sizeof(type), flags)
+#define alloc_percpu_gfp(type, flags) mock_malloc(10 * sizeof(type), flags, \
+						  "free_percpu")
 
 #define compound_order mock_compound_order
 
@@ -47,7 +48,7 @@
 #define for_each_possible_cpu(i) for (i = 0; i < nr_cpu_ids; i++)
 
 #undef free_percpu
-#define free_percpu(name) kfree(name)
+#define free_percpu(name) mock_free(name, "free_percpu")
 
 #define get_page mock_get_page
 
@@ -68,10 +69,11 @@
 #define homa_rpc_put mock_rpc_put
 
 #undef kmalloc
-#define kmalloc mock_kmalloc
+#define kmalloc(size, flags) mock_malloc((size), (flags), "kfree")
 
 #undef kmalloc_array
-#define kmalloc_array(count, size, type) mock_kmalloc((count) * (size), type)
+#define kmalloc_array(count, size, type) mock_malloc((count) * (size), type, \
+						     "kfree")
 
 #undef kmap_local_page
 #define kmap_local_page(page) ((void *)page)
@@ -282,6 +284,7 @@ struct net_device
 	   *mock_dev(int index, struct homa *homa);
 struct dst_entry
 	   *mock_dst_check(struct dst_entry *, __u32 cookie);
+void        mock_free(const void *block, const char *free_type);
 void        mock_free_pool(struct homa_pool *pool);
 cycles_t    mock_get_cycles(void);
 int         mock_get_link_ksettings(struct net_device *dev,
@@ -292,9 +295,9 @@ void        mock_get_page(struct page *page);
 struct homa_net
 	   *mock_hnet(int index, struct homa *homa);
 bool        mock_is_locked(void *lock);
-void       *mock_kmalloc(size_t size, gfp_t flags);
 void        mock_local_bh_disable(void);
 void        mock_local_bh_enable(void);
+void       *mock_malloc(size_t size, gfp_t flags, const char *free_type);
 struct net *mock_net_for_hnet(struct homa_net *hnet);
 void       *mock_net_generic(const struct net *net, unsigned int id);
 int         mock_page_refs(struct page *page);
