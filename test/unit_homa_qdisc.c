@@ -484,6 +484,34 @@ TEST_F(homa_qdisc, homa_qdisc_destroy)
 	kfree(qdisc);
 	kfree(qdisc2);
 }
+TEST_F(homa_qdisc, homa_qdisc_destroy__advance_next_qdisc)
+{
+	struct Qdisc *qdisc, *qdisc2;
+	struct homa_qdisc_dev *qdev;
+	struct homa_qdisc *q, *q2;
+
+	qdisc = mock_alloc_qdisc(&mock_net_queue);
+	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
+	q = qdisc_priv(qdisc);
+	qdisc2 = mock_alloc_qdisc(&mock_net_queue);
+	EXPECT_EQ(0, homa_qdisc_init(qdisc2, NULL, NULL));
+	q2 = qdisc_priv(qdisc2);
+	qdev = q->qdev;
+
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, &self->addr2, 5000,
+					     1000));
+	homa_qdisc_defer_tcp(q2, mock_tcp_skb(&self->addr, &self->addr2, 6000,
+					      1100));
+	qdev->next_qdisc = &q2->defer_links;
+
+	/* The pacer must not be left pointing at the destroyed qdisc. */
+	homa_qdisc_destroy(qdisc2);
+	EXPECT_EQ(&qdev->deferred_qdiscs, qdev->next_qdisc);
+
+	homa_qdisc_destroy(qdisc);
+	kfree(qdisc);
+	kfree(qdisc2);
+}
 
 TEST_F(homa_qdisc, homa_qdisc_add_queued__no_lag)
 {
