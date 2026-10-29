@@ -598,7 +598,7 @@ release:
 		WARN_ON(refcount_sub_and_test(rpc->msgout.frag_bytes,
 					      &hsk->sock.sk_wmem_alloc));
 		if (rpc->msgout.frags != &rpc->msgout.frag)
-			kfree(rpc->msgout.frags);
+			kvfree(rpc->msgout.frags);
 		tt_record2("homa_rpc_reap finished reaping id %d, port %d",
 				rpc->id, rpc->hsk->port);
 #ifndef __STRIP__ /* See strip.py */
