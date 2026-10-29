@@ -473,6 +473,8 @@ void homa_qdisc_destroy(struct Qdisc *qdisc)
 	while (!skb_queue_empty(&q->deferred_tcp))
 		kfree_skb_reason(__skb_dequeue(&q->deferred_tcp),
 				 SKB_DROP_REASON_QDISC_DROP);
+	if (q->qdev->next_qdisc == &q->defer_links)
+		q->qdev->next_qdisc = q->defer_links.next;
 	list_del_init(&q->defer_links);
 	homa_qdisc_unlock_qdev(q->qdev);
 	homa_qdisc_qdev_put(q->qdev);
