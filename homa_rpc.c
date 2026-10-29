@@ -844,6 +844,6 @@ void homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info)
 	    rpc->msgin.bytes_remaining == 0 &&
 	    skb_queue_len(&rpc->msgin.packets) == 0)
 		info->flags |= HOMA_RPC_RX_READY;
-	if (rpc->flags & RPC_PRIVATE)
+	if (test_bit(RPC_PRIVATE, &rpc->flags))
 		info->flags |= HOMA_RPC_PRIVATE;
 }
