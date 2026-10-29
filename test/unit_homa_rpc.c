@@ -1587,7 +1587,21 @@ TEST_F(homa_rpc, homa_rpc_get_info__HOMA_RPC_PRIVATE)
 			self->server_port, self->client_id, 5000, 20000);
 	struct homa_rpc_info info;
 
-	crpc->flags |= RPC_PRIVATE;
+	set_bit(RPC_PRIVATE, &crpc->flags);
 	homa_rpc_get_info(crpc, &info);
 	EXPECT_EQ(HOMA_RPC_PRIVATE, info.flags);
+}
+TEST_F(homa_rpc, homa_rpc_get_info__APP_NEEDS_LOCK_is_not_private)
+{
+	/* This test verifies the fix for a bug where APP_NEEDS_LOCK was
+	 * being confused with RPC_PRIVATE.
+	 */
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 20000);
+	struct homa_rpc_info info;
+
+	set_bit(APP_NEEDS_LOCK, &crpc->flags);
+	homa_rpc_get_info(crpc, &info);
+	EXPECT_EQ(0, info.flags);
 }
