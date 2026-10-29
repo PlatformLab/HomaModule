@@ -210,6 +210,11 @@ int mock_rpc_holds;
  */
 static int mock_local_bh_disables;
 
+/* The number of times local_lock_nested_bh() has been invoked, minus the
+ * number of times local_unlock_nested_bh has been invoked.
+ */
+static int mock_local_bh_locks;
+
 /* The number of times preempt_disable() has been invoked, minus the
  * number of times preempt_enable has been invoked.
  */
@@ -2245,6 +2250,20 @@ void mock_local_bh_enable(void)
 	mock_local_bh_disables--;
 }
 
+void mock_local_lock_nested_bh(void)
+{
+	if (mock_local_bh_disables == 0)
+		FAIL(" local_lock_nested_bh invoked without local_bh_disable");
+	mock_local_bh_locks++;
+}
+
+void mock_local_unlock_nested_bh(void)
+{
+	if (mock_local_bh_locks == 0)
+		FAIL(" local_unlock_nested_bh invoked without local_lock_nested_bh");
+	mock_local_bh_locks--;
+}
+
 /**
  * mock_net_for_hnet() - Return the struct net associated with a struct
  * homa_net, or NULL if the struct net can't be identified.
@@ -3033,6 +3052,11 @@ void mock_teardown(void)
 		FAIL(" %d local_bh_disables still active after test",
 				mock_local_bh_disables);
 	mock_local_bh_disables = 0;
+
+	if (mock_local_bh_locks != 0)
+		FAIL(" %d local_lock_nested_bhs still active after test",
+				mock_local_bh_locks);
+	mock_local_bh_locks = 0;
 
 	if (mock_preempt_disables != 0)
 		FAIL(" %d preempt_disables still active after test",
