@@ -172,6 +172,11 @@ void homa_peer_free_net(struct homa_net *hnet)
 	WARN(hnet->num_routes != 0, "%s ended up with hnet->num_routes %d",
 	     __func__, hnet->num_routes);
 	spin_unlock_bh(&peertab->lock);
+
+	/* homa_route_free uses hnet, which will be freed as soon as we
+	 * return, so wait for the callbacks queued above.
+	 */
+	rcu_barrier();
 }
 
 /**
