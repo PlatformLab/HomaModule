@@ -97,11 +97,12 @@ TEST_F(homa_hijack, homa_hijack_init)
 		  inet6_offloads[IPPROTO_TCP]->callbacks.gro_receive);
 }
 
-TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_tcp)
+TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_tcp_ipv4)
 {
 	struct homa_common_hdr *h;
 	struct sk_buff *skb;
 
+	mock_ipv6 = false;
 	homa_hijack_init();
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
@@ -119,6 +120,22 @@ TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_tcp)
 	h->urgent -= 1;
 	EXPECT_EQ(NULL, homa_hijack_gro_receive(&self->empty_list, skb));
 	EXPECT_STREQ("test_tcp_gro_receive", unit_log_get());
+	kfree_skb(skb);
+	homa_hijack_end();
+}
+TEST_F(homa_hijack, homa_hijack_gro_receive__pass_to_tcp_ipv6)
+{
+	struct homa_common_hdr *h;
+	struct sk_buff *skb;
+
+	mock_ipv6 = true;
+	homa_hijack_init();
+	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			     &self->header.common, 1400, 0);
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
+	h->flags = 0;
+	EXPECT_EQ(NULL, homa_hijack_gro_receive(&self->empty_list, skb));
+	EXPECT_STREQ("unit_tcp6_gro_receive", unit_log_get());
 	kfree_skb(skb);
 	homa_hijack_end();
 }
