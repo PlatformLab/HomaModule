@@ -2550,6 +2550,22 @@ TEST_F(homa_qdisc, homa_qdev_update_sysctl__cant_get_link_speed_from_dev)
 
 	homa_qdisc_qdev_put(qdev);
 }
+TEST_F(homa_qdisc, homa_qdev_update_sysctl__link_speed_unknown)
+{
+	struct homa_qdisc_dev *qdev;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	EXPECT_FALSE(IS_ERR(qdev));
+
+	/* Some drivers, such as virtio_net, don't know the link speed. */
+	self->homa.link_mbps = 16000;
+	mock_link_mbps = SPEED_UNKNOWN;
+	homa_qdev_update_sysctl(qdev);
+	EXPECT_EQ(16000, qdev->link_mbps);
+	EXPECT_EQ(529583, qdev->cycles_per_mibyte);
+
+	homa_qdisc_qdev_put(qdev);
+}
 
 TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__clamp_values)
 {

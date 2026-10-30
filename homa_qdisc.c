@@ -1403,7 +1403,9 @@ void homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev)
 	qdev->link_mbps = homa->link_mbps;
 	ops = qdev->dev->ethtool_ops;
 	if (ops && ops->get_link_ksettings) {
-		if (ops->get_link_ksettings(qdev->dev, &ksettings) == 0)
+		if (ops->get_link_ksettings(qdev->dev, &ksettings) == 0 &&
+		    ksettings.base.speed != 0 &&
+		    ksettings.base.speed != SPEED_UNKNOWN)
 			qdev->link_mbps = ksettings.base.speed;
 	}
 
