@@ -334,6 +334,9 @@ int         mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet,
 void        mock_sock_put(struct sock *sk);
 void        mock_spin_lock(spinlock_t *lock);
 void        mock_spin_unlock(spinlock_t *lock);
+struct sk_buff *
+	    mock_tcp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
+			 int sequence, int extra_bytes);
 void        mock_teardown(void);
 void       *mock_vmalloc(size_t size);
 

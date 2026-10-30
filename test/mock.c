@@ -2759,6 +2759,36 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 }
 
 /**
+ * mock_tcp_skb() - Allocate and return a TCP packet buffer. The buffer is
+ * initialized as if it just arrived from the network.
+ * @saddr:        IPv6 address to use as the sender of the packet, in
+ *                network byte order.
+ * @daddr:        IPv6 address to use as the destination for the packet, in
+ *                network byte order.
+ * @sequence:     Sequence number to store in the TCP header.
+ * @extra_bytes:  How much additional data to add to the buffer after
+ *                the TCP header.
+ *
+ * Return:        A packet buffer containing the information described above.
+ *                The caller owns this buffer and is responsible for freeing it.
+ */
+struct sk_buff *mock_tcp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
+			     int sequence, int extra_bytes)
+{
+	struct sk_buff *skb;
+	struct tcphdr *tcp;
+
+	skb = mock_raw_skb(saddr, daddr, IPPROTO_TCP,
+			   sizeof(struct tcphdr) + extra_bytes);
+	tcp = (struct tcphdr *)skb_put(skb, sizeof(struct tcphdr));
+	tcp->seq = htonl(sequence);
+	tcp->doff = sizeof(struct tcphdr) / 4;
+	skb_put(skb, extra_bytes);
+	qdisc_skb_cb(skb)->pkt_len = extra_bytes + 100;
+	return skb;
+}
+
+/**
  * Returns the number of sk_buffs currently in use.
  */
 int mock_skb_count(void)

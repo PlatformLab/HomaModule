@@ -162,8 +162,8 @@ integration tests.
 
 ## Significant changes
 - UDP-only variant: all Homa packet classes use UDP/5001 with complete
-  per-segment headers. The old TCP/Homa share scheduler is removed; ordinary
-  TCP and unrelated UDP use generic pass-through. Historical cross-protocol
+  per-segment headers. TCP hijacking is removed; the qdisc's balancing of
+  ordinary TCP against Homa is unchanged. Historical cross-protocol
   performance results below are not promises for this variant.
 - September 2026: Protocol change in granting mechanism. Messages that
   require grants are now completely scheduled (no initial unscheduled

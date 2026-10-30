@@ -302,6 +302,10 @@ char *homa_metrics_print(void)
 		  "Homa bytes transmitted by the pacer (including headers)\n");
 		M("pacer_fifo_bytes", m->pacer_fifo_bytes,
 		  "Homa bytes transmitted using FIFO priority (including headers)\n");
+		M("pacer_tcp_packets", m->pacer_tcp_packets,
+		  "TCP packets transmitted by the pacer\n");
+		M("pacer_tcp_bytes", m->pacer_tcp_bytes,
+		  "TCP bytes transmitted by the pacer (including headers)\n");
 		M("pacer_bubble_cycles", m->pacer_bubble_cycles,
 		  "Time NIC uplink was idle because pacer was slow\n");
 		M("nic_congest_cycles", m->nic_congest_cycles,
@@ -312,6 +316,8 @@ char *homa_metrics_print(void)
 		  "Calls to pacer from homa_qdisc_pacer_check\n");
 		M("pacer_help_bytes", m->pacer_help_bytes,
 		  "Bytes transmitted via homa_qdisc_pacer_check\n");
+		M("qdisc_tcp_packets", m->qdisc_tcp_packets,
+		  "TCP packets processed by homa_qdisc\n");
 		M("qdisc_flushes", m->qdisc_flushes,
 		  "RPCs that required qdisc cleanup when ended\n");
 		M("qdisc_lock_misses", m->qdisc_lock_misses,

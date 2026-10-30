@@ -941,3 +941,25 @@ void tt_inc_metric(int metric, u64 count)
 	*metric_addr += count;
 #endif /* See strip.py */
 }
+
+/**
+ * tt_record_tcp() - Create a timetrace record for a TCP packet, formatting
+ * data in a standard way.
+ * @format:       Format string for tt_record4; must have % specs for
+ *                source, dest, length, and ack/seq, in that order.
+ * @skb:          Contains TCP packet with valid transport header.
+ * @saddr:        Source address for packet.
+ * @daddr:        Destination address for packet.
+ */
+void tt_record_tcp(char *format, struct sk_buff *skb, __be32 saddr,
+		   __be32 daddr)
+{
+	struct tcphdr *th;
+	int data_length;
+
+	th = (struct tcphdr*)skb_transport_header(skb);
+	data_length = skb->len - skb_transport_offset(skb) - th->doff * 4;
+	tt_record4(format, (ntohl(saddr) << 16) + ntohs(th->source),
+		   (ntohl(daddr) << 16) + ntohs(th->dest), data_length,
+		   data_length == 0 ? ntohl(th->ack_seq) : ntohl(th->seq));
+}

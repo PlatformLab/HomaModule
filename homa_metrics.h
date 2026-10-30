@@ -432,6 +432,20 @@ struct homa_metrics {
 	u64 pacer_fifo_bytes;
 
 	/**
+	 * @pacer_tcp_packets: total number of TCP packets that were
+	 * transmitted by homa_qdisc_pacer (they were deferred because of
+	 * NIC queue overload).
+	 */
+	u64 pacer_tcp_packets;
+
+	/**
+	 * @pacer_tcp_bytes: total number of bytes in TCP packets that were
+	 * transmitted by homa_qdisc_pacer (they were deferred because of
+	 * NIC queue overload).
+	 */
+	u64 pacer_tcp_bytes;
+
+	/**
 	 * @pacer_bubble_cycles: total (estimated) lost transmission time on
 	 * the NIC uplink because the pacer failed to queue a packet before
 	 * the NIC became idle.
@@ -461,9 +475,17 @@ struct homa_metrics {
 	/**
 	 * @pacer_help_bytes: bytes that the pacer transmitted via calls to
 	 * homa_qdisc_pacer_check (presumably because the pacer thread
-	 * wasn't keeping up). Includes Homa packet and header bytes.
+	 * wasn't keeping up). Includes both TCP and Homa packets as well as
+	 * header bytes.
 	 */
 	u64 pacer_help_bytes;
+
+	/**
+	 * @qdisc_tcp_packets: total number of TCP packets that passed through
+	 * homa_qdisc; includes packets that were transmitted immediately as
+	 * well as those that were deferred.
+	 */
+	u64 qdisc_tcp_packets;
 
 	/**
 	 * @qdisc_flushes: total number of times that homa_qdisc_flush_rpc

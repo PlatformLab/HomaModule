@@ -102,16 +102,19 @@ feel free to contact me (John Ousterhout, ouster@cs.stanford.edu).
    It's possible that these problems are isolated to the particular NICs
    I was using, but I think it's safest to disable flow steering.
 
-1. Activate Homa's queuing discipline. It paces outgoing UDP Homa packets
+1. Activate Homa's queuing discipline. Homa has its own queuing discipline,
+   which serves two purposes. First, it paces outgoing Homa packets
    to prevent queue buildup in the NIC. This is
    essential to Homa's SRPT (Shortest Remaining Processing Time) scheduling
    policy, which favors shorter messages. Without the queuing discipline,
    small messages can get stuck in long NIC queues, which will impact
-   their tail latency. Ordinary non-Homa traffic, including TCP and other UDP
-   traffic, follows a generic FIFO pass-through path. The queuing discipline
-   does not provide TCP/Homa bandwidth-share arbitration or guarantee
-   cross-protocol isolation or improved TCP performance.
-   Activating Homa's queuing discipline requires
+   their tail latency. Second, the queuing discipline also manages outgoing packets
+   from other protcols such as TCP, ensuring that the protocols don't
+   interfere with each other. Without the queuing discipline, if TCP and
+   Homa are used concurrently on a node, TCP will interfere with Homa's
+   performance. The queuing discipline manages interactions between
+   protocols to avoid interference: with it, all protocols (including TCP)
+   get better performance. Activating Homa's queuing discipline requires
    each individual output queue to be individually configured; see the
    function `config_qdisc` in `cloudlab/bin/config` for details.
 
