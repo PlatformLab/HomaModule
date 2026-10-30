@@ -9,7 +9,9 @@
 #include "homa_pool.h"
 #include "homa_tx_pool.h"
 #include "homa_udp_tunnel.h"
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_qdisc.h"
+#endif /* See strip.py */
 #include "ccutils.h"
 #include "utils.h"
 
@@ -2036,6 +2038,7 @@ struct page *mock_alloc_pages(gfp_t gfp, unsigned int order)
 	return page;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * mock_alloc_qdisc() - Allocate and initialize a new Qdisc suitable for
  * use in unit tests as a homa qdisc.
@@ -2054,6 +2057,7 @@ struct Qdisc *mock_alloc_qdisc(struct netdev_queue *dev_queue)
 	spin_lock_init(&qdisc->q.lock);
 	return qdisc;
 }
+#endif /* See strip.py */
 
 /**
  * mock_check_error() - Determines whether a method should simulate an error
@@ -2693,9 +2697,11 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		case DATA:
 			header_size = sizeof(struct homa_data_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
 		case GRANT:
 			header_size = sizeof(struct homa_grant_hdr);
 			break;
+#endif /* See strip.py */
 		case RESEND:
 			header_size = sizeof(struct homa_resend_hdr);
 			break;
@@ -2705,21 +2711,25 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		case BUSY:
 			header_size = sizeof(struct homa_busy_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
 		case CUTOFFS:
 			header_size = sizeof(struct homa_cutoffs_hdr);
 			break;
 		case FREEZE:
 			header_size = sizeof(struct homa_freeze_hdr);
 			break;
+#endif /* See strip.py */
 		case NEED_ACK:
 			header_size = sizeof(struct homa_need_ack_hdr);
 			break;
 		case ACK:
 			header_size = sizeof(struct homa_ack_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
 		case START_MSG:
 			header_size = sizeof(struct homa_start_msg_hdr);
 			break;
+#endif /* See strip.py */
 		default:
 			header_size = sizeof(struct homa_common_hdr);
 			break;
@@ -3024,7 +3034,9 @@ void mock_teardown(void)
 				mock_preempt_disables);
 	mock_preempt_disables = 0;
 
+#ifndef __STRIP__ /* See strip.py */
 	memset(homa_metrics, 0, sizeof(homa_metrics));
+#endif /* See strip.py */
 
 	unit_hook_clear();
 }

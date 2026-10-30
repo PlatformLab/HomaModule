@@ -919,6 +919,7 @@ void tt_dbg3(char *msg, ...)
  */
 void tt_inc_metric(int metric, u64 count)
 {
+#ifndef __STRIP__ /* See strip.py */
 	/* Maps from the metric argument to an offset within homa_metrics.
 	 * This level of indirection is needed so that the kernel doesn't
 	 * have to be recompiled every time a new metric gets added (which
@@ -938,4 +939,5 @@ void tt_inc_metric(int metric, u64 count)
 	u64 *metric_addr = (u64 *)(((char *)homa_metrics_per_cpu())
 			+ offsets[metric]);
 	*metric_addr += count;
+#endif /* See strip.py */
 }

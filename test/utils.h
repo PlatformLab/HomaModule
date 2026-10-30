@@ -75,7 +75,9 @@ struct homa_rpc
 void         unit_sock_destroy(struct homa_sock *hsk);
 void         unit_teardown(void);
 
+#ifndef __STRIP__ /* See strip.py */
 const char  *unit_log_grantables(struct homa *homa);
+#endif /* See strip.py */
 
 /* Kludge to avoid including arpa/inet.h, which causes definition
  * conflicts with kernel header files.

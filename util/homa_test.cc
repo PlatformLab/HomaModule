@@ -1095,36 +1095,27 @@ int main(int argc, char** argv)
 	ibuf[0] = ibuf[1] = length;
 	seed_buffer(&ibuf[2], sizeof32(buffer) - 2*sizeof32(int), seed);
 
-	bool needs_homa = false;
-	for (int i = next_arg; i < argc; i++) {
-		if (strcmp(argv[i], "tcp") != 0 &&
-		    strcmp(argv[i], "tcpstream") != 0)
-			needs_homa = true;
+	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
+	if (fd < 0) {
+		printf("Couldn't open Homa socket: %s\n", strerror(errno));
 	}
-	fd = -1;
-	if (needs_homa) {
-		fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
-		if (fd < 0) {
-			printf("Couldn't open Homa socket: %s\n", strerror(errno));
-			exit(1);
-		}
 
-		buf_region = (char *) mmap(NULL, 1000*HOMA_BPAGE_SIZE,
-				PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
-		if (buf_region == MAP_FAILED) {
-			printf("Couldn't mmap buffer region: %s\n", strerror(errno));
-			exit(1);
-		}
-		struct homa_rcvbuf_args arg;
-		arg.start = (uintptr_t)buf_region;
-		arg.length = 1000*HOMA_BPAGE_SIZE;
-		status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
-				sizeof(arg));
-		if (status < 0) {
-			printf("Error in setsockopt(SO_HOMA_RCVBUF): %s\n",
-					strerror(errno));
-			exit(1);
-		}
+	// Set up buffer region.
+	buf_region = (char *) mmap(NULL, 1000*HOMA_BPAGE_SIZE,
+			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+	if (buf_region == MAP_FAILED) {
+		printf("Couldn't mmap buffer region: %s\n", strerror(errno));
+		exit(1);
+	}
+	struct homa_rcvbuf_args arg;
+	arg.start = (uintptr_t)buf_region;
+	arg.length = 1000*HOMA_BPAGE_SIZE;
+	status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
+			sizeof(arg));
+	if (status < 0) {
+		printf("Error in setsockopt(SO_HOMA_RCVBUF): %s\n",
+				strerror(errno));
+		exit(1);
 	}
 	recv_args.id = 0;
 	recv_args.num_bpages = 0;
@@ -1178,7 +1169,7 @@ int main(int argc, char** argv)
 			exit(1);
 		}
 	}
-	if (fd >= 0)
-		close(fd);
+	close(fd);
 	exit(0);
 }
+

@@ -67,6 +67,7 @@ TEST_F(timetrace, tt_record__basics)
 			buffer);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(timetrace, tt_inc_metric_uses_current_metric_layout)
 {
 	struct homa_metrics *m = homa_metrics_per_cpu();
@@ -81,6 +82,7 @@ TEST_F(timetrace, tt_inc_metric_uses_current_metric_layout)
 	EXPECT_EQ(29, m->linux_softirq_cycles);
 	EXPECT_EQ(41, m->temp[0]);
 }
+#endif /* See strip.py */
 
 TEST_F(timetrace, tt_record_buf__wraparound)
 {

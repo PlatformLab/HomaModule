@@ -95,11 +95,13 @@ struct homa_peertab {
 	 */
 	int idle_jiffies_max;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @sysctl_header: Used to remove sysctl values when this structure
 	 * is destroyed.
 	 */
 	struct ctl_table_header *sysctl_header;
+#endif /* See strip.py */
 
 	/** @rcu_head: Holds state of a pending call_rcu invocation. */
 	struct rcu_head rcu_head;
@@ -168,6 +170,7 @@ struct homa_peer {
 	 */
 	struct homa_ack acks[HOMA_MAX_ACKS_PER_PKT];
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @unsched_cutoffs: priorities to use for unscheduled packets
 	 * sent to this host, as specified in the most recent CUTOFFS
@@ -214,6 +217,7 @@ struct homa_peer {
 	 * grant lock. If this list is nonempty then refs will be nonzero.
 	 */
 	struct list_head grantable_links;
+#endif /* See strip.py */
 };
 
 /**
@@ -374,6 +378,7 @@ void     homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
 extern const struct rhashtable_params peer_ht_params;
 extern const struct rhashtable_params route_ht_params;
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_peer_lock() - Acquire the lock for a peer. If the lock isn't
  * immediately available, record stats on the waiting time.
@@ -385,6 +390,17 @@ static inline void homa_peer_lock(struct homa_peer *peer)
 	if (!spin_trylock_bh(&peer->lock))
 		homa_peer_lock_slow(peer);
 }
+#else /* See strip.py */
+/**
+ * homa_peer_lock() - Acquire the lock for a peer.
+ * @peer:    Peer to lock.
+ */
+static inline void homa_peer_lock(struct homa_peer *peer)
+	__acquires(peer->lock)
+{
+	spin_lock_bh(&peer->lock);
+}
+#endif /* See strip.py */
 
 /**
  * homa_peer_unlock() - Release the lock for a peer.

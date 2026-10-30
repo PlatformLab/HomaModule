@@ -66,6 +66,7 @@
  *    so no checks are needed there.
  */
 
+#ifndef __STRIP__ /* See strip.py */
 /* Used to enable sysctl access to grant-specific configuration parameters. The
  * @data fields are actually offsets within a struct homa_grant; these are
  * converted to pointers into a net-specific struct grant later.
@@ -115,6 +116,7 @@ static struct ctl_table grant_ctl_table[] = {
 		.proc_handler	= homa_grant_dointvec
 	},
 };
+#endif /* See strip.py */
 
 /**
  * homa_grant_alloc() - Allocate and initialize a new grant object, which
@@ -149,6 +151,7 @@ struct homa_grant *homa_grant_alloc(struct homa *homa)
 	 */
 	grant->fifo_fraction = 0;
 
+#ifndef __STRIP__ /* See strip.py */
 	grant->sysctl_header = register_net_sysctl(&init_net, "net/homa",
 						   grant_ctl_table);
 	if (!grant->sysctl_header) {
@@ -156,6 +159,7 @@ struct homa_grant *homa_grant_alloc(struct homa *homa)
 		pr_err("couldn't register sysctl parameters for Homa grants\n");
 		goto error;
 	}
+#endif /* See strip.py */
 	homa_grant_update_sysctl_deps(grant);
 	return grant;
 
@@ -172,10 +176,12 @@ error:
  */
 void homa_grant_free(struct homa_grant *grant)
 {
+#ifndef __STRIP__ /* See strip.py */
 	if (grant->sysctl_header) {
 		unregister_net_sysctl_table(grant->sysctl_header);
 		grant->sysctl_header = NULL;
 	}
+#endif /* See strip.py */
 	kfree(grant);
 }
 
@@ -1195,6 +1201,7 @@ void homa_grant_update_sysctl_deps(struct homa_grant *grant)
 	}
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_grant_dointvec() - This function is a wrapper around proc_dointvec. It
  * is invoked to read and write grant-related sysctl values.
@@ -1226,3 +1233,4 @@ int homa_grant_dointvec(const struct ctl_table *table, int write,
 		homa_grant_update_sysctl_deps(grant);
 	return result;
 }
+#endif /* See strip.py */

@@ -627,6 +627,7 @@ TEST_F(homa_sock, homa_sock_find__long_hash_chain)
 	unit_sock_destroy(&hsk4);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_sock, homa_sock_lock_slow)
 {
 	mock_clock_tick = 100;
@@ -642,6 +643,7 @@ TEST_F(homa_sock, homa_sock_lock_slow)
 	EXPECT_EQ(100, homa_metrics_per_cpu()->socket_lock_miss_cycles);
 	homa_sock_unlock(&self->hsk);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_sock, homa_sock_wait_wmem__no_memory_shortage)
 {

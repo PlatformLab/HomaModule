@@ -7,7 +7,9 @@
 #include "homa_peer.h"
 #include "homa_pool.h"
 
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
+#endif /* See strip.py */
 
 /**
  * homa_socktab_init() - Constructor for homa_socktabs.
@@ -404,13 +406,14 @@ void homa_sock_destroy(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 
-	int i = 0;
+	IF_NO_STRIP(int i = 0);
 
 	if (!hsk->homa)
 		return;
 
 	tt_record1("Starting to destroy socket %d", hsk->port);
 	while (!list_empty(&hsk->dead_rpcs)) {
+#ifndef __STRIP__ /* See strip.py */
 		if (!homa_rpc_reap(hsk)) {
 			i++;
 			if (i == 5) {
@@ -418,6 +421,9 @@ void homa_sock_destroy(struct sock *sk)
 				tt_freeze();
 			}
 		}
+#else /* See strip.py */
+		homa_rpc_reap(hsk);
+#endif /* See strip.py */
 	}
 
 	WARN_ON_ONCE(refcount_read(&hsk->sock.sk_wmem_alloc) != 1);
@@ -519,6 +525,7 @@ struct homa_sock *homa_sock_find(struct homa_net *hnet, u16 port)
 	return result;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_sock_lock_slow() - This function implements the slow path for
  * acquiring a socketC lock. It is invoked when a socket lock isn't immediately
@@ -565,6 +572,7 @@ void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
 		INC_METRIC(server_lock_miss_cycles, homa_clock() - start);
 	}
 }
+#endif /* See strip.py */
 
 /**
  * homa_sock_wait_wmem() - Block the thread until @hsk's usage of tx

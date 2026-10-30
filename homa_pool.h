@@ -151,6 +151,7 @@ int      homa_pool_set_region(struct homa_pool *pool, void __user *region,
 			      u64 region_size);
 void     homa_pool_wakeup_rpc(struct homa_rpc *rpc);
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_pool_lock() - Acquire the lock for a buffer pool. If the pool
  * isn't immediately available, record stats on the waiting time.
@@ -162,6 +163,17 @@ static inline void homa_pool_lock(struct homa_pool *pool)
 	if (!spin_trylock_bh(&pool->lock))
 		homa_pool_lock_slow(pool);
 }
+#else /* See strip.py */
+/**
+ * homa_pool_lock() - Acquire the lock for a buffer pool.
+ * @pool:     Buffer pool to lock.
+ */
+static inline void homa_pool_lock(struct homa_pool *pool)
+	__acquires(pool->lock)
+{
+	spin_lock_bh(&pool->lock);
+}
+#endif /* See strip.py */
 
 /**
  * homa_pool_unlock() - Release the lock for a buffer pool.

@@ -287,11 +287,13 @@ struct homa_qdisc_shared {
 	 */
 	int max_link_usage;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @sysctl_header: Used to remove sysctl values when this structure
 	 * is destroyed.
 	 */
 	struct ctl_table_header *sysctl_header;
+#endif /* See strip.py */
 };
 
 /**

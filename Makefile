@@ -13,11 +13,16 @@ HOMA_OBJS := homa_devel.o \
 	homa_tx_pool.o \
 	homa_udp_tunnel.o \
 	homa_utils.o \
-	timetrace.o \
-	homa_grant.o \
+	timetrace.o
+
+ifneq ($(__STRIP__),)
+MY_CFLAGS += -D__STRIP__
+else
+HOMA_OBJS += homa_grant.o \
 	homa_metrics.o \
 	homa_offload.o \
 	homa_qdisc.o
+endif
 
 CHECK_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o timetrace.o, $(HOMA_OBJS)))
 CHECK_SRCS += $(filter-out homa_receiver.h homa_devel.h, $(wildcard *.h))
@@ -31,7 +36,7 @@ endif
 LINUX_VERSION ?= $(shell uname -r)
 KDIR ?= /lib/modules/$(LINUX_VERSION)/build
 
-LINUX_SRC_DIR ?= $(KDIR)
+LINUX_SRC_DIR ?= ../net-next
 
 ifneq ($(KERNELRELEASE),)
 
@@ -54,6 +59,40 @@ kdoc:
 
 checkpatch:
 	$(LINUX_SRC_DIR)/scripts/checkpatch.pl --file --strict --codespell $(CHECK_SRCS)
+
+checkpatch-net-next:
+	$(LINUX_SRC_DIR)/scripts/checkpatch.pl --file --strict --codespell $(HOMA_TARGET)/*.[ch]
+
+# Copy stripped source files to a Linux source tree
+HOMA_TARGET ?= $(LINUX_SRC_DIR)/net/homa
+CP_HDRS := homa_impl.h \
+	   homa_interest.h \
+	   homa_peer.h \
+	   homa_pool.h \
+	   homa_rpc.h \
+	   homa_sock.h \
+	   homa_tx_pool.h \
+	   homa_udp_tunnel.h \
+	   homa_wire.h
+CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o homa_grant.o \
+		homa_hijack.o homa_metrics.o homa_offload.o homa_pacer.o \
+		homa_qdisc.o homa_skb.o timetrace.o, $(HOMA_OBJS)))
+CP_EXTRAS := Kconfig \
+	     Makefile
+CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS) $(CP_EXTRAS))
+net-next: $(HOMA_TARGET) $(CP_TARGETS) $(LINUX_SRC_DIR)/include/uapi/linux/homa.h
+$(HOMA_TARGET):
+	mkdir $(HOMA_TARGET)
+$(HOMA_TARGET)/%: % util/strip.py
+	util/strip.py $< > $@
+$(HOMA_TARGET)/%.txt: %.txt
+	cp $< $@
+$(HOMA_TARGET)/Makefile: Makefile.upstream
+	cp $< $@
+$(HOMA_TARGET)/strip_decl.py: util/strip_decl.py
+	cp $< $@
+$(LINUX_SRC_DIR)/include/uapi/linux/homa.h: homa.h util/strip.py
+	util/strip.py $< > $@
 
 clean:
 	$(MAKE) -C $(KDIR) M=$(shell pwd) clean

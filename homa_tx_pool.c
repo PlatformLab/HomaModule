@@ -272,7 +272,7 @@ struct page *homa_tx_pool_alloc_page(struct homa_tx_pool_core *tx_core,
 	struct homa_tx_pool *pool;
 	struct page *page;
 
-	u64 start;
+	IF_NO_STRIP(u64 start);
 
 	/* Step 1: can we reuse the core's cached page? */
 	page = tx_core->page;
@@ -305,7 +305,7 @@ struct page *homa_tx_pool_alloc_page(struct homa_tx_pool_core *tx_core,
 
 	/* Step 3: can we allocate a big page? */
 	INC_METRIC(tx_page_allocs, 1);
-	start = homa_clock();
+	IF_NO_STRIP(start = homa_clock());
 	page = alloc_pages(GFP_ATOMIC | __GFP_COMP | __GFP_NOWARN |
 			   __GFP_NORETRY, HOMA_TX_PAGE_ORDER);
 	if (likely(page)) {

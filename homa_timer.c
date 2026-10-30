@@ -64,7 +64,9 @@
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #include "homa_tx_pool.h"
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
+#endif /* See strip.py */
 
 /**
  * homa_timer_check_rpc() -  Invoked for each RPC during each timer pass; does
@@ -105,6 +107,7 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 	 * heard from the peer.
 	 */
 	if (rpc->state == RPC_INCOMING) {
+#ifndef __STRIP__ /* See strip.py */
 		if ((rpc->msgin.length - rpc->msgin.bytes_remaining)
 				>= rpc->msgin.granted) {
 			/* We've received everything that we've granted, so we
@@ -113,6 +116,7 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 			rpc->silent_ticks = 0;
 			return;
 		}
+#endif /* See strip.py */
 		if (rpc->msgin.num_bpages == 0) {
 			/* Waiting for buffer space, so no problem. */
 			rpc->silent_ticks = 0;
@@ -127,7 +131,11 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 	}
 
 	if (rpc->state == RPC_OUTGOING) {
+#ifndef __STRIP__ /* See strip.py */
 		if (tx_end < rpc->msgout.granted) {
+#else /* See strip.py */
+		if (tx_end < rpc->msgout.length) {
+#endif /* See strip.py */
 			/* There are granted bytes that we haven't transmitted,
 			 * so no need to be concerned; the ball is in our court.
 			 */
@@ -142,6 +150,7 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 		INC_METRIC(rpc_timeouts, 1);
 		tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, state %d",
 			   rpc->id, tt_addr(rpc->route->peer->addr), rpc->state);
+#ifndef __STRIP__ /* See strip.py */
 #if 0
 		homa_rpc_log_active_tt(homa, 0);
 		tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
@@ -153,6 +162,7 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 				  rpc->id,
 				  homa_print_ipv6_addr(&rpc->route->peer->addr),
 				  rpc->state);
+#endif /* See strip.py */
 		homa_rpc_abort(rpc, -ETIMEDOUT);
 		return;
 	}
@@ -173,6 +183,7 @@ void homa_timer(struct homa *homa)
 	struct homa_rpc *rpc;
 	int rpc_count = 0;
 
+#ifndef __STRIP__ /* See strip.py */
 	static u64 prev_grant_count;
 	int total_incoming_rpcs = 0;
 	int sum_incoming_rec = 0;
@@ -183,9 +194,11 @@ void homa_timer(struct homa *homa)
 	cycles_t start;
 	cycles_t end;
 	int core;
+#endif /* See strip.py */
 
 	homa->timer_ticks++;
 
+#ifndef __STRIP__ /* See strip.py */
 	start = homa_clock();
 	total_grants = 0;
 	for (core = 0; core < nr_cpu_ids; core++) {
@@ -217,6 +230,7 @@ void homa_timer(struct homa *homa)
 		zero_count = 0;
 	}
 	prev_grant_count = total_grants;
+#endif /* See strip.py */
 
 	/* Scan all existing RPCs in all sockets. */
 	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
@@ -227,7 +241,9 @@ void homa_timer(struct homa *homa)
 			 * "RPC Reaping Strategy" in homa_rpc_reap code for
 			 * details.
 			 */
+#ifndef __STRIP__ /* See strip.py */
 			u64 rpc_start = homa_clock();
+#endif /* See strip.py */
 
 			tt_record("homa_timer calling homa_rpc_reap");
 			if (homa_rpc_reap(hsk) == 0)
@@ -242,19 +258,21 @@ void homa_timer(struct homa *homa)
 			continue;
 		rcu_read_lock();
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-			total_rpcs++;
+			IF_NO_STRIP(total_rpcs++);
 
 			homa_rpc_lock(rpc);
 			if (rpc->state == RPC_IN_SERVICE) {
 				rpc->silent_ticks = 0;
 				homa_rpc_unlock(rpc);
 				continue;
+#ifndef __STRIP__ /* See strip.py */
 			} else if (rpc->state == RPC_INCOMING) {
 				total_incoming_rpcs += 1;
 				sum_incoming_rec += rpc->msgin.rec_incoming;
 				sum_incoming += rpc->msgin.granted
 						- (rpc->msgin.length
 						- rpc->msgin.bytes_remaining);
+#endif /* See strip.py */
 			}
 			rpc->silent_ticks++;
 			homa_timer_check_rpc(rpc);
@@ -274,13 +292,17 @@ void homa_timer(struct homa *homa)
 		homa_unprotect_rpcs(hsk);
 	}
 	homa_socktab_end_scan(&scan);
+#ifndef __STRIP__ /* See strip.py */
 	if (total_incoming_rpcs > 0)
 		tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",
 			   total_incoming_rpcs, sum_incoming, sum_incoming_rec,
 			   atomic_read(&homa->grant->total_incoming));
+#endif /* See strip.py */
 	homa_tx_pool_gc(homa);
 	homa_route_gc(homa->peertab);
+#ifndef __STRIP__ /* See strip.py */
 	homa_snapshot_rpcs();
 	end = homa_clock();
 	INC_METRIC(timer_cycles, end - start);
+#endif /* See strip.py */
 }
