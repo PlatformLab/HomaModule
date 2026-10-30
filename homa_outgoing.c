@@ -69,7 +69,7 @@ int homa_message_out_init(struct homa_rpc *rpc, int length)
 		goto done;
 	}
 	max_size = min_t(u32, rpc->hsk->homa->max_gso_size,
-			  dst->dev->gso_max_size);
+			 dst->dev->gso_max_size);
 	max_size = min_t(u32, max_size, U16_MAX);
 	max_segs = max_size > overhead ?
 		(max_size - overhead) / (rpc->msgout.max_seg_data +

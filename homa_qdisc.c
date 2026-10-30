@@ -1063,7 +1063,7 @@ int homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 			INC_METRIC(pacer_bubble_cycles, now - idle_time);
 			tt_record2("homa_qdisc_pacer bubble: %d cycles, homa_pending %d",
 				now - idle_time,
-				rb_first_cached(&qdev->deferred_rpcs) != NULL);
+				!!rb_first_cached(&qdev->deferred_rpcs));
 		}
 
 		if (!rb_first_cached(&qdev->deferred_rpcs))
