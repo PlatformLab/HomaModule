@@ -225,13 +225,11 @@ struct homa_grant {
 	 */
 	struct homa_rpc *oldest_rpc;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @sysctl_header: Used to remove sysctl values when this structure
 	 * is destroyed.
 	 */
 	struct ctl_table_header *sysctl_header;
-#endif /* See strip.py */
 } ____cacheline_aligned_in_smp;
 
 void     homa_grant_add_active(struct homa_grant *grant, struct homa_rpc *rpc,

@@ -8,9 +8,8 @@
 #include "homa_impl.h"
 #include "homa_pool.h"
 #include "homa_tx_pool.h"
-#ifndef __STRIP__ /* See strip.py */
+#include "homa_udp_tunnel.h"
 #include "homa_qdisc.h"
-#endif /* See strip.py */
 #include "ccutils.h"
 #include "utils.h"
 
@@ -45,8 +44,6 @@ int mock_dst_check_errors;
 int mock_ethtool_ksettings_errors;
 int mock_import_ubuf_errors;
 int mock_import_iovec_errors;
-int mock_ip6_xmit_errors;
-int mock_ip_queue_xmit_errors;
 int mock_kmalloc_errors;
 int mock_kthread_create_errors;
 int mock_prepare_to_wait_errors;
@@ -76,10 +73,21 @@ struct task_struct mock_task;
  */
 int mock_xmit_log_verbose;
 
-/* If a test sets this variable to nonzero, ip*xmit will log hijacking
- * information from outgoing packets.
- */
-int mock_xmit_log_hijack;
+int mock_udp_create_errors;
+int mock_udp_create_errno = -EADDRINUSE;
+int mock_udp_release_calls;
+int mock_udp_xmit_calls;
+struct udp_port_cfg mock_udp_port_cfg[2];
+struct udphdr mock_udp_last_header;
+int mock_udp_last_family;
+int mock_udp_last_tos;
+int mock_udp_last_ip_summed;
+int mock_udp_last_csum_start;
+int mock_udp_last_csum_offset;
+unsigned int mock_udp_last_gso_type;
+unsigned int mock_udp_last_gso_size;
+unsigned int mock_udp_last_gso_segs;
+int mock_udp_last_data_bytes;
 
 /* If a test sets this variable to nonzero, calls to wake_up and
  * wake_up_all will be logged.
@@ -329,8 +337,6 @@ int mock_num_drop_reasons;
 
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
-struct net_offload tcp_offload;
-struct net_offload tcp_v6_offload;
 
 static struct hrtimer_clock_base clock_base;
 struct task_struct *current_task = &mock_task;
@@ -361,6 +367,12 @@ struct paravirt_patch_template pv_ops;
 struct workqueue_struct *system_wq;
 struct workqueue_struct *system_percpu_wq;
 struct static_key_true validate_usercopy_range;
+#ifdef CONFIG_HUGETLB_PAGE_OPTIMIZE_VMEMMAP
+/* Mock pages have no optimized hugetlb vmemmap; match the kernel key's
+ * initial disabled state without changing the configured feature.
+ */
+DEFINE_STATIC_KEY_FALSE(hugetlb_optimize_vmemmap_key);
+#endif
 unsigned long __per_cpu_offset[NR_CPUS];
 struct tracepoint __tracepoint_sched_set_state_tp;
 
@@ -551,8 +563,19 @@ int debug_lockdep_rcu_enabled(void)
 int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
 {
 	struct homa_data_hdr *h;
+	struct udphdr *udp = udp_hdr(skb);
+	bool is_udp = skb_is_ipv6(skb) ?
+		      ipv6_hdr(skb)->nexthdr == IPPROTO_UDP :
+		      ip_hdr(skb)->protocol == IPPROTO_UDP;
 
 	h = (struct homa_data_hdr *)skb_transport_header(skb);
+	if (is_udp &&
+	    skb_transport_offset(skb) >= 0 &&
+	    skb_headlen(skb) >= skb_transport_offset(skb) +
+			       sizeof(*udp) + sizeof(*h) &&
+	    udp->source == htons(HOMA_UDP_PORT) &&
+	    udp->dest == htons(HOMA_UDP_PORT))
+		h = (struct homa_data_hdr *)(udp + 1);
 	unit_log_printf("; ", "__dev_queue_xmit invoked for id %llu, offset %d",
 			be64_to_cpu(h->common.sender_id), ntohl(h->seg.offset));
 	kfree_skb(skb);
@@ -688,27 +711,6 @@ int import_ubuf(int rw, void __user *buf, size_t len, struct iov_iter *i)
 	return 0;
 }
 
-int inet6_add_offload(const struct net_offload *prot, unsigned char protocol)
-{
-	return 0;
-}
-
-int inet6_add_protocol(const struct inet6_protocol *prot, unsigned char num)
-{
-	return 0;
-}
-
-int inet6_del_offload(const struct net_offload *prot, unsigned char protocol)
-{
-	return 0;
-}
-
-int inet6_del_protocol(const struct inet6_protocol *prot, unsigned char num)
-{
-	UNIT_LOG("; ", "inet6_del_protocol %u", num);
-	return 0;
-}
-
 int inet6_getname(struct socket *sock, struct sockaddr *uaddr, int peer)
 {
 	return 0;
@@ -734,27 +736,6 @@ int inet6_release(struct socket *sock)
 void inet6_unregister_protosw(struct inet_protosw *p)
 {
 	UNIT_LOG("; ", "inet6_unregister_protosw %u", p->protocol);
-}
-
-int inet_add_offload(const struct net_offload *prot, unsigned char protocol)
-{
-	return 0;
-}
-
-int inet_add_protocol(const struct net_protocol *prot, unsigned char num)
-{
-	return 0;
-}
-
-int inet_del_offload(const struct net_offload *prot, unsigned char protocol)
-{
-	return 0;
-}
-
-int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
-{
-	UNIT_LOG("; ", "inet_del_protocol %u", num);
-	return 0;
 }
 
 int inet_dgram_connect(struct socket *sock, struct SOCKADDR *uaddr,
@@ -869,81 +850,168 @@ unsigned int ip6_mtu(const struct dst_entry *dst)
 	return mock_mtu;
 }
 
-int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
-	     u32 mark, struct ipv6_txoptions *opt, int tclass, u32 priority)
+static int mock_udp_create(struct net *net, struct udp_port_cfg *cfg,
+			   struct socket **result)
 {
-	char buffer[200];
-	const char *prefix = " ";
+	struct socket *socket;
+	struct udp_sock *udp;
 
-	if (unit_hash_size(spinlocks_held)  > 0)
-		FAIL("ip6_xmit invoked with %d spinlocks held; this isn't safe because homa_qdisc_enqueue may acquire an RPC lock",
-		     unit_hash_size(spinlocks_held));
-
-	if (mock_check_error(&mock_ip6_xmit_errors)) {
-		kfree_skb(skb);
-		return -ENETDOWN;
-	}
-	if (mock_xmit_prios_offset == 0)
-		prefix = "";
-	mock_xmit_prios_offset += snprintf(
-			mock_xmit_prios + mock_xmit_prios_offset,
-			sizeof(mock_xmit_prios) - mock_xmit_prios_offset,
-			"%s%d", prefix, tclass >> 5);
-	if (mock_xmit_log_verbose)
-		homa_print_packet(skb, buffer, sizeof(buffer));
-	else
-		homa_print_packet_short(skb, buffer, sizeof(buffer));
-	unit_log_printf("; ", "xmit %s", buffer);
-#ifndef __STRIP__ /* See strip.py */
-	if (mock_xmit_log_hijack) {
-		struct homa_common_hdr *h;
-
-		h = (struct homa_common_hdr *)skb_transport_header(skb);
-		unit_log_printf("; ", "hijack checksum %d, flags 0x%x",
-			       h->checksum, h->flags);
-	}
-#endif /* See strip.py */
-	kfree_skb(skb);
+	mock_udp_port_cfg[cfg->family == AF_INET6] = *cfg;
+	if (mock_check_error(&mock_udp_create_errors))
+		return mock_udp_create_errno;
+	socket = malloc(sizeof(*socket));
+	udp = malloc(sizeof(*udp));
+	memset(socket, 0, sizeof(*socket));
+	memset(udp, 0, sizeof(*udp));
+	socket->sk = &udp->inet.sk;
+	socket->sk->sk_family = cfg->family;
+	socket->sk->sk_net.net = net;
+	*result = socket;
 	return 0;
 }
 
-int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
+int udp_sock_create4(struct net *net, struct udp_port_cfg *cfg,
+		      struct socket **socket)
 {
-	const char *prefix = " ";
-	char buffer[200];
+	return mock_udp_create(net, cfg, socket);
+}
 
-	if (unit_hash_size(spinlocks_held)  > 0)
-		FAIL("ip_queue_xmit invoked with %d spinlocks held; this isn't safe because homa_qdisc_enqueue may acquire an RPC lock",
-		     unit_hash_size(spinlocks_held));
-	if (mock_check_error(&mock_ip_queue_xmit_errors)) {
-		/* Latest data (as of 1/2019) suggests that ip_queue_xmit
-		 * frees packets after errors.
-		 */
-		kfree_skb(skb);
-		return -ENETDOWN;
-	}
-	if (mock_xmit_prios_offset == 0)
-		prefix = "";
+int udp_sock_create6(struct net *net, struct udp_port_cfg *cfg,
+		      struct socket **socket)
+{
+	return mock_udp_create(net, cfg, socket);
+}
+
+void setup_udp_tunnel_sock(struct net *net, struct socket *socket,
+			   struct udp_tunnel_sock_cfg *cfg)
+{
+	struct udp_sock *udp = udp_sk(socket->sk);
+
+	rcu_assign_sk_user_data(socket->sk, cfg->sk_user_data);
+	udp->encap_type = cfg->encap_type;
+	udp->encap_rcv = cfg->encap_rcv;
+	udp->encap_err_rcv = cfg->encap_err_rcv;
+	udp->gro_receive = cfg->gro_receive;
+	udp->gro_complete = cfg->gro_complete;
+}
+
+void udp_tunnel_sock_release(struct socket *socket)
+{
+	rcu_assign_sk_user_data(socket->sk, NULL);
+	synchronize_rcu();
+	mock_udp_release_calls++;
+	free(socket->sk);
+	free(socket);
+}
+
+int ip4_dst_hoplimit(const struct dst_entry *dst)
+{
+	return 64;
+}
+
+int ip6_dst_hoplimit(struct dst_entry *dst)
+{
+	return 64;
+}
+
+static void mock_udp_log_xmit(struct sk_buff *skb, int family, u8 tos)
+{
+	char buffer[300];
+	const char *prefix = mock_xmit_prios_offset ? " " : "";
+
+	if (unit_hash_size(spinlocks_held))
+		FAIL("UDP transmit invoked with spinlocks held");
+	if (!mock_active_rcu_locks)
+		FAIL("UDP transmit invoked without RCU protection");
+	mock_udp_xmit_calls++;
+	mock_udp_last_family = family;
+	mock_udp_last_tos = tos;
+	mock_udp_last_ip_summed = skb->ip_summed;
+	mock_udp_last_csum_start = skb->csum_start;
+	mock_udp_last_csum_offset = skb->csum_offset;
+	mock_udp_last_gso_type = skb_shinfo(skb)->gso_type;
+	mock_udp_last_gso_size = skb_shinfo(skb)->gso_size;
+	mock_udp_last_gso_segs = skb_shinfo(skb)->gso_segs;
+	mock_udp_last_data_bytes =
+		((struct homa_common_hdr *)skb->data)->type == DATA ?
+		homa_get_skb_info(skb)->data_bytes : 0;
 	mock_xmit_prios_offset += snprintf(
-			mock_xmit_prios + mock_xmit_prios_offset,
-			sizeof(mock_xmit_prios) - mock_xmit_prios_offset,
-			"%s%d", prefix, ((struct inet_sock *) sk)->tos>>5);
+		mock_xmit_prios + mock_xmit_prios_offset,
+		sizeof(mock_xmit_prios) - mock_xmit_prios_offset,
+		"%s%d", prefix, tos >> 5);
 	if (mock_xmit_log_verbose)
 		homa_print_packet(skb, buffer, sizeof(buffer));
 	else
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
 	unit_log_printf("; ", "xmit %s", buffer);
-#ifndef __STRIP__ /* See strip.py */
-	if (mock_xmit_log_hijack) {
-		struct homa_common_hdr *h;
+}
 
-		h = (struct homa_common_hdr *)skb_transport_header(skb);
-		unit_log_printf("; ", "hijack checksum %d, flags 0x%x",
-			       h->checksum, h->flags);
+static void mock_udp_push(struct sk_buff *skb, __be16 sport, __be16 dport,
+			   bool nocheck)
+{
+	struct udphdr *udp = (struct udphdr *)skb_push(skb, sizeof(*udp));
+
+	skb_reset_transport_header(skb);
+	udp->source = sport;
+	udp->dest = dport;
+	udp->len = htons(skb->len);
+	udp->check = nocheck ? 0 : htons(0xabcd);
+	if (!nocheck && !skb_is_gso(skb) &&
+	    skb->ip_summed != CHECKSUM_PARTIAL) {
+		skb->ip_summed = CHECKSUM_PARTIAL;
+		skb->csum_start = skb_transport_header(skb) - skb->head;
+		skb->csum_offset = offsetof(struct udphdr, check);
 	}
-#endif /* See strip.py */
+	mock_udp_last_ip_summed = skb->ip_summed;
+	mock_udp_last_csum_start = skb->csum_start;
+	mock_udp_last_csum_offset = skb->csum_offset;
+	mock_udp_last_header = *udp;
+}
+
+void udp_tunnel_xmit_skb(struct rtable *rt, struct sock *sk,
+			  struct sk_buff *skb, __be32 src, __be32 dst,
+			  u8 tos, u8 ttl, __be16 df, __be16 sport,
+			  __be16 dport, bool xnet, bool nocheck, u16 flags)
+{
+	struct iphdr *ip;
+
+	mock_udp_log_xmit(skb, AF_INET, tos);
+	mock_udp_push(skb, sport, dport, nocheck);
+	ip = (struct iphdr *)skb_push(skb, sizeof(*ip));
+	skb_reset_network_header(skb);
+	memset(ip, 0, sizeof(*ip));
+	ip->version = 4;
+	ip->ihl = 5;
+	ip->protocol = IPPROTO_UDP;
+	ip->saddr = src;
+	ip->daddr = dst;
+	ip->tos = tos;
+	ip->ttl = ttl;
+	ip->frag_off = df;
+	skb_dst_set(skb, &rt->dst);
 	kfree_skb(skb);
-	return 0;
+}
+
+void udp_tunnel6_xmit_skb(struct dst_entry *dst, struct sock *sk,
+			   struct sk_buff *skb, struct net_device *dev,
+			   const struct in6_addr *src, const struct in6_addr *dest,
+			   u8 tos, u8 ttl, __be32 label, __be16 sport,
+			   __be16 dport, bool nocheck, u16 flags)
+{
+	struct ipv6hdr *ip;
+
+	mock_udp_log_xmit(skb, AF_INET6, tos);
+	mock_udp_push(skb, sport, dport, nocheck);
+	ip = (struct ipv6hdr *)skb_push(skb, sizeof(*ip));
+	skb_reset_network_header(skb);
+	memset(ip, 0, sizeof(*ip));
+	ip->version = 6;
+	ip->nexthdr = IPPROTO_UDP;
+	ip->saddr = *src;
+	ip->daddr = *dest;
+	ip->hop_limit = ttl;
+	skb_dst_set(skb, dst);
+	kfree_skb(skb);
 }
 
 struct dst_entry *ipv4_dst_check(struct dst_entry *dst, u32 cookie)
@@ -1273,8 +1341,12 @@ void netif_schedule_queue(struct netdev_queue *txq)
 
 int netif_receive_skb(struct sk_buff *skb)
 {
+	/* Used only for UDP-encapsulated batches pushed up by GRO: the
+	 * transport header is the UDP header.
+	 */
 	struct homa_data_hdr *h = (struct homa_data_hdr *)
-			skb_transport_header(skb);
+			(skb_transport_header(skb) + sizeof(struct udphdr));
+
 	unit_log_printf("; ", "netif_receive_skb, id %llu, offset %d",
 			be64_to_cpu(h->common.sender_id), ntohl(h->seg.offset));
 	return 0;
@@ -1392,7 +1464,39 @@ void proto_unregister(struct proto *prot)
 
 void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 {
-	return NULL;
+	struct skb_shared_info *shinfo = skb_shinfo(skb);
+	int left = delta, i = 0;
+
+	if (delta > skb->data_len ||
+	    delta > skb_end_pointer(skb) - skb_tail_pointer(skb) ||
+	    !shinfo->nr_frags)
+		return NULL;
+	if (skb_copy_bits(skb, skb_headlen(skb), skb_tail_pointer(skb), delta))
+		return NULL;
+	while (left && i < shinfo->nr_frags) {
+		skb_frag_t *frag = &shinfo->frags[i];
+		int bytes = skb_frag_size(frag);
+
+		if (left < bytes) {
+			skb_frag_off_add(frag, left);
+			skb_frag_size_sub(frag, left);
+			left = 0;
+		} else {
+			left -= bytes;
+			put_page(skb_frag_page(frag));
+			i++;
+		}
+	}
+	if (left)
+		return NULL;
+	if (i) {
+		memmove(shinfo->frags, shinfo->frags + i,
+			(shinfo->nr_frags - i) * sizeof(shinfo->frags[0]));
+		shinfo->nr_frags -= i;
+	}
+	skb->tail += delta;
+	skb->data_len -= delta;
+	return skb_tail_pointer(skb);
 }
 
 bool queue_work_on(int cpu, struct workqueue_struct *wq,
@@ -1524,7 +1628,7 @@ bool rcuref_put_slowpath(rcuref_t *ref, unsigned int cnt)
 
 void refcount_warn_saturate(refcount_t *r, enum refcount_saturation_type t) {}
 
-int register_pernet_subsys(struct pernet_operations *)
+int register_pernet_device(struct pernet_operations *)
 {
 	return 0;
 }
@@ -1639,12 +1743,12 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *dest, int length)
 	skb_frag_t *frag;
 
 	/* Copy bytes from the linear part of the skb, if any. */
-	head_len = skb_tail_pointer(skb) - skb_transport_header(skb);
+	head_len = skb_headlen(skb);
 	if (offset < head_len) {
 		chunk_size = length;
 		if (chunk_size > (head_len - offset))
 			chunk_size = head_len - offset;
-		memcpy(dst, skb_transport_header(skb) + offset, chunk_size);
+		memcpy(dst, skb->data + offset, chunk_size);
 		offset += chunk_size;
 		length -= chunk_size;
 		dst += chunk_size;
@@ -1835,9 +1939,9 @@ void unregister_net_sysctl_table(struct ctl_table_header *header)
 	UNIT_LOG("; ", "unregister_net_sysctl_table");
 }
 
-void unregister_pernet_subsys(struct pernet_operations *)
+void unregister_pernet_device(struct pernet_operations *)
 {
-	UNIT_LOG("; ", "unregister_pernet_subsys");
+	UNIT_LOG("; ", "unregister_pernet_device");
 }
 
 void unregister_qdisc(struct Qdisc_ops *qops)
@@ -1932,7 +2036,6 @@ struct page *mock_alloc_pages(gfp_t gfp, unsigned int order)
 	return page;
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * mock_alloc_qdisc() - Allocate and initialize a new Qdisc suitable for
  * use in unit tests as a homa qdisc.
@@ -1951,7 +2054,6 @@ struct Qdisc *mock_alloc_qdisc(struct netdev_queue *dev_queue)
 	spin_lock_init(&qdisc->q.lock);
 	return qdisc;
 }
-#endif /* See strip.py */
 
 /**
  * mock_check_error() - Determines whether a method should simulate an error
@@ -2154,6 +2256,8 @@ struct homa_net *mock_hnet(int index, struct homa *homa)
 		hnet = malloc(sizeof(*hnet));
 		mock_hnets[index] = hnet;
 		homa_net_init(hnet, homa);
+		if (homa_udp_init(hnet, &mock_nets[index]))
+			FAIL("couldn't initialize mock namespace UDP pair");
 		if (index == 0)
 			mock_dev(0, homa);
 	}
@@ -2262,7 +2366,7 @@ void mock_put_page(struct page *page)
 
 /**
  * mock_raw_skb() - Performs most of the work of mock_skb_alloc and
- * mock_tcp_skb. Allocates and initializes an skb.
+ * wire packet helpers. Allocates and initializes an skb.
  * @saddr:        IPv6 address to use as the sender of the packet, in
  *                network byte order.
  * @daddr:        IPv6 address to use as the destination of the packet, in
@@ -2546,8 +2650,8 @@ void mock_set_core(int num)
 void mock_set_ipv6(struct homa_sock *hsk)
 {
 	mock_ipv6 = true;
-	mock_mtu -= hsk->ip_header_length - sizeof(struct ipv6hdr);
-	hsk->ip_header_length = sizeof(struct ipv6hdr);
+	if (hsk->sock.sk_family == AF_INET)
+		mock_mtu += sizeof(struct ipv6hdr) - sizeof(struct iphdr);
 	hsk->sock.sk_family = AF_INET6;
 }
 
@@ -2589,11 +2693,9 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		case DATA:
 			header_size = sizeof(struct homa_data_hdr);
 			break;
-#ifndef __STRIP__ /* See strip.py */
 		case GRANT:
 			header_size = sizeof(struct homa_grant_hdr);
 			break;
-#endif /* See strip.py */
 		case RESEND:
 			header_size = sizeof(struct homa_resend_hdr);
 			break;
@@ -2603,25 +2705,21 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		case BUSY:
 			header_size = sizeof(struct homa_busy_hdr);
 			break;
-#ifndef __STRIP__ /* See strip.py */
 		case CUTOFFS:
 			header_size = sizeof(struct homa_cutoffs_hdr);
 			break;
 		case FREEZE:
 			header_size = sizeof(struct homa_freeze_hdr);
 			break;
-#endif /* See strip.py */
 		case NEED_ACK:
 			header_size = sizeof(struct homa_need_ack_hdr);
 			break;
 		case ACK:
 			header_size = sizeof(struct homa_ack_hdr);
 			break;
-#ifndef __STRIP__ /* See strip.py */
 		case START_MSG:
 			header_size = sizeof(struct homa_start_msg_hdr);
 			break;
-#endif /* See strip.py */
 		default:
 			header_size = sizeof(struct homa_common_hdr);
 			break;
@@ -2646,36 +2744,6 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		info->data_bytes = extra_bytes;
 		info->dont_defer = 0;
 	}
-	qdisc_skb_cb(skb)->pkt_len = extra_bytes + 100;
-	return skb;
-}
-
-/**
- * mock_tcp_skb() - Allocate and return a TCP packet buffer. The buffer is
- * initialized as if it just arrived from the network.
- * @saddr:        IPv6 address to use as the sender of the packet, in
- *                network byte order.
- * @daddr:        IPv6 address to use as the destination for the packet, in
- *                network byte order.
- * @sequence:     Sequence number to store in the TCP header.
- * @extra_bytes:  How much additional data to add to the buffer after
- *                the TCP header.
- *
- * Return:        A packet buffer containing the information described above.
- *                The caller owns this buffer and is responsible for freeing it.
- */
-struct sk_buff *mock_tcp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
-			     int sequence, int extra_bytes)
-{
-	struct sk_buff *skb;
-	struct tcphdr *tcp;
-
-	skb = mock_raw_skb(saddr, daddr, IPPROTO_TCP,
-			   sizeof(struct tcphdr) + extra_bytes);
-	tcp = (struct tcphdr *)skb_put(skb, sizeof(struct tcphdr));
-	tcp->seq = htonl(sequence);
-	tcp->doff = sizeof(struct tcphdr) / 4;
-	skb_put(skb, extra_bytes);
 	qdisc_skb_cb(skb)->pkt_len = extra_bytes + 100;
 	return skb;
 }
@@ -2752,8 +2820,8 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	hsk->inet.pinet6 = &hsk_pinfo;
 	hsk->inet.inet_saddr = ipv6_to_ipv4(unit_get_in_addr("2.4.6.8"));
 	hsk->inet.pinet6->saddr = unit_get_in_addr("6::7:8:9");
-	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
-		+ sizeof(struct homa_data_hdr);
+	mock_mtu = UNIT_TEST_DATA_PER_PACKET + sizeof(struct iphdr)
+		+ sizeof(struct udphdr) + sizeof(struct homa_data_hdr);
 	mock_devices[0].gso_max_size = mock_mtu;
 	err = homa_pool_set_region(hsk->buffer_pool, (void *) 0x1000000,
 				   100*HOMA_BPAGE_SIZE);
@@ -2805,8 +2873,6 @@ void mock_teardown(void)
 	mock_dst_check_errors = 0;
 	mock_import_ubuf_errors = 0;
 	mock_import_iovec_errors = 0;
-	mock_ip6_xmit_errors = 0;
-	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
 	mock_kthread_create_errors = 0;
 	mock_prepare_to_wait_errors = 0;
@@ -2831,7 +2897,21 @@ void mock_teardown(void)
 	mock_prepare_to_wait_status = -ERESTARTSYS;
 	mock_signal_pending = 0;
 	mock_xmit_log_verbose = 0;
-	mock_xmit_log_hijack = 0;
+	mock_udp_create_errors = 0;
+	mock_udp_create_errno = -EADDRINUSE;
+	mock_udp_release_calls = 0;
+	mock_udp_xmit_calls = 0;
+	memset(mock_udp_port_cfg, 0, sizeof(mock_udp_port_cfg));
+	memset(&mock_udp_last_header, 0, sizeof(mock_udp_last_header));
+	mock_udp_last_family = 0;
+	mock_udp_last_tos = 0;
+	mock_udp_last_ip_summed = 0;
+	mock_udp_last_csum_start = 0;
+	mock_udp_last_csum_offset = 0;
+	mock_udp_last_gso_type = 0;
+	mock_udp_last_gso_size = 0;
+	mock_udp_last_gso_segs = 0;
+	mock_udp_last_data_bytes = 0;
 	mock_log_wakeups = 0;
 	mock_mtu = 0;
 	mock_max_skb_frags = 10;
@@ -2845,6 +2925,7 @@ void mock_teardown(void)
 	homa_net_id = 0;
 	for (i = 0; i < MOCK_MAX_NETS; i++) {
 		if (mock_hnets[i]) {
+			homa_udp_destroy(mock_hnets[i]);
 			free(mock_hnets[i]);
 			mock_hnets[i] = NULL;
 		}
@@ -2861,10 +2942,7 @@ void mock_teardown(void)
 	for (i = 0; i < MAX_DROP_REASONS; i++)
 		mock_drop_reasons[i] = -1;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
-	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));
-	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
-			&tcp_v6_offload;
 	jiffies = 1100;
 
 	count = unit_hash_size(skbs_in_use);
@@ -2946,9 +3024,7 @@ void mock_teardown(void)
 				mock_preempt_disables);
 	mock_preempt_disables = 0;
 
-#ifndef __STRIP__ /* See strip.py */
 	memset(homa_metrics, 0, sizeof(homa_metrics));
-#endif /* See strip.py */
 
 	unit_hook_clear();
 }

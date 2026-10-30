@@ -46,6 +46,10 @@ struct homa_rpc
 			     enum unit_rpc_state state, struct in6_addr *client_ip,
 			     struct in6_addr *server_ip, int server_port, int id,
 			     int req_length, int resp_length);
+struct sk_buff *unit_udp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
+			    struct homa_common_hdr *header, int payload);
+int          unit_count_drops(void);
+int          unit_drop_reason(int n);
 int          unit_count_peers(struct homa *homa);
 int          unit_count_routes(struct homa *homa);
 struct in6_addr
@@ -71,9 +75,7 @@ struct homa_rpc
 void         unit_sock_destroy(struct homa_sock *hsk);
 void         unit_teardown(void);
 
-#ifndef __STRIP__ /* See strip.py */
 const char  *unit_log_grantables(struct homa *homa);
-#endif /* See strip.py */
 
 /* Kludge to avoid including arpa/inet.h, which causes definition
  * conflicts with kernel header files.

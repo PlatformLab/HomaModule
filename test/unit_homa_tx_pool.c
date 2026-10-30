@@ -356,10 +356,8 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__new_large_page)
 	page = homa_tx_pool_alloc_page(tx_core, &length);
 	EXPECT_NE(NULL, page);
 	EXPECT_EQ(HOMA_TX_PAGE_SIZE, length);
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->tx_page_allocs);
 	EXPECT_EQ(100, homa_metrics_per_cpu()->tx_page_alloc_cycles);
-#endif /* See strip.py */
 	put_page(page);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__high_order_page_not_available)
@@ -373,10 +371,8 @@ TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__high_order_page_not_available)
 	page = homa_tx_pool_alloc_page(tx_core, &length);
 	EXPECT_NE(NULL, page);
 	EXPECT_EQ(PAGE_SIZE, length);
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->tx_page_allocs);
 	EXPECT_EQ(50, homa_metrics_per_cpu()->tx_page_alloc_cycles);
-#endif /* See strip.py */
 	put_page(page);
 }
 TEST_F(homa_tx_pool, homa_tx_pool_alloc_page__no_pages_available)

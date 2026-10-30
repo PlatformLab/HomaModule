@@ -30,7 +30,6 @@ FIXTURE_TEARDOWN(homa_utils)
 	unit_teardown();
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * set_cutoffs() - A convenience method to allow all of the values in
  * homa->unsched_cutoffs to be set concisely.
@@ -66,16 +65,11 @@ TEST_F(homa_utils, homa_init__grant_alloc_failure)
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.grant);
 }
-#endif /* See strip.py */
 TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 {
 	struct homa homa2;
 
-#ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 4;
-#else /* See strip.py */
-	mock_kmalloc_errors = 1;
-#endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.peertab);
@@ -84,11 +78,7 @@ TEST_F(homa_utils, homa_init__cant_allocate_socktab)
 {
 	struct homa homa2;
 
-#ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 0x20;
-#else /* See strip.py */
-	mock_kmalloc_errors = 8;
-#endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.socktab);
@@ -97,11 +87,7 @@ TEST_F(homa_utils, homa_init__cant_initialize_tx_pool)
 {
 	struct homa homa2;
 
-#ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 0x40;
-#else /* See strip.py */
-	mock_kmalloc_errors = 0x10;
-#endif/* See strip.py */
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_SUBSTR("Couldn't initialize homa_tx_pool (errno 12)",
 		      mock_printk_output);
@@ -129,6 +115,8 @@ TEST_F(homa_utils, homa_net_destroy__delete_sockets)
 	EXPECT_EQ(1, hsk1.shutdown);
 	EXPECT_EQ(1, hsk2.shutdown);
 	EXPECT_EQ(0, hsk3.shutdown);
+	EXPECT_EQ(NULL, rcu_access_pointer(hnet->udp4));
+	EXPECT_EQ(NULL, rcu_access_pointer(hnet->udp6));
 
 	unit_sock_destroy(&hsk3);
 }
@@ -156,7 +144,6 @@ TEST_F(homa_utils, homa_net_destroy__delete_peers)
 	EXPECT_EQ(1, unit_count_routes(&self->homa));
 }
 
-#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_utils, homa_print_ipv4_addr)
 {
 	struct in6_addr test_addr1 = unit_get_in_addr("192.168.0.1");
@@ -198,9 +185,6 @@ TEST_F(homa_utils, homa_snprintf)
 	EXPECT_STREQ("Test message with values: 100 and 1000; plus: 123",
 			buffer);
 }
-#endif /* See strip.py */
-
-#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_utils, homa_prios_changed__basics)
 {
 	set_cutoffs(&self->homa, 90, 80, HOMA_MAX_MESSAGE_LENGTH*2, 60, 50,
@@ -232,4 +216,3 @@ TEST_F(homa_utils, homa_prios_changed__share_lowest_priority)
 	EXPECT_EQ(0x7fffffff, self->homa.unsched_cutoffs[0]);
 	EXPECT_EQ(0, self->homa.max_sched_prio);
 }
-#endif /* See strip.py */

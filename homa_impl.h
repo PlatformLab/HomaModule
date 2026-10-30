@@ -49,23 +49,18 @@
 #include <net/gro.h>
 #include <net/rps.h>
 
-#ifndef __UPSTREAM__ /* See strip.py */
 #include "homa.h"
 #include <linux/version.h>
 #ifdef CONFIG_ARM64
 #include <clocksource/arm_arch_timer.h>
 #endif
 #include "homa_devel.h"
-#else /* See strip.py */
-#include <linux/homa.h>
-#endif /* See strip.py */
 #include "homa_wire.h"
 
 #ifdef __UNIT_TEST__
 #include "mock.h"
 #endif /* __UNIT_TEST__ */
 
-#ifndef __STRIP__ /* See strip.py */
 /* Null out things that confuse VSCode Intellisense */
 #ifdef __VSCODE__
 #define smp_processor_id() 1
@@ -73,7 +68,6 @@
 #define BUG_ON(...)
 #define set_current_state(...)
 #endif
-#endif /* See strip.py */
 
 /* Forward declarations. */
 struct homa;
@@ -82,10 +76,8 @@ struct homa_rpc;
 struct homa_route;
 struct homa_sock;
 
-#ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"
 #include "homa_metrics.h"
-#endif /* See strip.py */
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
 #define __COND_ACQUIRES(lock) __cond_acquires(nonnull, lock)
@@ -127,19 +119,14 @@ struct homa {
 	 */
 	atomic64_t next_outgoing_id;
 
-#ifndef __UPSTREAM__ /* See strip.py */
 	/** @qshared: Contains information used by homa_qdisc.c. */
 	struct homa_qdisc_shared *qshared;
-#endif /* See strip.py */
-
-#ifndef __STRIP__ /* See strip.py */
 
 	/**
 	 * @grant: Contains information used by homa_grant.c to manage
 	 * grants for incoming messages.
 	 */
 	struct homa_grant *grant;
-#endif /* See strip.py */
 
 	/**
 	 * @peertab: Info about all the other hosts we have communicated with;
@@ -194,7 +181,6 @@ struct homa {
 	 */
 	int tx_page_pool_min_kb;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @unsched_bytes: The number of bytes that may be sent in a
 	 * new message without receiving any grants. There used to be a
@@ -207,7 +193,6 @@ struct homa {
 	 * @unsched_bytes and @window). Set externally via sysctl.
 	 */
 	int unsched_bytes;
-#endif /* See strip.py */
 
 	/**
 	 * @link_mbps: The raw bandwidth of the network uplink, in
@@ -215,7 +200,6 @@ struct homa {
 	 */
 	int link_mbps;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @poll_usecs: Amount of time (in microseconds) that a thread
 	 * will spend busy-waiting for an incoming messages before
@@ -268,7 +252,6 @@ struct homa {
 	 * next version change.  Can be set externally via sysctl.
 	 */
 	int cutoff_version;
-#endif /* See strip.py */
 
 	/**
 	 * @resend_ticks: When an RPC's @silent_ticks reaches this value,
@@ -316,7 +299,6 @@ struct homa {
 	 */
 	int max_dead_frags;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @verbose: Nonzero enables additional logging. Set externally via
 	 * sysctl.
@@ -329,7 +311,6 @@ struct homa {
 	 * perform TSO. Set externally via sysctl.
 	 */
 	int gso_force_software;
-#endif /* See strip.py */
 
 	/**
 	 * @max_gso_size: Maximum number of bytes that will be included
@@ -343,14 +324,6 @@ struct homa {
 	 * externally via sysctl.
 	 */
 	int wmem_max;
-
-#ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @hijack_tcp: Non-zero means encapsulate outgoing Homa packets
-	 * as TCP packets (i.e. use TCP as the IP protocol). This makes TSO
-	 * and RSS work better. Set externally via sysctl.
-	 */
-	int hijack_tcp;
 
 	/**
 	 * @max_gro_skbs: Maximum number of socket buffers that can be
@@ -410,11 +383,11 @@ struct homa {
 
 	/**
 	 * @gro_busy_usecs: if the gap between the completion of
-	 * homa_gro_receive and the next call to homa_gro_receive on the same
-	 * core is less than this, then GRO on that core is considered to be
-	 * "busy", and optimizations such as HOMA_GRO_SHORT_BYPASS will not be
-	 * done because they risk overloading the core. Set externally via
-	 * sysctl.
+	 * homa_udp_gro_receive (the UDP tunnel GRO callback) and the next call
+	 * to it on the same core is less than this, then GRO on that core is
+	 * considered to be "busy", and optimizations such as
+	 * HOMA_GRO_SHORT_BYPASS will not be done because they risk
+	 * overloading the core. Set externally via sysctl.
 	 */
 	int gro_busy_usecs;
 
@@ -422,7 +395,6 @@ struct homa {
 	 * @gro_busy_cycles: Same as busy_usecs except in homa_clock() units.
 	 */
 	int gro_busy_cycles;
-#endif /* See strip.py */
 
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked
@@ -430,7 +402,6 @@ struct homa {
 	 */
 	u32 timer_ticks;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @freeze_type: determines conditions under which the time trace
 	 * should be frozen. Set externally via sysctl.
@@ -452,7 +423,6 @@ struct homa {
 	 * range [1..1<<drop_bits]) Set externally via sysctl.
 	 */
 	int drop_bits;
-#endif /* See strip.py */
 
 	/**
 	 * @bpage_lease_usecs: how long a core can own a bpage (microseconds)
@@ -479,7 +449,6 @@ struct homa {
 	 */
 	bool destroyed;
 
-#ifndef __UPSTREAM__ /* See strip.py */
 	/**
 	 * @sysctl_action: This value is set by sysctl to invoke one of
 	 * several actions for testing. It is normally zero.
@@ -492,7 +461,6 @@ struct homa {
 	 * short-term use during testing.
 	 */
 	int temp[4];
-#endif /* See strip.py */
 };
 
 /**
@@ -502,6 +470,12 @@ struct homa {
 struct homa_net {
 	/** @homa: Global Homa information. */
 	struct homa *homa;
+
+	/** @udp4: Namespace-owned IPv4 UDP tunnel socket. */
+	struct socket __rcu *udp4;
+
+	/** @udp6: Namespace-owned IPv6-only UDP tunnel socket. */
+	struct socket __rcu *udp6;
 
 	/**
 	 * @prev_default_port: The most recent port number assigned from
@@ -545,21 +519,6 @@ struct homa_skb_info {
 static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
 {
 	return (struct homa_skb_info *)(skb_end_pointer(skb)) - 1;
-}
-
-/**
- * homa_set_doff() - Fills in the doff TCP header field for a packet.
- * @skb:   Packet whose doff field is to be set.
- * @size:  Size of the "header" in bytes (must be a multiple of 4). This is
- *         needed for two reasons. First, for TSO to work it must indicate
- *         the number of bytes that should be replicated in each segment.
- *         The bytes after this will be distributed among segments. Second,
- *         for TCP hijacking to work it must have a valid value (20 is a
- *         good choice if the packet isn't a TSO frame).
- */
-static inline void homa_set_doff(struct sk_buff *skb, int size)
-{
-	tcp_hdr(skb)->doff = size >> 2;
 }
 
 /** skb_is_ipv6() - Return true if the packet is encapsulated with IPv6,
@@ -637,7 +596,6 @@ static inline bool homa_make_header_avl(struct sk_buff *skb)
 	return pskb_may_pull(skb, pull_length);
 }
 
-#ifndef __UPSTREAM__ /* See strip.py */
 #ifdef __UNIT_TEST__
 void unit_log_printf(const char *separator, const char *format, ...)
 		__printf(2, 3);
@@ -648,7 +606,6 @@ void unit_hook(char *id);
 #define UNIT_LOG(...)
 #define UNIT_HOOK(...)
 #endif /* __UNIT_TEST__ */
-#endif /* See strip.py */
 
 extern unsigned int homa_net_id;
 
@@ -719,7 +676,6 @@ int      __homa_xmit_control(void *contents, size_t length,
 void     homa_xmit_data(struct homa_rpc *rpc);
 void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
-#ifndef __STRIP__ /* See strip.py */
 void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 int      homa_dointvec(const struct ctl_table *table, int write,
 		       void *buffer, size_t *lenp, loff_t *ppos);
@@ -734,9 +690,6 @@ int      homa_sysctl_softirq_cores(const struct ctl_table *table,
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			       int length);
 void     homa_xmit_start_msg(struct homa_rpc *rpc, int length);
-#else /* See strip.py */
-int      homa_message_in_init(struct homa_rpc *rpc, int length);
-#endif /* See strip.py */
 
 /**
  * homa_net() - Return the struct homa_net associated with a particular
@@ -763,7 +716,6 @@ static inline u64 homa_clock(void)
 	u64 mock_get_clock(void);
 	return mock_get_clock();
 #else /* __UNIT_TEST__ */
-#ifndef __UPSTREAM__ /* See strip.py */
 	/* As of August 2025, get_cycles takes only about 8 ns/call, vs.
 	 * 14 ns/call for ktime_get_ns. This saves about .24 core when
 	 * driving a 25 Gbps network at high load (see perf.txt for details).
@@ -771,9 +723,6 @@ static inline u64 homa_clock(void)
 	 * upstreamed version.
 	 */
 	return get_cycles();
-#else /* See strip.py */
-	return ktime_get_ns();
-#endif /* See strip.py */
 #endif /* __UNIT_TEST__ */
 }
 
@@ -787,7 +736,6 @@ static inline u64 homa_clock_khz(void)
 #ifdef __UNIT_TEST__
 	return 1000000;
 #else /* __UNIT_TEST__ */
-#ifndef __UPSTREAM__ /* See strip.py */
 #ifdef CONFIG_X86
 	return tsc_khz;
 #elif defined(CONFIG_ARM64)
@@ -795,9 +743,6 @@ static inline u64 homa_clock_khz(void)
 #else
 	return 1000000;
 #endif
-#else /* See strip.py */
-	return 1000000;
-#endif /* See strip.py */
 #endif /* __UNIT_TEST__ */
 }
 
@@ -820,7 +765,6 @@ static inline u64 homa_ns_to_cycles(u64 ns)
 #endif /* __UNIT_TEST__ */
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_usecs_to_cycles() - Convert from units of microseconds to units of
  * homa_clock().
@@ -839,9 +783,6 @@ static inline u64 homa_usecs_to_cycles(u64 usecs)
 	return tmp;
 #endif /* __UNIT_TEST__ */
 }
-#endif /* See strip.py */
-
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_high_priority() - Return the next-to-highest available priority
  * level.  Used in situations where we want to boost the priority of
@@ -855,7 +796,6 @@ static inline int homa_high_priority(struct homa *homa)
 {
 	return (homa->num_priorities <= 2) ? 0 : homa->num_priorities - 2;
 }
-#endif /* See strip.py */
 
 /* Homa Locking Strategy:
  *
@@ -958,12 +898,12 @@ static inline int homa_high_priority(struct homa *homa)
  *
  * Locks and Packet Transmission:
  *
- * Homa must not hold locks while transmitting packets (e.g. by calling
- * ip_queue_xmit or ip6_xmit). This is because homa_qdisc could be invoked
+ * Homa must not hold locks while transmitting packets through the UDP tunnel
+ * helpers. This is because homa_qdisc could be invoked
  * during the transmission process, and it may need to acquire locks under
  * some conditions (such as an RPC lock). Homa_qdisc is invoked with the
- * qdisc lock held, so invoking ip*xmit with a lock held can result in
- * AB-BA deadlocks.
+ * qdisc lock held, so invoking a tunnel transmit helper with a lock held can
+ * result in AB-BA deadlocks.
  */
 
 #endif /* _HOMA_IMPL_H */

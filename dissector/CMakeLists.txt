@@ -45,6 +45,17 @@ cmake_minimum_required(VERSION 3.1)
 project(HomaDissector VERSION 0.0.1 DESCRIPTION "Wireshark Homa Plugin" LANGUAGES C)
 option(INSTALL_PLUGIN_LOCAL "Install the homa dissector plugin inside the local folder of wireshark" ON)
 
+set(HOMA_API_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/../homa.h")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HOMA_API_HEADER}")
+file(STRINGS "${HOMA_API_HEADER}" HOMA_UDP_PORT_DEFINITION
+    REGEX "^#define[ \t]+HOMA_UDP_PORT[ \t]+[0-9]+[ \t]*$")
+list(LENGTH HOMA_UDP_PORT_DEFINITION HOMA_UDP_PORT_DEFINITION_COUNT)
+if (NOT HOMA_UDP_PORT_DEFINITION_COUNT EQUAL 1)
+    message(FATAL_ERROR "Expected one numeric HOMA_UDP_PORT definition in ${HOMA_API_HEADER}")
+endif ()
+string(REGEX REPLACE "^#define[ \t]+HOMA_UDP_PORT[ \t]+([0-9]+)[ \t]*$"
+    "\\1" HOMA_UDP_PORT_VALUE "${HOMA_UDP_PORT_DEFINITION}")
+
 find_package(Wireshark CONFIG REQUIRED)
 
 if (NOT Wireshark_PLUGINS_ENABLED)
@@ -59,6 +70,7 @@ endif ()
 add_definitions(-DVERSION=\"${PROJECT_VERSION}\")
 
 add_library(${PROJECT_NAME} MODULE homa.c)
+target_compile_definitions(${PROJECT_NAME} PRIVATE HOMA_UDP_PORT=${HOMA_UDP_PORT_VALUE})
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "" DEFINE_SYMBOL "")
 target_link_libraries(${PROJECT_NAME} epan)
 

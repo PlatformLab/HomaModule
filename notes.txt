@@ -2,17 +2,12 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Notes for new granting mechanism:
-  * Compile with __STRIP__
   * Reduce tt_record calls in homa_grant.c?
   * Remove grant->prev_grant?
   * What is the difference between granted and prev_grant in homa_message_in?
   * Make copied_from_user an atomic_t?
   * Remove "end" argument for homa_tx_skb_send? At the least, fix its
     documentation
-
-* Finish exploring how to provide pacer helpers when TCP is running wihout
-  Homa: is it possible to trigger everything from callbacks without a
-  thread?
 
 * Homa's bipartite matching algorithm is failing under very high loads
   in large clusters where there are large backlogs of messages waiting to

@@ -10,10 +10,6 @@
 #include "homa_wire.h"
 #include "homa_sock.h"
 
-#ifndef __STRIP__ /* See strip.py */
-#include "homa_hijack.h"
-#endif /* See strip.py */
-
 #include <linux/rhashtable.h>
 
 struct homa_rpc;
@@ -99,13 +95,11 @@ struct homa_peertab {
 	 */
 	int idle_jiffies_max;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @sysctl_header: Used to remove sysctl values when this structure
 	 * is destroyed.
 	 */
 	struct ctl_table_header *sysctl_header;
-#endif /* See strip.py */
 
 	/** @rcu_head: Holds state of a pending call_rcu invocation. */
 	struct rcu_head rcu_head;
@@ -174,7 +168,6 @@ struct homa_peer {
 	 */
 	struct homa_ack acks[HOMA_MAX_ACKS_PER_PKT];
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @unsched_cutoffs: priorities to use for unscheduled packets
 	 * sent to this host, as specified in the most recent CUTOFFS
@@ -221,7 +214,6 @@ struct homa_peer {
 	 * grant lock. If this list is nonempty then refs will be nonzero.
 	 */
 	struct list_head grantable_links;
-#endif /* See strip.py */
 };
 
 /**
@@ -298,7 +290,7 @@ struct homa_route {
 
 	/**
 	 * @flow: Contains parameters used to generate @dst; must be
-	 * retained and passed to ip*xmit.
+	 * retained for the UDP tunnel transmit helpers.
 	 */
 	struct flowi flow;
 
@@ -376,11 +368,12 @@ int      homa_route_prefer_evict(struct homa_peertab *peertab,
 void     homa_route_remove(struct homa_route *route,
 			   struct homa_peertab *peertab);
 int      homa_route_validate(struct homa_rpc *rpc);
+void     homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
+			 struct homa_route *route, int priority);
 
 extern const struct rhashtable_params peer_ht_params;
 extern const struct rhashtable_params route_ht_params;
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_peer_lock() - Acquire the lock for a peer. If the lock isn't
  * immediately available, record stats on the waiting time.
@@ -392,17 +385,6 @@ static inline void homa_peer_lock(struct homa_peer *peer)
 	if (!spin_trylock_bh(&peer->lock))
 		homa_peer_lock_slow(peer);
 }
-#else /* See strip.py */
-/**
- * homa_peer_lock() - Acquire the lock for a peer.
- * @peer:    Peer to lock.
- */
-static inline void homa_peer_lock(struct homa_peer *peer)
-	__acquires(peer->lock)
-{
-	spin_lock_bh(&peer->lock);
-}
-#endif /* See strip.py */
 
 /**
  * homa_peer_unlock() - Release the lock for a peer.
@@ -452,32 +434,6 @@ static inline int homa_peer_compare(struct rhashtable_compare_arg *arg,
 
 	return !(ipv6_addr_equal(&key->addr, &peer->ht_key.addr) &&
 		 peer->ht_key.hnet == key->hnet);
-}
-
-/**
- * homa_route_xmit() - Transmit a packet according to a given route.
- * @skb:      Packet to transmit.
- * @hsk:      Socket on which to transmit packet.
- * @route:    Route to use to transmit packet.
- * @priority: Priority for packet.
- * Return:    0 for success, otherwise a negative errno.
- */
-static inline int homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
-				  struct homa_route *route, int priority)
-{
-	rcu_read_lock();
-	dst_hold(rcu_dereference(route->dst));
-	skb_dst_set(skb, rcu_dereference(route->dst));
-	rcu_read_unlock();
-	IF_NO_STRIP(priority = hsk->homa->priority_map[priority]);
-	if (ipv6_addr_v4mapped(&route->peer->addr)) {
-		IF_NO_STRIP(homa_hijack_set_hdr(skb, route, false));
-		hsk->inet.tos = priority << 5;
-		return ip_queue_xmit(&hsk->inet.sk, skb, &route->flow);
-	}
-	IF_NO_STRIP(homa_hijack_set_hdr(skb, route, true));
-	return ip6_xmit(&hsk->inet.sk, skb, &route->flow.u.ip6, 0,
-			NULL, priority << 5, 0);
 }
 
 /**

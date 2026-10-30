@@ -1,5 +1,13 @@
 This repo contains an implementation of the Homa transport protocol as a Linux kernel module.
 
+This variant uses UDP port 5001 for both IPv4 and IPv6. Applications retain
+Homa sockets and protocol selector 146; communicating peers must use the new
+wire format, with no native-wire or TCP transport fallback. Ordinary TCP
+benchmark modes remain application functionality.
+
+The historical performance and NIC-support statements below describe Homa
+before the move to UDP; they have not been re-measured for this UDP transport.
+
 - For more information on Homa in general, see the [Homa
   Wiki](https://homa-transport.atlassian.net/wiki/spaces/HOMA).
 
@@ -9,7 +17,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   which appeared in the USENIX Annual Technical Conference in July, 2021.
 
 - A synopsis of the protocol implemented by this module is available in
-  [protocol.md](https://github.com/PlatformLab/HomaModule/blob/main/protocol.md).
+  [protocol.md](protocol.md), including this variant's UDP wire layout.
 
 - As of August 2020, Homa has complete functionality for running real applications,
   and its tail latency is more than 10x better than TCP for all workloads I have
@@ -95,7 +103,78 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
    - Homa exports a collection of configuration parameters through the
      sysctl mechanism. For details, see the man page `homa.7`.
 
+## Utilities and non-loading checks
+
+Ordinary TCP comparison modes remain separate application protocols, not Homa
+encapsulation. The `cp_node` client/server commands with `--protocol tcp`,
+`cperf.py` and `cp_bench` retain their TCP modes. Homa modes continue to use the application socket API and therefore
+require the module; no utility should substitute an ordinary UDP socket for
+a Homa application socket.
+
+On a Linux test host, the simple TCP tools can run without Homa:
+
+```shell
+util/server --tcp-only --port 4000
+util/homa_test 127.0.0.1:4000 --count 4 --length 128 tcp
+```
+
+The server default still starts both Homa and TCP services. `--tcp-only`
+suppresses Homa socket creation; `homa_test` initializes Homa only when a
+selected operation requires it. The TCP-only `tcpstream` operation also works
+without Homa. `buffer_client` and `buffer_server` remain ordinary TCP stress
+tools; they run indefinitely, so use bounded, owned-process tests rather than
+leaving them running. Cluster benchmarks still need their documented `nodeN`
+hostname mapping and topology; loopback checks do not validate a
+cluster benchmark.
+
+### Raw UDP injection and passive reception
+
+[send_raw](util/send_raw.c) accepts complete inner Homa bytes, not an RPC
+message to be framed automatically:
+
+```text
+send_raw [-4|-6] [--hex HEX|--file PATH] host [contents]
+receive_raw [-4|-6] [--count N] [--timeout MS] [--payload] [--verify-checksum]
+```
+
+Literal contents is retained for diagnostic injection; use hex or a binary
+file for real headers containing zero bytes. `--file -` reads stdin. The
+arbitrary IP-protocol argument is removed: injection always uses raw UDP with
+both outer ports 5001. IPv4 source selection uses a temporary connected
+datagram socket, then the tool pins that source and computes the pseudoheader
+checksum. IPv6 requests kernel checksum generation at UDP offset 6. A computed
+zero is encoded as `0xffff`.
+
+Both tools require root or `CAP_NET_RAW`. Reception is a passive raw tap; it
+does not bind an ordinary UDP socket to 5001 or take traffic away from the
+module. IPv4 raw input includes its IP header; IPv6 raw input starts at UDP.
+The receiver bounds and decodes the compact common/DATA/control headers,
+including fixed-size ACKs and their count. `--payload` prints bytes after the
+typed header as hex. Checksum status is `unchecked` unless
+`--verify-checksum` is requested; verification is intended for fully
+checksummed injections, not pre-offload captures.
+
+For a controlled loopback example, start the receiver, wait for its `ready`
+record, then send a padded BUSY header from a second terminal:
+
+```shell
+util/receive_raw -4 --count 1 --timeout 3000 --payload --verify-checksum
+util/send_raw -4 --hex 006400c81400000000000000020000000000 127.0.0.1
+```
+
+Receiver records are line-buffered `ready`, `packet key=value...` and
+`summary status=... valid=N malformed=N`. Only valid filtered packets count.
+The timeout is a total deadline in milliseconds. Exit 0 means clean count
+completion, 1 reports an error/malformed traffic, and 2 reports timeout.
+Malformed injection is diagnostic traffic, not a valid application RPC.
+Loaded-module coexistence and actual Homa responses still require separate
+integration tests.
+
 ## Significant changes
+- UDP-only variant: all Homa packet classes use UDP/5001 with complete
+  per-segment headers. The old TCP/Homa share scheduler is removed; ordinary
+  TCP and unrelated UDP use generic pass-through. Historical cross-protocol
+  performance results below are not promises for this variant.
 - September 2026: Protocol change in granting mechanism. Messages that
   require grants are now completely scheduled (no initial unscheduled
   packets are sent). A new packet type, START_MSG, has been introduced
@@ -138,17 +217,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
 - October 2024: the process of upstreaming Homa into the Linux kernel has
   begun. The reviewing process is likely to result in API changes.
   Upstreaming will occur in stages, so the first version to appear in Linux
-  will not be either functionally complete or performant. The sources in
-  this repository contain '#ifndef __STRIP__' directives, which
-  separate functionality being upstreamed from functionality that is not
-  currently upstreamed (some things, such as development aids,
-  may never be upstreamed).
+  will not be either functionally complete or performant.
 - October 2024: Homa now has an official IANA IP protocol number (146).
 - August 2024: upgraded to Linux 6.10.6.
-- July 2024: introduced "TCP hijacking", where Homa packets are sent as
-  legitimate TCP segments (using TCP as the IP protocol) and then reclaimed
-  from TCP on the destination. This allows Homa to make better use of
-  TSO and RSS.
 - June 2024: refactored sk_buff management to use frags; improves
   efficiency significantly.
 - April 2024: replaced `master` branch with `main`

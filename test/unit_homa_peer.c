@@ -46,14 +46,12 @@ FIXTURE_TEARDOWN(homa_peer)
 	unit_teardown();
 }
 
-#ifndef __STRIP__ /* See strip.py */
 static void peer_spinlock_hook(char *id)
 {
 	if (strcmp(id, "spin_lock") != 0)
 		return;
 	mock_clock += 1000;
 }
-#endif /* See strip.py */
 
 static struct _test_data_homa_peer *test_data;
 static struct homa_route *conflicting_route;
@@ -110,7 +108,6 @@ TEST_F(homa_peer, homa_peer_alloc_peertab__rhashtable_init_fails_for_route_ht)
 	EXPECT_TRUE(IS_ERR(peertab));
 	EXPECT_EQ(EINVAL, -PTR_ERR(peertab));
 }
-#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_peer, homa_peer_alloc_peertab__cant_register_sysctl)
 {
 	struct homa_peertab *peertab;
@@ -122,7 +119,6 @@ TEST_F(homa_peer, homa_peer_alloc_peertab__cant_register_sysctl)
 	EXPECT_SUBSTR("couldn't register sysctl parameters for Homa peertab",
 		      mock_printk_output);
 }
-#endif /* See strip.py */
 
 TEST_F(homa_peer, homa_peer_free_net__basics)
 {
@@ -173,9 +169,7 @@ TEST_F(homa_peer, homa_peer_free_peertab) {
 
 	unit_log_clear();
 	homa_peer_free_peertab(self->homa.peertab);
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_SUBSTR("unregister_net_sysctl_table", unit_log_get());
-#endif /* See strip.py */
 
 	homa_route_release(route);
 	self->homa.peertab = homa_peer_alloc_peertab();
@@ -189,10 +183,8 @@ TEST_F(homa_peer, homa_peer_alloc__success)
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ_IP(*ip1111, peer->addr);
 	EXPECT_EQ(1, refcount_read(&peer->refs));
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(INT_MAX, peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2]);
 	EXPECT_EQ(0, peer->cutoff_version);
-#endif /* See strip.py */
 	homa_peer_free(peer);
 }
 TEST_F(homa_peer, homa_peer_alloc__kmalloc_error)
@@ -203,9 +195,7 @@ TEST_F(homa_peer, homa_peer_alloc__kmalloc_error)
 	peer = homa_peer_alloc(&self->hsk, ip3333);
 	EXPECT_EQ(ENOMEM, -PTR_ERR(peer));
 
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_kmalloc_errors);
-#endif /* See strip.py */
 }
 
 TEST_F(homa_peer, homa_peer_free)
@@ -230,10 +220,8 @@ TEST_F(homa_peer, homa_peer_get__basics)
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ_IP(*ip1111, peer->addr);
 	EXPECT_EQ(1, refcount_read(&peer->refs));
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(INT_MAX, peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2]);
 	EXPECT_EQ(0, peer->cutoff_version);
-#endif /* See strip.py */
 
 	/* Second call: lookup existing peer. */
 	peer2 = homa_peer_get(&self->hsk, ip1111);
@@ -277,12 +265,13 @@ TEST_F(homa_peer, homa_route_alloc__success)
 	route = homa_route_alloc(&self->hsk, &key);
 	ASSERT_FALSE(IS_ERR(route));
 	EXPECT_EQ_IP(*ip1111, route->flow.u.ip6.daddr);
+	EXPECT_EQ(IPPROTO_UDP, route->flow.u.ip6.flowi6_proto);
+	EXPECT_EQ(HOMA_UDP_PORT, ntohs(route->flow.u.ip6.fl6_sport));
+	EXPECT_EQ(HOMA_UDP_PORT, ntohs(route->flow.u.ip6.fl6_dport));
 	EXPECT_EQ(1, refcount_read(&route->refs));
 	EXPECT_EQ(12345, route->access_jiffies);
 	EXPECT_EQ(1, rcuref_read(&route->dst->__rcuref));
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->route_allocs);
-#endif /* See strip.py */
 	homa_route_free(&route->rcu_head);
 }
 TEST_F(homa_peer, homa_route_alloc__kmalloc_error)
@@ -295,9 +284,7 @@ TEST_F(homa_peer, homa_route_alloc__kmalloc_error)
 	route = homa_route_alloc(&self->hsk, &key);
 	EXPECT_EQ(ENOMEM, -PTR_ERR(route));
 
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_kmalloc_errors);
-#endif /* See strip.py */
 }
 TEST_F(homa_peer, homa_route_alloc__set_saddr_from_socket)
 {
@@ -306,18 +293,108 @@ TEST_F(homa_peer, homa_route_alloc__set_saddr_from_socket)
 
 	/* First try: use IPv4 address. */
 	self->hsk.sock.sk_family = AF_INET;
-	homa_route_key_init(&key, &self->hsk, ip1111);
+	homa_route_key_init(&key, &self->hsk, self->client_ip);
 	route = homa_route_alloc(&self->hsk, &key);
 	EXPECT_STREQ("2.4.6.8", homa_print_ipv6_addr(&route->key.saddr));
+	EXPECT_EQ(IPPROTO_UDP, route->flow.u.ip4.flowi4_proto);
+	EXPECT_EQ(HOMA_UDP_PORT, ntohs(route->flow.u.ip4.fl4_sport));
+	EXPECT_EQ(HOMA_UDP_PORT, ntohs(route->flow.u.ip4.fl4_dport));
 	homa_route_free(&route->rcu_head);
 
-	/* Second try: use IPv4 address. */
+	/* Second try: use IPv6 address. */
 	self->hsk.sock.sk_family = AF_INET6;
 	homa_route_key_init(&key, &self->hsk, ip1111);
 	route = homa_route_alloc(&self->hsk, &key);
 	EXPECT_STREQ("[6::7:8:9]", homa_print_ipv6_addr(&route->key.saddr));
 	homa_route_free(&route->rcu_head);
 }
+
+TEST_F(homa_peer, homa_route_xmit__udp_handoff_references)
+{
+	struct homa_route *route = homa_route_get(&self->hsk, self->server_ip);
+	struct homa_busy_hdr busy = {
+		.common = {.type = BUSY, .sport = htons(40000), .dport = htons(99)}
+	};
+	struct sk_buff *skb;
+	struct dst_entry *dst;
+	int refs, route_refs, skbs;
+
+	ASSERT_FALSE(IS_ERR(route));
+	dst = rcu_dereference(route->dst);
+	refs = rcuref_read(&dst->__rcuref);
+	route_refs = refcount_read(&route->refs);
+	skb = __homa_skb_alloc(HOMA_MIN_PKT_LENGTH);
+	ASSERT_NE(NULL, skb);
+	memset(skb_put(skb, HOMA_MIN_PKT_LENGTH), 0, HOMA_MIN_PKT_LENGTH);
+	memcpy(skb->data, &busy, sizeof(busy));
+	skbs = mock_skb_count();
+	homa_route_xmit(skb, &self->hsk, route, 2);
+
+	/* The skb is consumed, the dst reference handed to the tunnel
+	 * helper is released with it, and the route keeps its own.
+	 */
+	EXPECT_EQ(skbs - 1, mock_skb_count());
+	EXPECT_EQ(refs, rcuref_read(&dst->__rcuref));
+	EXPECT_EQ(route_refs, refcount_read(&route->refs));
+	EXPECT_EQ(AF_INET, mock_udp_last_family);
+	EXPECT_EQ(HOMA_UDP_PORT, ntohs(mock_udp_last_header.source));
+	EXPECT_EQ(HOMA_UDP_PORT, ntohs(mock_udp_last_header.dest));
+	EXPECT_EQ(CHECKSUM_PARTIAL, mock_udp_last_ip_summed);
+	EXPECT_EQ(offsetof(struct udphdr, check), mock_udp_last_csum_offset);
+	homa_route_release(route);
+}
+TEST_F(homa_peer, homa_route_xmit__ipv6_and_priority_mapped_once)
+{
+	struct in6_addr addr = unit_get_in_addr("2001:db8::2");
+	struct homa_busy_hdr busy = {
+		.common = {.type = BUSY, .sport = htons(40000), .dport = htons(99)}
+	};
+	struct homa_route *route;
+	struct sk_buff *skb;
+
+	mock_ipv6 = true;
+	self->hsk.sock.sk_family = AF_INET6;
+	route = homa_route_get(&self->hsk, &addr);
+	ASSERT_FALSE(IS_ERR(route));
+
+	/* Mapping the priority twice would yield 3 instead of 6. */
+	self->homa.priority_map[2] = 6;
+	self->homa.priority_map[6] = 3;
+	skb = __homa_skb_alloc(HOMA_MIN_PKT_LENGTH);
+	ASSERT_NE(NULL, skb);
+	memset(skb_put(skb, HOMA_MIN_PKT_LENGTH), 0, HOMA_MIN_PKT_LENGTH);
+	memcpy(skb->data, &busy, sizeof(busy));
+	homa_route_xmit(skb, &self->hsk, route, 2);
+	EXPECT_EQ(AF_INET6, mock_udp_last_family);
+	EXPECT_STREQ("6", mock_xmit_prios);
+	homa_route_release(route);
+}
+TEST_F(homa_peer, homa_route_xmit__software_gso_forces_checksum_none)
+{
+	struct homa_route *route = homa_route_get(&self->hsk, self->server_ip);
+	struct homa_data_hdr data = {
+		.common = {.type = DATA, .sport = htons(40000),
+			   .dport = htons(99)},
+		.msg_length = htonl(100)
+	};
+	struct sk_buff *skb;
+
+	ASSERT_FALSE(IS_ERR(route));
+	skb = __homa_skb_alloc(sizeof(data));
+	ASSERT_NE(NULL, skb);
+	memcpy(skb_put(skb, sizeof(data)), &data, sizeof(data));
+	memset(homa_get_skb_info(skb), 0, sizeof(struct homa_skb_info));
+	skb_shinfo(skb)->gso_type = SKB_GSO_UDP_L4;
+	skb_shinfo(skb)->gso_size = sizeof(data) + 32;
+	skb_shinfo(skb)->gso_segs = 2;
+	self->homa.gso_force_software = 1;
+	homa_route_xmit(skb, &self->hsk, route, 0);
+	EXPECT_EQ(CHECKSUM_NONE, mock_udp_last_ip_summed);
+	EXPECT_EQ(SKB_GSO_UDP_L4, mock_udp_last_gso_type);
+	EXPECT_EQ(2, mock_udp_last_gso_segs);
+	homa_route_release(route);
+}
+
 TEST_F(homa_peer, homa_route_alloc__route_error_ipv4)
 {
 	struct homa_route_key key;
@@ -335,9 +412,7 @@ TEST_F(homa_peer, homa_route_alloc__route_error_ipv4)
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(route));
 	EXPECT_STREQ("couldn't find route for peer", self->hsk.error_msg);
 
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
-#endif /* See strip.py */
 }
 TEST_F(homa_peer, homa_route_alloc__route_error_ipv6)
 {
@@ -356,9 +431,7 @@ TEST_F(homa_peer, homa_route_alloc__route_error_ipv6)
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(route));
 	EXPECT_STREQ("couldn't find route for peer", self->hsk.error_msg);
 
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
-#endif /* See strip.py */
 }
 
 TEST_F(homa_peer, homa_route_free)
@@ -418,9 +491,7 @@ TEST_F(homa_peer, homa_route_get__basics)
 	EXPECT_EQ(2, self->homa.peertab->num_routes);
 	EXPECT_EQ(2, self->hnet->num_routes);
 
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(2, homa_metrics_per_cpu()->route_allocs);
-#endif /* See strip.py */
 	homa_route_release(route);
 	homa_route_release(route);
 	homa_route_release(route2);
@@ -443,9 +514,7 @@ TEST_F(homa_peer, homa_route_get__stale_route)
 	EXPECT_EQ(2, refcount_read(&route2->refs));
 	EXPECT_EQ(1, refcount_read(&route->refs));
 
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(2, homa_metrics_per_cpu()->route_allocs);
-#endif /* See strip.py */
 	homa_route_release(route);
 	homa_route_release(route2);
 }
@@ -885,7 +954,6 @@ TEST_F(homa_peer, homa_route_prefer_evict)
 	homa_peer_free_net(hnet2);
 }
 
-#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_peer, homa_unsched_priority)
 {
 	struct homa_peer peer;
@@ -916,7 +984,6 @@ TEST_F(homa_peer, homa_peer_lock_slow)
 	homa_peer_unlock(route->peer);
 	homa_route_release(route);
 }
-#endif /* See strip.py */
 
 TEST_F(homa_peer, homa_peer_add_ack)
 {

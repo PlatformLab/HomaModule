@@ -12,10 +12,15 @@ FIXTURE(homa_metrics) {
 };
 FIXTURE_SETUP(homa_metrics)
 {
+	memset(&homa_mout, 0, sizeof(homa_mout));
+	ASSERT_EQ(0, homa_metrics_init());
 	homa_init(&self->homa);
 }
 FIXTURE_TEARDOWN(homa_metrics)
 {
+	while (homa_mout.active_opens > 0)
+		homa_metrics_release(NULL, NULL);
+	EXPECT_EQ(0, homa_mout.active_opens);
 	homa_destroy(&self->homa);
 	homa_metrics_end();
 	unit_teardown();
@@ -48,6 +53,27 @@ TEST_F(homa_metrics, homa_metrics_open)
 	EXPECT_EQ(0, homa_metrics_open(NULL, NULL));
 	EXPECT_EQ(5, strlen(homa_mout.output));
 	EXPECT_EQ(2, homa_mout.active_opens);
+}
+
+TEST_F(homa_metrics, udp_scheduler_metrics)
+{
+	char *output;
+
+	EXPECT_EQ(0, homa_mout.active_opens);
+	EXPECT_EQ(0, homa_metrics_open(NULL, NULL));
+	EXPECT_EQ(1, homa_mout.active_opens);
+	ASSERT_NE(NULL, homa_mout.output);
+	output = homa_mout.output;
+	EXPECT_NE(NULL, strstr(homa_mout.output, "pacer_homa_packets"));
+	EXPECT_NE(NULL, strstr(homa_mout.output, "pacer_fifo_bytes"));
+	EXPECT_NE(NULL, strstr(homa_mout.output, "qdisc_flushes"));
+	EXPECT_NE(NULL, strstr(homa_mout.output, "gro_data_bypasses"));
+	EXPECT_EQ(NULL, strstr(homa_mout.output, "pacer_tcp_packets"));
+	EXPECT_EQ(NULL, strstr(homa_mout.output, "pacer_tcp_bytes"));
+	EXPECT_EQ(NULL, strstr(homa_mout.output, "qdisc_tcp_packets"));
+	EXPECT_EQ(0, homa_metrics_release(NULL, NULL));
+	EXPECT_EQ(0, homa_mout.active_opens);
+	EXPECT_EQ(output, homa_mout.output);
 }
 TEST_F(homa_metrics, homa_metrics_read__basics)
 {

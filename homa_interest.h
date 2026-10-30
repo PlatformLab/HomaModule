@@ -43,13 +43,11 @@ struct homa_interest {
 #define HOMA_INTEREST_HANDOFF_ACTIVE  2
 	atomic_t state;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @core: Core on which homa_wait_*was invoked.  This is a hint
 	 * used for load balancing (see balance.txt).
 	 */
 	int core;
-#endif /* See strip.py */
 
 	/**
 	 * @blocked: Zero means a handoff was received without the thread
@@ -97,9 +95,7 @@ void     homa_interest_notify_shared(struct homa_sock *hsk,
 				     struct homa_rpc *rpc);
 int      homa_interest_wait(struct homa_interest *interest);
 
-#ifndef __STRIP__ /* See strip.py */
 struct homa_interest
 	*homa_choose_interest(struct homa_sock *hsk);
-#endif /* See strip.py */
 
 #endif /* _HOMA_INTEREST_H */

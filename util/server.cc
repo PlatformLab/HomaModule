@@ -179,6 +179,7 @@ void print_help(const char *name)
 		"--ipv6       Use IPv6 instead of IPv4 (default: IPv4)\n"
 		"--num_ports  Number of Homa ports to open (default: 1)\n"
 		"--port       (First) port number to use (default: 4000)\n"
+		"--tcp-only   Serve ordinary TCP without opening Homa sockets\n"
 		"--validate   Validate contents of incoming messages (default: false)\n"
 		"--verbose    Log events as they happen (default: false)\n",
 		name);
@@ -310,6 +311,7 @@ void tcp_server(int port)
 int main(int argc, char** argv) {
 	int next_arg;
 	int num_ports = 1;
+	bool tcp_only = false;
 
 	if ((argc >= 2) && (strcmp(argv[1], "--help") == 0)) {
 		print_help(argv[0]);
@@ -340,6 +342,8 @@ int main(int argc, char** argv) {
 			next_arg++;
 			port = get_int(argv[next_arg],
 					"Bad port %s; must be positive integer\n");
+		} else if (strcmp(argv[next_arg], "--tcp-only") == 0) {
+			tcp_only = true;
 		} else if (strcmp(argv[next_arg], "--validate") == 0) {
 			validate = true;
 		} else if (strcmp(argv[next_arg], "--verbose") == 0) {
@@ -351,9 +355,11 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	for (int i = 0; i < num_ports; i++) {
-		std::thread thread(homa_server, port+i);
-		thread.detach();
+	if (!tcp_only) {
+		for (int i = 0; i < num_ports; i++) {
+			std::thread thread(homa_server, port+i);
+			thread.detach();
+		}
 	}
 
 	tcp_server(port);

@@ -7,6 +7,11 @@
 
 #include <linux/types.h>
 
+struct homa;
+struct list_head;
+struct sk_buff;
+struct sock;
+
 /**
  * struct homa_offload_core - Stores core-specific information used during
  * GRO operations.
@@ -20,7 +25,7 @@ struct homa_offload_core {
 
 	/**
 	 * @last_gro: the most recent homa_clock() time when
-	 * homa_gro_receive returned on this core. Used to determine
+	 * homa_udp_gro_receive returned on this core. Used to determine
 	 * whether GRO is keeping a core busy.
 	 */
 	u64 last_gro;
@@ -72,13 +77,13 @@ struct homa_offload_core {
 };
 DECLARE_PER_CPU(struct homa_offload_core, homa_offload_core);
 
-int      homa_gro_complete(struct sk_buff *skb, int thoff);
+int      homa_gro_complete(struct sk_buff *skb);
 void     homa_gro_gen2(struct homa *homa, struct sk_buff *skb);
 void     homa_gro_gen3(struct homa *homa, struct sk_buff *skb);
-struct sk_buff *homa_gro_receive(struct list_head *gro_list,
-				 struct sk_buff *skb);
-struct sk_buff *homa_gso_segment(struct sk_buff *skb,
-				 netdev_features_t features);
+struct sk_buff *homa_udp_gro_receive(struct sock *sk,
+				     struct list_head *held_list,
+				     struct sk_buff *skb);
+int      homa_udp_gro_complete(struct sock *sk, struct sk_buff *skb, int nhoff);
 int      homa_offload_end(void);
 int      homa_offload_init(void);
 void     homa_send_ipis(void);

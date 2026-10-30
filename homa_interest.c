@@ -7,9 +7,7 @@
 #include "homa_rpc.h"
 #include "homa_sock.h"
 
-#ifndef __STRIP__ /* See strip.py */
 #include "homa_offload.h"
-#endif /* See strip.py */
 
 /* DESIGN NOTES:
  * The key idea behind the design of the interest mechanism is to reduce usage
@@ -35,7 +33,7 @@ void homa_interest_init_shared(struct homa_interest *interest,
 {
 	interest->rpc = NULL;
 	atomic_set(&interest->state, 0);
-	IF_NO_STRIP(interest->core = raw_smp_processor_id());
+	interest->core = raw_smp_processor_id();
 	interest->blocked = 0;
 	init_waitqueue_head(&interest->wait_queue);
 	interest->hsk = hsk;
@@ -60,7 +58,7 @@ int homa_interest_init_private(struct homa_interest *interest,
 
 	interest->rpc = rpc;
 	atomic_set(&interest->state, 0);
-	IF_NO_STRIP(interest->core = raw_smp_processor_id());
+	interest->core = raw_smp_processor_id();
 	interest->blocked = 0;
 	init_waitqueue_head(&interest->wait_queue);
 	interest->hsk = rpc->hsk;
@@ -88,12 +86,10 @@ int homa_interest_wait(struct homa_interest *interest)
 	int iteration;
 	int wait_err;
 
-#ifndef __STRIP__ /* See strip.py */
 	u64 start, block_start, blocked_time, now;
 
 	start = homa_clock();
 	blocked_time = 0;
-#endif /* See strip.py */
 	interest->blocked = 0;
 
 	/* This loop iterates in order to poll and/or reap dead RPCS. */
@@ -114,24 +110,20 @@ int homa_interest_wait(struct homa_interest *interest)
 		if (homa_rpc_reap(hsk) != 0)
 			continue;
 
-#ifndef __STRIP__ /* See strip.py */
 		/* See if the polling limit has been reached. */
 		now = homa_clock();
 		per_cpu(homa_offload_core,
 			raw_smp_processor_id()).last_app_active = now;
 		if (now - start >= hsk->homa->poll_cycles)
 			break;
-#else /* See strip.py */
-		break;
-#endif /* See strip.py */
 	}
 
 	interest->blocked = 1;
-	IF_NO_STRIP(block_start = now);
+	block_start = now;
 	wait_err = wait_event_interruptible_exclusive(interest->wait_queue,
 						      atomic_read_acquire(&interest->state) &
 						      HOMA_INTEREST_READY);
-	IF_NO_STRIP(blocked_time = homa_clock() - block_start);
+	blocked_time = homa_clock() - block_start;
 
 check_err:
 	if (wait_err == -ERESTARTSYS) {
@@ -162,11 +154,9 @@ done:
 	 */
 	while (atomic_read(&interest->state) & HOMA_INTEREST_HANDOFF_ACTIVE)
 		cpu_relax();
-#ifndef __STRIP__ /* See strip.py */
 	if (interest->blocked)
 		INC_METRIC(blocked_cycles, blocked_time);
 	INC_METRIC(poll_cycles, homa_clock() - start - blocked_time);
-#endif /* See strip.py */
 	return result;
 }
 
@@ -203,7 +193,6 @@ void homa_interest_notify_shared(struct homa_sock *hsk, struct homa_rpc *rpc)
 {
 	struct homa_interest *interest;
 
-#ifndef __STRIP__ /* See strip.py */
 	interest = homa_choose_interest(hsk);
 
 	/* Update the last_app_active time for the thread's core, so Homa
@@ -211,10 +200,6 @@ void homa_interest_notify_shared(struct homa_sock *hsk, struct homa_rpc *rpc)
 	 */
 	per_cpu(homa_offload_core, interest->core).last_app_active =
 			homa_clock();
-#else /* See strip.py */
-	interest = list_first_entry(&hsk->interests,
-				    struct homa_interest, links);
-#endif /* See strip.py */
 	list_del_init(&interest->links);
 	interest->rpc = rpc;
 
@@ -229,7 +214,6 @@ void homa_interest_notify_shared(struct homa_sock *hsk, struct homa_rpc *rpc)
 	atomic_set_release(&interest->state, HOMA_INTEREST_READY);
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_choose_interest() - Given all the interests registered for a socket,
  * choose the best one to handle an incoming message.
@@ -262,4 +246,3 @@ struct homa_interest *homa_choose_interest(struct homa_sock *hsk)
 	 */
 	return first;
 }
-#endif /* See strip.py */

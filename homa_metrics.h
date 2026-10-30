@@ -432,20 +432,6 @@ struct homa_metrics {
 	u64 pacer_fifo_bytes;
 
 	/**
-	 * @pacer_tcp_packets: total number of TCP packets that were
-	 * transmitted by homa_qdisc_pacer (they were deferred because of
-	 * NIC queue overload).
-	 */
-	u64 pacer_tcp_packets;
-
-	/**
-	 * @pacer_tcp_bytes: total number of bytes in TCP packets that were
-	 * transmitted by homa_qdisc_pacer (they were deferred because of
-	 * NIC queue overload).
-	 */
-	u64 pacer_tcp_bytes;
-
-	/**
 	 * @pacer_bubble_cycles: total (estimated) lost transmission time on
 	 * the NIC uplink because the pacer failed to queue a packet before
 	 * the NIC became idle.
@@ -475,17 +461,9 @@ struct homa_metrics {
 	/**
 	 * @pacer_help_bytes: bytes that the pacer transmitted via calls to
 	 * homa_qdisc_pacer_check (presumably because the pacer thread
-	 * wasn't keeping up). Includes both TCP and Homa packets as well as
-	 * header bytes.
+	 * wasn't keeping up). Includes Homa packet and header bytes.
 	 */
 	u64 pacer_help_bytes;
-
-	/**
-	 * @qdisc_tcp_packets: total number of TCP packets that passed through
-	 * homa_qdisc; includes packets that were transmitted immediately as
-	 * well as those that were deferred.
-	 */
-	u64 qdisc_tcp_packets;
 
 	/**
 	 * @qdisc_flushes: total number of times that homa_qdisc_flush_rpc
@@ -539,14 +517,20 @@ struct homa_metrics {
 	u64 peer_dst_refreshes;
 
 	/**
-	 * @control_xmit_errors: total number of times ip_queue_xmit
-	 * failed when transmitting a control packet.
+	 * @control_xmit_errors: total number of control packets rejected
+	 * before being handed to the UDP tunnel helpers because the padded
+	 * packet did not fit the route's MTU (-EMSGSIZE from
+	 * __homa_xmit_control). Failures after the handoff are not counted:
+	 * the helpers return void and report nothing synchronously.
 	 */
 	u64 control_xmit_errors;
 
 	/**
-	 * @data_xmit_errors: total number of times ip_queue_xmit
-	 * failed when transmitting a data packet.
+	 * @data_xmit_errors: total number of times a data packet was not
+	 * sent because the geometry of its message no longer fits the
+	 * route's MTU (-EMSGSIZE from homa_tx_skb_alloc, counted in
+	 * homa_tx_skb_send). Failures after the handoff to the UDP tunnel
+	 * helpers are not counted (they are not reported synchronously).
 	 */
 	u64 data_xmit_errors;
 
@@ -787,15 +771,15 @@ struct homa_metrics {
 
 	/**
 	 * @gro_grant_bypasses: total number of GRANT packets passed directly
-	 * to homa_softirq by homa_gro_receive, bypassing the normal SoftIRQ
-	 * mechanism (triggered by HOMA_GRO_FAST_GRANTS).
+	 * to homa_softirq by homa_udp_gro_receive, bypassing the normal
+	 * SoftIRQ mechanism (triggered by HOMA_GRO_FAST_GRANTS).
 	 */
 	u64 gro_grant_bypasses;
 
 	/**
 	 * @gro_data_bypasses: total number of DATA packets passed directly
-	 * to homa_softirq by homa_gro_receive, bypassing the normal SoftIRQ
-	 * mechanism (triggered by HOMA_GRO_SHORT_BYPASS).
+	 * to homa_softirq by homa_udp_gro_receive, bypassing the normal
+	 * SoftIRQ mechanism (triggered by HOMA_GRO_SHORT_BYPASS).
 	 */
 	u64 gro_data_bypasses;
 

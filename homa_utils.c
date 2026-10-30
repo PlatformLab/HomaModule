@@ -9,10 +9,9 @@
 #include "homa_rpc.h"
 #include "homa_tx_pool.h"
 
-#ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_qdisc.h"
-#endif /* See strip.py */
+#include "homa_udp_tunnel.h"
 
 /**
  * homa_init() - Constructor for homa objects.
@@ -24,13 +23,12 @@ int homa_init(struct homa *homa)
 {
 	int err;
 
-	IF_NO_STRIP(int i);
+	int i;
 
 	memset(homa, 0, sizeof(*homa));
 
 	atomic64_set(&homa->next_outgoing_id, 2);
 	homa->link_mbps = 25000;
-#ifndef __STRIP__ /* See strip.py */
 	homa->qshared = homa_qdisc_shared_alloc();
 	if (IS_ERR(homa->qshared)) {
 		err = PTR_ERR(homa->qshared);
@@ -43,7 +41,6 @@ int homa_init(struct homa *homa)
 		homa->grant = NULL;
 		goto error;
 	}
-#endif /* See strip.py */
 	homa->peertab = homa_peer_alloc_peertab();
 	if (IS_ERR(homa->peertab)) {
 		err = PTR_ERR(homa->peertab);
@@ -64,7 +61,6 @@ int homa_init(struct homa *homa)
 	}
 
 	/* Wild guesses to initialize configuration values... */
-#ifndef __STRIP__ /* See strip.py */
 	homa->unsched_bytes = 40000;
 	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
@@ -83,31 +79,21 @@ int homa_init(struct homa *homa)
 #else
 	homa->cutoff_version = 1;
 #endif
-#endif /* See strip.py */
 	homa->resend_ticks = 5;
 	homa->resend_interval = 5;
 	homa->timeout_ticks = 100;
 	homa->timeout_resends = 5;
 	homa->request_ack_ticks = 2;
 	homa->dead_frags_limit = 100;
-#ifndef __STRIP__ /* See strip.py */
 	homa->verbose = 0;
-#endif /* See strip.py */
 	homa->max_gso_size = 1000;
 	homa->wmem_max = 100000000;
-#ifndef __STRIP__ /* See strip.py */
 	homa->max_gro_skbs = 20;
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->busy_usecs = 100;
 	homa->gro_busy_usecs = 5;
-#endif /* See strip.py */
 	homa->bpage_lease_usecs = 10000;
-#ifdef __STRIP__ /* See strip.py */
-	homa->bpage_lease_cycles = homa->bpage_lease_usecs  * 2500;
-#endif /* See strip.py */
-#ifndef __STRIP__ /* See strip.py */
 	homa_incoming_sysctl_changed(homa);
-#endif /* See strip.py */
 	return 0;
 
 error:
@@ -130,7 +116,6 @@ void homa_destroy(struct homa *homa)
 		kfree(homa->socktab);
 		homa->socktab = NULL;
 	}
-#ifndef __STRIP__ /* See strip.py */
 	if (homa->grant) {
 		homa_grant_free(homa->grant);
 		homa->grant = NULL;
@@ -139,7 +124,6 @@ void homa_destroy(struct homa *homa)
 		homa_qdisc_shared_free(homa->qshared);
 		homa->qshared = NULL;
 	}
-#endif /* See strip.py */
 	if (homa->peertab) {
 		homa_peer_free_peertab(homa->peertab);
 		homa->peertab = NULL;
@@ -168,11 +152,14 @@ int homa_net_init(struct homa_net *hnet, struct homa *homa)
  */
 void homa_net_destroy(struct homa_net *hnet)
 {
+	/* Shutting down the sockets ends their RPCs and routes; the tunnel
+	 * sockets must stay available until then.
+	 */
 	homa_socktab_destroy(hnet->homa->socktab, hnet);
+	homa_udp_destroy(hnet);
 	homa_peer_free_net(hnet);
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_prios_changed() - This function is called whenever configuration
  * information related to priorities, such as @homa->unsched_cutoffs or
@@ -210,7 +197,6 @@ void homa_prios_changed(struct homa *homa)
 	}
 	homa->cutoff_version++;
 }
-#endif /* See strip.py */
 
 /**
  * homa_spin() - Delay (without sleeping) for a given time interval.

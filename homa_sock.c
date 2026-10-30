@@ -7,10 +7,7 @@
 #include "homa_peer.h"
 #include "homa_pool.h"
 
-#ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
-#include "homa_hijack.h"
-#endif /* See strip.py */
 
 /**
  * homa_socktab_init() - Constructor for homa_socktabs.
@@ -210,8 +207,6 @@ int homa_sock_init(struct homa_sock *hsk)
 
 	hsk->is_server = false;
 	hsk->shutdown = false;
-	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET) ?
-				sizeof(struct iphdr) : sizeof(struct ipv6hdr);
 	hsk->error_msg = "no error";
 	spin_lock_init(&hsk->lock);
 	atomic_set(&hsk->protect_count, 0);
@@ -237,7 +232,6 @@ int homa_sock_init(struct homa_sock *hsk)
 	/* Initialize fields outside the Homa part. */
 	hsk->sock.sk_sndbuf = homa->wmem_max;
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
-	IF_NO_STRIP(homa_hijack_sock_init(hsk));
 
 	/* This is needed to prevent blocking when allocating memory in
 	 * functions like ip_route_output_flow, which could be invoked
@@ -410,14 +404,13 @@ void homa_sock_destroy(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 
-	IF_NO_STRIP(int i = 0);
+	int i = 0;
 
 	if (!hsk->homa)
 		return;
 
 	tt_record1("Starting to destroy socket %d", hsk->port);
 	while (!list_empty(&hsk->dead_rpcs)) {
-#ifndef __STRIP__ /* See strip.py */
 		if (!homa_rpc_reap(hsk)) {
 			i++;
 			if (i == 5) {
@@ -425,9 +418,6 @@ void homa_sock_destroy(struct sock *sk)
 				tt_freeze();
 			}
 		}
-#else /* See strip.py */
-		homa_rpc_reap(hsk);
-#endif /* See strip.py */
 	}
 
 	WARN_ON_ONCE(refcount_read(&hsk->sock.sk_wmem_alloc) != 1);
@@ -529,7 +519,6 @@ struct homa_sock *homa_sock_find(struct homa_net *hnet, u16 port)
 	return result;
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_sock_lock_slow() - This function implements the slow path for
  * acquiring a socketC lock. It is invoked when a socket lock isn't immediately
@@ -576,7 +565,6 @@ void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
 		INC_METRIC(server_lock_miss_cycles, homa_clock() - start);
 	}
 }
-#endif /* See strip.py */
 
 /**
  * homa_sock_wait_wmem() - Block the thread until @hsk's usage of tx

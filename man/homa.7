@@ -13,6 +13,17 @@ homa \- Homa transport protocol
 .fi
 .SH DESCRIPTION
 .PP
+This variant carries all Homa packets over IPv4 or IPv6 UDP with source and
+destination port
+.BR HOMA_UDP_PORT " (5001)."
+Applications still create Homa sockets with
+.BR IPPROTO_HOMA " (146)"
+and use Homa application ports and socket options; they do not bind ordinary
+UDP sockets to the tunnel port.
+Both families require UDP checksums.
+There is no native protocol-146 wire delivery, TCP encapsulation or transport
+fallback, and no setting is required to enable UDP.
+.PP
 Homa is a network transport protocol for communication within a datacenter.
 Its most important benefit is that if offers exceptionally low latency
 for small messages, even in the presence of high network loads.
@@ -590,7 +601,8 @@ grants; we recommend leaving it that way until the pathologies are remedied.
 An integer value used to determine whether or not to perform some
 optimizations specified by
 .IR gro_policy .
-If the gap between the completion of one call to homa_gro_receive and
+If the gap between the completion of one call to homa_udp_gro_receive
+(the UDP tunnel GRO callback in homa_offload.c) and
 the invocation of the next call on the same core is less than this many
 microseconds, the core is considered to be "busy", so optimizations
 that add to the load of the core will not be performed.
@@ -601,23 +613,8 @@ at the GRO level. See code in homa_offload.c for more details.
 .TP
 .IR gso_force_software
 If this value is nonzero, Homa will perform GSO in software instead of
-asking the NIC to perform TSO in hardware. This can be useful when running
-with NICs that refuse to perform TSO on Homa packets.
-.TP
-.IR hijack_tcp
-An integer value; if nonzero, Homa will transmit its packets as TCP
-packets (e.g., using IPPROTO_TCP instead of IPPROTO_HOMA). This allows Homa
-to make better use of NIC hardware support such as TSO and RSS, but it
-requires Homa to intercept all incoming TCP packets to see if they are
-actually Homa packets. Some might object to this interference with the
-rest of the Linux kernel.
-.TP
-.IR homa_share
-When there exist both Homa and TCP packets whose transmission has been
-deferred because the NIC queue is overloaded, this determines how the
-uplink bandwidth is allocated between Homa and TCP. This parameter is
-a value between 0 and 100 indicating what percent of the uplink bandwidth
-will be allocated to Homa; the remainder will be allocated to TCP.
+asking the NIC to perform UDP segmentation in hardware. The transport
+remains UDP in both cases.
 .TP
 .IR link_mbps
 An integer value specifying the bandwidth of this machine's uplink to

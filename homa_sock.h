@@ -229,12 +229,6 @@ struct homa_sock {
 	 */
 	bool shutdown;
 
-	/**
-	 * @ip_header_length: Length of IP headers for this socket (depends
-	 * on IPv4 vs. IPv6).
-	 */
-	int ip_header_length;
-
 	/** @slink: Links this socket into a homa_socktab bucket. */
 	struct homa_sock_link *slink;
 
@@ -353,11 +347,9 @@ struct homa_v6_sock {
 	struct ipv6_pinfo inet6;
 };
 
-#ifndef __STRIP__ /* See strip.py */
 void               homa_bucket_lock_slow(struct homa_rpc_bucket *bucket,
 					 u64 id);
 void               homa_sock_lock_slow(struct homa_sock *hsk);
-#endif /* See strip.py */
 int                homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 				  u16 port);
 void               homa_sock_destroy(struct sock *sk);
@@ -376,7 +368,6 @@ struct homa_sock  *homa_socktab_next(struct homa_socktab_scan *scan);
 struct homa_sock  *homa_socktab_start_scan(struct homa_socktab *socktab,
 					   struct homa_socktab_scan *scan);
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_sock_lock() - Acquire the lock for a socket. If the socket
  * isn't immediately available, record stats on the waiting time.
@@ -388,17 +379,6 @@ static inline void homa_sock_lock(struct homa_sock *hsk)
 	if (!spin_trylock_bh(&hsk->lock))
 		homa_sock_lock_slow(hsk);
 }
-#else /* See strip.py */
-/**
- * homa_sock_lock() - Acquire the lock for a socket.
- * @hsk:     Socket to lock.
- */
-static inline void homa_sock_lock(struct homa_sock *hsk)
-	__acquires(hsk->lock)
-{
-	spin_lock_bh(&hsk->lock);
-}
-#endif /* See strip.py */
 
 /**
  * homa_sock_unlock() - Release the lock for a socket.
@@ -465,7 +445,6 @@ static inline struct homa_rpc_bucket
 			& (HOMA_SERVER_RPC_BUCKETS - 1)];
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_bucket_lock() - Acquire the lock for an RPC hash table bucket.
  * @bucket:    Bucket to lock.
@@ -478,19 +457,6 @@ static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
 	if (!spin_trylock_bh(&bucket->lock))
 		homa_bucket_lock_slow(bucket, id);
 }
-#else /* See strip.py */
-/**
- * homa_bucket_lock() - Acquire the lock for an RPC hash table bucket.
- * @bucket:    Bucket to lock.
- * @id:        Id of the RPC on whose behalf the bucket is being locked.
- *             Used only for metrics.
- */
-static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
-	__acquires(bucket->lock)
-{
-	spin_lock_bh(&bucket->lock);
-}
-#endif /* See strip.py */
 
 /**
  * homa_bucket_unlock() - Release the lock for an RPC hash table bucket.

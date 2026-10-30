@@ -478,8 +478,7 @@ def config_homa(mod):
     exec_cmd(["sudo", "bash", "-c", "insmod %s" % (mod)],
             check=True)
 
-    # See if Homa supports sysctls (if it has been stripped down for Linux
-    # upstreaming, it might not).
+    # Check that Homa's configuration interface is available.
 
     result = exec_cmd(["sysctl", ".net.homa.num_priorities"], check=False)
     if result.returncode != 0:
@@ -506,10 +505,6 @@ def config_homa(mod):
     else:
         raise Exception("Can't configure Homa: no config info available "
                 "for link speed %d Mbps" % (link_mbps))
-
-    if get_nic_type() == "ice":
-        print("Enabling TCP hijacking")
-        set_sysctl("hijack_tcp", 1)
 
 def config_ipv6(num_hosts, vlan):
     """
@@ -672,12 +667,11 @@ def config_qdisc():
     config = get_qdisc_config()
     root = config['root_handle']
 
-    # If the option 'homa_share' isn't available, then Homa was compiled
-    # without homa_qdisc (e.g. for a stripped version).
-    result = exec_cmd(['sysctl', '.net.homa.homa_share'], check=False)
+    # Check a retained qdisc setting before configuring the queues.
+    result = exec_cmd(['sysctl', '.net.homa.max_nic_queue_usecs'], check=False)
     if result.returncode != 0:
-        print("Can't install Homa qdisc: it isn't available "
-                "(maybe Homa is stripped?)")
+        print("Can't install Homa qdisc: its configuration interface "
+                "isn't available")
         return
 
     print('Installing Homa qdisc')

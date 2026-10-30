@@ -28,10 +28,10 @@ struct homa_message_out {
 	int length;
 
 	/**
-	 * @frags: Array of fragments that hold the tx message in a ready-
-	 * to-transmit form, consisting of segments, each with a
-	 * homa_seg_hdr followed by the data for that segment. These
-	 * fragments will be incorporated into skb's to transmit the message.
+	 * @frags: Immutable tx pool storage: each segment has an internal
+	 * homa_seg_hdr placeholder followed by its payload. Outgoing skbs
+	 * reference only the payload bytes and supply private DATA headers.
+	 * In-flight originals and retransmissions can share these fragments.
 	 * If this doesn't point to @frag below then it is dynamically
 	 * allocated and must be freed.
 	 */
@@ -54,13 +54,15 @@ struct homa_message_out {
 
 	/**
 	 * @max_seg_data: Maximum amount of message data to include in each
-	 * segment of tx packets.
+	 * UDP datagram. Fixed at message initialization from the route MTU
+	 * minus IP, UDP and DATA headers; never resized for a later route.
 	 */
 	int max_seg_data;
 
 	/**
 	 * @max_gso_segs: Maximum number of segments that can be present in a
-	 * single GSO packet.
+	 * single GSO packet. Current device and fragment limits may reduce
+	 * the number actually emitted, without changing segment boundaries.
 	 */
 	int max_gso_segs;
 
@@ -80,12 +82,11 @@ struct homa_message_out {
 
 	/**
 	 * @next_xmit_offset: All bytes in the message, up to but not
-	 * including this one, have been passed to ip_queue_xmit or
-	 * ip6_xmit at least once.
+	 * including this one, have been handed to the UDP tunnel at least
+	 * once (the kernel tunnel helpers consume the skb and return void).
 	 */
 	int next_xmit_offset;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @granted: Total number of initial bytes we are currently permitted
 	 * to send; must wait for grants before sending bytes at or beyond
@@ -104,7 +105,6 @@ struct homa_message_out {
 	 * packets.
 	 */
 	u8 retrans_priority;
-#endif /* See strip.py */
 
 	/**
 	 * @init_time: homa_clock() time when this structure was initialized.
@@ -184,7 +184,6 @@ struct homa_message_in {
 	 */
 	u32 bpage_offsets[HOMA_MAX_BPAGES];
 
-#ifndef __STRIP__ /* See strip.py */
 
 	/**
 	 * @active_ix: Index of slot in @grant->active_rpcs that refers
@@ -219,10 +218,8 @@ struct homa_message_in {
 	 * (i.e. first data packet was received for message).
 	 */
 	u64 birth;
-#endif /* See strip.py */
 };
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * struct homa_rpc_qdisc - Information that homa_qdisc needs to store in
  * each RPC. Managed entirely by homa_qdisc.
@@ -258,7 +255,6 @@ struct homa_rpc_qdisc {
 	 */
 	int tx_left;
 };
-#endif /* See strip.py */
 
 /**
  * struct homa_rpc - One of these structures exists for each active
@@ -409,10 +405,8 @@ struct homa_rpc {
 	 */
 	struct homa_message_out msgout;
 
-#ifndef __STRIP__ /* See strip.py */
 	/** @qrpc: Information managed by homa_qdisc for this RPC. */
 	struct homa_rpc_qdisc qrpc;
-#endif /* See strip.py */
 
 	/**
 	 * @hash_links: Used to link this object into a hash bucket for
@@ -449,14 +443,12 @@ struct homa_rpc {
 	 */
 	struct homa_interest *private_interest;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @grantable_links: Used to link this RPC into peer->grantable_rpcs.
 	 * If this RPC isn't in peer->grantable_rpcs, this is an empty
 	 * list pointing to itself. Must hold homa->grant->lock when accessing.
 	 */
 	struct list_head grantable_links;
-#endif /* See strip.py */
 
 	/**
 	 * @silent_ticks: Number of times homa_timer has been invoked
@@ -495,8 +487,8 @@ struct homa_rpc {
 	u64 start_time;
 };
 
-void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
-			 int port, int error);
+void     homa_abort_rpcs(struct homa *homa, struct homa_net *hnet,
+			 const struct in6_addr *addr, int port, int error);
 void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 void     homa_rpc_ack(struct homa_sock *hsk, struct homa_rpc *rpc,

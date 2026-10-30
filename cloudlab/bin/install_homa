@@ -7,15 +7,14 @@
 # or more target machines; it also loads the Homa kernel module.
 #
 # Usage:
-# install_homa [--net-next] [--verbose] num_nodes [first]
+# install_homa [--verbose] num_nodes [first]
 #
 # The "num_nodes" arguments indicates how many servers should be updated.
 # The "first" argument is optional; it is an integer identifying the
 # first node on which installation will occur (e.g. "install 4 2" means
 # node2 through node5 will be updated. "first" defaults to 0.
 # This script assumes that the Homa module binary (homa.ko) has already
-# been built. If --net-next is specified, it will be in the kernel build
-# directory (see code below for path), otherwise it will be in ~/homaModule.
+# been built from the full source tree in ~/homaModule.
 # In addition, the utility programs in ~/homaModule/util must have been built.
 
 root=~/homaModule
@@ -25,11 +24,8 @@ set -e
 homa_ko=$root/homa.ko
 verbose=""
 rsync_switches="-rt"
-while true; do
-    if [ $1 = "--net-next" ]; then
-        homa_ko=/netnext/net-next/net/homa/homa.ko
-        shift
-    elif [ $1 = "--verbose" ]; then
+while [ $# -gt 0 ]; do
+    if [ "$1" = "--verbose" ]; then
         verbose=" --verbose"
         rsync_switches="-rtv"
         shift
@@ -42,7 +38,11 @@ if [ $# -eq 2 ]; then
 elif [ $# -eq 1 ]; then
     first=0
 else
-    echo "Usage: install_homa [--net-next] num_nodes [first]"
+    echo "Usage: install_homa [--verbose] num_nodes [first]"
+    exit 1
+fi
+if [[ ! $1 =~ ^[0-9]+$ || ! $first =~ ^[0-9]+$ ]]; then
+    echo "Usage: install_homa [--verbose] num_nodes [first]"
     exit 1
 fi
 last=`expr $first + $1 - 1` || true

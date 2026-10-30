@@ -22,7 +22,8 @@ CINCLUDES := \
 	    -I. \
 	    -I.. \
 	    $(KERN_INCLUDES) \
-	    -include $(KDIR)/include/linux/kconfig.h
+	    -include $(KDIR)/include/linux/kconfig.h \
+	    -include kconfig_overrides.h
 CCINCLUDES := \
 	    -I. \
 	    -I.. \
@@ -32,9 +33,6 @@ DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
 	     -D KBUILD_MODNAME='"homa"' \
 	     -DCC_USING_FENTRY
-ifneq ($(__STRIP__),)
-DEFS +=      -D__STRIP__
-endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wuninitialized \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
@@ -55,14 +53,12 @@ TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_timer.c \
 	      unit_homa_tx_pool.c \
 	      unit_homa_utils.c \
-	      unit_timetrace.c
-ifeq ($(__STRIP__),)
-TEST_SRCS +=  unit_homa_grant.c \
-	      unit_homa_hijack.c \
+	      unit_timetrace.c \
+	      unit_homa_udp_tunnel.c \
+	      unit_homa_grant.c \
 	      unit_homa_metrics.c \
 	      unit_homa_offload.c \
 	      unit_homa_qdisc.c
-endif
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 
 HOMA_SRCS :=  homa_devel.c \
@@ -76,15 +72,13 @@ HOMA_SRCS :=  homa_devel.c \
 	      homa_sock.c \
 	      homa_timer.c \
 	      homa_tx_pool.c \
+	      homa_udp_tunnel.c \
 	      homa_utils.c \
-	      timetrace.c
-ifeq ($(__STRIP__),)
-HOMA_SRCS +=  homa_grant.c \
-	      homa_hijack.c \
+	      timetrace.c \
+	      homa_grant.c \
 	      homa_metrics.c \
 	      homa_offload.c \
 	      homa_qdisc.c
-endif
 
 HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS))
 
@@ -139,46 +133,6 @@ unit: $(OBJS)
 test: unit
 	./unit
 
-# Additional definitions for running unit tests using stripped sources.
-
-S_HOMA_SRCS := $(patsubst %,stripped/%,$(filter-out timetrace.c, $(HOMA_SRCS)))
-S_HOMA_OBJS :=  $(patsubst %.c,%.o,$(S_HOMA_SRCS))
-S_HOMA_HDRS := stripped/homa.h \
-		stripped/homa_impl.h \
-		stripped/homa_peer.h \
-		stripped/homa_pool.h \
-		stripped/homa_receiver.h \
-		stripped/homa_rpc.h \
-		stripped/homa_sock.h \
-		stripped/homa_stub.h \
-		stripped/homa_wire.h
-stripped/%.c: ../%.c
-	../util/strip.py --alt $< > $@
-stripped/%.h: ../%.h
-	../util/strip.py --alt $< > $@
-S_TEST_OBJS := $(patsubst %,stripped/%,$(filter-out unit_timetrace.o, $(TEST_OBJS)))
-S_OBJS := $(S_HOMA_OBJS) $(S_TEST_OBJS) $(patsubst %,stripped/%,$(OTHER_OBJS))
-
-$(S_OBJS): | stripped $(S_HOMA_HDRS)
-
-stripped:
-	mkdir -p stripped
-
-stripped/%.o: stripped/%.c
-	$(CC) -c $(patsubst -I..,-Istripped,$(CFLAGS)) $< -o $@
-stripped/%.o: %.c
-	$(CC) -c $(patsubst -I..,-Istripped,$(CFLAGS)) $< -o $@
-stripped/%.o: %.cc
-	$(CXX) -c $(patsubst -I..,-Istripped,$(CCFLAGS)) $< -o $@
-
-s_unit: $(S_OBJS)
-	$(CXX) $(CFLAGS) $^ -o $@ -lasan
-
-s_test: s_unit
-	./s_unit
-
-CLEANS += s_unit
-
 # The target below shouldn't be needed: theoretically, any code that is
 # sensitive to IPv4 vs. IPv6 should be tested explicitly, regardless of
 # the --ipv4 argument.
@@ -190,13 +144,12 @@ test_both: unit
 
 clean:
 	rm -f $(CLEANS)
-	rm -rf stripped
 
 # This magic (along with the -MD gcc option) automatically generates makefile
 # dependencies for header files included from C source files we compile,
 # and keeps those dependencies up-to-date every time we recompile.
 # See 'mergedep.pl' for more information.
-.deps: $(wildcard *.d stripped/*.d)
+.deps: $(wildcard *.d)
 	@mkdir -p $(@D)
 	$(PERL) mergedep.pl $@ $^
 -include .deps

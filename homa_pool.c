@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 #include "homa_impl.h"
-#ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
-#endif /* See strip.py */
 #include "homa_pool.h"
 
 /* This file contains functions that manage user-space buffer pools. */
@@ -348,16 +346,10 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 		goto new_page;
 	}
 	if ((core->allocated + partial) > HOMA_BPAGE_SIZE) {
-#ifndef __STRIP__ /* See strip.py */
 		if (bpage->refs == 1) {
 			/* Bpage is totally free, so we can reuse it. */
 			core->allocated = 0;
 			INC_METRIC(bpage_reuses, 1);
-#else /* See strip.py */
-		if (bpage->refs == 1) {
-			/* Bpage is totally free, so we can reuse it. */
-			core->allocated = 0;
-#endif /* See strip.py */
 		} else {
 			bpage->owner = -1;
 
@@ -567,13 +559,11 @@ void homa_pool_wakeup_rpc(struct homa_rpc *rpc)
 {
 	struct homa_resend_hdr resend;
 
-#ifndef __STRIP__ /* See strip.py */
 	/* If the RPC is scheduled, all we have to do is issue a grant. */
 	if (test_bit(RPC_GRANTABLE, &rpc->flags)) {
 		homa_grant_check_rpc(rpc);
 		return;
 	}
-#endif /* See strip.py */
 
 	/* Unscheduled: must ask for the message to be retransmitted. Use
 	 * the next-to-highest priority level to provide a priority boost
@@ -616,7 +606,6 @@ u64 homa_pool_avail_bytes(struct homa_pool *pool)
 	return avail;
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_pool_lock_slow() - This function implements the slow path for
  * acquiring the lock for a buffer pool. It is invoked when the lock isn't
@@ -635,4 +624,3 @@ void homa_pool_lock_slow(struct homa_pool *pool)
 	INC_METRIC(bpool_lock_misses, 1);
 	INC_METRIC(bpool_lock_miss_cycles, homa_clock() - start);
 }
-#endif /* See strip.py */
