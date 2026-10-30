@@ -5,13 +5,7 @@
 #define _HOMA_MOCK_H
 
 #include <linux/ethtool.h>
-/* Kernel 6.17's addrconf.h passes unsigned dev_addr to a char parameter.
- * Keep this kernel-header warning local; retain -Wpointer-sign for Homa.
- */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpointer-sign"
 #include <net/udp_tunnel.h>
-#pragma GCC diagnostic pop
 
 /* Replace various Linux variables and functions with mocked ones. */
 #undef alloc_pages
@@ -156,13 +150,7 @@
 #define spin_unlock mock_spin_unlock
 
 #undef this_cpu_ptr
-/* Named mocked per-CPU objects are arrays; allocated objects are pointers.
- * Decay either form to a pointer to one CPU's object before indexing.
- */
-#define this_cpu_ptr(name)						\
-	((__typeof__(__builtin_choose_expr(				\
-		__builtin_classify_type(*(name)) == 5, *(name), (name)) + 0)) \
-	 (name) + cpu_number)
+#define this_cpu_ptr(name) (&name[cpu_number])
 
 #undef __this_cpu_read
 #define __this_cpu_read(name) (name)
