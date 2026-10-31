@@ -756,7 +756,7 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 		h = (struct homa_data_hdr *)skb_transport_header(skb);
 		bytes_left = rpc->msgout.length - ntohl(h->seg.offset);
 		if (bytes_left < rpc->qrpc.tx_left)
-			rpc->qrpc.tx_left = bytes_left;
+			WRITE_ONCE(rpc->qrpc.tx_left, bytes_left);
 		rpc->qrpc.qdev = qdev;
 		homa_qdisc_insert_rb(qdev, rpc);
 	}
@@ -953,7 +953,7 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 	bytes_left = rpc->msgout.length - (ntohl(h->seg.offset) +
 					   info->data_bytes);
 	if (bytes_left < qrpc->tx_left)
-		qrpc->tx_left = bytes_left;
+		WRITE_ONCE(qrpc->tx_left, bytes_left);
 	if (fifo) {
 		if (skb_queue_len(&qrpc->packets) > 0) {
 			rb_erase_cached(node, &qdev->deferred_rpcs);
