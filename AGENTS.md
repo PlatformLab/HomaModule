@@ -8,8 +8,11 @@ Linux kernel module implementing the Homa transport. This variant sends **all**
 Homa packets as UDP datagrams with outer source and destination port **5001**
 (IPv4 and IPv6). `IPPROTO_HOMA` (146) is kept only as the application socket
 protocol selector and option level; it is not a wire protocol. The Homa socket
-API is unchanged. There is no TCP hijack, no native IP delivery, no strip or
-upstream build, and no new sysctl. Plain TCP in the utilities is application
+API is unchanged. There is no TCP hijack, no native IP delivery, and no new
+sysctl. The strip/upstream mechanism (`__STRIP__`, `__UPSTREAM__`,
+`IF_NO_STRIP`, `util/strip.py`, `Makefile.upstream`) is unchanged and the UDP
+tunnel is part of the stripped build; the GRO callbacks in `homa_offload.c` are
+not. Plain TCP in the utilities is application
 functionality and stays.
 
 ## Build and test

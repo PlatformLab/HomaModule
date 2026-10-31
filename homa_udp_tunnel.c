@@ -33,7 +33,8 @@
  *   does not consume the skb (the ICMP layer does). Path-MTU messages are
  *   ignored here; everything else is translated into the existing Homa
  *   error handlers, which abort affected RPCs.
- * - The GRO callbacks live in homa_offload.c.
+ * - The GRO callbacks live in homa_offload.c (not present in the stripped
+ *   build, where datagrams are delivered without GRO batching).
  *
  * Transmit skbs, routes and RCU: homa_route_xmit hands each skb, plus one
  * dst reference, to the kernel helper, which consumes both on all paths.
@@ -41,10 +42,13 @@
 
 #include "homa_impl.h"
 #include <net/udp_tunnel.h>
-#include "homa_offload.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #include "homa_udp_tunnel.h"
+
+#ifndef __STRIP__ /* See strip.py */
+#include "homa_offload.h"
+#endif /* See strip.py */
 
 /**
  * homa_udp_init() - Create and publish the namespace's tunnel socket pair.
@@ -67,8 +71,10 @@ int homa_udp_init(struct homa_net *hnet, struct net *net)
 		.encap_type = 1,
 		.encap_rcv = homa_udp_encap_rcv,
 		.encap_err_rcv = homa_udp_encap_err_rcv,
+#ifndef __STRIP__ /* See strip.py */
 		.gro_receive = homa_udp_gro_receive,
 		.gro_complete = homa_udp_gro_complete,
+#endif /* See strip.py */
 	};
 	struct udp_port_cfg port = {
 		.family = AF_INET,

@@ -68,9 +68,6 @@ TEST_F(homa_metrics, udp_scheduler_metrics)
 	EXPECT_NE(NULL, strstr(homa_mout.output, "pacer_fifo_bytes"));
 	EXPECT_NE(NULL, strstr(homa_mout.output, "qdisc_flushes"));
 	EXPECT_NE(NULL, strstr(homa_mout.output, "gro_data_bypasses"));
-	EXPECT_EQ(NULL, strstr(homa_mout.output, "pacer_tcp_packets"));
-	EXPECT_EQ(NULL, strstr(homa_mout.output, "pacer_tcp_bytes"));
-	EXPECT_EQ(NULL, strstr(homa_mout.output, "qdisc_tcp_packets"));
 	EXPECT_EQ(0, homa_metrics_release(NULL, NULL));
 	EXPECT_EQ(0, homa_mout.active_opens);
 	EXPECT_EQ(output, homa_mout.output);

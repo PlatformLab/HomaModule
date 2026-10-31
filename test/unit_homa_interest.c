@@ -4,7 +4,9 @@
 #include "homa_interest.h"
 #include "homa_sock.h"
 
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_offload.h"
+#endif /* See strip.py */
 
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
@@ -15,6 +17,7 @@
 static int hook_count;
 static struct homa_interest *hook_interest;
 
+#ifndef __STRIP__ /* See strip.py */
 static void log_hook(char *id)
 {
 	if (strcmp(id, "unlock") == 0 ||
@@ -22,6 +25,7 @@ static void log_hook(char *id)
 		unit_log_printf("; ", "%s", id);
 	}
 }
+#endif /* See strip.py */
 
 static void notify_hook(char *id)
 {
@@ -173,6 +177,7 @@ TEST_F(homa_interest, homa_interest_wait__poll_interrupted_by_signal)
 	EXPECT_EQ(EINTR, -homa_interest_wait(&interest));
 	EXPECT_EQ(0, interest.blocked);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_interest, homa_interest_wait__call_schedule)
 {
 	struct homa_interest interest;
@@ -190,6 +195,7 @@ TEST_F(homa_interest, homa_interest_wait__call_schedule)
 	EXPECT_STREQ("schedule; schedule", unit_log_get());
 	list_del_init(&interest.links);
 }
+#endif /* See strip.py */
 TEST_F(homa_interest, homa_interest_wait__call_homa_rpc_reap)
 {
 	struct homa_interest interest;
@@ -201,11 +207,11 @@ TEST_F(homa_interest, homa_interest_wait__call_homa_rpc_reap)
 	ASSERT_NE(NULL, crpc);
 	homa_rpc_end(crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
-	EXPECT_EQ(0, homa_metrics_per_cpu()->reaper_calls);
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->reaper_calls));
 
 	homa_interest_init_shared(&interest, &self->hsk);
 
-	self->homa.poll_cycles = 0;
+	IF_NO_STRIP(self->homa.poll_cycles = 0);
 	unit_hook_register(notify_hook);
 	hook_interest = &interest;
 	hook_count = 1;
@@ -213,7 +219,7 @@ TEST_F(homa_interest, homa_interest_wait__call_homa_rpc_reap)
 
 	EXPECT_EQ(0, homa_interest_wait(&interest));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.dead_rpcs));
-	EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls));
 	list_del_init(&interest.links);
 }
 TEST_F(homa_interest, homa_interest_wait__poll_then_block)
@@ -221,7 +227,7 @@ TEST_F(homa_interest, homa_interest_wait__poll_then_block)
 	struct homa_interest interest;
 
 	homa_interest_init_shared(&interest, &self->hsk);
-	self->homa.poll_cycles = 3000;
+	IF_NO_STRIP(self->homa.poll_cycles = 3000);
 	mock_set_clock_vals(1000, 2000, 3999, 4000, 0);
 	mock_clock = 4000;
 	unit_hook_register(notify_hook);
@@ -229,9 +235,11 @@ TEST_F(homa_interest, homa_interest_wait__poll_then_block)
 	hook_count = 4;
 
 	EXPECT_EQ(0, -homa_interest_wait(&interest));
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(3000, homa_metrics_per_cpu()->poll_cycles);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->blocked_cycles);
 	EXPECT_EQ(1, interest.blocked);
+#endif /* See strip.py */
 	list_del_init(&interest.links);
 }
 TEST_F(homa_interest, homa_interest_wait__interrupted_by_signal)
@@ -240,7 +248,7 @@ TEST_F(homa_interest, homa_interest_wait__interrupted_by_signal)
 
 	homa_interest_init_shared(&interest, &self->hsk);
 	mock_prepare_to_wait_errors = 1;
-	self->homa.poll_cycles = 0;
+	IF_NO_STRIP(self->homa.poll_cycles = 0);
 
 	EXPECT_EQ(EINTR, -homa_interest_wait(&interest));
 	EXPECT_EQ(1, interest.blocked);
@@ -254,7 +262,7 @@ TEST_F(homa_interest, homa_interest_wait__handoff_occurs_during_signal)
 	mock_prepare_to_wait_errors = 1;
 	unit_hook_register(signal_hook);
 	hook_interest = &interest;
-	self->homa.poll_cycles = 0;
+	IF_NO_STRIP(self->homa.poll_cycles = 0);
 
 	EXPECT_EQ(0, -homa_interest_wait(&interest));
 	EXPECT_EQ(1, interest.blocked);
@@ -282,7 +290,7 @@ TEST_F(homa_interest, homa_interest_wait__time_metrics)
 	struct homa_interest interest;
 
 	homa_interest_init_shared(&interest, &self->hsk);
-	self->homa.poll_cycles = 0;
+	IF_NO_STRIP(self->homa.poll_cycles = 0);
 	mock_set_clock_vals(1000, 1500, 3000, 3200, 0);
 	mock_clock = 4000;
 	unit_hook_register(notify_hook);
@@ -290,8 +298,8 @@ TEST_F(homa_interest, homa_interest_wait__time_metrics)
 	hook_count = 4;
 
 	EXPECT_EQ(0, -homa_interest_wait(&interest));
-	EXPECT_EQ(700, homa_metrics_per_cpu()->poll_cycles);
-	EXPECT_EQ(1500, homa_metrics_per_cpu()->blocked_cycles);
+	IF_NO_STRIP(EXPECT_EQ(700, homa_metrics_per_cpu()->poll_cycles));
+	IF_NO_STRIP(EXPECT_EQ(1500, homa_metrics_per_cpu()->blocked_cycles));
 	list_del_init(&interest.links);
 }
 
@@ -345,6 +353,7 @@ TEST_F(homa_interest, homa_interest_notify_shared)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.interests));
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_interest, homa_choose_interest__find_idle_core)
 {
 	struct homa_interest interest1, interest2, interest3;
@@ -365,7 +374,7 @@ TEST_F(homa_interest, homa_choose_interest__find_idle_core)
 	struct homa_interest *result = homa_choose_interest(&self->hsk);
 	EXPECT_EQ(&interest2, result);
 	EXPECT_EQ(2, result->core);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->handoffs_alt_thread);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->handoffs_alt_thread));
 	INIT_LIST_HEAD(&self->hsk.interests);
 }
 TEST_F(homa_interest, homa_choose_interest__all_cores_busy)
@@ -387,6 +396,7 @@ TEST_F(homa_interest, homa_choose_interest__all_cores_busy)
 
 	struct homa_interest *result = homa_choose_interest(&self->hsk);
 	EXPECT_EQ(3, result->core);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->handoffs_alt_thread);
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->handoffs_alt_thread));
 	INIT_LIST_HEAD(&self->hsk.interests);
 }
+#endif /* See strip.py */

@@ -6,7 +6,9 @@
  *   (they build up here instead).
  * - It implements the SRPT policy for Homa traffic (highest priority goes
  *   to the message with the fewest bytes remaining to transmit).
- * Non-Homa traffic uses ordinary qdisc FIFO pass-through.
+ * - It manages TCP traffic as well as Homa traffic, so that TCP doesn't
+ *   create long NIC queues.
+ * - When queues do build up, it balances output traffic between Homa and TCP.
  */
 
 /* PACING:
@@ -80,6 +82,7 @@
 #include "timetrace.h"
 
 #include <linux/ethtool.h>
+#include <net/tcp.h>
 
 /* Used to enable sysctl access to configuration parameters related to
  * homa_qdisc. The @data fields are actually offsets within a struct
@@ -112,6 +115,13 @@ static struct ctl_table homa_qdisc_ctl_table[] = {
 	{
 		.procname	= "defer_min_bytes",
 		.data		= OFFSET(defer_min_bytes),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_qdisc_dointvec
+	},
+	{
+		.procname	= "homa_share",
+		.data		= OFFSET(homa_share),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_qdisc_dointvec
@@ -267,6 +277,7 @@ struct homa_qdisc_shared *homa_qdisc_shared_alloc(void)
 	qshared->max_nic_est_backlog_usecs = 5;
 	qshared->max_nic_queue_usecs = 40;
 	qshared->defer_min_bytes = 1000;
+	qshared->homa_share = 50;
 	qshared->max_link_usage = 99;
 	qshared->sysctl_header = register_net_sysctl(&init_net, "net/homa",
 						     homa_qdisc_ctl_table);
@@ -379,6 +390,8 @@ struct homa_qdisc_dev *homa_qdisc_qdev_get(struct net_device *dev)
 	INIT_LIST_HEAD(&qdev->links);
 	spin_lock_init(&qdev->defer_lock);
 	qdev->deferred_rpcs = RB_ROOT_CACHED;
+	INIT_LIST_HEAD(&qdev->deferred_qdiscs);
+	qdev->next_qdisc = &qdev->deferred_qdiscs;
 	qdev->nic_queues = queues;
 	for (i = 0; i < dev->real_num_tx_queues; i++)
 		qdev->nic_queues[i].num_queued = dev->_tx[i].dql.num_queued;
@@ -440,6 +453,7 @@ void homa_qdisc_dev_callback(struct rcu_head *head)
 
 	qdev = container_of(head, struct homa_qdisc_dev, rcu_head);
 	homa_qdisc_free_homa(qdev);
+	WARN_ON(!list_empty(&qdev->deferred_qdiscs));
 	kfree(qdev->nic_queues);
 	kfree(qdev);
 }
@@ -471,6 +485,8 @@ int homa_qdisc_init(struct Qdisc *sch, struct nlattr *opt,
 			break;
 		}
 	}
+	skb_queue_head_init(&q->deferred_tcp);
+	INIT_LIST_HEAD(&q->defer_links);
 
 	sch->limit = 10 * 1024;
 	return 0;
@@ -487,6 +503,12 @@ void homa_qdisc_destroy(struct Qdisc *qdisc)
 
 	qdisc_reset_queue(qdisc);
 
+	homa_qdisc_lock_qdev(q->qdev);
+	while (!skb_queue_empty(&q->deferred_tcp))
+		kfree_skb_reason(__skb_dequeue(&q->deferred_tcp),
+				 SKB_DROP_REASON_QDISC_DROP);
+	list_del_init(&q->defer_links);
+	homa_qdisc_unlock_qdev(q->qdev);
 	homa_qdisc_qdev_put(q->qdev);
 }
 
@@ -510,10 +532,9 @@ void homa_qdisc_add_queued(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 	queued = READ_ONCE(queue->num_queued);
 
 	/* Check to see if queue->num_queued lags behind dql->num_queued
-	 * (perhaps races in updates?); if so, correct it. time_after32 is
-	 * used here only as a generic u32 wraparound comparison.
+	 * (perhaps races in updates?); if so, correct it.
 	 */
-	if (time_after32(dql_queued, queued)) {
+	if (after(dql_queued, queued)) {
 		tt_record4("dql_queued (%d) ahead of queued (%d), diff %d, for qix %d\n",
 			   dql_queued, queued, dql_queued - queued,
 			   skb_get_queue_mapping(skb));
@@ -537,8 +558,6 @@ void homa_qdisc_add_queued(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
  * @skb:      Packet to eventually transmit.
  * @sch:      Qdisc via which to transmit @skb.
  * @to_free:  Used when dropping packets.
- * Return:    NET_XMIT_SUCCESS (the packet was either queued on @sch or
- *            deferred for the pacer), or the status from queuing it.
  */
 int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		       struct sk_buff **to_free)
@@ -550,8 +569,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	int offset = 0;
 	int pkt_len;
 
-	/* This function transmits short Homa messages immediately, even
-	 * when the NIC queue is long. We do this because
+	/* This function tries to transmit short packets immediately for both
+	 * Homa and TCP, even when the NIC queue is long. We do this because
 	 * (a) it reduces tail latency significantly for short packets,
 	 * (b) there is no way to generate enough short packets to cause NIC
 	 * queue buildup, and (c) the pacer's single thread doesn't have
@@ -561,12 +580,28 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	qshared = qdev->hnet->homa->qshared;
 	pkt_len = qdisc_pkt_len(skb);
 	if (!is_homa_pkt(skb)) {
-		/* Ordinary protocols (including TCP) retain FIFO pass-through,
-		 * without inspecting private Homa skb storage or flow state.
+		/* This is a TCP packet (or something else other than Homa).
+		 * Defer short TCP packets only if they are in the same flow
+		 * as a previously deferred packet for this qdisc.
 		 */
-		homa_qdisc_update_link_idle(qdev, pkt_len, -1);
-		homa_qdisc_add_queued(qdev, skb);
-		return qdisc_enqueue_tail(skb, sch);
+		INC_METRIC(qdisc_tcp_packets, 1);
+		if (pkt_len < qshared->defer_min_bytes) {
+			if (skb_queue_empty(&q->deferred_tcp) ||
+			    homa_qdisc_can_bypass(skb, q)) {
+				homa_qdisc_update_link_idle(qdev, pkt_len, -1);
+				goto enqueue;
+			}
+			homa_qdisc_defer_tcp(q, skb);
+			return NET_XMIT_SUCCESS;
+		}
+		if (atomic_read(&qdev->total_nic_queue) <=
+		    qdev->max_nic_queue_bytes &&
+		    !homa_qdisc_any_deferred(qdev) &&
+		    homa_qdisc_update_link_idle(qdev, pkt_len,
+				qshared->max_nic_est_backlog_cycles))
+			goto enqueue;
+		homa_qdisc_defer_tcp(q, skb);
+		return NET_XMIT_SUCCESS;
 	}
 
 	/* is_homa_pkt may have reallocated the skb head, so locate the Homa
@@ -613,9 +648,15 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	return NET_XMIT_SUCCESS;
 
 enqueue:
-	if (h->common.type == DATA) {
-		tt_record3("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d on qid %d",
-			   be64_to_cpu(h->common.sender_id), offset,
+	if (is_homa_pkt(skb)) {
+		h = (struct homa_data_hdr *)(udp_hdr(skb) + 1);
+		if (h->common.type == DATA) {
+			tt_record3("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d on qid %d",
+				   be64_to_cpu(h->common.sender_id), offset,
+				   q->ix);
+		}
+	} else {
+		tt_record1("homa_qdisc_enqueue queuing non-homa packet, qid %d",
 			   q->ix);
 	}
 	homa_qdisc_add_queued(qdev, skb);
@@ -623,18 +664,116 @@ enqueue:
 }
 
 /**
- * homa_qdisc_defer_homa() - Add a Homa DATA packet to the deferred list for
- * a qdev. The packet is consumed: it is either queued for the pacer or
- * freed (if its RPC no longer exists).
+ * homa_qdisc_can_bypass() - Determine whether it is OK to transmit a given
+ * TCP packet before those already deferred for a qdisc.
+ * @skb:     New packet
+ * @q:       Qdisc with deferred TCP packets
+ * Return:   True if skb can be transmitted before the packets in @list
+ *           without violating reordering rules.
+ */
+bool homa_qdisc_can_bypass(struct sk_buff *skb, struct homa_qdisc *q)
+{
+	struct sk_buff *skb2;
+	__be32 daddr, daddr2;
+	__be16 source, dest;
+	bool result;
+	int element;
+
+	/* Collect information from skb. If it isn't a TCP packet then
+	 * reordering constraints are unknown so deny reordering.
+	 */
+	if (skb->protocol == htons(ETH_P_IP)) {
+		if (ip_hdr(skb)->protocol != IPPROTO_TCP)
+			return false;
+		daddr = ip_hdr(skb)->daddr;
+	} else if (skb->protocol == htons(ETH_P_IPV6)) {
+		if (ipv6_hdr(skb)->nexthdr != IPPROTO_TCP)
+			return false;
+		daddr = ipv6_hdr(skb)->daddr.in6_u.u6_addr32[0] ^
+			ipv6_hdr(skb)->daddr.in6_u.u6_addr32[2] ^
+			ipv6_hdr(skb)->daddr.in6_u.u6_addr32[3];
+	} else {
+		return false;
+	}
+
+	/* If skb is an ack (i.e. no payload) then reordering is fine. */
+	if ((skb->len - skb_transport_offset(skb) - tcp_hdrlen(skb)) == 0)
+		return true;
+
+	/* If any packets in the list are TCP packets on the same flow
+	 * then deny reordering. The flow check is overconservative, in that
+	 * it may sometimes deny even when the flows aren't the same.
+	 */
+	source = tcp_hdr(skb)->source;
+	dest = tcp_hdr(skb)->dest;
+	element = 0;
+	result = true;
+	homa_qdisc_lock_qdev(q->qdev);
+	skb_queue_walk(&q->deferred_tcp, skb2) {
+		element++;
+		if (skb2->protocol == htons(ETH_P_IP)) {
+			if (ip_hdr(skb2)->protocol != IPPROTO_TCP)
+				continue;
+			daddr2 = ip_hdr(skb2)->daddr;
+		} else if (skb2->protocol == htons(ETH_P_IPV6)) {
+			if (ipv6_hdr(skb2)->nexthdr != IPPROTO_TCP)
+				continue;
+			daddr2 = ipv6_hdr(skb2)->daddr.in6_u.u6_addr32[0] ^
+				 ipv6_hdr(skb2)->daddr.in6_u.u6_addr32[1] ^
+				 ipv6_hdr(skb2)->daddr.in6_u.u6_addr32[2] ^
+				 ipv6_hdr(skb2)->daddr.in6_u.u6_addr32[3];
+
+		} else {
+			continue;
+		}
+
+		if (daddr == daddr2 && dest == tcp_hdr(skb2)->dest &&
+		    source == tcp_hdr(skb2)->source) {
+			result = false;
+			break;
+		}
+	}
+	homa_qdisc_unlock_qdev(q->qdev);
+	return result;
+}
+
+/**
+ * homa_qdisc_defer_tcp() - Add a non-Homa packet to the deferred list for
+ * a qdisc.
+ * @q:       Qdisc where the packet was submitted.
+ * @skb:     Packet to defer (must not be a Homa packet).
+ */
+void homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb)
+{
+	struct homa_qdisc_dev *qdev = q->qdev;
+	u64 now = homa_clock();
+
+	tt_record_tcp("homa_qdisc deferring TCP packet from 0x%x to 0x%x, data bytes %d, seq/ack %u",
+		skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
+
+	homa_qdisc_lock_qdev(qdev);
+	__skb_queue_tail(&q->deferred_tcp, skb);
+	if (list_empty(&q->defer_links))
+		list_add_tail(&q->defer_links, &qdev->deferred_qdiscs);
+	if (qdev->last_defer)
+		INC_METRIC(nic_backlog_cycles, now - qdev->last_defer);
+	qdev->last_defer = now;
+	homa_qdisc_unlock_qdev(qdev);
+	wake_up_interruptible(&qdev->pacer_sleep);
+}
+
+/**
+ * homa_qdisc_defer_homa() - Add a Homa packet to the deferred list for
+ * a qdev.
  * @qdev:    Network device for which the packet should be enqueued.
  * @skb:     Packet to enqueue; its transport header must be the UDP header
  *           and the Homa header after it must be linear.
  */
 void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 {
+	int transport = skb_transport_offset(skb);
 	u64 now = homa_clock();
 	struct homa_rpc *rpc;
-	int transport = skb_transport_offset(skb);
 
 	/* Must hold the RPC lock while queuing the RPC in the qdisc, in
 	 * order to prevent concurrent deletion of the RPC.
@@ -704,6 +843,77 @@ void homa_qdisc_insert_rb(struct homa_qdisc_dev *qdev, struct homa_rpc *rpc)
 	if (qdev->oldest_rpc && rpc->msgout.init_time <
 				qdev->oldest_rpc->msgout.init_time)
 		qdev->oldest_rpc = rpc;
+}
+
+/**
+ * homa_qdisc_xmit_deferred_tcp() - Transmit the "next" non-Homa packet
+ * that has been deferred for a particular homa_qdisc_dev.
+ * @qdev:     Device on which to transmit packet.
+ * Return:    The number of bytes in the transmitted packet, or 0 if there
+ *            were no deferred TCP packets.
+ */
+int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
+{
+	struct homa_qdisc *q;
+	struct sk_buff *skb;
+	struct Qdisc *qdisc;
+	int pkt_len;
+
+	/* When there are deferred TCP packets on multiple queues, we
+	 * will cycle between the queues in round-robin style, transmitting
+	 * one packet from each queue.  An earlier implementation kept all
+	 * of the deferred TCP packets on a single global queue for the qdev
+	 * and transmitted them in FIFO fashion. However, this resulted in
+	 * head-of-line blocking where a short message for one queue could
+	 * get stuck behind a long messaage for a different queue, resulting
+	 * in high tail latency. With the round-robin approach, shorter
+	 * messages get transmitted more quickly as long as they don't use
+	 * the same NIC queue as a long message.
+	 */
+
+	homa_qdisc_lock_qdev(qdev);
+	if (list_empty(&qdev->deferred_qdiscs)) {
+		homa_qdisc_unlock_qdev(qdev);
+		return 0;
+	}
+	if (qdev->next_qdisc == &qdev->deferred_qdiscs)
+		q = list_first_entry(&qdev->deferred_qdiscs, struct homa_qdisc,
+				     defer_links);
+	else
+		q = list_entry(qdev->next_qdisc, struct homa_qdisc,
+			       defer_links);
+	qdev->next_qdisc = q->defer_links.next;
+	skb = __skb_dequeue(&q->deferred_tcp);
+	if (skb_queue_empty(&q->deferred_tcp)) {
+		list_del_init(&q->defer_links);
+		if (!rb_first_cached(&qdev->deferred_rpcs) &&
+		    list_empty(&qdev->deferred_qdiscs)) {
+			INC_METRIC(nic_backlog_cycles,
+				   homa_clock() - qdev->last_defer);
+			qdev->last_defer = 0;
+		}
+	}
+	homa_qdisc_unlock_qdev(qdev);
+
+	pkt_len = qdisc_pkt_len(skb);
+	homa_qdisc_update_link_idle(qdev, pkt_len, -1);
+	if (ip_hdr(skb)->protocol == IPPROTO_TCP)
+		tt_record_tcp("homa_qdisc_pacer requeued TCP packet from "
+			"0x%x to 0x%x, data bytes %d, seq/ack %u",
+			skb, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
+	homa_qdisc_add_queued(qdev, skb);
+
+	/* Can't invoke dev_queue_xmit as for Homa packets, because it
+	 * will choose a new output queue for the skb, which could result
+	 * in undesirable packet reordering.
+	 */
+	qdisc = homa_qdisc_from_priv(q);
+	spin_lock_bh(qdisc_lock(qdisc));
+	qdisc_enqueue_tail(skb, qdisc);
+	spin_unlock_bh(qdisc_lock(qdisc));
+	__netif_schedule(qdisc);
+
+	return pkt_len;
 }
 
 /**
@@ -799,7 +1009,8 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 		qdev->srpt_bytes -= qdisc_pkt_len(skb);
 	}
 
-	if (!rb_first_cached(&qdev->deferred_rpcs)) {
+	if (!rb_first_cached(&qdev->deferred_rpcs) &&
+	    list_empty(&qdev->deferred_qdiscs)) {
 		INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
 		qdev->last_defer = 0;
 	}
@@ -834,8 +1045,13 @@ int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 	 * this means it will pass through homa_disc_enqueue again, but
 	 * homa_qdisc_enqueue will see dont_defer and pass it along
 	 * without additional deferral. We call dev_queue_xmit rather
-	 * than enqueuing the packet and calling __netif_schedule so it is sent
-	 * immediately instead of waiting for an asynchronous qdisc run.
+	 * than enqueuing the packet and calling __netif_schedule (as in
+	 * homa_qdisc_xmit_deferred_tcp) so that the packet is transmitted
+	 * immediately. The __netif_schedule approach runs the qdisc
+	 * asynchronously, which means it won't run until other SoftIRQ
+	 * handlers complete. This can result in significant delays in
+	 * getting the packet out, which can then cause multiple output
+	 * packets to bunch up, creating undesirable queues in the NIC.
 	 */
 	homa_get_skb_info(skb)->dont_defer = true;
 	dev_queue_xmit(skb);
@@ -887,7 +1103,8 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 			kfree_skb_reason(skb_dequeue(&rpc->qrpc.packets),
 					 SKB_DROP_REASON_NO_SOCKET);
 
-		if (!rb_first_cached(&qdev->deferred_rpcs)) {
+		if (!rb_first_cached(&qdev->deferred_rpcs) &&
+		    list_empty(&qdev->deferred_qdiscs)) {
 			INC_METRIC(nic_backlog_cycles, homa_clock() - qdev->last_defer);
 			qdev->last_defer = 0;
 		}
@@ -989,9 +1206,9 @@ int homa_qdisc_pacer_main(void *device)
 }
 
 /**
- * homa_qdisc_pacer() - Transmit a few deferred Homa packets if the NIC
- * isn't congested. There may still be deferred packets when this function
- * returns.
+ * homa_qdisc_pacer() - Transmit a few packets from the homa_deferred and
+ * tcp_deferred lists if the NIC isn't congested. There may still be
+ * deferred packets when this function returns.
  *
  * Note: this function may be invoked from places other than
  * homa_qdisc_pacer_main. The reason for this is that (as of 10/2019)
@@ -1061,17 +1278,40 @@ int homa_qdisc_pacer(struct homa_qdisc_dev *qdev)
 		 */
 		if (idle_time < now && qdev->unfinished) {
 			INC_METRIC(pacer_bubble_cycles, now - idle_time);
-			tt_record2("homa_qdisc_pacer bubble: %d cycles, homa_pending %d",
+			tt_record3("homa_qdisc_pacer bubble: %d cycles, homa_pending %d, tcp_pending %d",
 				now - idle_time,
-				!!rb_first_cached(&qdev->deferred_rpcs));
+				rb_first_cached(&qdev->deferred_rpcs) != NULL,
+				!list_empty(&qdev->deferred_qdiscs));
 		}
 
-		if (!rb_first_cached(&qdev->deferred_rpcs))
-			break;
-		xmit_bytes = homa_qdisc_xmit_deferred_homa(qdev);
-		if (xmit_bytes > 0) {
-			INC_METRIC(pacer_homa_packets, 1);
-			INC_METRIC(pacer_homa_bytes, xmit_bytes);
+		/* Decide whether to transmit a Homa or TCP packet. If
+		 * only one protocol has packets, reset homa_credit to
+		 * prevent negative credit buildup for the protocol
+		 * with packets.
+		 */
+		if (list_empty(&qdev->deferred_qdiscs)) {
+			if (!rb_first_cached(&qdev->deferred_rpcs))
+				break;
+			qdev->homa_credit = 1;
+		} else if (!rb_first_cached(&qdev->deferred_rpcs)) {
+			qdev->homa_credit = 0;
+		}
+		if (qdev->homa_credit > 0) {
+			xmit_bytes = homa_qdisc_xmit_deferred_homa(qdev);
+			if (xmit_bytes > 0) {
+				INC_METRIC(pacer_homa_packets, 1);
+				INC_METRIC(pacer_homa_bytes, xmit_bytes);
+				qdev->homa_credit -= xmit_bytes * (100 -
+					qdev->hnet->homa->qshared->homa_share);
+			}
+		} else {
+			xmit_bytes = homa_qdisc_xmit_deferred_tcp(qdev);
+			if (xmit_bytes > 0) {
+				INC_METRIC(pacer_tcp_packets, 1);
+				INC_METRIC(pacer_tcp_bytes, xmit_bytes);
+				qdev->homa_credit += xmit_bytes *
+					qdev->hnet->homa->qshared->homa_share;
+			}
 		}
 		result += xmit_bytes;
 		INC_METRIC(pacer_xmit_cycles, homa_clock() - now);
@@ -1256,6 +1496,10 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 	qshared->max_nic_est_backlog_cycles = homa_ns_to_cycles(1000 *
 			qshared->max_nic_est_backlog_usecs);
 
+	if (qshared->homa_share < 0)
+		qshared->homa_share = 0;
+	if (qshared->homa_share > 100)
+		qshared->homa_share = 100;
 	if (qshared->max_link_usage < 5)
 		qshared->max_link_usage = 5;
 	if (qshared->max_link_usage > 100)

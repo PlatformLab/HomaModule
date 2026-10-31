@@ -388,6 +388,7 @@ struct sk_buff *homa_udp_gro_receive(struct sock *sk,
 			INC_METRIC(gro_grant_bypasses, 1);
 			goto bypass;
 		}
+#ifndef __STRIP__ /* See strip.py */
 	} else if (h_new->common.type == START_MSG) {
 		tt_record3("homa_gro_receive got START_MSG from 0x%x, id %llu, msg_length %d",
 			   saddr, homa_local_id(h_new->common.sender_id),
@@ -396,6 +397,7 @@ struct sk_buff *homa_udp_gro_receive(struct sock *sk,
 		tt_record4("homa_gro_receive got packet from 0x%x id %llu, type 0x%x, priority %d",
 			   saddr, homa_local_id(h_new->common.sender_id),
 			   h_new->common.type, priority);
+#endif /* See strip.py */
 	}
 
 	/* The GRO mechanism tries to separate packets onto different

@@ -9,7 +9,9 @@
 #include "homa_pool.h"
 #include "homa_tx_pool.h"
 #include "homa_udp_tunnel.h"
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_qdisc.h"
+#endif /* See strip.py */
 #include "ccutils.h"
 #include "utils.h"
 
@@ -2036,6 +2038,7 @@ struct page *mock_alloc_pages(gfp_t gfp, unsigned int order)
 	return page;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * mock_alloc_qdisc() - Allocate and initialize a new Qdisc suitable for
  * use in unit tests as a homa qdisc.
@@ -2054,6 +2057,7 @@ struct Qdisc *mock_alloc_qdisc(struct netdev_queue *dev_queue)
 	spin_lock_init(&qdisc->q.lock);
 	return qdisc;
 }
+#endif /* See strip.py */
 
 /**
  * mock_check_error() - Determines whether a method should simulate an error
@@ -2693,9 +2697,11 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		case DATA:
 			header_size = sizeof(struct homa_data_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
 		case GRANT:
 			header_size = sizeof(struct homa_grant_hdr);
 			break;
+#endif /* See strip.py */
 		case RESEND:
 			header_size = sizeof(struct homa_resend_hdr);
 			break;
@@ -2705,21 +2711,25 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		case BUSY:
 			header_size = sizeof(struct homa_busy_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
 		case CUTOFFS:
 			header_size = sizeof(struct homa_cutoffs_hdr);
 			break;
 		case FREEZE:
 			header_size = sizeof(struct homa_freeze_hdr);
 			break;
+#endif /* See strip.py */
 		case NEED_ACK:
 			header_size = sizeof(struct homa_need_ack_hdr);
 			break;
 		case ACK:
 			header_size = sizeof(struct homa_ack_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
 		case START_MSG:
 			header_size = sizeof(struct homa_start_msg_hdr);
 			break;
+#endif /* See strip.py */
 		default:
 			header_size = sizeof(struct homa_common_hdr);
 			break;
@@ -2744,6 +2754,36 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		info->data_bytes = extra_bytes;
 		info->dont_defer = 0;
 	}
+	qdisc_skb_cb(skb)->pkt_len = extra_bytes + 100;
+	return skb;
+}
+
+/**
+ * mock_tcp_skb() - Allocate and return a TCP packet buffer. The buffer is
+ * initialized as if it just arrived from the network.
+ * @saddr:        IPv6 address to use as the sender of the packet, in
+ *                network byte order.
+ * @daddr:        IPv6 address to use as the destination for the packet, in
+ *                network byte order.
+ * @sequence:     Sequence number to store in the TCP header.
+ * @extra_bytes:  How much additional data to add to the buffer after
+ *                the TCP header.
+ *
+ * Return:        A packet buffer containing the information described above.
+ *                The caller owns this buffer and is responsible for freeing it.
+ */
+struct sk_buff *mock_tcp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
+			     int sequence, int extra_bytes)
+{
+	struct sk_buff *skb;
+	struct tcphdr *tcp;
+
+	skb = mock_raw_skb(saddr, daddr, IPPROTO_TCP,
+			   sizeof(struct tcphdr) + extra_bytes);
+	tcp = (struct tcphdr *)skb_put(skb, sizeof(struct tcphdr));
+	tcp->seq = htonl(sequence);
+	tcp->doff = sizeof(struct tcphdr) / 4;
+	skb_put(skb, extra_bytes);
 	qdisc_skb_cb(skb)->pkt_len = extra_bytes + 100;
 	return skb;
 }
@@ -3024,7 +3064,9 @@ void mock_teardown(void)
 				mock_preempt_disables);
 	mock_preempt_disables = 0;
 
+#ifndef __STRIP__ /* See strip.py */
 	memset(homa_metrics, 0, sizeof(homa_metrics));
+#endif /* See strip.py */
 
 	unit_hook_clear();
 }

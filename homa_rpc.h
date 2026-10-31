@@ -87,6 +87,7 @@ struct homa_message_out {
 	 */
 	int next_xmit_offset;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @granted: Total number of initial bytes we are currently permitted
 	 * to send; must wait for grants before sending bytes at or beyond
@@ -105,6 +106,7 @@ struct homa_message_out {
 	 * packets.
 	 */
 	u8 retrans_priority;
+#endif /* See strip.py */
 
 	/**
 	 * @init_time: homa_clock() time when this structure was initialized.
@@ -184,6 +186,7 @@ struct homa_message_in {
 	 */
 	u32 bpage_offsets[HOMA_MAX_BPAGES];
 
+#ifndef __STRIP__ /* See strip.py */
 
 	/**
 	 * @active_ix: Index of slot in @grant->active_rpcs that refers
@@ -218,8 +221,10 @@ struct homa_message_in {
 	 * (i.e. first data packet was received for message).
 	 */
 	u64 birth;
+#endif /* See strip.py */
 };
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * struct homa_rpc_qdisc - Information that homa_qdisc needs to store in
  * each RPC. Managed entirely by homa_qdisc.
@@ -255,6 +260,7 @@ struct homa_rpc_qdisc {
 	 */
 	int tx_left;
 };
+#endif /* See strip.py */
 
 /**
  * struct homa_rpc - One of these structures exists for each active
@@ -405,8 +411,10 @@ struct homa_rpc {
 	 */
 	struct homa_message_out msgout;
 
+#ifndef __STRIP__ /* See strip.py */
 	/** @qrpc: Information managed by homa_qdisc for this RPC. */
 	struct homa_rpc_qdisc qrpc;
+#endif /* See strip.py */
 
 	/**
 	 * @hash_links: Used to link this object into a hash bucket for
@@ -443,12 +451,14 @@ struct homa_rpc {
 	 */
 	struct homa_interest *private_interest;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @grantable_links: Used to link this RPC into peer->grantable_rpcs.
 	 * If this RPC isn't in peer->grantable_rpcs, this is an empty
 	 * list pointing to itself. Must hold homa->grant->lock when accessing.
 	 */
 	struct list_head grantable_links;
+#endif /* See strip.py */
 
 	/**
 	 * @silent_ticks: Number of times homa_timer has been invoked

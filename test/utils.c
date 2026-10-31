@@ -14,7 +14,9 @@
 #include "mock.h"
 #include "utils.h"
 
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_qdisc.h"
+#endif /* See strip.py */
 
 /* Unlike mock_skb_alloc's normalized inner packet, this is the exact
  * UDP-present receive boundary used by encap_rcv.
@@ -287,6 +289,7 @@ void unit_log_frag_list(struct sk_buff *skb, int verbose)
 	}
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * unit_log_grantables() - Clear the test log and append information about
  * all of the messages under grant->grantable_peers.
@@ -322,6 +325,7 @@ const char *unit_log_grantables(struct homa *homa)
 	}
 	return unit_log_get();
 }
+#endif /* See strip.py */
 
 /**
  * unit_log_skb_list() - Append to the test log a human-readable description
@@ -571,6 +575,7 @@ int unit_count_peers(struct homa *homa)
 	return count;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * unit_log_deferred() - Clear the unit test log and append information
  * about all packets currently queued in homa_qdisc.
@@ -601,6 +606,7 @@ const char *unit_log_deferred(struct homa_qdisc_dev *qdev)
 	}
 	return unit_log_get();
 }
+#endif /* See strip.py */
 
 /**
  * unit_alloc_frags() - Fill in an array of fragments with allocated

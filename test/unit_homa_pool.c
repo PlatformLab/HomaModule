@@ -22,9 +22,11 @@ FIXTURE_SETUP(homa_pool)
 {
 	homa_init(&self->homa);
 	self->hnet = mock_hnet(0, &self->homa);
+#ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
 	self->homa.grant->fifo_fraction = 0;
+#endif /* See strip.py */
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->server_ip = unit_get_in_addr("1.2.3.4");
@@ -394,6 +396,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__no_partial_page)
 	EXPECT_EQ(HOMA_BPAGE_SIZE, crpc->msgin.bpage_offsets[1]);
 	EXPECT_EQ(0, atomic_read(&pool->free_bpages));
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_pool, homa_pool_alloc_msg__private_page_stolen)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
@@ -423,6 +426,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__private_page_stolen)
 	EXPECT_EQ(1, pool->descriptors[3].owner);
 	EXPECT_EQ(38, atomic_read(&pool->free_bpages));
 }
+#endif /* See strip.py */
 TEST_F(homa_pool, homa_pool_alloc_msg__page_wrap_around)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
@@ -442,7 +446,9 @@ TEST_F(homa_pool, homa_pool_alloc_msg__page_wrap_around)
 	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc->msgin.bpage_offsets[0]);
 	EXPECT_EQ(2000, pool->cores[smp_processor_id()].allocated);
 	EXPECT_EQ(smp_processor_id(), pool->descriptors[2].owner);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->bpage_reuses);
+#endif /* See strip.py */
 }
 TEST_F(homa_pool, homa_pool_alloc_msg__owned_page_overflow)
 {
@@ -539,7 +545,9 @@ TEST_F(homa_pool, homa_pool_alloc_msg__out_of_space)
 	EXPECT_EQ(100, rpc->id);
 	EXPECT_TRUE(list_is_last(&rpc->buf_links,
 				 &self->hsk.buffer_pool->waiting_for_bufs));
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(3, homa_metrics_per_cpu()->buffer_alloc_failures);
+#endif /* See strip.py */
 	EXPECT_EQ(1, pool->bpages_needed);
 }
 
@@ -725,7 +733,11 @@ TEST_F(homa_pool, homa_pool_check_waiting__rpc_initially_locked)
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
 
+#ifndef __STRIP__ /* See strip.py */
 	mock_trylock_errors = 0xa;
+#else /* See strip.py */
+	mock_trylock_errors = 0x3;
+#endif /* See strip.py */
 	unit_log_clear();
 	atomic_set(&pool->free_bpages, 1);
 	homa_pool_check_waiting(pool);

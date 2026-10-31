@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+
 
 #include "homa_impl.h"
-#include "homa_offload.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #include "homa_sock.h"
@@ -10,6 +9,9 @@
 #include "kselftest_harness.h"
 #include "ccutils.h"
 #include "utils.h"
+
+#ifndef __STRIP__ /* See strip.py */
+#include "homa_offload.h"
 
 static const int control_header_lengths[] = {
 	sizeof(struct homa_grant_hdr),
@@ -22,6 +24,7 @@ static const int control_header_lengths[] = {
 	sizeof(struct homa_ack_hdr),
 	sizeof(struct homa_start_msg_hdr)
 };
+#endif /* See strip.py */
 
 FIXTURE(homa_udp_tunnel) {
 	struct homa homa;
@@ -73,8 +76,10 @@ TEST_F(homa_udp_tunnel, socket_pair_and_checksum_policy)
 	EXPECT_NE(0, udp_sk(udp6->sk)->encap_type);
 	EXPECT_EQ(&homa_udp_encap_rcv, udp_sk(udp4->sk)->encap_rcv);
 	EXPECT_EQ(&homa_udp_encap_err_rcv, udp_sk(udp6->sk)->encap_err_rcv);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(&homa_udp_gro_receive, udp_sk(udp6->sk)->gro_receive);
 	EXPECT_EQ(&homa_udp_gro_complete, udp_sk(udp6->sk)->gro_complete);
+#endif /* See strip.py */
 
 	/* Both sockets are published with the namespace. */
 	EXPECT_EQ(self->hnet, udp4->sk->sk_user_data);
@@ -150,8 +155,8 @@ TEST_F(homa_udp_tunnel, receive_both_families_dispatches_inner_homa)
 		skb_get(skb);
 		EXPECT_EQ(0, udp_sk(socket->sk)->encap_rcv(socket->sk, skb));
 		EXPECT_EQ(i + 1, unit_list_length(&self->hsk.active_rpcs));
-		EXPECT_EQ(i + 1,
-			  homa_metrics_per_cpu()->packets_received[DATA - DATA]);
+		IF_NO_STRIP(EXPECT_EQ(i + 1,
+			homa_metrics_per_cpu()->packets_received[DATA - DATA]));
 		EXPECT_EQ(0, skb_transport_offset(skb));
 		EXPECT_EQ(sizeof(self->data) + 64, skb->len);
 		EXPECT_EQ(i, skb_is_ipv6(skb));
@@ -170,9 +175,10 @@ TEST_F(homa_udp_tunnel, receive_both_families_dispatches_inner_homa)
 		kfree_skb(skb);
 		EXPECT_EQ(count + 1, mock_skb_count());
 	}
-	EXPECT_EQ(2, homa_metrics_per_cpu()->softirq_calls);
+	IF_NO_STRIP(EXPECT_EQ(2, homa_metrics_per_cpu()->softirq_calls));
 }
 
+#ifndef __STRIP__ /* See strip.py */
 static void receive_control_types(struct __test_metadata *_metadata,
 				 FIXTURE_DATA(homa_udp_tunnel) *self, int family)
 {
@@ -361,6 +367,7 @@ TEST_F(homa_udp_tunnel, receive_all_control_types_ipv6)
 {
 	receive_control_types(_metadata, self, AF_INET6);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_udp_tunnel, receive_zero_checksum_both_families)
 {
@@ -385,7 +392,7 @@ TEST_F(homa_udp_tunnel, receive_zero_checksum_both_families)
 	EXPECT_EQ(2, mock_num_drop_reasons);
 	EXPECT_EQ(count, mock_skb_count());
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(0, homa_metrics_per_cpu()->softirq_calls);
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->softirq_calls));
 }
 
 TEST_F(homa_udp_tunnel, malformed_lengths_ports_and_missing_linear_header)
@@ -418,7 +425,7 @@ TEST_F(homa_udp_tunnel, malformed_lengths_ports_and_missing_linear_header)
 	}
 	EXPECT_EQ(5, mock_num_drop_reasons);
 	EXPECT_EQ(count, mock_skb_count());
-	EXPECT_EQ(0, homa_metrics_per_cpu()->softirq_calls);
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->softirq_calls));
 }
 
 TEST_F(homa_udp_tunnel, valid_nonlinear_header_is_pulled)
@@ -448,9 +455,10 @@ TEST_F(homa_udp_tunnel, null_userdata_consumes_without_dispatch)
 	EXPECT_EQ(0, homa_udp_encap_rcv(socket->sk, skb));
 	EXPECT_EQ(count - 1, mock_skb_count());
 	EXPECT_EQ(SKB_DROP_REASON_NO_SOCKET, mock_drop_reasons[0]);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->softirq_calls);
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->softirq_calls));
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * gro_child() - Create a UDP-encapsulated Homa DATA packet in the layout
  * that a packet has on the frag_list of a Homa GRO batch (or when the tunnel
@@ -595,6 +603,7 @@ TEST_F(homa_udp_tunnel, bypassed_packet_with_ip_header_present)
 	EXPECT_EQ(0, skb_transport_offset(skb));
 	EXPECT_EQ(sizeof(self->data) + 64, skb->len);
 }
+#endif /* See strip.py */
 
 /**
  * tx_skb() - Create an outgoing Homa packet with the headroom and layout
@@ -605,10 +614,16 @@ TEST_F(homa_udp_tunnel, bypassed_packet_with_ip_header_present)
  */
 static struct sk_buff *tx_skb(struct homa_common_hdr *header, int payload)
 {
-	int header_length = header->type == DATA ? sizeof(struct homa_data_hdr) :
-			    control_header_lengths[header->type - GRANT];
-	int length = max_t(int, header_length + payload, HOMA_MIN_PKT_LENGTH);
-	struct sk_buff *skb = __homa_skb_alloc(length);
+	int header_length = sizeof(struct homa_data_hdr);
+	int length;
+	struct sk_buff *skb;
+
+#ifndef __STRIP__ /* See strip.py */
+	if (header->type != DATA)
+		header_length = control_header_lengths[header->type - GRANT];
+#endif /* See strip.py */
+	length = max_t(int, header_length + payload, HOMA_MIN_PKT_LENGTH);
+	skb = __homa_skb_alloc(length);
 
 	memcpy(skb_put(skb, header_length), header, header_length);
 	memset(skb_put(skb, length - header_length), 0, length - header_length);
@@ -636,12 +651,16 @@ TEST_F(homa_udp_tunnel, transmit_both_families_owns_skb_not_route)
 		ASSERT_FALSE(IS_ERR(route));
 		refs = refcount_read(&route->refs);
 		skb = tx_skb(&self->data.common, 64);
-		self->homa.priority_map[3] = 6;
+		IF_NO_STRIP(self->homa.priority_map[3] = 6);
 		homa_route_xmit(skb, &self->hsk, route, 3);
 		EXPECT_EQ(count, mock_skb_count());
 		EXPECT_EQ(refs, refcount_read(&route->refs));
 		EXPECT_EQ(i ? AF_INET6 : AF_INET, mock_udp_last_family);
+#ifndef __STRIP__ /* See strip.py */
 		EXPECT_EQ(6 << 5, mock_udp_last_tos);
+#else /* See strip.py */
+		EXPECT_EQ(0, mock_udp_last_tos);
+#endif /* See strip.py */
 		EXPECT_EQ(htons(HOMA_UDP_PORT), mock_udp_last_header.source);
 		EXPECT_EQ(htons(HOMA_UDP_PORT), mock_udp_last_header.dest);
 		EXPECT_NE(0, mock_udp_last_header.check);
@@ -691,6 +710,7 @@ TEST_F(homa_udp_tunnel, unsendable_control_rejected_before_handoff)
 	}
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_udp_tunnel, all_control_types_transmit_without_rpc)
 {
 	unsigned char storage[HOMA_MAX_HEADER] = {};
@@ -784,6 +804,7 @@ TEST_F(homa_udp_tunnel, software_gso_keeps_udp_l4_and_forces_checksum_none)
 	EXPECT_EQ(offsetof(struct udphdr, check), mock_udp_last_csum_offset);
 	homa_route_release(route);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_udp_tunnel, net_destroy_releases_pair_once_after_sockets)
 {

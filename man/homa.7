@@ -616,6 +616,13 @@ If this value is nonzero, Homa will perform GSO in software instead of
 asking the NIC to perform UDP segmentation in hardware. The transport
 remains UDP in both cases.
 .TP
+.IR homa_share
+When there exist both Homa and TCP packets whose transmission has been
+deferred because the NIC queue is overloaded, this determines how the
+uplink bandwidth is allocated between Homa and TCP. This parameter is
+a value between 0 and 100 indicating what percent of the uplink bandwidth
+will be allocated to Homa; the remainder will be allocated to TCP.
+.TP
 .IR link_mbps
 An integer value specifying the bandwidth of this machine's uplink to
 the top-of-rack switch, in units of 1e06 bits per second.

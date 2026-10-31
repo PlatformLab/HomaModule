@@ -111,17 +111,7 @@ encapsulation. The `cp_node` client/server commands with `--protocol tcp`,
 require the module; no utility should substitute an ordinary UDP socket for
 a Homa application socket.
 
-On a Linux test host, the simple TCP tools can run without Homa:
-
-```shell
-util/server --tcp-only --port 4000
-util/homa_test 127.0.0.1:4000 --count 4 --length 128 tcp
-```
-
-The server default still starts both Homa and TCP services. `--tcp-only`
-suppresses Homa socket creation; `homa_test` initializes Homa only when a
-selected operation requires it. The TCP-only `tcpstream` operation also works
-without Homa. `buffer_client` and `buffer_server` remain ordinary TCP stress
+`buffer_client` and `buffer_server` remain ordinary TCP stress
 tools; they run indefinitely, so use bounded, owned-process tests rather than
 leaving them running. Cluster benchmarks still need their documented `nodeN`
 hostname mapping and topology; loopback checks do not validate a
@@ -172,8 +162,8 @@ integration tests.
 
 ## Significant changes
 - UDP-only variant: all Homa packet classes use UDP/5001 with complete
-  per-segment headers. The old TCP/Homa share scheduler is removed; ordinary
-  TCP and unrelated UDP use generic pass-through. Historical cross-protocol
+  per-segment headers. TCP hijacking is removed; the qdisc's balancing of
+  ordinary TCP against Homa is unchanged. Historical cross-protocol
   performance results below are not promises for this variant.
 - September 2026: Protocol change in granting mechanism. Messages that
   require grants are now completely scheduled (no initial unscheduled

@@ -131,6 +131,7 @@ static void create_rpcs_hook(char *id)
 	saved_self = NULL;
 }
 
+#ifndef __UPSTREAM__ /* See strip.py */
 TEST_F(homa_plumbing, homa_load__error_in_tt_init)
 {
 	int result;
@@ -144,6 +145,7 @@ TEST_F(homa_plumbing, homa_load__error_in_tt_init)
 	result = homa_load();
 	EXPECT_EQ(-1, result);
 }
+#endif /* See strip.py */
 TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
 {
 	homa_destroy(&self->homa);
@@ -335,6 +337,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 	EXPECT_EQ(1, self->hsk.is_server);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_plumbing, homa_ioc_abort__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -395,6 +398,7 @@ TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 	EXPECT_STREQ("RPC identifier did not match any existing RPC",
 		     self->hsk.error_msg);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_plumbing, homa_ioc_info__cant_read_homa_info_from_user_space)
 {
@@ -705,7 +709,9 @@ TEST_F(homa_plumbing, homa_setsockopt__recvbuf_success)
 			sizeof(struct homa_rcvbuf_args)));
 	EXPECT_EQ(args.start, (uintptr_t)self->hsk.buffer_pool->region);
 	EXPECT_EQ(64, self->hsk.buffer_pool->num_bpages);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->so_set_buf_calls);
+#endif /* See strip.py */
 }
 TEST_F(homa_plumbing, homa_setsockopt__server_bad_optlen)
 {
@@ -999,6 +1005,7 @@ TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_packet_for_scheduled_msg)
 	EXPECT_SUBSTR("xmit START_MSG 200", unit_log_get());
 	ASSERT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__request_metrics)
 {
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
@@ -1006,6 +1013,7 @@ TEST_F(homa_plumbing, homa_sendmsg__request_metrics)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->client_requests_started);
 	EXPECT_EQ(200, homa_metrics_per_cpu()->client_request_bytes_started);
 }
+#endif /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__response_nonzero_completion_cookie)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
@@ -1130,6 +1138,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_succeeds)
 	EXPECT_EQ(RPC_OUTGOING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__response_metrics)
 {
 	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
@@ -1141,6 +1150,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_metrics)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->server_responses_started);
 	EXPECT_EQ(200, homa_metrics_per_cpu()->server_response_bytes_started);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_plumbing, homa_recvmsg__wrong_args_length)
 {
@@ -1450,7 +1460,7 @@ TEST_F(homa_plumbing, homa_recvmsg__reap_because_of_SOCK_NOSPACE)
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
 	EXPECT_EQ(0, self->hsk.dead_frags);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->reaper_calls));
 }
 TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_args)
 {
@@ -1514,7 +1524,9 @@ TEST_F(homa_plumbing, homa_softirq__packet_too_short)
 	skb->len -= 1;
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->short_packets);
+#endif /* See strip.py */
 }
 TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 {
@@ -1525,7 +1537,9 @@ TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 			     &self->data.common, 1400, 1400);
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->short_packets);
+#endif /* See strip.py */
 }
 TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 {

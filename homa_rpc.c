@@ -8,8 +8,10 @@
 #include "homa_pool.h"
 #include "homa_tx_pool.h"
 
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_qdisc.h"
+#endif /* See strip.py */
 
 /**
  * homa_rpc_alloc_client() - Allocate and initialize a client RPC (one that
@@ -53,11 +55,13 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	crpc->dport = ntohs(dest->in6.sin6_port);
 	crpc->msgin.length = -1;
 	crpc->msgout.length = -1;
-	homa_qdisc_rpc_init(&crpc->qrpc);
+	IF_NO_STRIP(homa_qdisc_rpc_init(&crpc->qrpc));
 	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->buf_links);
 	INIT_LIST_HEAD(&crpc->dead_links);
+#ifndef __STRIP__ /* See strip.py */
 	INIT_LIST_HEAD(&crpc->grantable_links);
+#endif /* See strip.py */
 	crpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	crpc->magic = HOMA_RPC_MAGIC;
 	crpc->start_time = homa_clock();
@@ -166,13 +170,16 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->id = id;
 	srpc->msgin.length = -1;
 	srpc->msgout.length = -1;
-	homa_qdisc_rpc_init(&srpc->qrpc);
+	IF_NO_STRIP(homa_qdisc_rpc_init(&srpc->qrpc));
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->dead_links);
+#ifndef __STRIP__ /* See strip.py */
 	INIT_LIST_HEAD(&srpc->grantable_links);
+#endif /* See strip.py */
 	srpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_time = homa_clock();
+#ifndef __STRIP__ /* See strip.py */
 	if (h->type == DATA) {
 		msg_length = ntohl(((struct homa_data_hdr *)h)->msg_length);
 		err = homa_message_in_init(srpc, msg_length, msg_length);
@@ -180,6 +187,10 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 		msg_length = ntohl(((struct homa_start_msg_hdr *)h)->msg_length);
 		err = homa_message_in_init(srpc, msg_length, 0);
 	}
+#else /* See strip.py */
+	msg_length = ntohl(((struct homa_data_hdr *)h)->msg_length);
+	err = homa_message_in_init(srpc, msg_length);
+#endif /* See strip.py */
 	if (err != 0)
 		goto error;
 
@@ -300,12 +311,14 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	rpc->state = RPC_DEAD;
 	rpc->error = -EINVAL;
 
+#ifndef __STRIP__ /* See strip.py */
 	/* The following line must occur before the socket is locked. This is
 	 * necessary because homa_grant_unmanage_rpc may release the RPC lock
 	 * and reacquire it.
 	 */
 	if (rpc->msgin.length >= 0)
 		homa_grant_unmanage_rpc(rpc);
+#endif /* See strip.py */
 
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
 	homa_sock_lock(rpc->hsk);
@@ -315,7 +328,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	__list_del_entry(&rpc->ready_links);
 	homa_pool_unlink(rpc);
 	homa_interest_notify_private(rpc);
-	homa_qdisc_flush_rpc(rpc);
+	IF_NO_STRIP(homa_qdisc_flush_rpc(rpc));
 
 	rpc->hsk->dead_frags += rpc->msgout.num_frags + 1;
 	if (rpc->hsk->dead_frags > rpc->hsk->homa->max_dead_frags)
@@ -538,7 +551,7 @@ int homa_rpc_reap(struct homa_sock *hsk)
 release:
 	homa_sock_unlock(hsk);
 	for (i = 0; i < num_rpcs; i++) {
-		int tx_left;
+		IF_NO_STRIP(int tx_left);
 
 		rpc = rpcs[i];
 		UNIT_LOG("; ", "reaped %llu", rpc->id);
@@ -565,6 +578,7 @@ release:
 			}
 		}
 
+#ifndef __STRIP__ /* See strip.py */
 		if (skb_queue_len(&rpc->qrpc.packets) > 0) {
 			tt_record2("Freezing because homa_rpc_reap found %d packets in qdisc queue for id %d",
 				   skb_queue_len(&rpc->qrpc.packets), rpc->id);
@@ -576,6 +590,7 @@ release:
 			       skb_queue_len(&rpc->qrpc.packets), rpc->id);
 			homa_qdisc_flush_rpc(rpc);
 		}
+#endif /* See strip.py */
 
 		if (rpc->route) {
 			homa_route_release(rpc->route);
@@ -590,6 +605,7 @@ release:
 			kfree(rpc->msgout.frags);
 		tt_record2("homa_rpc_reap finished reaping id %d, port %d",
 				rpc->id, rpc->hsk->port);
+#ifndef __STRIP__ /* See strip.py */
 		tx_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
 		if (homa_is_client(rpc->id)) {
 			INC_METRIC(client_response_bytes_done,
@@ -610,6 +626,7 @@ release:
 				INC_METRIC(server_responses_done, 1);
 			}
 		}
+#endif /* See strip.py */
 		rpc->state = 0;
 		rpc->magic = 0;
 		kfree(rpc);
@@ -799,8 +816,12 @@ void homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info)
 	if (rpc->msgout.length >= 0) {
 		info->tx_length = rpc->msgout.length;
 		info->tx_sent = rpc->msgout.next_xmit_offset;
+#ifndef __STRIP__ /* See strip.py */
 		info->tx_granted = rpc->msgout.granted;
 		info->tx_prio = rpc->msgout.priority;
+#else /* See strip.py */
+		info->tx_granted = rpc->msgout.length;
+#endif /* See strip.py */
 	} else {
 		info->tx_length = -1;
 	}
@@ -811,7 +832,11 @@ void homa_rpc_get_info(struct homa_rpc *rpc, struct homa_rpc_info *info)
 			info->rx_gaps++;
 			info->rx_gap_bytes += gap->end - gap->start;
 		}
+#ifndef __STRIP__ /* See strip.py */
 		info->rx_granted = rpc->msgin.granted;
+#else /* See strip.py */
+		info->rx_granted = rpc->msgin.length;
+#endif /* See strip.py */
 		if (skb_queue_len(&rpc->msgin.packets) > 0)
 			info->flags |= HOMA_RPC_RX_COPY;
 	} else {

@@ -52,6 +52,7 @@ const struct rhashtable_params route_ht_params = {
 	.hashfn = xxh32_hash
 };
 
+#ifndef __STRIP__ /* See strip.py */
 /* Used to enable sysctl access to peertab-specific configuration parameters.
  * The @data fields are actually offsets within a struct homa_peertab; these
  * are converted to pointers into a struct peertab later.
@@ -87,6 +88,7 @@ static struct ctl_table peer_ctl_table[] = {
 		.proc_handler	= homa_peer_dointvec
 	},
 };
+#endif /* See strip.py */
 
 /**
  * homa_peer_alloc_peertab() - Allocate and initialize a homa_peertab.
@@ -119,6 +121,7 @@ struct homa_peertab *homa_peer_alloc_peertab(void)
 	peertab->idle_secs_min = 10;
 	peertab->idle_secs_max = 120;
 
+#ifndef __STRIP__ /* See strip.py */
 	peertab->sysctl_header = register_net_sysctl(&init_net, "net/homa",
 						     peer_ctl_table);
 	if (!peertab->sysctl_header) {
@@ -126,6 +129,7 @@ struct homa_peertab *homa_peer_alloc_peertab(void)
 		pr_err("couldn't register sysctl parameters for Homa peertab\n");
 		goto error;
 	}
+#endif /* See strip.py */
 	homa_peer_update_sysctl_deps(peertab);
 	return peertab;
 
@@ -208,10 +212,12 @@ void homa_peer_free_peertab(struct homa_peertab *peertab)
 		rhashtable_destroy(&peertab->peer_ht);
 		peertab->route_ht_valid = false;
 	}
+#ifndef __STRIP__ /* See strip.py */
 	if (peertab->sysctl_header) {
 		unregister_net_sysctl_table(peertab->sysctl_header);
 		peertab->sysctl_header = NULL;
 	}
+#endif /* See strip.py */
 	kfree(peertab);
 }
 
@@ -240,10 +246,12 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 	peer->ht_key.hnet = hsk->hnet;
 	refcount_set(&peer->refs, 1);
 	spin_lock_init(&peer->lock);
+#ifndef __STRIP__ /* See strip.py */
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 2] = INT_MAX;
 	INIT_LIST_HEAD(&peer->grantable_rpcs);
 	INIT_LIST_HEAD(&peer->grantable_links);
+#endif /* See strip.py */
 
 	tt_record1("Allocated new homa_peer for node 0x%x",
 		   tt_addr(peer->addr));
@@ -607,10 +615,11 @@ void homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
 {
 	bool ipv6 = !ipv6_addr_v4mapped(&route->peer->addr);
 	struct homa_net *hnet = hsk->hnet;
-	u8 tos = hsk->homa->priority_map[priority] << 5;
 	struct socket *socket;
 	struct dst_entry *dst;
+	u8 tos = 0;
 
+	IF_NO_STRIP(tos = hsk->homa->priority_map[priority] << 5);
 	skb->protocol = htons(ipv6 ? ETH_P_IPV6 : ETH_P_IP);
 	skb->mark = route->key.mark;
 	skb->priority = READ_ONCE(hsk->sock.sk_priority);
@@ -625,8 +634,12 @@ void homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
 	 * this state while seeding the pseudo-header checksum. For a
 	 * non-GSO packet the tunnel helper installs the UDP checksum itself.
 	 */
+#ifndef __STRIP__ /* See strip.py */
 	skb->ip_summed = skb_is_gso(skb) && !hsk->homa->gso_force_software ?
 			 CHECKSUM_PARTIAL : CHECKSUM_NONE;
+#else /* See strip.py */
+	skb->ip_summed = skb_is_gso(skb) ? CHECKSUM_PARTIAL : CHECKSUM_NONE;
+#endif /* See strip.py */
 
 	rcu_read_lock_bh();
 	socket = ipv6 ? rcu_dereference_bh(hnet->udp6) :
@@ -802,6 +815,7 @@ int homa_route_prefer_evict(struct homa_peertab *peertab,
 				   route2->access_jiffies);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_unsched_priority() - Returns the priority level to use for
  * unscheduled packets of a message.
@@ -867,6 +881,7 @@ void homa_peer_lock_slow(struct homa_peer *peer)
 	INC_METRIC(peer_ack_lock_misses, 1);
 	INC_METRIC(peer_ack_lock_miss_cycles, homa_clock() - start);
 }
+#endif /* See strip.py */
 
 /**
  * homa_peer_add_ack() - Add a given RPC to the list of unacked
@@ -939,6 +954,7 @@ void homa_peer_update_sysctl_deps(struct homa_peertab *peertab)
 	peertab->idle_jiffies_max = peertab->idle_secs_max * HZ;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_peer_dointvec() - This function is a wrapper around proc_dointvec. It
  * is invoked to read and write peer-related sysctl values.
@@ -969,3 +985,4 @@ int homa_peer_dointvec(const struct ctl_table *table, int write,
 	homa_peer_update_sysctl_deps(peertab);
 	return result;
 }
+#endif /* See strip.py */

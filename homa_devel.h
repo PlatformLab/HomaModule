@@ -14,6 +14,16 @@
 
 #include "timetrace.h"
 
+#ifdef __STRIP__
+#define INC_METRIC(...)
+
+#undef LINUX_VERSION_CODE
+#define LINUX_VERSION_CODE 100
+
+#undef KERNEL_VERSION
+#define KERNEL_VERSION(...) 100
+#endif /* __STRIP__ */
+
 struct homa;
 struct homa_net;
 struct homa_rpc;
@@ -93,6 +103,12 @@ static inline void check_addr_valid(void *addr, char *info)
 #endif /* __UNIT_TEST__ */
 }
 
+#ifndef __STRIP__ /* See strip.py */
+#define IF_NO_STRIP(...) __VA_ARGS__
+#else /* See strip.py */
+#define IF_NO_STRIP(...)
+#endif /* See strip.py */
+
 void     homa_check_addr(void *p);
 void     homa_check_list(struct list_head *list, int max_length);
 int      homa_drop_packet(struct homa *homa);
@@ -120,7 +136,9 @@ int      homa_udp_checksum(struct sk_buff *skb);
 int      homa_validate_incoming(struct homa *homa, int verbose,
 				int *link_errors);
 
+#ifndef __STRIP__ /* See strip.py */
 bool     homa_rpcs_deferred(struct homa *homa);
 void     homa_validate_rbtree(struct rb_node *node, int depth, char *message);
+#endif /* See strip.py */
 
 #endif /* _HOMA_DEVEL_H */

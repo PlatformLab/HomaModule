@@ -121,6 +121,7 @@ struct homa_recvmsg_args {
 	__u32 bpage_offsets[HOMA_MAX_BPAGES];
 };
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * struct homa_abort_args - Structure that passes arguments and results
  * between user space and the HOMAIOCABORT ioctl.
@@ -141,6 +142,7 @@ struct homa_abort_args {
 	/** @_pad2: Reserved. */
 	__u64 _pad2[2];
 };
+#endif /* See strip.py */
 
 /** define SO_HOMA_RCVBUF: setsockopt option for specifying buffer region. */
 #define SO_HOMA_RCVBUF 10
@@ -205,11 +207,16 @@ struct homa_rpc_info {
 	 */
 	__u32 tx_granted;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @tx_prio: Current priority level that the receiver has specified
 	 * for transmitting packets.
 	 */
 	__u32 tx_prio;
+#else /* See strip.py */
+	/** @reserved: Reserved for future use. */
+	__u32 reserved;
+#endif /* See strip.py */
 
 	/**
 	 * @rx_length: Length of the incoming message, in bytes. -1 means
@@ -311,7 +318,9 @@ struct homa_info {
 
 /* I/O control calls on Homa sockets.*/
 #define HOMAIOCINFO  _IOWR('h', 0x90, struct homa_info)
+#ifndef __STRIP__ /* See strip.py */
 #define HOMAIOCABORT  _IOWR('h', 0x91, struct homa_abort_args)
 #define HOMAIOCFREEZE _IO('h', 0x92)
+#endif /* See strip.py */
 
 #endif /* _UAPI_LINUX_HOMA_H */
