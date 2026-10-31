@@ -6,14 +6,9 @@
 #define _HOMA_WIRE_H
 
 #include <linux/skbuff.h>
-#ifdef __UNIT_TEST__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-variable"
-#endif /* __UNIT_TEST__ */
-#include <net/tcp.h>
-#ifdef __UNIT_TEST__
-#pragma GCC diagnostic pop
-#endif /* __UNIT_TEST__ */
+#include <linux/netdevice.h>
+#include <linux/ipv6.h>
+#include <linux/udp.h>
 
 /* Defines the possible types of Homa packets.
  *
@@ -51,10 +46,11 @@ enum homa_packet_type {
 /**
  * define HOMA_SKB_EXTRA - How many bytes of additional space to allow at the
  * beginning of each sk_buff, before the Homa header. This includes room for
- * either an IPV4 or IPV6 header, Ethernet header, VLAN header, etc. This is
- * a bit of an overestimate, since it also includes space for a TCP header.
+ * UDP, the largest fixed IP header, and the link-layer reserved space, so
+ * the kernel UDP tunnel helpers can prepend their headers in place.
  */
-#define HOMA_SKB_EXTRA MAX_TCP_HEADER
+#define HOMA_SKB_EXTRA (LL_MAX_HEADER + sizeof(struct ipv6hdr) + \
+		       sizeof(struct udphdr))
 
 /**
  * define HOMA_ETH_FRAME_OVERHEAD - Additional overhead bytes for each
@@ -72,14 +68,15 @@ enum homa_packet_type {
 /**
  * define HOMA_MIN_PKT_LENGTH - Every Homa packet must be padded to at least
  * this length to meet Ethernet frame size limitations. This number includes
- * Homa headers and data, but not IP or Ethernet headers.
+ * Homa headers and data, but not UDP, IP or Ethernet headers. The IPv4
+ * minimum frame has 46 bytes after Ethernet: 20 IP + 8 UDP + 18 Homa.
  */
-#define HOMA_MIN_PKT_LENGTH 26
+#define HOMA_MIN_PKT_LENGTH 18
 
 /**
  * define HOMA_MAX_HEADER - Number of bytes in the largest Homa header.
  */
-#define HOMA_MAX_HEADER 90
+#define HOMA_MAX_HEADER 65
 
 #ifndef __STRIP__ /* See strip.py */
 /**
@@ -100,86 +97,24 @@ enum homa_packet_type {
 
 /**
  * struct homa_common_hdr - Wire format for the first bytes in every Homa
- * packet. This must (mostly) match the format of a TCP header to enable
- * Homa packets to actually be transmitted as TCP packets (and thereby
- * take advantage of TSO and other features).
+ * packet. Application ports are independent of the outer UDP tunnel ports.
  */
 struct homa_common_hdr {
 	/**
 	 * @sport: Port on source machine from which packet was sent.
-	 * Must be in the same position as in a TCP header.
 	 */
 	__be16 sport;
 
 	/**
-	 * @dport: Port on destination that is to receive packet. Must be
-	 * in the same position as in a TCP header.
+	 * @dport: Port on destination that is to receive packet.
 	 */
 	__be16 dport;
 
 	/**
-	 * @sequence: corresponds to the sequence number field in TCP headers;
-	 * not used by Homa (may be auto-incremented by TSO).
-	 */
-	__be32 sequence;
-
-	/**
-	 * @ack: Corresponds to the high-order bits of the acknowledgment
-	 * field in TCP headers; not used by Homa.
-	 */
-	char ack[3];
-
-	/**
 	 * @type: Homa packet type (one of the values of the homa_packet_type
-	 * enum). Corresponds to the low-order byte of the ack in TCP.
+	 * enum).
 	 */
 	u8 type;
-
-	/**
-	 * @doff: High order 4 bits correspond to the Data Offset field of a
-	 * TCP header. In DATA packets they hold the number of 4-byte chunks
-	 * in a homa_data_hdr; used by TSO to determine where the replicated
-	 * header portion ends. For other packets the offset is always 5
-	 * (standard TCP header length); other values may cause some NICs
-	 * (such as Intel E810-C) to drop outgoing data packets when TCP
-	 * hijacking is enabled. The low-order bits are always 0.
-	 */
-	u8 doff;
-
-#ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @flags: Holds TCP flags such as URG, ACK, etc. Not used by Homa
-	 * except for TCP hijacking.
-	 */
-	u8 flags;
-#else /* See strip.py */
-	/** @reserved1: Not used (corresponds to TCP flags). */
-	u8 reserved1;
-#endif /* See strip.py */
-
-	/**
-	 * @window: Corresponds to the window field in TCP headers. Not used
-	 * by HOMA.
-	 */
-	__be16 window;
-
-	/**
-	 * @checksum: occupies the same bytes as the checksum in a TCP
-	 * header. Set by Homa only during TCP hijacking.
-	 */
-	__be16 checksum;
-
-#ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @urgent: occupies the same bytes as the urgent pointer in a TCP
-	 * header. Not used by Homa except during TCP hijacking.
-	 */
-	__be16 urgent;
-#define HOMA_HIJACK_URGENT 0xb97d
-#else /* See strip.py */
-	/** @reserved2: Not used (corresponds to TCP urgent field). */
-	__be16 reserved2;
-#endif /* See strip.py */
 
 	/**
 	 * @sender_id: the identifier of this RPC as used on the sender (i.e.,
@@ -226,7 +161,7 @@ struct homa_ack {
  *    |                       |
  *    |                       |
  *    |-----------------------|
- *    |      seg_header       |
+ *    |      data_header      |
  *    |-----------------------|
  *    |                       |
  *    |                       |
@@ -234,7 +169,7 @@ struct homa_ack {
  *    |                       |
  *    |                       |
  *    |-----------------------|
- *    |      seg_header       |
+ *    |      data_header      |
  *    |-----------------------|
  *    |                       |
  *    |                       |
@@ -243,9 +178,9 @@ struct homa_ack {
  *    |                       |
  *    |-----------------------|
  *
- * TSO may not adjust @homa_common_hdr.sequence in the segments, so Homa
- * sprinkles correct offsets (in homa_seg_hdrs) throughout the segment data;
- * TSO/GSO will include a different homa_seg_hdr in each generated packet.
+ * Each UDP GSO chunk contains a complete, independently mutable DATA header
+ * and its payload. Only the outer IP and UDP headers are replicated by GSO.
+ * The tx pool's internal homa_seg_hdr placeholders are not sent separately.
  *
  * If the first packet that a receiver sees for an incoming message is DATA
  * (rather than START_MSG) it means that this message is unscheduled: the
@@ -265,21 +200,12 @@ struct homa_data_hdr {
 	/** @msg_length: Total #bytes in the message. */
 	__be32 msg_length;
 
-#ifndef __STRIP__ /* See strip.py */
-	/* Previously used for incoming; retained as of 10/2026 so that
-	 * header size stays the same (otherwise kernel timetraces won't
-	 * work with older Homa versions: offset will be read from the
-	 * wrong place).
-	 */
-#endif /* See strip.py */
+	/** @reserved1: Reserved DATA field; transmitted as zero. */
 	__be32 reserved1;
 
 	/** @ack: If the @client_id field of this is nonzero, provides info
 	 * about an RPC that the recipient can now safely free. Note: in
-	 * TSO packets this will get duplicated in each of the segments;
-	 * in order to avoid repeated attempts to ack the same RPC,
-	 * homa_gro_receive will clear this field in all segments but the
-	 * first.
+	 * UDP GSO packets only the first chunk carries a piggybacked ack.
 	 */
 	struct homa_ack ack;
 
@@ -303,7 +229,7 @@ struct homa_data_hdr {
 
 	char pad[3];
 
-	/** @seg: First of possibly many segments. */
+	/** @seg: Offset of the payload in this UDP datagram. */
 	struct homa_seg_hdr seg;
 } __packed;
 

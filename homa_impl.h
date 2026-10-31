@@ -346,13 +346,6 @@ struct homa {
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
-	 * @hijack_tcp: Non-zero means encapsulate outgoing Homa packets
-	 * as TCP packets (i.e. use TCP as the IP protocol). This makes TSO
-	 * and RSS work better. Set externally via sysctl.
-	 */
-	int hijack_tcp;
-
-	/**
 	 * @max_gro_skbs: Maximum number of socket buffers that can be
 	 * aggregated by the GRO mechanism.  Set externally via sysctl.
 	 */
@@ -410,11 +403,11 @@ struct homa {
 
 	/**
 	 * @gro_busy_usecs: if the gap between the completion of
-	 * homa_gro_receive and the next call to homa_gro_receive on the same
-	 * core is less than this, then GRO on that core is considered to be
-	 * "busy", and optimizations such as HOMA_GRO_SHORT_BYPASS will not be
-	 * done because they risk overloading the core. Set externally via
-	 * sysctl.
+	 * homa_udp_gro_receive (the UDP tunnel GRO callback) and the next call
+	 * to it on the same core is less than this, then GRO on that core is
+	 * considered to be "busy", and optimizations such as
+	 * HOMA_GRO_SHORT_BYPASS will not be done because they risk
+	 * overloading the core. Set externally via sysctl.
 	 */
 	int gro_busy_usecs;
 
@@ -503,6 +496,12 @@ struct homa_net {
 	/** @homa: Global Homa information. */
 	struct homa *homa;
 
+	/** @udp4: Namespace-owned IPv4 UDP tunnel socket. */
+	struct socket __rcu *udp4;
+
+	/** @udp6: Namespace-owned IPv6-only UDP tunnel socket. */
+	struct socket __rcu *udp6;
+
 	/**
 	 * @prev_default_port: The most recent port number assigned from
 	 * the range of default ports.
@@ -545,21 +544,6 @@ struct homa_skb_info {
 static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
 {
 	return (struct homa_skb_info *)(skb_end_pointer(skb)) - 1;
-}
-
-/**
- * homa_set_doff() - Fills in the doff TCP header field for a packet.
- * @skb:   Packet whose doff field is to be set.
- * @size:  Size of the "header" in bytes (must be a multiple of 4). This is
- *         needed for two reasons. First, for TSO to work it must indicate
- *         the number of bytes that should be replicated in each segment.
- *         The bytes after this will be distributed among segments. Second,
- *         for TCP hijacking to work it must have a valid value (20 is a
- *         good choice if the packet isn't a TSO frame).
- */
-static inline void homa_set_doff(struct sk_buff *skb, int size)
-{
-	tcp_hdr(skb)->doff = size >> 2;
 }
 
 /** skb_is_ipv6() - Return true if the packet is encapsulated with IPv6,
@@ -958,12 +942,12 @@ static inline int homa_high_priority(struct homa *homa)
  *
  * Locks and Packet Transmission:
  *
- * Homa must not hold locks while transmitting packets (e.g. by calling
- * ip_queue_xmit or ip6_xmit). This is because homa_qdisc could be invoked
+ * Homa must not hold locks while transmitting packets through the UDP tunnel
+ * helpers. This is because homa_qdisc could be invoked
  * during the transmission process, and it may need to acquire locks under
  * some conditions (such as an RPC lock). Homa_qdisc is invoked with the
- * qdisc lock held, so invoking ip*xmit with a lock held can result in
- * AB-BA deadlocks.
+ * qdisc lock held, so invoking a tunnel transmit helper with a lock held can
+ * result in AB-BA deadlocks.
  */
 
 #endif /* _HOMA_IMPL_H */

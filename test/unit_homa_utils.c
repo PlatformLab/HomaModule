@@ -129,6 +129,8 @@ TEST_F(homa_utils, homa_net_destroy__delete_sockets)
 	EXPECT_EQ(1, hsk1.shutdown);
 	EXPECT_EQ(1, hsk2.shutdown);
 	EXPECT_EQ(0, hsk3.shutdown);
+	EXPECT_EQ(NULL, rcu_access_pointer(hnet->udp4));
+	EXPECT_EQ(NULL, rcu_access_pointer(hnet->udp6));
 
 	unit_sock_destroy(&hsk3);
 }

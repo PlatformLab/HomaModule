@@ -11,6 +11,7 @@ HOMA_OBJS := homa_devel.o \
 	homa_sock.o \
 	homa_timer.o \
 	homa_tx_pool.o \
+	homa_udp_tunnel.o \
 	homa_utils.o \
 	timetrace.o
 
@@ -18,7 +19,6 @@ ifneq ($(__STRIP__),)
 MY_CFLAGS += -D__STRIP__
 else
 HOMA_OBJS += homa_grant.o \
-	homa_hijack.o \
 	homa_metrics.o \
 	homa_offload.o \
 	homa_qdisc.o
@@ -72,6 +72,7 @@ CP_HDRS := homa_impl.h \
 	   homa_rpc.h \
 	   homa_sock.h \
 	   homa_tx_pool.h \
+	   homa_udp_tunnel.h \
 	   homa_wire.h
 CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o homa_grant.o \
 		homa_hijack.o homa_metrics.o homa_offload.o homa_pacer.o \

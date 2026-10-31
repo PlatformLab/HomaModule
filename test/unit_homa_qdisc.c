@@ -29,6 +29,7 @@ static struct sk_buff *new_test_skb(struct homa_rpc *rpc,
 {
 	struct homa_skb_info *info;
 	struct homa_data_hdr data;
+	struct udphdr udp;
 	struct sk_buff *skb;
 
 	data.common = (struct homa_common_hdr){
@@ -39,8 +40,12 @@ static struct sk_buff *new_test_skb(struct homa_rpc *rpc,
 	};
 	data.msg_length = htonl(rpc->msgout.length);
 	data.seg.offset = htonl(offset);
-	skb = mock_raw_skb(saddr, daddr, IPPROTO_HOMA,
-			   sizeof(data) + length + sizeof(*info));
+	udp = (struct udphdr){.source = htons(HOMA_UDP_PORT),
+			      .dest = htons(HOMA_UDP_PORT),
+			      .len = htons(sizeof(udp) + sizeof(data) + length)};
+	skb = mock_raw_skb(saddr, daddr, IPPROTO_UDP,
+			   sizeof(udp) + sizeof(data) + length + sizeof(*info));
+	memcpy(skb_put(skb, sizeof(udp)), &udp, sizeof(udp));
 	memcpy(skb_put(skb, sizeof(data)), &data, sizeof(data));
 	if (length != 0)
 		unit_fill_data(skb_put(skb, length), length, 0);
@@ -48,6 +53,28 @@ static struct sk_buff *new_test_skb(struct homa_rpc *rpc,
 	info->data_bytes = length;
 	qdisc_skb_cb(skb)->pkt_len = length + 100;
 	return skb;
+}
+
+/**
+ * split_skb() - Move all of the bytes of @skb beyond the first @linear bytes
+ * (counted from skb->data) into a page fragment.
+ * @skb:     Packet to convert.
+ * @linear:  Number of bytes to leave in the linear part of the skb.
+ */
+static void split_skb(struct sk_buff *skb, int linear)
+{
+	struct page *page = alloc_page(GFP_KERNEL);
+	int rest = skb->len - linear;
+
+	ASSERT_NE(NULL, page);
+	/* The mock page_address() is the struct page itself, so the packet
+	 * bytes must be copied only after skb_fill_page_desc has read the
+	 * page header.
+	 */
+	skb_fill_page_desc(skb, 0, page, 0, rest);
+	memcpy(page_address(page), skb->data + linear, rest);
+	skb->tail -= rest;
+	skb->data_len = rest;
 }
 
 /**
@@ -673,6 +700,86 @@ TEST_F(homa_qdisc, homa_qdisc_enqueue__short_homa_message)
 	EXPECT_EQ(1, q->qdisc->q.qlen);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_LT(1000000, atomic64_read(&q->qdev->link_idle_time));
+}
+TEST_F(homa_qdisc, is_homa_pkt__udp_with_other_port_is_not_homa)
+{
+	struct homa_qdisc *q = init_qdisc(self->qdiscs[3]);
+	struct sk_buff *skb, *to_free;
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->server_port,
+			       self->client_id, 7100, 100);
+	ASSERT_NE(NULL, crpc);
+
+	skb = new_test_skb(crpc, &self->addr, &self->addr2, 0, 1500);
+	udp_hdr(skb)->dest = htons(HOMA_UDP_PORT + 1);
+	to_free = NULL;
+	atomic_set(&q->qdev->total_nic_queue, 1500);
+	q->qdev->max_nic_queue_bytes = 1499;
+
+	/* Not a Homa packet, so it is deferred like other non-Homa traffic
+	 * rather than on behalf of an RPC.
+	 */
+	unit_log_clear();
+	EXPECT_EQ(NET_XMIT_SUCCESS, homa_qdisc_enqueue(skb, q->qdisc,
+						       &to_free));
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_EQ(1, skb_queue_len(&q->deferred_tcp));
+	EXPECT_STREQ("", unit_log_deferred(q->qdev));
+	EXPECT_EQ(1, homa_metrics_per_cpu()->qdisc_tcp_packets);
+}
+TEST_F(homa_qdisc, is_homa_pkt__udp_control_packet_not_deferred)
+{
+	struct homa_qdisc *q = init_qdisc(self->qdiscs[3]);
+	struct sk_buff *skb, *to_free;
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->server_port,
+			       self->client_id, 7100, 100);
+	ASSERT_NE(NULL, crpc);
+
+	skb = new_test_skb(crpc, &self->addr, &self->addr2, 0, 1500);
+	((struct homa_common_hdr *)(udp_hdr(skb) + 1))->type = BUSY;
+	to_free = NULL;
+	atomic_set(&q->qdev->total_nic_queue, 1500);
+	q->qdev->max_nic_queue_bytes = 1499;
+
+	unit_log_clear();
+	EXPECT_EQ(NET_XMIT_SUCCESS, homa_qdisc_enqueue(skb, q->qdisc,
+						       &to_free));
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_FALSE(homa_qdisc_any_deferred(q->qdev));
+	EXPECT_EQ(1, q->qdisc->q.qlen);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->qdisc_tcp_packets);
+}
+TEST_F(homa_qdisc, is_homa_pkt__pull_only_homa_common_header)
+{
+	struct homa_qdisc *q = init_qdisc(self->qdiscs[3]);
+	struct sk_buff *skb, *to_free;
+	struct homa_rpc *crpc;
+	int linear;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			       &self->server_ip, self->server_port,
+			       self->client_id, 7100, 100);
+	ASSERT_NE(NULL, crpc);
+
+	skb = new_test_skb(crpc, &self->addr, &self->addr2, 0, 100);
+	((struct homa_common_hdr *)(udp_hdr(skb) + 1))->type = BUSY;
+	linear = skb_transport_offset(skb) + sizeof(struct udphdr) + 5;
+	split_skb(skb, linear);
+	EXPECT_EQ(linear, skb_headlen(skb));
+	to_free = NULL;
+
+	/* The Homa common header was not linear, so it must be pulled. */
+	EXPECT_EQ(NET_XMIT_SUCCESS, homa_qdisc_enqueue(skb, q->qdisc,
+						       &to_free));
+	EXPECT_EQ(NULL, to_free);
+	EXPECT_EQ(skb_transport_offset(skb) + sizeof(struct udphdr) +
+		  sizeof(struct homa_common_hdr), skb_headlen(skb));
+	EXPECT_EQ(1, q->qdisc->q.qlen);
 }
 TEST_F(homa_qdisc, homa_qdisc_enqueue__short_final_packet_in_long_message)
 {

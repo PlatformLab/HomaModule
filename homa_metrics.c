@@ -341,9 +341,9 @@ char *homa_metrics_print(void)
 		M("peer_dst_refreshes", m->peer_dst_refreshes,
 		  "Obsolete dsts had to be regenerated\n");
 		M("control_xmit_errors", m->control_xmit_errors,
-		  "Errors sending control packets\n");
+		  "Control packets not sent: padded size exceeds route MTU\n");
 		M("data_xmit_errors", m->data_xmit_errors,
-		  "Errors sending data packets\n");
+		  "Data packets not sent: message geometry exceeds route MTU\n");
 		M("unknown_rpcs", m->unknown_rpcs,
 		  "Non-grant packets discarded because RPC unknown\n");
 		M("server_cant_create_rpcs", m->server_cant_create_rpcs,
@@ -421,9 +421,9 @@ char *homa_metrics_print(void)
 		M("gen3_alt_handoffs", m->gen3_alt_handoffs,
 		  "Gen3 handoffs to secondary core (primary was busy)\n");
 		M("gro_grant_bypasses", m->gro_grant_bypasses,
-		  "Grant packets passed directly to homa_softirq by homa_gro_receive\n");
+		  "Grant packets passed directly to homa_softirq by homa_udp_gro_receive\n");
 		M("gro_data_bypasses", m->gro_data_bypasses,
-		  "Data packets passed directly to homa_softirq by homa_gro_receive\n");
+		  "Data packets passed directly to homa_softirq by homa_udp_gro_receive\n");
 		for (i = 0; i < NUM_TEMP_METRICS;  i++) {
 			snprintf(name, sizeof(name), "temp%d", i);
 			M(name, m->temp[i], "Temporary use in testing\n");

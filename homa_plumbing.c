@@ -7,10 +7,10 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
+#include "homa_udp_tunnel.h"
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
-#include "homa_hijack.h"
 #include "homa_offload.h"
 #include "homa_qdisc.h"
 #endif /* See strip.py */
@@ -19,7 +19,7 @@
 unsigned int homa_net_id;
 
 /* This structure defines functions that allow Homa to be used as a
- * pernet subsystem.
+ * pernet device (see register_pernet_device below).
  */
 static struct pernet_operations homa_net_ops = {
 	.init = homa_net_start,
@@ -140,19 +140,6 @@ static struct inet_protosw homav6_protosw = {
 	.flags             = INET_PROTOSW_REUSE,
 };
 
-/* This structure is used by IP to deliver incoming Homa packets to us. */
-static struct net_protocol homa_protocol = {
-	.handler =	homa_softirq,
-	.err_handler =	homa_err_handler_v4,
-	.no_policy =     1,
-};
-
-static struct inet6_protocol homav6_protocol = {
-	.handler =	homa_softirq,
-	.err_handler =	homa_err_handler_v6,
-	.flags =        INET6_PROTO_NOPOLICY | INET6_PROTO_FINAL,
-};
-
 #ifndef __STRIP__ /* See strip.py */
 /* Used to configure sysctl access to Homa configuration parameters. The
  * @data fields are actually offsets within a struct homa; these are converted
@@ -240,13 +227,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "gso_force_software",
 		.data		= OFFSET(gso_force_software),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "hijack_tcp",
-		.data		= OFFSET(hijack_tcp),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -448,9 +428,7 @@ static struct hrtimer hrtimer;
 int __init homa_load(void)
 {
 	struct homa *homa = &homa_data;
-	bool init_protocol6 = false;
 	bool init_protosw6 = false;
-	bool init_protocol = false;
 	bool init_protosw = false;
 	bool init_net_ops = false;
 	bool init_proto6 = false;
@@ -488,19 +466,17 @@ int __init homa_load(void)
 	/* Extra constraints on data packets:
 	 * - Ensure minimum header length so Homa doesn't have to worry about
 	 *   padding data packets.
-	 * - Make sure data packet headers are a multiple of 4 bytes (needed
-	 *   for TCP/TSO compatibility).
 	 */
 	BUILD_BUG_ON(sizeof(struct homa_data_hdr) < HOMA_MIN_PKT_LENGTH);
-	BUILD_BUG_ON((sizeof(struct homa_data_hdr) -
-		      sizeof(struct homa_seg_hdr)) & 0x3);
 
 #ifndef __STRIP__ /* See strip.py */
 	/* Homa requires at least 8 priority levels. */
 	BUILD_BUG_ON(HOMA_MAX_PRIORITIES < 8);
 #endif /* See strip.py */
 
-	/* Detect size changes in uAPI structs. */
+	/* Detect size changes in wire formats and uAPI structs. */
+	BUILD_BUG_ON(sizeof(struct homa_common_hdr) != 13);
+	BUILD_BUG_ON(sizeof(struct homa_data_hdr) != 41);
 	BUILD_BUG_ON(sizeof(struct homa_sendmsg_args) != 24);
 	BUILD_BUG_ON(sizeof(struct homa_recvmsg_args) != 88);
 #ifndef __STRIP__ /* See strip.py */
@@ -509,7 +485,7 @@ int __init homa_load(void)
 
 #ifndef __UPSTREAM__ /* See strip.py */
 	pr_err("Homa module loading\n");
-	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, route %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu skb_shared_info %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
+	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, route %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu homa_rpc %lu sk_buff %lu skb_shared_info %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
 		  sizeof(struct homa_data_hdr),
 		  sizeof(struct homa_seg_hdr),
 		  sizeof(struct homa_ack),
@@ -519,7 +495,6 @@ int __init homa_load(void)
 		  sizeof(struct flowi),
 		  sizeof(struct ipv6hdr),
 		  sizeof(struct flowi6),
-		  sizeof(struct tcp_sock),
 		  sizeof(struct homa_rpc),
 		  sizeof(struct sk_buff),
 		  sizeof(struct skb_shared_info),
@@ -542,9 +517,42 @@ int __init homa_load(void)
 		goto error;
 	init_homa = true;
 
-	status = register_pernet_subsys(&homa_net_ops);
+#ifndef __STRIP__ /* See strip.py */
+	/* A namespace can receive UDP as soon as its pair is published.
+	 * Initialize every global callback dependency before registering it.
+	 */
+	status = homa_metrics_init();
+	if (status != 0)
+		goto error;
+	init_metrics = true;
+
+	homa_ctl_header = register_net_sysctl(&init_net, "net/homa",
+					      homa_ctl_table);
+	if (!homa_ctl_header) {
+		pr_err("couldn't register Homa sysctl parameters\n");
+		status = -ENOMEM;
+		goto error;
+	}
+	init_sysctl = true;
+
+	status = homa_offload_init();
 	if (status != 0) {
-		pr_err("Homa got error from register_pernet_subsys: %d\n",
+		pr_err("Homa couldn't init offloads\n");
+		goto error;
+	}
+	init_offload = true;
+
+	status = homa_qdisc_register();
+	if (status != 0) {
+		pr_err("Homa couldn't load its qdisc: error %d\n", status);
+		goto error;
+	}
+	init_qdisc = true;
+#endif /* See strip.py */
+
+	status = register_pernet_device(&homa_net_ops);
+	if (status != 0) {
+		pr_err("Homa got error from register_pernet_device: %d\n",
 		       status);
 		goto error;
 	}
@@ -575,52 +583,6 @@ int __init homa_load(void)
 	}
 	init_protosw6 = true;
 
-	status = inet_add_protocol(&homa_protocol, IPPROTO_HOMA);
-	if (status != 0) {
-		pr_err("inet_add_protocol failed in %s: %d\n", __func__,
-		       status);
-		goto error;
-	}
-	init_protocol = true;
-
-	status = inet6_add_protocol(&homav6_protocol, IPPROTO_HOMA);
-	if (status != 0) {
-		pr_err("inet6_add_protocol failed in %s: %d\n",  __func__,
-		       status);
-		goto error;
-	}
-	init_protocol6 = true;
-
-#ifndef __STRIP__ /* See strip.py */
-	status = homa_metrics_init();
-	if (status != 0)
-		goto error;
-	init_metrics = true;
-
-	homa_ctl_header = register_net_sysctl(&init_net, "net/homa",
-					      homa_ctl_table);
-	if (!homa_ctl_header) {
-		pr_err("couldn't register Homa sysctl parameters\n");
-		status = -ENOMEM;
-		goto error;
-	}
-	init_sysctl = true;
-
-	status = homa_offload_init();
-	if (status != 0) {
-		pr_err("Homa couldn't init offloads\n");
-		goto error;
-	}
-	init_offload = true;
-
-	status = homa_qdisc_register();
-	if (status != 0) {
-		pr_err("Homa couldn't load its qdisc: error %d\n", status);
-		goto error;
-	}
-	init_qdisc = true;
-#endif /* See strip.py */
-
 	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
 	if (IS_ERR(timer_kthread)) {
 		status = PTR_ERR(timer_kthread);
@@ -630,9 +592,6 @@ int __init homa_load(void)
 		goto error;
 	}
 
-#ifndef __STRIP__ /* See strip.py */
-	homa_hijack_init();
-#endif /* See strip.py */
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_set_temp(homa->temp);
 #endif /* See strip.py */
@@ -642,6 +601,16 @@ int __init homa_load(void)
 error:
 	if (timer_kthread)
 		kthread_stop(timer_kthread);
+	if (init_protosw)
+		inet_unregister_protosw(&homa_protosw);
+	if (init_protosw6)
+		inet6_unregister_protosw(&homav6_protosw);
+	if (init_proto)
+		proto_unregister(&homa_prot);
+	if (init_proto6)
+		proto_unregister(&homav6_prot);
+	if (init_net_ops)
+		unregister_pernet_device(&homa_net_ops);
 #ifndef __STRIP__ /* See strip.py */
 	if (init_qdisc)
 		homa_qdisc_unregister();
@@ -652,20 +621,6 @@ error:
 	if (init_metrics)
 		homa_metrics_end();
 #endif /* See strip.py */
-	if (init_protocol)
-		inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
-	if (init_protocol6)
-		inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
-	if (init_protosw)
-		inet_unregister_protosw(&homa_protosw);
-	if (init_protosw6)
-		inet6_unregister_protosw(&homav6_protosw);
-	if (init_proto)
-		proto_unregister(&homa_prot);
-	if (init_proto6)
-		proto_unregister(&homav6_prot);
-	if (init_net_ops)
-		unregister_pernet_subsys(&homa_net_ops);
 	/* Must not destroy homa until after namespace cleanup: it will
 	 * access info in homa.
 	 */
@@ -686,11 +641,17 @@ void __exit homa_unload(void)
 
 	pr_notice("Homa module unloading\n");
 
-#ifndef __STRIP__ /* See strip.py */
-	homa_hijack_end();
-#endif /* See strip.py */
 	if (timer_kthread)
 		kthread_stop(timer_kthread);
+	inet_unregister_protosw(&homa_protosw);
+	inet6_unregister_protosw(&homav6_protosw);
+	proto_unregister(&homa_prot);
+	proto_unregister(&homav6_prot);
+
+	/* Namespace cleanup releases the tunnel sockets, whose callbacks use
+	 * the qdisc/offload/metrics/sysctl state torn down below.
+	 */
+	unregister_pernet_device(&homa_net_ops);
 #ifndef __STRIP__ /* See strip.py */
 	homa_qdisc_unregister();
 	if (homa_offload_end() != 0)
@@ -698,13 +659,6 @@ void __exit homa_unload(void)
 	unregister_net_sysctl_table(homa_ctl_header);
 	homa_metrics_end();
 #endif /* See strip.py */
-	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
-	inet_unregister_protosw(&homa_protosw);
-	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
-	inet6_unregister_protosw(&homav6_protosw);
-	proto_unregister(&homa_prot);
-	proto_unregister(&homav6_prot);
-	unregister_pernet_subsys(&homa_net_ops);
 	homa_destroy(homa);
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_destroy();
@@ -721,8 +675,17 @@ module_exit(homa_unload);
  */
 int homa_net_start(struct net *net)
 {
+	struct homa_net *hnet = homa_net(net);
+	int err;
+
 	pr_notice("Homa attaching to net namespace\n");
-	return homa_net_init(homa_net(net), &homa_data);
+	err = homa_net_init(hnet, &homa_data);
+	if (err)
+		return err;
+	err = homa_udp_init(hnet, net);
+	if (err)
+		homa_net_destroy(hnet);
+	return err;
 }
 
 /**
@@ -1585,7 +1548,10 @@ void homa_unhash(struct sock *sk)
 /**
  * homa_softirq() - This function is invoked at SoftIRQ level to handle
  * incoming packets.
- * @skb:   The incoming packet.
+ * @skb:   The incoming packet, as prepared by homa_udp_encap_rcv: data and
+ *         transport header point at the Homa header. It may have a frag_list
+ *         of further packets (not counted in its len), each prepared in the
+ *         same way.
  * Return: Always 0
  */
 int homa_softirq(struct sk_buff *skb)
@@ -1594,7 +1560,6 @@ int homa_softirq(struct sk_buff *skb)
 	struct sk_buff **prev_link, **other_link;
 	enum skb_drop_reason reason;
 	struct homa_common_hdr *h;
-	int header_offset;
 
 	IF_NO_STRIP(struct homa *homa = homa_net(dev_net(skb->dev))->homa);
 	IF_NO_STRIP(u64 start);
@@ -1620,9 +1585,9 @@ int homa_softirq(struct sk_buff *skb)
 		next = skb->next;
 
 		/* Make the header available at skb->data, even if the packet
-		 * is fragmented. One complication: it's possible that the IP
-		 * header hasn't yet been removed (this happens for GRO packets
-		 * on the frag_list, since they aren't handled explicitly by IP.
+		 * is fragmented. homa_udp_encap_rcv has already removed the
+		 * IP and UDP headers of the head and of every packet on the
+		 * frag_list, so skb->data is the Homa header.
 		 */
 		if (!homa_make_header_avl(skb)) {
 #ifndef __STRIP__ /* See strip.py */
@@ -1633,9 +1598,6 @@ int homa_softirq(struct sk_buff *skb)
 			reason = SKB_DROP_REASON_HDR_TRUNC;
 			goto discard;
 		}
-		header_offset = skb_transport_header(skb) - skb->data;
-		if (header_offset)
-			__skb_pull(skb, header_offset);
 
 		/* Reject packets that are too short or have bogus types. */
 		h = (struct homa_common_hdr *)skb->data;
@@ -1649,7 +1611,7 @@ int homa_softirq(struct sk_buff *skb)
 				pr_warn("Homa %s packet from %s too short: %d bytes\n",
 					homa_symbol_for_type(h->type),
 					homa_print_ipv6_addr(&saddr),
-					skb->len - header_offset);
+					skb->len);
 #endif /* See strip.py */
 			INC_METRIC(short_packets, 1);
 			reason = SKB_DROP_REASON_PKT_TOO_SMALL;
@@ -1749,10 +1711,34 @@ discard:
 }
 
 /**
- * homa_err_handler_v4() - Invoked by IP to handle an incoming error
- * packet, such as ICMP UNREACHABLE.
+ * homa_quoted_dport() - Extract the Homa destination port from the packet
+ * quoted in an ICMP error message.
+ * @skb:    ICMP error; skb->data points to the quoted IP header.
+ * @offset: Offset in @skb of the quoted UDP header.
+ * Return:  The Homa destination port in host byte order, or 0 if the quote
+ *          is too short to contain it (ICMP need not quote more than the
+ *          first 8 bytes after the IP header). Zero makes the caller treat
+ *          the error as applying to all RPCs for the peer.
+ */
+static int homa_quoted_dport(struct sk_buff *skb, int offset)
+{
+	int dport_offset = offset + sizeof(struct udphdr) +
+			   offsetof(struct homa_common_hdr, dport);
+	__be16 dport;
+
+	if (dport_offset + sizeof(dport) > skb->len ||
+	    skb_copy_bits(skb, dport_offset, &dport, sizeof(dport)) < 0)
+		return 0;
+	return ntohs(dport);
+}
+
+/**
+ * homa_err_handler_v4() - Invoked (via homa_udp_encap_err_rcv) to handle an
+ * incoming error packet, such as ICMP UNREACHABLE, for a Homa packet sent
+ * to the UDP tunnel.
  * @skb:    The incoming packet; skb->data points to the byte just after
- *          the ICMP header (the first byte of the embedded packet IP header).
+ *          the ICMP header (the first byte of the embedded packet IP header),
+ *          which is followed by the quoted UDP and Homa headers.
  * @skb:   The incoming packet.
  * @info:  Information about the error that occurred?
  *
@@ -1760,7 +1746,7 @@ discard:
  */
 int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
-	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
+	struct homa_net *hnet = homa_net(dev_net(skb->dev));
 	const struct icmphdr *icmp = icmp_hdr(skb);
 	struct in6_addr daddr;
 	int type = icmp->type;
@@ -1772,10 +1758,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 	iph = (struct iphdr *)(skb->data);
 	ipv6_addr_set_v4mapped(iph->daddr, &daddr);
 	if (type == ICMP_DEST_UNREACH && code == ICMP_PORT_UNREACH) {
-		struct homa_common_hdr *h = (struct homa_common_hdr *)(skb->data
-				+ iph->ihl * 4);
-
-		port = ntohs(h->dport);
+		port = homa_quoted_dport(skb, iph->ihl * 4);
 		error = -ENOTCONN;
 	} else if (type == ICMP_DEST_UNREACH) {
 		if (code == ICMP_PROT_UNREACH)
@@ -1787,19 +1770,22 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 			  __func__, info, type, code);
 	}
 	if (error != 0)
-		homa_abort_rpcs(homa, &daddr, port, error);
+		homa_abort_rpcs(hnet->homa, hnet, &daddr, port, error);
 	return 0;
 }
 
 /**
- * homa_err_handler_v6() - Invoked by IP to handle an incoming error
- * packet, such as ICMP UNREACHABLE.
+ * homa_err_handler_v6() - Invoked (via homa_udp_encap_err_rcv) to handle an
+ * incoming error packet, such as ICMP UNREACHABLE, for a Homa packet sent
+ * to the UDP tunnel.
  * @skb:    The incoming packet; skb->data points to the byte just after
- *          the ICMP header (the first byte of the embedded packet IP header).
+ *          the ICMP header (the first byte of the embedded packet IP header),
+ *          which is followed by the quoted UDP and Homa headers.
  * @opt:    Not used.
  * @type:   Type of ICMP packet.
  * @code:   Additional information about the error.
- * @offset: Total length of IPv6 header, including any extension headers.
+ * @offset: Total length of IPv6 header, including any extension headers
+ *          (offset of the quoted UDP header).
  * @info:   Information about the error that occurred?
  *
  * Return: zero, or a negative errno if the error couldn't be handled here.
@@ -1808,15 +1794,12 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			u8 type,  u8 code,  int offset,  __be32 info)
 {
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
-	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
+	struct homa_net *hnet = homa_net(dev_net(skb->dev));
 	int error = 0;
 	int port = 0;
 
 	if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_PORT_UNREACH) {
-		const struct homa_common_hdr *h;
-
-		h = (struct homa_common_hdr *)(skb->data + offset);
-		port = ntohs(h->dport);
+		port = homa_quoted_dport(skb, offset);
 		error = -ENOTCONN;
 	} else if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_ADDR_UNREACH) {
 		error = -EHOSTUNREACH;
@@ -1824,7 +1807,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 		error = -EPROTONOSUPPORT;
 	}
 	if (error != 0)
-		homa_abort_rpcs(homa, &iph->daddr, port, error);
+		homa_abort_rpcs(hnet->homa, hnet, &iph->daddr, port, error);
 	return 0;
 }
 

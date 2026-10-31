@@ -7,6 +7,8 @@
 #include "mock.h"
 #include "utils.h"
 
+extern void tt_inc_metric(int metric, u64 count);
+
 FIXTURE(timetrace) {
 	struct file file;
 };
@@ -64,6 +66,23 @@ TEST_F(timetrace, tt_record__basics)
 			"1004 [C01] Message with 4 args: 1 2 3 4\n",
 			buffer);
 }
+
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(timetrace, tt_inc_metric_uses_current_metric_layout)
+{
+	struct homa_metrics *m = homa_metrics_per_cpu();
+
+	m->napi_cycles = 10;
+	m->linux_softirq_cycles = 20;
+	m->temp[0] = 30;
+	tt_inc_metric(0, 7);
+	tt_inc_metric(1, 9);
+	tt_inc_metric(3, 11);
+	EXPECT_EQ(17, m->napi_cycles);
+	EXPECT_EQ(29, m->linux_softirq_cycles);
+	EXPECT_EQ(41, m->temp[0]);
+}
+#endif /* See strip.py */
 
 TEST_F(timetrace, tt_record_buf__wraparound)
 {

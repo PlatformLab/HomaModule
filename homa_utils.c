@@ -8,6 +8,7 @@
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #include "homa_tx_pool.h"
+#include "homa_udp_tunnel.h"
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
@@ -168,7 +169,11 @@ int homa_net_init(struct homa_net *hnet, struct homa *homa)
  */
 void homa_net_destroy(struct homa_net *hnet)
 {
+	/* Shutting down the sockets ends their RPCs and routes; the tunnel
+	 * sockets must stay available until then.
+	 */
 	homa_socktab_destroy(hnet->homa->socktab, hnet);
+	homa_udp_destroy(hnet);
 	homa_peer_free_net(hnet);
 }
 

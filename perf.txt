@@ -507,7 +507,7 @@ ktime_get_raw_fast_ns     ns            24 ns
 
 57. (August 2024): Best known parameters for c6525-100g cluster:
     Homa:
-    hijack_tcp=1 .unsched_bytes=20000 window=0 max_incoming=1000000
+    .unsched_bytes=20000 window=0 max_incoming=1000000
     gro_policy=0xe2 throttle_min_bytes=1000
     --client-ports 4 --port-receivers 6 --server-ports 4 --port-threads 6
     TCP:
@@ -1325,4 +1325,3 @@ Event                                                               Median
    However, with RPS, packets can get spread out over too many cores, which
    causes poor latency when there is a single client and the server is
    underloaded.
-

@@ -2635,7 +2635,8 @@ TEST_F(homa_incoming, homa_abort_rpcs__basics)
 	ASSERT_NE(NULL, crpc2);
 	ASSERT_NE(NULL, crpc3);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, 0, -EPROTONOSUPPORT);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip, 0,
+			-EPROTONOSUPPORT);
 	EXPECT_EQ(2, unit_list_length(&self->hsk.ready_rpcs));
 	EXPECT_EQ(0, list_empty(&crpc1->ready_links));
 	EXPECT_EQ(EPROTONOSUPPORT, -crpc1->error);
@@ -2660,7 +2661,8 @@ TEST_F(homa_incoming, homa_abort_rpcs__multiple_sockets)
 	ASSERT_NE(NULL, crpc2);
 	ASSERT_NE(NULL, crpc3);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, 0, -EPROTONOSUPPORT);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip, 0,
+			-EPROTONOSUPPORT);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
 	EXPECT_EQ(0, list_empty(&crpc1->ready_links));
 	EXPECT_EQ(EPROTONOSUPPORT, -crpc1->error);
@@ -2686,8 +2688,8 @@ TEST_F(homa_incoming, homa_abort_rpcs__select_addr)
 	ASSERT_NE(NULL, crpc2);
 	ASSERT_NE(NULL, crpc3);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, self->server_port,
-			-ENOTCONN);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip,
+			self->server_port, -ENOTCONN);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
 	EXPECT_EQ(0, list_empty(&crpc1->ready_links));
 	EXPECT_EQ(RPC_OUTGOING, crpc2->state);
@@ -2709,8 +2711,8 @@ TEST_F(homa_incoming, homa_abort_rpcs__select_port)
 	ASSERT_NE(NULL, crpc2);
 	ASSERT_NE(NULL, crpc3);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, self->server_port,
-			-ENOTCONN);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip,
+			self->server_port, -ENOTCONN);
 	EXPECT_EQ(2, unit_list_length(&self->hsk.ready_rpcs));
 	EXPECT_EQ(0, list_empty(&crpc1->ready_links));
 	EXPECT_EQ(ENOTCONN, -crpc1->error);
@@ -2734,7 +2736,7 @@ TEST_F(homa_incoming, homa_abort_rpcs__any_port)
 	ASSERT_NE(NULL, crpc2);
 	ASSERT_NE(NULL, crpc3);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, 0, -ENOTCONN);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip, 0, -ENOTCONN);
 	EXPECT_EQ(0, list_empty(&crpc1->ready_links));
 	EXPECT_EQ(0, list_empty(&crpc2->ready_links));
 	EXPECT_EQ(0, list_empty(&crpc3->ready_links));
@@ -2749,8 +2751,30 @@ TEST_F(homa_incoming, homa_abort_rpcs__ignore_dead_rpcs)
 	homa_rpc_end(crpc);
 	EXPECT_EQ(RPC_DEAD, crpc->state);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, 0, -ENOTCONN);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip, 0, -ENOTCONN);
 	EXPECT_EQ(-EINVAL, crpc->error);
+}
+TEST_F(homa_incoming, homa_abort_rpcs__other_namespace)
+{
+	struct homa_net *other_hnet = mock_hnet(1, &self->homa);
+	struct homa_sock other_hsk;
+	struct homa_rpc *crpc1, *crpc2;
+
+	mock_sock_init(&other_hsk, other_hnet, 0);
+	crpc1 = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			5000, 1600);
+	crpc2 = unit_client_rpc(&other_hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			5000, 1600);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	unit_log_clear();
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip, 0, -ENOTCONN);
+	EXPECT_EQ(ENOTCONN, -crpc1->error);
+	EXPECT_EQ(RPC_OUTGOING, crpc2->state);
+	EXPECT_EQ(0, crpc2->error);
+	unit_sock_destroy(&other_hsk);
 }
 TEST_F(homa_incoming, homa_abort_rpcs__free_server_rpc)
 {
@@ -2760,7 +2784,7 @@ TEST_F(homa_incoming, homa_abort_rpcs__free_server_rpc)
 
 	ASSERT_NE(NULL, srpc);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->client_ip, 0, 0);
+	homa_abort_rpcs(&self->homa, self->hnet, self->client_ip, 0, 0);
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 }
 

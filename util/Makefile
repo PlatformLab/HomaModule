@@ -18,6 +18,13 @@ HDRS = ../homa_receiver.h ../homa.h dist.h time_trace.h
 
 all: $(BINS)
 
+# Standalone userspace UDP wire tools: no application helper/C++ linkage.
+send_raw receive_raw: %: %.o
+	$(CC) $(CFLAGS) $< -o $@
+
+send_raw.o receive_raw.o: %.o: %.c raw_homa.h ../homa.h
+	$(CC) -c $(CFLAGS) $< -o $@
+
 cp_node: cp_node.o dist.o time_trace.o $(LIB_OBJS)
 	g++ $(CFLAGS) $^ -lpthread -o $@
 

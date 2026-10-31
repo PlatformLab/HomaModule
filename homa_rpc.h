@@ -28,10 +28,10 @@ struct homa_message_out {
 	int length;
 
 	/**
-	 * @frags: Array of fragments that hold the tx message in a ready-
-	 * to-transmit form, consisting of segments, each with a
-	 * homa_seg_hdr followed by the data for that segment. These
-	 * fragments will be incorporated into skb's to transmit the message.
+	 * @frags: Immutable tx pool storage: each segment has an internal
+	 * homa_seg_hdr placeholder followed by its payload. Outgoing skbs
+	 * reference only the payload bytes and supply private DATA headers.
+	 * In-flight originals and retransmissions can share these fragments.
 	 * If this doesn't point to @frag below then it is dynamically
 	 * allocated and must be freed.
 	 */
@@ -54,13 +54,15 @@ struct homa_message_out {
 
 	/**
 	 * @max_seg_data: Maximum amount of message data to include in each
-	 * segment of tx packets.
+	 * UDP datagram. Fixed at message initialization from the route MTU
+	 * minus IP, UDP and DATA headers; never resized for a later route.
 	 */
 	int max_seg_data;
 
 	/**
 	 * @max_gso_segs: Maximum number of segments that can be present in a
-	 * single GSO packet.
+	 * single GSO packet. Current device and fragment limits may reduce
+	 * the number actually emitted, without changing segment boundaries.
 	 */
 	int max_gso_segs;
 
@@ -80,8 +82,8 @@ struct homa_message_out {
 
 	/**
 	 * @next_xmit_offset: All bytes in the message, up to but not
-	 * including this one, have been passed to ip_queue_xmit or
-	 * ip6_xmit at least once.
+	 * including this one, have been handed to the UDP tunnel at least
+	 * once (the kernel tunnel helpers consume the skb and return void).
 	 */
 	int next_xmit_offset;
 
@@ -495,8 +497,8 @@ struct homa_rpc {
 	u64 start_time;
 };
 
-void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
-			 int port, int error);
+void     homa_abort_rpcs(struct homa *homa, struct homa_net *hnet,
+			 const struct in6_addr *addr, int port, int error);
 void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 void     homa_rpc_ack(struct homa_sock *hsk, struct homa_rpc *rpc,

@@ -366,16 +366,18 @@ void homa_rpc_abort(struct homa_rpc *rpc, int error)
 }
 
 /**
- * homa_abort_rpcs() - Abort all RPCs to/from a particular peer.
+ * homa_abort_rpcs() - Abort all RPCs to/from a particular peer in a given
+ * network namespace.
  * @homa:    Overall data about the Homa protocol implementation.
+ * @hnet:    Only RPCs of sockets in this network namespace are aborted.
  * @addr:    Address (network order) of the destination whose RPCs are
  *           to be aborted.
  * @port:    If nonzero, then RPCs will only be aborted if they were
  *	     targeted at this server port.
  * @error:   Negative errno value indicating the reason for the abort.
  */
-void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
-		     int port, int error)
+void homa_abort_rpcs(struct homa *homa, struct homa_net *hnet,
+		     const struct in6_addr *addr, int port, int error)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
@@ -383,6 +385,8 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 
 	for (hsk = homa_socktab_start_scan(homa->socktab, &scan); hsk;
 	     hsk = homa_socktab_next(&scan)) {
+		if (hsk->hnet != hnet)
+			continue;
 		/* Skip the (expensive) lock acquisition if there's no
 		 * work to do.
 		 */

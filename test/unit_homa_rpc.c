@@ -514,9 +514,18 @@ TEST_F(homa_rpc, homa_rpc_end__state_ready)
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_rpc_end__delete_deferred_skbs_in_homa_qdisc)
 {
+	int length = sizeof(struct udphdr) + sizeof(self->data) + 1400;
+	struct udphdr udp = {
+		.source = htons(HOMA_UDP_PORT),
+		.dest = htons(HOMA_UDP_PORT),
+		.len = htons(length),
+		.check = htons(1)
+	};
 	struct homa_qdisc_dev *qdev;
+	struct homa_data_hdr *h;
 	struct homa_rpc *crpc;
 	struct sk_buff *skb;
+	int i;
 
 	qdev = homa_qdisc_qdev_get(mock_dev(0, &self->homa));
 
@@ -525,16 +534,37 @@ TEST_F(homa_rpc, homa_rpc_end__delete_deferred_skbs_in_homa_qdisc)
 			       self->client_id, 10000, 10000);
 	ASSERT_NE(NULL, crpc);
 
-	skb = mock_skb_alloc(self->client_ip, self->server_ip,
-			      &self->data.common, 1400, 0);
-	homa_qdisc_defer_homa(qdev, skb);
-	self->data.seg.offset = htonl(2800);
-	skb = mock_skb_alloc(self->client_ip, self->server_ip,
-			      &self->data.common, 1400, 2800);
-	homa_qdisc_defer_homa(qdev, skb);
+	for (i = 0; i < 2; i++) {
+		skb = mock_raw_skb(self->client_ip, self->server_ip, IPPROTO_UDP,
+				   length + sizeof(struct homa_skb_info));
+		memcpy(skb_put(skb, sizeof(udp)), &udp, sizeof(udp));
+		self->data.seg.offset = htonl(2800 * i);
+		memcpy(skb_put(skb, sizeof(self->data)), &self->data,
+		       sizeof(self->data));
+		unit_fill_data(skb_put(skb, 1400), 1400, 2800 * i);
+		if (mock_ipv6)
+			skb_push(skb, sizeof(struct ipv6hdr));
+		else {
+			skb_push(skb, sizeof(struct iphdr));
+			ip_hdr(skb)->ihl = 5;
+		}
+		homa_get_skb_info(skb)->data_bytes = 1400;
+		homa_get_skb_info(skb)->dont_defer = false;
+		qdisc_skb_cb(skb)->pkt_len = skb->len;
+		homa_qdisc_defer_homa(qdev, skb);
+	}
+	ASSERT_EQ(&crpc->qrpc.rb_node, rb_first_cached(&qdev->deferred_rpcs));
+	EXPECT_EQ(NULL, rb_next(&crpc->qrpc.rb_node));
+	ASSERT_EQ(2, skb_queue_len(&crpc->qrpc.packets));
+	h = (struct homa_data_hdr *)(udp_hdr(skb_peek(&crpc->qrpc.packets)) + 1);
+	EXPECT_EQ(0, ntohl(h->seg.offset));
+	h = (struct homa_data_hdr *)(udp_hdr(skb_peek_tail(&crpc->qrpc.packets)) + 1);
+	EXPECT_EQ(2800, ntohl(h->seg.offset));
 	EXPECT_STREQ("[id 1234, offsets 0 2800]", unit_log_deferred(qdev));
 
 	homa_rpc_end(crpc);
+	EXPECT_EQ(NULL, rb_first_cached(&qdev->deferred_rpcs));
+	EXPECT_EQ(0, skb_queue_len(&crpc->qrpc.packets));
 	EXPECT_STREQ("", unit_log_deferred(qdev));
 	homa_qdisc_qdev_put(qdev);
 }
@@ -604,7 +634,8 @@ TEST_F(homa_rpc, homa_abort_rpcs__basics)
 	ASSERT_NE(NULL, crpc2);
 	ASSERT_NE(NULL, crpc3);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, 0, -EPROTONOSUPPORT);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip, 0,
+			-EPROTONOSUPPORT);
 	EXPECT_EQ(2, unit_list_length(&self->hsk.ready_rpcs));
 	EXPECT_EQ(0, list_empty(&crpc1->ready_links));
 	EXPECT_EQ(EPROTONOSUPPORT, -crpc1->error);
@@ -631,7 +662,8 @@ TEST_F(homa_rpc, homa_abort_rpcs__multiple_sockets)
 	ASSERT_NE(NULL, crpc2);
 	ASSERT_NE(NULL, crpc3);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, 0, -EPROTONOSUPPORT);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip, 0,
+			-EPROTONOSUPPORT);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
 	EXPECT_EQ(0, list_empty(&crpc1->ready_links));
 	EXPECT_EQ(EPROTONOSUPPORT, -crpc1->error);
@@ -658,8 +690,8 @@ TEST_F(homa_rpc, homa_abort_rpcs__select_addr)
 	ASSERT_NE(NULL, crpc2);
 	ASSERT_NE(NULL, crpc3);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, self->server_port,
-			-ENOTCONN);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip,
+			self->server_port, -ENOTCONN);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
 	EXPECT_EQ(0, list_empty(&crpc1->ready_links));
 	EXPECT_EQ(RPC_OUTGOING, crpc2->state);
@@ -681,8 +713,8 @@ TEST_F(homa_rpc, homa_abort_rpcs__select_port)
 	ASSERT_NE(NULL, crpc2);
 	ASSERT_NE(NULL, crpc3);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, self->server_port,
-			-ENOTCONN);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip,
+			self->server_port, -ENOTCONN);
 	EXPECT_EQ(2, unit_list_length(&self->hsk.ready_rpcs));
 	EXPECT_EQ(0, list_empty(&crpc1->ready_links));
 	EXPECT_EQ(ENOTCONN, -crpc1->error);
@@ -706,7 +738,7 @@ TEST_F(homa_rpc, homa_abort_rpcs__any_port)
 	ASSERT_NE(NULL, crpc2);
 	ASSERT_NE(NULL, crpc3);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, 0, -ENOTCONN);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip, 0, -ENOTCONN);
 	EXPECT_EQ(0, list_empty(&crpc1->ready_links));
 	EXPECT_EQ(0, list_empty(&crpc2->ready_links));
 	EXPECT_EQ(0, list_empty(&crpc3->ready_links));
@@ -720,7 +752,7 @@ TEST_F(homa_rpc, homa_abort_rpcs__ignore_dead_rpcs)
 	ASSERT_NE(NULL, crpc);
 	crpc->state = RPC_DEAD;
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->server_ip, 0, -ENOTCONN);
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip, 0, -ENOTCONN);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 	crpc->state = RPC_OUTGOING;
 }
@@ -732,8 +764,30 @@ TEST_F(homa_rpc, homa_abort_rpcs__free_server_rpc)
 
 	ASSERT_NE(NULL, srpc);
 	unit_log_clear();
-	homa_abort_rpcs(&self->homa, self->client_ip, 0, 0);
+	homa_abort_rpcs(&self->homa, self->hnet, self->client_ip, 0, 0);
 	EXPECT_EQ(RPC_DEAD, srpc->state);
+}
+TEST_F(homa_rpc, homa_abort_rpcs__other_namespace)
+{
+	struct homa_net *other_hnet = mock_hnet(1, &self->homa);
+	struct homa_sock other_hsk;
+	struct homa_rpc *crpc1, *crpc2;
+
+	mock_sock_init(&other_hsk, other_hnet, 0);
+	crpc1 = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			5000, 1600);
+	crpc2 = unit_client_rpc(&other_hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			5000, 1600);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	unit_log_clear();
+	homa_abort_rpcs(&self->homa, self->hnet, self->server_ip, 0, -ENOTCONN);
+	EXPECT_EQ(ENOTCONN, -crpc1->error);
+	EXPECT_EQ(RPC_OUTGOING, crpc2->state);
+	EXPECT_EQ(0, crpc2->error);
+	unit_sock_destroy(&other_hsk);
 }
 
 TEST_F(homa_rpc, homa_rpc_reap__nothing_to_reap)
@@ -1424,6 +1478,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__basics)
 
 	crpc->completion_cookie = 1111;
 	crpc->msgout.priority = 4;
+	self->hsk.inet.sk.sk_family = AF_INET6;
 
 	homa_rpc_get_info(crpc, &info);
 	EXPECT_EQ(AF_INET6, info.peer.in6.sin6_family);

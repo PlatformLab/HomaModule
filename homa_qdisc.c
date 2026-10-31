@@ -77,12 +77,12 @@
  */
 
 #include "homa_impl.h"
-#include "homa_hijack.h"
 #include "homa_qdisc.h"
 #include "homa_rpc.h"
 #include "timetrace.h"
 
 #include <linux/ethtool.h>
+#include <net/tcp.h>
 
 /* Used to enable sysctl access to configuration parameters related to
  * homa_qdisc. The @data fields are actually offsets within a struct
@@ -149,12 +149,34 @@ static struct Qdisc_ops homa_qdisc_ops __read_mostly = {
 
 /**
  * is_homa_pkt() - Return true if @skb is a Homa packet, false otherwise.
- * @skb:    Packet buffer to check.
+ * A Homa packet is a UDP packet whose source and destination ports are both
+ * HOMA_UDP_PORT and whose payload starts with a Homa common header with a
+ * valid packet type. The IP protocol and UDP ports are checked first, so
+ * packets that are not Homa (TCP, other UDP traffic) never have their
+ * headers pulled.
+ * @skb:    Packet buffer to check; its network and transport headers must
+ *          already be linear and the transport header must be the UDP header.
+ *          If true is returned, the Homa common header (immediately after
+ *          the UDP header) has been made linear (note: this may reallocate
+ *          the skb head).
  * Return:  see above.
+ *
+ * Only the 13-byte common header is pulled, not the full
+ * struct homa_data_hdr, so for a DATA packet msg_length, seg.offset and the
+ * other DATA fields that homa_qdisc_enqueue reads are not guaranteed to be
+ * linear or in bounds. Pulling sizeof(struct homa_data_hdr) for DATA would
+ * protect against a foreign UDP 5001<->5001 packet whose type byte happens
+ * to read as DATA (reads of unpulled or uninitialized bytes, including
+ * homa_skb_info), and against a second pull (and head reallocation) later
+ * in enqueue. It costs nothing for Homa-built skbs, whose headers are always
+ * linear, which is why the extra pull is not done: it is the accepted
+ * trade-off for foreign traffic.
  */
 static inline bool is_homa_pkt(struct sk_buff *skb)
 {
-	int eth_prot, protocol;
+	struct homa_common_hdr *h;
+	struct udphdr _uh, *uh;
+	int eth_prot, protocol, off;
 
 	eth_prot = ntohs(skb_protocol(skb, true));
 	if (eth_prot == ETH_P_IP)
@@ -163,8 +185,20 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
 		protocol = ipv6_hdr(skb)->nexthdr;
 	else
 		return false;
-	return protocol == IPPROTO_HOMA ||
-		(protocol == IPPROTO_TCP && homa_skb_hijacked(skb));
+	if (protocol != IPPROTO_UDP)
+		return false;
+
+	off = skb_transport_offset(skb);
+	uh = skb_header_pointer(skb, off, sizeof(_uh), &_uh);
+	if (!uh || uh->source != htons(HOMA_UDP_PORT) ||
+	    uh->dest != htons(HOMA_UDP_PORT))
+		return false;
+	if (!pskb_may_pull(skb, off + sizeof(struct udphdr) +
+			   sizeof(struct homa_common_hdr)))
+		return false;
+	h = (struct homa_common_hdr *)(skb_transport_header(skb) +
+				       sizeof(struct udphdr));
+	return h->type >= DATA && h->type <= MAX_OP;
 }
 
 /**
@@ -570,7 +604,12 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		return NET_XMIT_SUCCESS;
 	}
 
-	if (homa_get_skb_info(skb)->dont_defer) {
+	/* is_homa_pkt may have reallocated the skb head, so locate the Homa
+	 * header only now.
+	 */
+	h = (struct homa_data_hdr *)(skb_transport_header(skb) +
+				     sizeof(struct udphdr));
+	if (h->common.type == DATA && homa_get_skb_info(skb)->dont_defer) {
 		homa_qdisc_add_queued(qdev, skb);
 		return qdisc_enqueue_tail(skb, sch);
 	}
@@ -586,8 +625,8 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	 * issue any grants, even though the "incoming" data isn't going to
 	 * be transmitted anytime soon.
 	 */
-	h = (struct homa_data_hdr *)skb_transport_header(skb);
-	offset = ntohl(h->seg.offset);
+	if (h->common.type == DATA)
+		offset = ntohl(h->seg.offset);
 	if (h->common.type != DATA ||
 	    ntohl(h->msg_length) < qshared->defer_min_bytes) {
 		homa_qdisc_update_link_idle(qdev, pkt_len, -1);
@@ -610,7 +649,7 @@ int homa_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 
 enqueue:
 	if (is_homa_pkt(skb)) {
-		h = (struct homa_data_hdr *)skb_transport_header(skb);
+		h = (struct homa_data_hdr *)(udp_hdr(skb) + 1);
 		if (h->common.type == DATA) {
 			tt_record3("homa_qdisc_enqueue queuing homa data packet for id %d, offset %d on qid %d",
 				   be64_to_cpu(h->common.sender_id), offset,
@@ -727,17 +766,24 @@ void homa_qdisc_defer_tcp(struct homa_qdisc *q, struct sk_buff *skb)
  * homa_qdisc_defer_homa() - Add a Homa packet to the deferred list for
  * a qdev.
  * @qdev:    Network device for which the packet should be enqueued.
- * @skb:     Packet to enqueue.
+ * @skb:     Packet to enqueue; its transport header must be the UDP header
+ *           and the Homa header after it must be linear.
  */
 void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 {
+	int transport = skb_transport_offset(skb);
 	u64 now = homa_clock();
 	struct homa_rpc *rpc;
 
 	/* Must hold the RPC lock while queuing the RPC in the qdisc, in
 	 * order to prevent concurrent deletion of the RPC.
+	 * homa_rpc_find_from_skb expects the transport header to be the Homa
+	 * header, so temporarily skip over the UDP header (this returns
+	 * the RPC locked).
 	 */
+	skb_set_transport_header(skb, transport + sizeof(struct udphdr));
 	rpc = homa_rpc_find_from_skb(skb, false);
+	skb_set_transport_header(skb, transport);
 	if (!rpc) {
 		/* RPC has ended; discard packet. */
 		kfree_skb_reason(skb, SKB_DROP_REASON_NO_SOCKET);
@@ -750,7 +796,7 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 		struct homa_data_hdr *h;
 		int bytes_left;
 
-		h = (struct homa_data_hdr *)skb_transport_header(skb);
+		h = (struct homa_data_hdr *)(udp_hdr(skb) + 1);
 		bytes_left = rpc->msgout.length - ntohl(h->seg.offset);
 		if (bytes_left < rpc->qrpc.tx_left)
 			rpc->qrpc.tx_left = bytes_left;
@@ -945,7 +991,7 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 	 * it's position won't change because it is already highest priority).
 	 */
 	info = homa_get_skb_info(skb);
-	h = (struct homa_data_hdr *)skb_transport_header(skb);
+	h = (struct homa_data_hdr *)(udp_hdr(skb) + 1);
 	bytes_left = rpc->msgout.length - (ntohl(h->seg.offset) +
 					   info->data_bytes);
 	if (bytes_left < qrpc->tx_left)
@@ -991,7 +1037,7 @@ int homa_qdisc_xmit_deferred_homa(struct homa_qdisc_dev *qdev)
 
 	pkt_len = qdisc_pkt_len(skb);
 	homa_qdisc_update_link_idle(qdev, pkt_len, -1);
-	h = (struct homa_data_hdr *)skb_transport_header(skb);
+	h = (struct homa_data_hdr *)(udp_hdr(skb) + 1);
 	tt_record2("homa_qdisc_pacer queuing homa data packet for id %d, offset %d",
 		   be64_to_cpu(h->common.sender_id), ntohl(h->seg.offset));
 
@@ -1072,10 +1118,12 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
  * then it updates @qdev->link_idle_time to include @bytes; otherwise it does
  * nothing.
  * @qdev:              Information about the device.
- * @bytes:             Size of a packet that is about to be transmitted;
- *                     includes all headers out through the Ethernet header,
- *                     but not additional overhead such as CRC and gap
- *                     between packets.
+ * @bytes:             Size of a packet that is about to be transmitted,
+ *                     as returned by qdisc_pkt_len (for a GSO packet this
+ *                     includes the IP and UDP headers of every segment).
+ *                     It excludes additional overhead such as CRC and gap
+ *                     between packets; HOMA_ETH_FRAME_OVERHEAD is added
+ *                     here, once per call.
  * @max_queue_cycles:  If it will take longer than this amount of time for
  *                     previously queued bytes to be transmitted, then don't
  *                     update @qdev->link_idle_time. A negative value means

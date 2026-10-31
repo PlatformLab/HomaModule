@@ -9,6 +9,8 @@
 #include "homa_rpc.h"
 
 #include <linux/xxhash.h>
+#include <net/ip6_fib.h>
+#include <net/udp_tunnel.h>
 
 #ifdef __UNIT_TEST__
 #undef rhashtable_init
@@ -353,9 +355,10 @@ struct homa_route *homa_route_alloc(struct homa_sock *hsk,
 
 		flowi4_init_output(&route->flow.u.ip4, key->bound_dev_if,
 				   key->mark, 0, RT_SCOPE_UNIVERSE,
-				   IPPROTO_HOMA, 0,
+				   IPPROTO_UDP, 0,
 				   ipv6_to_ipv4(route->key.daddr),
-				   ipv6_to_ipv4(route->key.saddr), 0, 0,
+				   ipv6_to_ipv4(route->key.saddr),
+				   htons(HOMA_UDP_PORT), htons(HOMA_UDP_PORT),
 				   key->uid);
 		rt = ip_route_output_flow(sock_net(&hsk->sock),
 					  &route->flow.u.ip4, &hsk->sock);
@@ -365,15 +368,14 @@ struct homa_route *homa_route_alloc(struct homa_sock *hsk,
 		}
 		rcu_assign_pointer(route->dst, &rt->dst);
 	} else {
-		/* This code is derived from code in tcp_v6_connect. */
-		route->flow.u.ip6.flowi6_proto = IPPROTO_HOMA;
+		route->flow.u.ip6.flowi6_proto = IPPROTO_UDP;
 		route->flow.u.ip6.daddr = route->key.daddr;
 		route->flow.u.ip6.saddr = route->key.saddr;
 		route->flow.u.ip6.flowlabel = ip6_make_flowinfo(0, 0);
 		route->flow.u.ip6.flowi6_oif = key->bound_dev_if;
 		route->flow.u.ip6.flowi6_mark = key->mark;
-		route->flow.u.ip6.fl6_dport = 0;
-		route->flow.u.ip6.fl6_sport = 0;
+		route->flow.u.ip6.fl6_dport = htons(HOMA_UDP_PORT);
+		route->flow.u.ip6.fl6_sport = htons(HOMA_UDP_PORT);
 		route->flow.u.ip6.flowi6_uid = key->uid;
 		dst = ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
 						   &route->flow.u.ip6, NULL);
@@ -573,6 +575,99 @@ int homa_route_validate(struct homa_rpc *rpc)
 		homa_route_release(old);
 	}
 	return 0;
+}
+
+/**
+ * homa_route_xmit() - Transmit a packet according to a given route, by
+ * encapsulating it in UDP with the kernel tunnel helpers
+ * (udp_tunnel_xmit_skb or udp_tunnel6_xmit_skb) on the namespace's tunnel
+ * socket. This is the single transmit entry for all Homa packets (DATA,
+ * control and retransmissions).
+ * @skb:      Packet to transmit, with skb->data at the Homa header and
+ *            HOMA_SKB_EXTRA bytes of headroom (see __homa_skb_alloc).
+ *            The packet is always consumed (transmitted or freed),
+ *            whatever this function returns.
+ * @hsk:      Application socket on whose behalf the packet is sent; it is
+ *            used only for per-socket settings, never as the outer UDP
+ *            socket.
+ * @route:    Route to use to transmit packet. The caller must hold a
+ *            reference on it; this function takes its own reference on
+ *            the route's dst and the tunnel helper consumes that one.
+ * @priority: Homa priority level in the range [0, HOMA_MAX_PRIORITIES);
+ *            it is converted to a DSCP value here, and only here, using
+ *            homa->priority_map.
+ *
+ * Context: Process or softirq context, with no spinlocks held. The helpers
+ * need BH protection, so everything from route/socket lookup through the
+ * handoff runs inside rcu_read_lock_bh(). The tunnel sockets are owned by
+ * the namespace and are released only after every Homa socket of the
+ * namespace has been shut down, so they outlive any caller here.
+ *
+ * Return: None. The kernel tunnel helpers return void, so failures after
+ * the handoff (qdisc/device drops, no neighbor, ...) are not reported
+ * synchronously; failures reported by the network (ICMP) are delivered later
+ * through homa_udp_encap_err_rcv, which aborts the affected RPCs. Size
+ * problems are detected earlier by the packet builders, before this
+ * function is invoked.
+ */
+void homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
+		     struct homa_route *route, int priority)
+{
+	bool ipv6 = !ipv6_addr_v4mapped(&route->peer->addr);
+	struct homa_net *hnet = hsk->hnet;
+	struct socket *socket;
+	struct dst_entry *dst;
+	u8 tos = 0;
+
+	IF_NO_STRIP(tos = hsk->homa->priority_map[priority] << 5);
+	skb->protocol = htons(ipv6 ? ETH_P_IPV6 : ETH_P_IP);
+	skb->mark = route->key.mark;
+	skb->priority = READ_ONCE(hsk->sock.sk_priority);
+	skb->encapsulation = 0;
+
+	/* The UDP header will be pushed immediately before the Homa header. */
+	skb->csum_start = skb_headroom(skb) - sizeof(struct udphdr);
+	skb->csum_offset = offsetof(struct udphdr, check);
+
+	/* CHECKSUM_NONE forces netif_needs_gso and UDP software segmentation
+	 * even when the device advertises USO. The UDP GSO helper preserves
+	 * this state while seeding the pseudo-header checksum. For a
+	 * non-GSO packet the tunnel helper installs the UDP checksum itself.
+	 */
+#ifndef __STRIP__ /* See strip.py */
+	skb->ip_summed = skb_is_gso(skb) && !hsk->homa->gso_force_software ?
+			 CHECKSUM_PARTIAL : CHECKSUM_NONE;
+#else /* See strip.py */
+	skb->ip_summed = skb_is_gso(skb) ? CHECKSUM_PARTIAL : CHECKSUM_NONE;
+#endif /* See strip.py */
+
+	rcu_read_lock_bh();
+	socket = ipv6 ? rcu_dereference_bh(hnet->udp6) :
+			rcu_dereference_bh(hnet->udp4);
+	dst = rcu_dereference_bh(route->dst);
+
+	/* The helper installs the dst in the skb, consuming this reference
+	 * (the route keeps its own); skb_dst_set must not be used here since
+	 * the IPv4 helper clears any existing dst before installing its own.
+	 */
+	dst_hold(dst);
+	if (ipv6) {
+		struct flowi6 *flow = &route->flow.u.ip6;
+
+		udp_tunnel6_xmit_skb(dst, socket->sk, skb, NULL, &flow->saddr,
+				     &flow->daddr, tos, ip6_dst_hoplimit(dst),
+				     flow->flowlabel, htons(HOMA_UDP_PORT),
+				     htons(HOMA_UDP_PORT), false, 0);
+	} else {
+		struct flowi4 *flow = &route->flow.u.ip4;
+
+		udp_tunnel_xmit_skb((struct rtable *)dst, socket->sk, skb,
+				    flow->saddr, flow->daddr, tos,
+				    ip4_dst_hoplimit(dst), htons(IP_DF),
+				    htons(HOMA_UDP_PORT), htons(HOMA_UDP_PORT),
+				    false, false, 0);
+	}
+	rcu_read_unlock_bh();
 }
 
 /**

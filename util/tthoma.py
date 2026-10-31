@@ -2047,7 +2047,7 @@ class Dispatcher:
 
     patterns.append({
         'name': 'ip_xmit',
-        'regexp': 'calling ip.*_xmit: peer ([^,]+), id ([0-9]+), '
+        'regexp': 'calling UDP xmit: peer ([^,]+), id ([0-9]+), '
                   'offset ([0-9]+), length ([0-9]+)'
     })
 
@@ -4872,7 +4872,8 @@ class AnalyzeGrants:
         Returns a list of events of interest for this analyzer. Elements
         in the list have one of the following forms:
         <time, "txdata", node, id, offset, length>
-            Time is when data packet was passed to ip_queue_xmit on node.
+            Time is when the data packet entered Homa's UDP transmit path
+            on node.
             Id is an RPC id, offset is the offset of first data byte in packet
             and length is the number of data bytes in the packet.
         <time, "rxdata", node, id, offset, length>

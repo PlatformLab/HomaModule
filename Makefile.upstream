@@ -13,4 +13,5 @@ homa-y:=        homa_incoming.o \
 		homa_sock.o \
 		homa_timer.o \
 		homa_tx_pool.o \
+		homa_udp_tunnel.o \
 		homa_utils.o

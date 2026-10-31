@@ -11,7 +11,6 @@
 #include "utils.h"
 
 #ifndef __STRIP__ /* See strip.py */
-#include "homa_hijack.h"
 #include "homa_qdisc.h"
 #endif /* See strip.py */
 
@@ -75,6 +74,81 @@ static const char *log_frags(skb_frag_t *frags, int num_frags,
 		}
 	}
 	return unit_log_get();
+}
+
+static void enable_gso(struct homa_rpc *rpc, int segments)
+{
+	struct dst_entry *dst = rcu_dereference(rpc->route->dst);
+
+	rpc->hsk->homa->max_gso_size = 100000;
+	dst->dev->gso_max_size = 100000;
+	dst->dev->gso_max_segs = 128;
+	rpc->msgout.max_gso_segs = segments;
+}
+
+/* Examine every actual UDP payload, not just the first linear DATA header. */
+static void check_gso_records(struct __test_metadata *_metadata,
+			      struct homa_rpc *rpc, struct sk_buff *skb,
+			      int first, int end, bool retransmit, u64 ack_id)
+{
+	struct skb_shared_info *shinfo = skb_shinfo(skb);
+	int offset = first, wire_offset = 0, records = 0;
+	u8 actual[8192], expected[8192];
+
+	while (offset < end) {
+		struct homa_data_hdr h;
+		int bytes = min(rpc->msgout.max_seg_data, end - offset);
+		int pool_offset = offset + (offset / rpc->msgout.max_seg_data + 1) *
+				  sizeof(struct homa_seg_hdr);
+		int frag_index, copied = 0;
+
+		ASSERT_LE(bytes, sizeof(actual));
+		ASSERT_EQ(0, skb_copy_bits(skb, wire_offset, &h, sizeof(h)));
+		EXPECT_EQ(DATA, h.common.type);
+		EXPECT_EQ(rpc->hsk->port, ntohs(h.common.sport));
+		EXPECT_EQ(rpc->dport, ntohs(h.common.dport));
+		EXPECT_EQ(rpc->id, be64_to_cpu(h.common.sender_id));
+		EXPECT_EQ(rpc->msgout.length, ntohl(h.msg_length));
+		EXPECT_EQ(offset, ntohl(h.seg.offset));
+		EXPECT_EQ(retransmit, h.retransmit);
+		IF_NO_STRIP(EXPECT_EQ(rpc->route->peer->cutoff_version,
+				      h.cutoff_version));
+		EXPECT_EQ(records == 0 ? ack_id : 0, be64_to_cpu(h.ack.client_id));
+		EXPECT_EQ(0, h.reserved1);
+		EXPECT_EQ(0, h.pad[0] | h.pad[1] | h.pad[2]);
+		ASSERT_EQ(0, skb_copy_bits(skb, wire_offset + sizeof(h),
+					   actual, bytes));
+		for (frag_index = 0; frag_index < rpc->msgout.num_frags;
+		     frag_index++) {
+			skb_frag_t *frag = &rpc->msgout.frags[frag_index];
+			int take;
+
+			if (pool_offset >= skb_frag_size(frag)) {
+				pool_offset -= skb_frag_size(frag);
+				continue;
+			}
+			take = min_t(int, bytes - copied,
+				     skb_frag_size(frag) - pool_offset);
+			memcpy(expected + copied,
+			       unit_frag_first_byte(frag) + pool_offset, take);
+			copied += take;
+			pool_offset = 0;
+			if (copied == bytes)
+				break;
+		}
+		ASSERT_EQ(bytes, copied);
+		EXPECT_EQ(0, memcmp(actual, expected, bytes));
+		wire_offset += sizeof(h) + bytes;
+		offset += bytes;
+		records++;
+	}
+	EXPECT_EQ(wire_offset, skb->len);
+	EXPECT_EQ(end - first, homa_get_skb_info(skb)->data_bytes);
+	EXPECT_LE(shinfo->nr_frags, MAX_SKB_FRAGS);
+	EXPECT_EQ(records > 1 ? SKB_GSO_UDP_L4 : 0, shinfo->gso_type);
+	EXPECT_EQ(records > 1 ? records : 0, shinfo->gso_segs);
+	EXPECT_EQ(records > 1 ? sizeof(struct homa_data_hdr) +
+		  rpc->msgout.max_seg_data : 0, shinfo->gso_size);
 }
 
 FIXTURE(homa_outgoing) {
@@ -190,6 +264,58 @@ TEST_F(homa_outgoing, homa_message_out_init__max_gso_segs)
 	EXPECT_EQ(0, homa_message_out_init(crpc, 10000));
 	EXPECT_EQ(1, crpc->msgout.max_gso_segs);
 
+	homa_rpc_unlock(crpc);
+}
+
+TEST_F(homa_outgoing, homa_message_out_init__udp_mtu_geometry)
+{
+	union sockaddr_in_union addr = self->server_addr;
+	int ip_length;
+
+	mock_set_ipv6(&self->hsk);
+	addr.in6.sin6_family = AF_INET6;
+	/* A route MTU below the device MTU is usable in either family. */
+	for (ip_length = sizeof(struct iphdr); ip_length <= sizeof(struct ipv6hdr);
+	     ip_length += sizeof(struct ipv6hdr) - sizeof(struct iphdr)) {
+		struct homa_rpc *crpc;
+
+		addr.in6.sin6_addr = unit_get_in_addr(ip_length == sizeof(struct iphdr) ?
+						     "1.2.3.4" : "2001:db8::1");
+		crpc = homa_rpc_alloc_client(&self->hsk, &addr);
+		ASSERT_FALSE(IS_ERR(crpc));
+		mock_mtu = 1200;
+		EXPECT_EQ(0, homa_message_out_init(crpc, 10000));
+		EXPECT_EQ(1200 - ip_length - 8 - 41, crpc->msgout.max_seg_data);
+		mock_mtu = ip_length + 8 + 41 + HOMA_MIN_SEG_DATA;
+		EXPECT_EQ(0, homa_message_out_init(crpc, 10000));
+		EXPECT_EQ(HOMA_MIN_SEG_DATA, crpc->msgout.max_seg_data);
+		mock_mtu--;
+		EXPECT_EQ(-EHOSTUNREACH, homa_message_out_init(crpc, 10000));
+		EXPECT_STREQ("route has MTU too small for Homa", self->hsk.error_msg);
+		homa_rpc_unlock(crpc);
+	}
+}
+
+TEST_F(homa_outgoing, homa_message_out_init__gso_size_underflow_and_caps)
+{
+	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
+						      &self->server_addr);
+
+	ASSERT_FALSE(IS_ERR(crpc));
+	self->homa.max_gso_size = 1;
+	self->dev->gso_max_size = 1;
+	EXPECT_EQ(0, homa_message_out_init(crpc, 10000));
+	EXPECT_EQ(1, crpc->msgout.max_gso_segs);
+
+	self->homa.max_gso_size = 1000000;
+	self->dev->gso_max_size = 1000000;
+	self->dev->gso_max_segs = 1000;
+	EXPECT_EQ(0, homa_message_out_init(crpc, 1000000));
+	EXPECT_LE(crpc->msgout.max_gso_segs, 128);
+	EXPECT_LE(crpc->msgout.max_gso_segs, (MAX_SKB_FRAGS + 1) / 2);
+	EXPECT_LE(crpc->msgout.max_gso_segs *
+		  (sizeof(struct homa_data_hdr) + crpc->msgout.max_seg_data) +
+		  sizeof(struct iphdr) + sizeof(struct udphdr), U16_MAX);
 	homa_rpc_unlock(crpc);
 }
 
@@ -410,7 +536,7 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__compute_num_segs)
 			       self->server_ip, self->server_port,
 			       self->client_id, 6000, 100);
 	ASSERT_NE(NULL, crpc);
-	crpc->msgout.max_gso_segs = 10;
+	enable_gso(crpc, 10);
 
 	/* First call fills 2 segments. */
 	end = 4200;
@@ -499,26 +625,32 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__fill_in_skb_frags)
 			       self->server_ip, self->server_port,
 			       self->client_id, 20000, 100);
 	ASSERT_NE(NULL, crpc);
-	crpc->msgout.max_gso_segs = 10;
+	enable_gso(crpc, 10);
 
+	/* Five records exhaust ten frags: five payload frags, one extra at
+	 * a pool-page boundary, and four private DATA-header frags.
+	 */
+	mock_max_skb_frags = 10;
 	end = 15000;
 	skb = homa_tx_skb_alloc(crpc, 5000, &end);
-	if (IS_ERR(skb))
-		EXPECT_EQ(0, -PTR_ERR(skb));
-	unit_log_clear();
-	EXPECT_STREQ("data in frag 0: 4200-5599; "
-		     "offset 5600, data in frag 0: 5600-6999; "
-		     "offset 7000, data in frag 0: 7000-8167, "
-		     "data in frag 1: 8168-8399; "
-		     "offset 8400, data in frag 1: 8400-9799; "
-		     "offset 9800, data in frag 1: 9800-11199; "
-		     "offset 11200, data in frag 1: 11200-12251, "
-		     "data in frag 2: 12252-12599; "
-		     "offset 12600, data in frag 2: 12600-13999; "
-		     "offset 14000, data in frag 2: 14000-15399",
-		     log_frags(skb_shinfo(skb)->frags,
-		     	       skb_shinfo(skb)->nr_frags,
-			       crpc->msgout.max_seg_data, false));
+	ASSERT_FALSE(IS_ERR(skb));
+	EXPECT_EQ(11200, end);
+	EXPECT_EQ(10, skb_shinfo(skb)->nr_frags);
+	EXPECT_EQ(5, skb_shinfo(skb)->gso_segs);
+	check_gso_records(_metadata, crpc, skb, 4200, end, false, 0);
+	kfree_skb(skb);
+
+	/* With the kernel's 17-frag allowance, eight complete records fit:
+	 * ten payload frags (two page crossings) and seven header frags.
+	 */
+	mock_max_skb_frags = 17;
+	end = 15000;
+	skb = homa_tx_skb_alloc(crpc, 5000, &end);
+	ASSERT_FALSE(IS_ERR(skb));
+	EXPECT_EQ(15400, end);
+	EXPECT_EQ(17, skb_shinfo(skb)->nr_frags);
+	EXPECT_EQ(8, skb_shinfo(skb)->gso_segs);
+	check_gso_records(_metadata, crpc, skb, 4200, end, false, 0);
 	kfree_skb(skb);
 }
 TEST_F(homa_outgoing, homa_tx_skb_alloc__not_enough_frags_in_skb)
@@ -532,22 +664,16 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__not_enough_frags_in_skb)
 			       self->server_ip, self->server_port,
 			       self->client_id, 20000, 100);
 	ASSERT_NE(NULL, crpc);
-	crpc->msgout.max_gso_segs = 10;
+	enable_gso(crpc, 10);
 	mock_max_skb_frags = 2;
 
 	end = 18000;
 	skb = homa_tx_skb_alloc(crpc, 4000, &end);
 	if (IS_ERR(skb))
 		EXPECT_EQ(0, -PTR_ERR(skb));
-	unit_log_clear();
-	EXPECT_STREQ("data in frag 0: 2800-4083, "
-		     "data in frag 1: 4084-4199; "
-		     "offset 4200, data in frag 1: 4200-5599; "
-		     "offset 5600, data in frag 1: 5600-6999",
-		     log_frags(skb_shinfo(skb)->frags,
-		     	       skb_shinfo(skb)->nr_frags,
-			       crpc->msgout.max_seg_data, false));
-	EXPECT_EQ(7000, end);
+	EXPECT_EQ(4200, end);
+	EXPECT_EQ(2, skb_shinfo(skb)->nr_frags);
+	check_gso_records(_metadata, crpc, skb, 2800, end, false, 0);
 	kfree_skb(skb);
 }
 TEST_F(homa_outgoing, homa_tx_skb_alloc__not_enough_frags_in_skb_must_drop_frag)
@@ -563,7 +689,7 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__not_enough_frags_in_skb_must_drop_frag)
 			       self->server_ip, self->server_port,
 			       self->client_id, 20000, 100);
 	ASSERT_NE(NULL, crpc);
-	crpc->msgout.max_gso_segs = 10;
+	enable_gso(crpc, 10);
 	mock_max_skb_frags = 3;
 
 	end = 14000;
@@ -592,7 +718,7 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__not_enough_space_for_one_segment)
 			       self->server_ip, self->server_port,
 			       self->client_id, 20000, 100);
 	ASSERT_NE(NULL, crpc);
-	crpc->msgout.max_gso_segs = 10;
+	enable_gso(crpc, 10);
 	mock_max_skb_frags = 1;
 
 	end = 14000;
@@ -637,7 +763,7 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__shinfo_gso_fields)
 			       self->server_ip, self->server_port,
 			       self->client_id, 5000, 100);
 	ASSERT_NE(NULL, crpc);
-	crpc->msgout.max_gso_segs = 3;
+	enable_gso(crpc, 3);
 
 	/* First packet has only one segment. */
 	end = 1501;
@@ -661,19 +787,12 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__shinfo_gso_fields)
 	skb = homa_tx_skb_alloc(crpc, 0, &end);
 	if (IS_ERR(skb))
 		EXPECT_EQ(0, -PTR_ERR(skb));
-	unit_log_clear();
-	EXPECT_STREQ("data in frag 0: 0-1399; "
-		     "offset 1400, data in frag 0: 1400-2799; "
-		     "offset 2800, data in frag 0: 2800-4083, "
-		     "data in frag 1: 4084-4199",
-		     log_frags(skb_shinfo(skb)->frags,
-		     	       skb_shinfo(skb)->nr_frags,
-			       crpc->msgout.max_seg_data, false));
+	check_gso_records(_metadata, crpc, skb, 0, 4200, false, 0);
 	EXPECT_EQ(4200, end);
 	shinfo = skb_shinfo(skb);
 	EXPECT_EQ(3, shinfo->gso_segs);
-	EXPECT_EQ(1400 + sizeof(struct homa_seg_hdr), shinfo->gso_size);
-	EXPECT_EQ(SKB_GSO_TCPV6, shinfo->gso_type);
+	EXPECT_EQ(1400 + sizeof(struct homa_data_hdr), shinfo->gso_size);
+	EXPECT_EQ(SKB_GSO_UDP_L4, shinfo->gso_type);
 	kfree_skb(skb);
 }
 TEST_F(homa_outgoing, homa_tx_skb_alloc__homa_info_fields)
@@ -688,7 +807,7 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__homa_info_fields)
 			       self->server_ip, self->server_port,
 			       self->client_id, 5000, 100);
 	ASSERT_NE(NULL, crpc);
-	crpc->msgout.max_gso_segs = 3;
+	enable_gso(crpc, 3);
 
 	end = 5000;
 	skb = homa_tx_skb_alloc(crpc, 1500, &end);
@@ -699,6 +818,229 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__homa_info_fields)
 	EXPECT_EQ(3600, homa_info->data_bytes);
 	EXPECT_EQ(0, homa_info->dont_defer);
 	kfree_skb(skb);
+}
+
+TEST_F(homa_outgoing, homa_tx_skb_alloc__all_headers_short_tail_and_private_retransmit)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->server_port,
+			self->client_id, 5003, 100);
+	struct homa_peer *peer = crpc->route->peer;
+	struct sk_buff *original, *retrans;
+	struct homa_data_hdr h;
+	u8 pool_bytes[6000];
+	u32 end = 5003;
+	int i;
+
+	ASSERT_EQ(1, crpc->msgout.num_frags);
+	ASSERT_LE(skb_frag_size(crpc->msgout.frags), sizeof(pool_bytes));
+	memcpy(pool_bytes, unit_frag_first_byte(crpc->msgout.frags),
+	       skb_frag_size(crpc->msgout.frags));
+	enable_gso(crpc, 10);
+	IF_NO_STRIP(peer->cutoff_version = htons(7));
+	peer->num_acks = 1;
+	peer->acks[0].client_id = cpu_to_be64(90);
+	peer->acks[0].server_port = htons(99);
+	original = homa_tx_skb_alloc(crpc, 0, &end);
+	ASSERT_FALSE(IS_ERR(original));
+	EXPECT_EQ(5003, end);
+	EXPECT_EQ(4, skb_shinfo(original)->gso_segs);
+	EXPECT_EQ(5003 + 4 * 41, original->len);
+	check_gso_records(_metadata, crpc, original, 0, end, false, 90);
+	EXPECT_EQ(0, peer->num_acks);
+
+	crpc->msgout.next_xmit_offset = crpc->msgout.length;
+	IF_NO_STRIP(peer->cutoff_version = htons(8));
+	peer->num_acks = 1;
+	peer->acks[0].client_id = cpu_to_be64(92);
+	end = 5003;
+	retrans = homa_tx_skb_alloc(crpc, 1501, &end);
+	ASSERT_FALSE(IS_ERR(retrans));
+	EXPECT_EQ(5003, end);
+	check_gso_records(_metadata, crpc, retrans, 1400, end, true, 92);
+	EXPECT_EQ(0, peer->num_acks);
+
+	/* Mutating a retransmission must leave all in-flight headers intact. */
+	for (i = 0; i < 4; i++) {
+		ASSERT_EQ(0, skb_copy_bits(original, i * (1400 + 41), &h, sizeof(h)));
+		EXPECT_EQ(i * 1400, ntohl(h.seg.offset));
+		EXPECT_EQ(0, h.retransmit);
+		IF_NO_STRIP(EXPECT_EQ(htons(7), h.cutoff_version));
+		EXPECT_EQ(i == 0 ? 90 : 0, be64_to_cpu(h.ack.client_id));
+	}
+	EXPECT_EQ(0, memcmp(pool_bytes, unit_frag_first_byte(crpc->msgout.frags),
+			    skb_frag_size(crpc->msgout.frags)));
+	kfree_skb(original);
+	kfree_skb(retrans);
+}
+
+TEST_F(homa_outgoing, homa_tx_skb_alloc__current_device_gso_limits)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->server_port,
+			self->client_id, 6000, 100);
+	struct sk_buff *skb;
+	u32 end = 6000;
+
+	enable_gso(crpc, 10);
+	self->dev->gso_max_segs = 2;
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	ASSERT_FALSE(IS_ERR(skb));
+	EXPECT_EQ(2800, end);
+	check_gso_records(_metadata, crpc, skb, 0, end, false, 0);
+	kfree_skb(skb);
+
+	self->dev->gso_max_segs = 128;
+	self->dev->gso_max_size = sizeof(struct iphdr) + sizeof(struct udphdr) +
+				 1400 + sizeof(struct homa_data_hdr);
+	end = 6000;
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	ASSERT_FALSE(IS_ERR(skb));
+	EXPECT_EQ(1400, end);
+	check_gso_records(_metadata, crpc, skb, 0, end, false, 0);
+	kfree_skb(skb);
+}
+
+TEST_F(homa_outgoing, homa_tx_skb_alloc__private_header_allocation_failure)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->server_port,
+			self->client_id, 6000, 100);
+	struct page *page = skb_frag_page(crpc->msgout.frags);
+	struct homa_peer *peer = crpc->route->peer;
+	struct sk_buff *skb;
+	u32 end = 6000;
+	int refs = page_ref_count(page);
+
+	enable_gso(crpc, 10);
+	peer->num_acks = 1;
+	peer->acks[0].client_id = cpu_to_be64(90);
+	mock_alloc_page_errors = 1;
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	ASSERT_TRUE(IS_ERR(skb));
+	EXPECT_EQ(-ENOMEM, PTR_ERR(skb));
+	EXPECT_EQ(6000, end);
+	EXPECT_EQ(refs, page_ref_count(page));
+	EXPECT_EQ(1, peer->num_acks);
+
+	mock_alloc_skb_errors = 1;
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	ASSERT_TRUE(IS_ERR(skb));
+	EXPECT_EQ(-ENOMEM, PTR_ERR(skb));
+	EXPECT_EQ(refs, page_ref_count(page));
+	EXPECT_EQ(1, peer->num_acks);
+}
+
+TEST_F(homa_outgoing, homa_tx_skb_alloc__partial_assembly_error_releases_pages)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->server_port,
+			self->client_id, 6000, 100);
+	skb_frag_t *frag = crpc->msgout.frags;
+	struct page *page = skb_frag_page(frag);
+	struct sk_buff *skb;
+	int saved_size = skb_frag_size(frag), refs = page_ref_count(page);
+	u32 end = 6000;
+
+	ASSERT_EQ(1, crpc->msgout.num_frags);
+	enable_gso(crpc, 10);
+	crpc->route->peer->num_acks = 1;
+	/* The first record attaches a payload reference; the second is bad. */
+	skb_frag_size_set(frag, 1400 + 4 + 100);
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	skb_frag_size_set(frag, saved_size);
+	ASSERT_TRUE(IS_ERR(skb));
+	EXPECT_EQ(-EINVAL, PTR_ERR(skb));
+	EXPECT_EQ(refs, page_ref_count(page));
+	EXPECT_EQ(1, crpc->route->peer->num_acks);
+	EXPECT_EQ(6000, end);
+}
+
+TEST_F(homa_outgoing, homa_tx_skb_alloc__pool_header_crosses_page)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end = 9000;
+
+	mock_no_high_order_pages = true;
+	mock_mtu = sizeof(struct iphdr) + 8 + 41 + PAGE_SIZE - 5;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			9000, 100);
+	ASSERT_NE(NULL, crpc);
+	enable_gso(crpc, 10);
+	/* The second internal four-byte offset begins at PAGE_SIZE - 1. */
+	EXPECT_EQ(PAGE_SIZE - 5, crpc->msgout.max_seg_data);
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	ASSERT_FALSE(IS_ERR(skb));
+	EXPECT_EQ(9000, end);
+	check_gso_records(_metadata, crpc, skb, 0, end, false, 0);
+	kfree_skb(skb);
+}
+
+TEST_F(homa_outgoing, homa_tx_skb_alloc__runtime_fragment_cap)
+{
+	struct homa_rpc *crpc;
+	struct sk_buff *skb;
+	u32 end = 20000;
+
+	mock_no_high_order_pages = true;
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			20000, 100);
+	enable_gso(crpc, 10);
+	mock_max_skb_frags = 5;
+	skb = homa_tx_skb_alloc(crpc, 0, &end);
+	ASSERT_FALSE(IS_ERR(skb));
+	/* Third payload crosses a pool page: 6 frags, not the nominal 5. */
+	EXPECT_EQ(2800, end);
+	EXPECT_EQ(3, skb_shinfo(skb)->nr_frags);
+	check_gso_records(_metadata, crpc, skb, 0, end, false, 0);
+	kfree_skb(skb);
+}
+
+TEST_F(homa_outgoing, homa_tx_skb_send__existing_geometry_mtu_change)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->server_port,
+			self->client_id, 6000, 100);
+	u32 end = 6000;
+	int old_mtu = mock_mtu, calls = mock_udp_xmit_calls;
+
+	enable_gso(crpc, 10);
+	crpc->route->peer->num_acks = 1;
+	homa_rpc_lock(crpc);
+	mock_mtu--;
+	EXPECT_EQ(-EMSGSIZE, homa_tx_skb_send(crpc, 0, &end));
+	EXPECT_EQ(0, crpc->msgout.next_xmit_offset);
+	EXPECT_EQ(1400, crpc->msgout.max_seg_data);
+	EXPECT_EQ(1, crpc->route->peer->num_acks);
+	EXPECT_EQ(calls, mock_udp_xmit_calls);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors));
+	EXPECT_EQ(-EHOSTUNREACH, crpc->error);
+	EXPECT_STREQ("route has MTU too small for Homa", self->hsk.error_msg);
+
+	mock_mtu = old_mtu + 1000;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 0, &end));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors));
+	EXPECT_EQ(1400, crpc->msgout.max_seg_data);
+	EXPECT_EQ(6000, end);
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_tx_skb_send__mtu_change_aborts_server_rpc)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 6000);
+	u32 end = 6000;
+
+	ASSERT_NE(NULL, srpc);
+	homa_rpc_lock(srpc);
+	mock_mtu--;
+	EXPECT_EQ(-EMSGSIZE, homa_tx_skb_send(srpc, 0, &end));
+	EXPECT_EQ(RPC_DEAD, srpc->state);
+	EXPECT_STREQ("route has MTU too small for Homa", self->hsk.error_msg);
+	homa_rpc_unlock(srpc);
 }
 
 TEST_F(homa_outgoing, homa_tx_skb_send__basics)
@@ -764,18 +1106,23 @@ TEST_F(homa_outgoing, homa_tx_skb_send__priorities)
 	crpc->msgout.retrans_priority = 3;
 	crpc->msgout.next_xmit_offset = 1500;
 	mock_xmit_log_verbose = 1;
+	/* A second accidental priority_map application would produce 7. */
+	self->homa.priority_map[2] = 4;
+	self->homa.priority_map[3] = 5;
+	self->homa.priority_map[4] = 7;
+	self->homa.priority_map[5] = 7;
 
 	/* First packet uses retransmit priority.*/
 	homa_rpc_lock(crpc);
 	end = 100;
 	EXPECT_EQ(0, homa_tx_skb_send(crpc, 0, &end));
-	EXPECT_STREQ("3", mock_xmit_prios);
+	EXPECT_STREQ("5", mock_xmit_prios);
 
 	/* Second packet uses msgout priority.*/
 	mock_clear_xmit_prios();
 	end = 2000;
 	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
-	EXPECT_STREQ("2", mock_xmit_prios);
+	EXPECT_STREQ("4", mock_xmit_prios);
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_outgoing, homa_tx_skb_send__metrics)
@@ -794,11 +1141,11 @@ TEST_F(homa_outgoing, homa_tx_skb_send__metrics)
 	end = 2000;
 	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->packets_sent[0]);
-	EXPECT_EQ(1456, homa_metrics_per_cpu()->priority_bytes[6]);
+	EXPECT_EQ(1441, homa_metrics_per_cpu()->priority_bytes[6]);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->priority_packets[6]);
 	homa_rpc_unlock(crpc);
 }
-TEST_F(homa_outgoing, homa_tx_skb_send__ipv4_call_homa_hijack_set_hdr)
+TEST_F(homa_outgoing, homa_tx_skb_send__ipv4_udp)
 {
 	struct homa_rpc *crpc;
 	u32 end;
@@ -813,19 +1160,21 @@ TEST_F(homa_outgoing, homa_tx_skb_send__ipv4_call_homa_hijack_set_hdr)
 			       self->client_id, 5000, 100);
 	ASSERT_NE(NULL, crpc);
 	crpc->msgout.max_gso_segs = 1;
-	mock_xmit_log_hijack = 1;
 	unit_log_clear();
 
 	homa_rpc_lock(crpc);
 	end = 2000;
 	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
-	EXPECT_STREQ("xmit DATA 1400@1400; hijack checksum 444, flags 0x6",
-		     unit_log_get());
+	EXPECT_STREQ("xmit DATA 1400@1400", unit_log_get());
+	EXPECT_EQ(AF_INET, mock_udp_last_family);
+	EXPECT_EQ(HOMA_UDP_PORT, ntohs(mock_udp_last_header.source));
+	EXPECT_EQ(HOMA_UDP_PORT, ntohs(mock_udp_last_header.dest));
 	homa_rpc_unlock(crpc);
 }
-TEST_F(homa_outgoing, homa_tx_skb_send__ipv4_transmit_error)
+TEST_F(homa_outgoing, homa_tx_skb_send__ipv4_alloc_error)
 {
 	struct homa_rpc *crpc;
+	int calls;
 	u32 end;
 
 	// Make sure the test uses IPv4.
@@ -838,58 +1187,73 @@ TEST_F(homa_outgoing, homa_tx_skb_send__ipv4_transmit_error)
 			       self->client_id, 5000, 100);
 	ASSERT_NE(NULL, crpc);
 	crpc->msgout.max_gso_segs = 1;
-	mock_ip_queue_xmit_errors = 1;
+	calls = mock_udp_xmit_calls;
+	mock_alloc_skb_errors = 1;
 	unit_log_clear();
 
+	/* The tunnel helpers return void, so the only failures reported
+	 * to the caller happen before the packet is handed over.
+	 */
 	homa_rpc_lock(crpc);
 	end = 2000;
-	EXPECT_EQ(ENETDOWN, -homa_tx_skb_send(crpc, 1500, &end));
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors));
+	EXPECT_EQ(ENOMEM, -homa_tx_skb_send(crpc, 1500, &end));
+	EXPECT_EQ(calls, mock_udp_xmit_calls);
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->data_xmit_errors));
 	homa_rpc_unlock(crpc);
 }
-TEST_F(homa_outgoing, homa_tx_skb_send__ipv6_call_homa_hijack_set_hdr)
+TEST_F(homa_outgoing, homa_tx_skb_send__ipv6_udp)
 {
 	struct homa_rpc *crpc;
 	u32 end;
 	struct in6_addr addr;
 
 	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
+	mock_set_ipv6(&self->hsk);
+	mock_mtu = sizeof(struct ipv6hdr) + sizeof(struct udphdr) +
+		   sizeof(struct homa_data_hdr) + 1400;
 
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			       &addr, self->server_port,
 			       self->client_id, 5000, 100);
 	ASSERT_NE(NULL, crpc);
 	crpc->msgout.max_gso_segs = 1;
-	mock_xmit_log_hijack = 1;
 	unit_log_clear();
 
 	homa_rpc_lock(crpc);
 	end = 2000;
 	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
-	EXPECT_STREQ("xmit DATA 1400@1400; hijack checksum 666, flags 0x6",
-		     unit_log_get());
+	EXPECT_STREQ("xmit DATA 1400@1400", unit_log_get());
+	EXPECT_EQ(AF_INET6, mock_udp_last_family);
+	EXPECT_EQ(HOMA_UDP_PORT, ntohs(mock_udp_last_header.source));
+	EXPECT_EQ(HOMA_UDP_PORT, ntohs(mock_udp_last_header.dest));
 	homa_rpc_unlock(crpc);
 }
-TEST_F(homa_outgoing, homa_tx_skb_send__ipv6_transmit_error)
+TEST_F(homa_outgoing, homa_tx_skb_send__ipv6_alloc_error)
 {
 	struct homa_rpc *crpc;
 	u32 end;
 	struct in6_addr addr;
+	int calls;
 
 	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
+	mock_set_ipv6(&self->hsk);
+	mock_mtu = sizeof(struct ipv6hdr) + sizeof(struct udphdr) +
+		   sizeof(struct homa_data_hdr) + 1400;
 
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			       &addr, self->server_port,
 			       self->client_id, 5000, 100);
 	ASSERT_NE(NULL, crpc);
 	crpc->msgout.max_gso_segs = 1;
-	mock_ip6_xmit_errors = 1;
+	calls = mock_udp_xmit_calls;
+	mock_alloc_skb_errors = 1;
 	unit_log_clear();
 
 	homa_rpc_lock(crpc);
 	end = 2000;
-	EXPECT_EQ(ENETDOWN, -homa_tx_skb_send(crpc, 1500, &end));
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->data_xmit_errors));
+	EXPECT_EQ(ENOMEM, -homa_tx_skb_send(crpc, 1500, &end));
+	EXPECT_EQ(calls, mock_udp_xmit_calls);
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->data_xmit_errors));
 	homa_rpc_unlock(crpc);
 }
 #endif /* See strip.py */
@@ -967,20 +1331,44 @@ TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
 	ASSERT_NE(NULL, srpc);
 	unit_log_clear();
 	homa_rpc_lock(srpc);
-	EXPECT_EQ(0, homa_xmit_control(BUSY, &h, 10, srpc));
-	EXPECT_STREQ("padded control packet with 16 bytes; "
-			"xmit unknown packet type 0x0",
-			unit_log_get());
+	EXPECT_EQ(0, homa_xmit_control(BUSY, &h, sizeof(h), srpc));
+	EXPECT_STREQ("xmit BUSY", unit_log_get());
+	EXPECT_EQ(sizeof(struct udphdr) + HOMA_MIN_PKT_LENGTH,
+		  ntohs(mock_udp_last_header.len));
 	homa_rpc_unlock(srpc);
 }
+TEST_F(homa_outgoing, __homa_xmit_control__unsendable_padded_control)
+{
+	struct homa_busy_hdr busy = {.common.type = BUSY};
+	struct homa_ack_hdr ack = {.common.type = ACK};
+	int calls = mock_udp_xmit_calls;
+
+	mock_mtu = sizeof(struct iphdr) + 8 + HOMA_MIN_PKT_LENGTH - 1;
+	EXPECT_EQ(-EMSGSIZE, __homa_xmit_control(&busy, sizeof(busy),
+						self->route, &self->hsk));
+	EXPECT_EQ(calls, mock_udp_xmit_calls);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors));
+	mock_mtu++;
+	EXPECT_EQ(0, __homa_xmit_control(&busy, sizeof(busy),
+					self->route, &self->hsk));
+	EXPECT_EQ(calls + 1, mock_udp_xmit_calls);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors));
+
+	mock_mtu = sizeof(struct iphdr) + 8 + sizeof(ack) - 1;
+	EXPECT_EQ(-EMSGSIZE, __homa_xmit_control(&ack, sizeof(ack),
+						self->route, &self->hsk));
+	EXPECT_EQ(calls + 1, mock_udp_xmit_calls);
+	IF_NO_STRIP(EXPECT_EQ(2, homa_metrics_per_cpu()->control_xmit_errors));
+}
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, __homa_xmit_control__ipv6_set_hijack)
+TEST_F(homa_outgoing, __homa_xmit_control__ipv6_udp)
 {
 	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
 	struct in6_addr addr;
 
 	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
+	mock_set_ipv6(&self->hsk);
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &addr,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
@@ -988,20 +1376,21 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_set_hijack)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
-	mock_xmit_log_hijack = 1;
 	homa_rpc_lock(srpc);
 	EXPECT_EQ(0, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
-	EXPECT_STREQ("xmit GRANT 12345@4; hijack checksum 666, flags 0x6",
-		     unit_log_get());
+	EXPECT_STREQ("xmit GRANT 12345@4", unit_log_get());
+	EXPECT_EQ(AF_INET6, mock_udp_last_family);
 	homa_rpc_unlock(srpc);
 }
-TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
+TEST_F(homa_outgoing, __homa_xmit_control__ipv6_unsendable)
 {
 	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
 	struct in6_addr addr;
+	int calls = mock_udp_xmit_calls;
 
 	ASSERT_EQ(1, inet_pton(AF_INET6, "2001:44::1", &addr));
+	mock_set_ipv6(&self->hsk);
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &addr,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
@@ -1010,14 +1399,17 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 	h.offset = htonl(12345);
 	h.priority = 4;
 	mock_xmit_log_verbose = 1;
-	mock_ip6_xmit_errors = 1;
+	calls = mock_udp_xmit_calls;
+	mock_mtu = sizeof(struct ipv6hdr) + sizeof(struct udphdr) +
+		   max_t(size_t, sizeof(h), HOMA_MIN_PKT_LENGTH) - 1;
 	homa_rpc_lock(srpc);
-	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_EQ(EMSGSIZE, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(calls, mock_udp_xmit_calls);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors));
 	homa_rpc_unlock(srpc);
 }
-TEST_F(homa_outgoing, __homa_xmit_control__ipv4_set_hijack)
+TEST_F(homa_outgoing, __homa_xmit_control__ipv4_udp)
 {
 	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
@@ -1034,17 +1426,17 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_set_hijack)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
-	mock_xmit_log_hijack = 1;
 	homa_rpc_lock(srpc);
 	EXPECT_EQ(0, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
-	EXPECT_STREQ("xmit GRANT 12345@4; hijack checksum 444, flags 0x6",
-		     unit_log_get());
+	EXPECT_STREQ("xmit GRANT 12345@4", unit_log_get());
+	EXPECT_EQ(AF_INET, mock_udp_last_family);
 	homa_rpc_unlock(srpc);
 }
-TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
+TEST_F(homa_outgoing, __homa_xmit_control__ipv4_unsendable)
 {
 	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
+	int calls;
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
@@ -1059,10 +1451,13 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 	h.offset = htonl(12345);
 	h.priority = 4;
 	mock_xmit_log_verbose = 1;
-	mock_ip_queue_xmit_errors = 1;
+	calls = mock_udp_xmit_calls;
+	mock_mtu = sizeof(struct iphdr) + sizeof(struct udphdr) +
+		   max_t(size_t, sizeof(h), HOMA_MIN_PKT_LENGTH) - 1;
 	homa_rpc_lock(srpc);
-	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_EQ(EMSGSIZE, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(calls, mock_udp_xmit_calls);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->control_xmit_errors));
 	homa_rpc_unlock(srpc);
 }
@@ -1249,10 +1644,10 @@ TEST_F(homa_outgoing, homa_resend_data__error)
 			self->server_ip, self->server_port, self->client_id,
 			16000, 1000);
 	unit_log_clear();
-	mock_ip_queue_xmit_errors = 2;
+	mock_alloc_skb_errors = 2;
 
 	homa_rpc_lock(crpc);
-	EXPECT_EQ(ENETDOWN, -homa_resend_data(crpc, 7100, 10000));
+	EXPECT_EQ(ENOMEM, -homa_resend_data(crpc, 7100, 10000));
 	EXPECT_STREQ("xmit DATA 1400@7000", unit_log_get());
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->resent_packets));
 	homa_rpc_unlock(crpc);
@@ -1262,9 +1657,11 @@ TEST_F(homa_outgoing, homa_rpc_tx_end)
 {
 	struct homa_qdisc_dev *qdev;
 	struct homa_skb_info *info;
-	struct homa_data_hdr h;
 	struct homa_rpc *srpc;
 	struct sk_buff *skb;
+	struct udphdr *udp;
+	struct iphdr *ip;
+	u32 end;
 	int offset, length;
 
 	qdev = homa_qdisc_qdev_get(self->dev);
@@ -1280,29 +1677,48 @@ TEST_F(homa_outgoing, homa_rpc_tx_end)
 	EXPECT_EQ(5600, homa_rpc_tx_end(srpc));
 	homa_rpc_unlock(srpc);
 
-	h.common = (struct homa_common_hdr){
-		.sport = htons(srpc->hsk->port),
-		.dport = htons(srpc->dport),
-		.type = DATA,
-		.sender_id = cpu_to_be64(srpc->id)
-	};
-	offset = 3000;
-	length = 1000;
-	h.msg_length = htonl(srpc->msgout.length);
-	h.seg.offset = htonl(offset);
-	skb = mock_skb_alloc(self->server_ip, self->client_ip, &h.common,
-			     length + sizeof(struct homa_skb_info), 0);
+	/* Defer a real canonical segment that lies below next_xmit_offset.
+	 * Qdisc sees UDP transport headers, unlike normalized receive skbs.
+	 */
+	offset = 2 * srpc->msgout.max_seg_data;
+	length = srpc->msgout.max_seg_data;
+	end = offset + length;
+	homa_rpc_lock(srpc);
+	skb = homa_tx_skb_alloc(srpc, offset, &end);
+	homa_rpc_unlock(srpc);
+	ASSERT_FALSE(IS_ERR(skb));
+	EXPECT_EQ(offset + length, end);
 	info = homa_get_skb_info(skb);
-	info->data_bytes = length;
-	info->dont_defer = 0;
-	qdisc_skb_cb(skb)->pkt_len = length + 100;
+	EXPECT_EQ(length, info->data_bytes);
+	udp = (struct udphdr *)skb_push(skb, sizeof(*udp));
+	skb_reset_transport_header(skb);
+	udp->source = htons(HOMA_UDP_PORT);
+	udp->dest = htons(HOMA_UDP_PORT);
+	udp->len = htons(skb->len);
+	udp->check = htons(1);
+	ip = (struct iphdr *)skb_push(skb, sizeof(*ip));
+	skb_reset_network_header(skb);
+	memset(ip, 0, sizeof(*ip));
+	ip->version = 4;
+	ip->ihl = 5;
+	ip->protocol = IPPROTO_UDP;
+	ip->saddr = ipv6_to_ipv4(*self->server_ip);
+	ip->daddr = ipv6_to_ipv4(*self->client_ip);
+	ip->tot_len = htons(skb->len);
+	skb->protocol = htons(ETH_P_IP);
+	skb->dev = self->dev;
+	qdisc_skb_cb(skb)->pkt_len = skb->len;
 
 	homa_qdisc_defer_homa(qdev, skb);
-	EXPECT_EQ(3000, homa_rpc_tx_end(srpc));
+	EXPECT_EQ(1, skb_queue_len(&srpc->qrpc.packets));
+	EXPECT_EQ(skb, skb_peek(&srpc->qrpc.packets));
+	EXPECT_EQ(qdev, srpc->qrpc.qdev);
+	EXPECT_EQ(offset, homa_rpc_tx_end(srpc));
 
 	homa_qdisc_xmit_deferred_homa(qdev);
+	EXPECT_EQ(0, skb_queue_len(&srpc->qrpc.packets));
 	EXPECT_EQ(5600, homa_rpc_tx_end(srpc));
 
-        homa_qdisc_qdev_put(qdev);
+	homa_qdisc_qdev_put(qdev);
 }
 #endif /* See strip.py */

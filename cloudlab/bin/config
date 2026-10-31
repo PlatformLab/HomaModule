@@ -507,10 +507,6 @@ def config_homa(mod):
         raise Exception("Can't configure Homa: no config info available "
                 "for link speed %d Mbps" % (link_mbps))
 
-    if get_nic_type() == "ice":
-        print("Enabling TCP hijacking")
-        set_sysctl("hijack_tcp", 1)
-
 def config_ipv6(num_hosts, vlan):
     """
     Configure this node to enable IPv6.

@@ -123,28 +123,114 @@ char *homa_print_ipv6_addr(const struct in6_addr *addr)
 }
 
 /**
- * homa_print_packet() - Print a human-readable string describing the
- * information in a Homa packet.
- * @skb:     Packet whose information should be printed.
- * @buffer:  Buffer in which to generate the string.
- * @buf_len: Number of bytes available at @buffer.
- *
- * Return:   @buffer
+ * homa_packet_offset() - Locate the Homa header in a packet for debug
+ * printing. Handles both normalized packets (transport header already at the
+ * Homa header) and packets that still carry the outer UDP header.
+ * @skb:    Packet to examine; nothing in it is modified.
+ * Return:  Offset from skb->data of the Homa header: the transport offset
+ *          plus the UDP header size if a UDP header with both ports
+ *          HOMA_UDP_PORT and a UDP length equal to the rest of the packet
+ *          is found there, otherwise the transport offset itself (0 if that
+ *          is negative). The result is not guaranteed to lie within the
+ *          packet; homa_packet_header checks that.
+ */
+static int homa_packet_offset(struct sk_buff *skb)
+{
+	struct udphdr udp;
+	int offset = skb_transport_offset(skb);
+
+	if (offset < 0)
+		return 0;
+	if (offset + sizeof(udp) <= skb->len &&
+	    !skb_copy_bits(skb, offset, &udp, sizeof(udp)) &&
+	    udp.source == htons(HOMA_UDP_PORT) &&
+	    udp.dest == htons(HOMA_UDP_PORT) &&
+	    ntohs(udp.len) == skb->len - offset)
+		offset += sizeof(udp);
+	return offset;
+}
+
+/**
+ * homa_packet_header() - Copy the Homa header of a packet into a buffer
+ * (safe for non-linear skbs) and check that the packet is long enough for
+ * the header of its type.
+ * @skb:     Packet to examine; nothing in it is modified.
+ * @header:  Buffer of at least HOMA_MAX_HEADER bytes; receives up to that
+ *           many bytes starting at the Homa header (fewer if the packet is
+ *           shorter).
+ * Return:   Offset from skb->data of the Homa header (see
+ *           homa_packet_offset), or -EINVAL if the packet is too short for
+ *           the common header or for the header of its type, an ACK claims
+ *           more acks than fit in the header, or a multi-segment DATA packet
+ *           lacks UDP_L4 GSO state with a gso_size larger than the DATA
+ *           header.
+ */
+static int homa_packet_header(struct sk_buff *skb, char *header)
+{
+	struct homa_common_hdr *h = (struct homa_common_hdr *)header;
+	int start = homa_packet_offset(skb), size;
+
+	if (start > skb->len || skb->len - start < sizeof(*h) ||
+	    skb_copy_bits(skb, start, header,
+			  min_t(unsigned int, HOMA_MAX_HEADER, skb->len - start)))
+		return -EINVAL;
+	switch (h->type) {
+	case DATA: size = sizeof(struct homa_data_hdr); break;
+#ifndef __STRIP__ /* See strip.py */
+	case GRANT: size = sizeof(struct homa_grant_hdr); break;
+#endif /* See strip.py */
+	case RESEND: size = sizeof(struct homa_resend_hdr); break;
+#ifndef __STRIP__ /* See strip.py */
+	case CUTOFFS: size = sizeof(struct homa_cutoffs_hdr); break;
+#endif /* See strip.py */
+	case ACK: {
+		struct homa_ack_hdr *ack = (struct homa_ack_hdr *)header;
+
+		if (ntohs(ack->num_acks) > ARRAY_SIZE(ack->acks))
+			return -EINVAL;
+		size = sizeof(*ack);
+		break;
+	}
+#ifndef __STRIP__ /* See strip.py */
+	case START_MSG: size = sizeof(struct homa_start_msg_hdr); break;
+#endif /* See strip.py */
+	default: size = sizeof(*h); break;
+	}
+	if (size > skb->len - start ||
+	    (h->type == DATA && skb_shinfo(skb)->gso_segs > 1 &&
+	     (skb_shinfo(skb)->gso_type != SKB_GSO_UDP_L4 ||
+	      skb_shinfo(skb)->gso_size <= sizeof(struct homa_data_hdr))))
+		return -EINVAL;
+	return start;
+}
+
+/**
+ * homa_print_packet() - Describe normalized Homa or encapsulated UDP packets.
+ * @skb: Packet whose information should be printed.
+ * @buffer: Destination buffer.
+ * @buf_len: Bytes available in @buffer.
+ * Return: @buffer.
  */
 char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 {
 	struct homa_common_hdr *common;
-	char header[HOMA_MAX_HEADER];
+	char header[HOMA_MAX_HEADER] = {};
 	struct in6_addr saddr;
-	int used = 0;
+	int used = 0, start;
 
+	if (buf_len <= 0)
+		return buffer;
 	if (!skb) {
 		snprintf(buffer, buf_len, "skb is NULL!");
 		buffer[buf_len - 1] = 0;
 		return buffer;
 	}
 
-	skb_copy_bits(skb, 0, &header, min(sizeof(header), skb->len));
+	start = homa_packet_header(skb, header);
+	if (start < 0) {
+		snprintf(buffer, buf_len, "malformed Homa packet");
+		return buffer;
+	}
 	common = (struct homa_common_hdr *)header;
 	saddr = skb_canonical_ipv6_saddr(skb);
 	used = homa_snprintf(buffer, buf_len, used,
@@ -155,19 +241,17 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 			     be64_to_cpu(common->sender_id));
 	switch (common->type) {
 	case DATA: {
-		struct homa_skb_info *homa_info = homa_get_skb_info(skb);
 		struct homa_data_hdr *h = (struct homa_data_hdr *)header;
 		int data_left, i, seg_length, pos, offset;
 
-		if (skb_shinfo(skb)->gso_segs == 0) {
-			seg_length = homa_data_len(skb);
+		if (skb_shinfo(skb)->gso_segs <= 1) {
+			seg_length = skb->len - start - sizeof(*h);
 			data_left = 0;
 		} else {
 			seg_length = skb_shinfo(skb)->gso_size -
-				     sizeof(struct homa_seg_hdr);
-			if (seg_length > homa_info->data_bytes)
-				seg_length = homa_info->data_bytes;
-			data_left = homa_info->data_bytes - seg_length;
+				     sizeof(*h);
+			data_left = skb->len - start -
+				    skb_shinfo(skb)->gso_size;
 		}
 		offset = ntohl(h->seg.offset);
 #ifndef __STRIP__ /* See strip.py */
@@ -188,23 +272,22 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		if (h->retransmit)
 			used = homa_snprintf(buffer, buf_len, used,
 					     ", RETRANSMIT");
-		if (skb_shinfo(skb)->gso_type == 0xd)
-			used = homa_snprintf(buffer, buf_len, used,
-					     ", TSO disabled");
 		if (skb_shinfo(skb)->gso_segs <= 1)
 			break;
-		pos = skb_transport_offset(skb) + sizeof(*h) + seg_length;
+		pos = start + skb_shinfo(skb)->gso_size;
 		used = homa_snprintf(buffer, buf_len, used, ", extra segs");
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
-			struct homa_seg_hdr seg;
+			struct homa_data_hdr seg;
 
-			skb_copy_bits(skb, pos, &seg, sizeof(seg));
-			offset = ntohl(seg.offset);
-			if (seg_length > data_left)
-				seg_length = data_left;
+			if (data_left <= sizeof(seg) ||
+			    skb_copy_bits(skb, pos, &seg, sizeof(seg)))
+				break;
+			offset = ntohl(seg.seg.offset);
+			seg_length = min_t(int, skb_shinfo(skb)->gso_size,
+					 data_left) - sizeof(seg);
 			used = homa_snprintf(buffer, buf_len, used,
 					     " %d@%d", seg_length, offset);
-			data_left -= seg_length;
+			data_left -= sizeof(seg) + seg_length;
 			pos += skb_shinfo(skb)->gso_size;
 		};
 		break;
@@ -307,40 +390,53 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 {
 	struct homa_common_hdr *common;
-	char header[HOMA_MAX_HEADER];
+	char header[HOMA_MAX_HEADER] = {};
+	int start;
 
+	if (buf_len <= 0)
+		return buffer;
+	if (!skb) {
+		snprintf(buffer, buf_len, "skb is NULL!");
+		return buffer;
+	}
+	start = homa_packet_header(skb, header);
 	common = (struct homa_common_hdr *)header;
-	skb_copy_bits(skb, 0, header, min(HOMA_MAX_HEADER, skb->len));
+	if (start < 0) {
+		snprintf(buffer, buf_len, "malformed Homa packet");
+		return buffer;
+	}
 	switch (common->type) {
 	case DATA: {
 		struct homa_data_hdr *h = (struct homa_data_hdr *)header;
-		struct homa_skb_info *homa_info = homa_get_skb_info(skb);
 		int data_left, used, i, seg_length, pos, offset;
 
-		if (skb_shinfo(skb)->gso_segs == 0) {
-			seg_length = homa_data_len(skb);
+		if (skb_shinfo(skb)->gso_segs <= 1) {
+			seg_length = skb->len - start - sizeof(*h);
 			data_left = 0;
 		} else {
 			seg_length = skb_shinfo(skb)->gso_size -
-				     sizeof(struct homa_seg_hdr);
-			data_left = homa_info->data_bytes - seg_length;
+				     sizeof(*h);
+			data_left = skb->len - start -
+				    skb_shinfo(skb)->gso_size;
 		}
 		offset = ntohl(h->seg.offset);
 
-		pos = skb_transport_offset(skb) + sizeof(*h) + seg_length;
+		pos = start + skb_shinfo(skb)->gso_size;
 		used = homa_snprintf(buffer, buf_len, 0, "DATA%s %d@%d",
 				     h->retransmit ? " retrans" : "",
 				     seg_length, offset);
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
-			struct homa_seg_hdr seg;
+			struct homa_data_hdr seg;
 
-			skb_copy_bits(skb, pos, &seg, sizeof(seg));
-			offset = ntohl(seg.offset);
-			if (seg_length > data_left)
-				seg_length = data_left;
+			if (data_left <= sizeof(seg) ||
+			    skb_copy_bits(skb, pos, &seg, sizeof(seg)))
+				break;
+			offset = ntohl(seg.seg.offset);
+			seg_length = min_t(int, skb_shinfo(skb)->gso_size,
+					 data_left) - sizeof(seg);
 			used = homa_snprintf(buffer, buf_len, used,
 					     " %d@%d", seg_length, offset);
-			data_left -= seg_length;
+			data_left -= sizeof(seg) + seg_length;
 			pos += skb_shinfo(skb)->gso_size;
 		}
 		break;
@@ -1317,31 +1413,29 @@ error:
 #endif /* See strip.py */
 
 /**
- * homa_tcp_checksum() - Compute the TCP checksum for a packet. This is
+ * homa_udp_checksum() - Compute the UDP checksum for a packet. This is
  * done "from scratch", i.e. not using any existing information such
  * as skb->csum.
  * @skb:     Contains the packet to checksum
  * Return:   Checksum for the packet: 0 is the "correct" value.
  */
-int homa_tcp_checksum(struct sk_buff *skb)
+int homa_udp_checksum(struct sk_buff *skb)
 {
-    int tcp_len = skb->len - skb_transport_offset(skb);
-    __wsum data_csum;
+	int offset = skb_transport_offset(skb);
+	struct udphdr udp;
+	__wsum data_csum;
+	int len;
 
-    // Calculate the sum of the TCP header + data manually
-    data_csum = skb_checksum(skb, skb_transport_offset(skb), tcp_len, 0);
-
-    if (skb_is_ipv6(skb)) {
-        const struct ipv6hdr *ip6h = ipv6_hdr(skb);
-
-        // Fold the manual sum with the IPv6 pseudo-header
-        return csum_ipv6_magic(&ip6h->saddr, &ip6h->daddr, tcp_len,
-                               IPPROTO_TCP, data_csum);
-    } else {
-        const struct iphdr *iph = ip_hdr(skb);
-
-        // Fold the manual sum with the IPv4 pseudo-header
-        return csum_tcpudp_magic(iph->saddr, iph->daddr, tcp_len,
-                                 IPPROTO_TCP, data_csum);
-    }
+	if (offset < 0 || skb_copy_bits(skb, offset, &udp, sizeof(udp)))
+		return -EINVAL;
+	len = ntohs(udp.len);
+	if (len < sizeof(udp) || len > skb->len - offset || skb_is_gso(skb))
+		return -EINVAL;
+	data_csum = skb_checksum(skb, offset, len, 0);
+	if (skb_is_ipv6(skb))
+		return csum_ipv6_magic(&ipv6_hdr(skb)->saddr,
+				       &ipv6_hdr(skb)->daddr, len,
+				       IPPROTO_UDP, data_csum);
+	return csum_tcpudp_magic(ip_hdr(skb)->saddr, ip_hdr(skb)->daddr,
+				 len, IPPROTO_UDP, data_csum);
 }

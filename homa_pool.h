@@ -177,7 +177,7 @@ static inline void homa_pool_lock(struct homa_pool *pool)
 
 /**
  * homa_pool_unlock() - Release the lock for a buffer pool.
- * @hsk:   Buffer pool to unlock.
+ * @pool:  Buffer pool to unlock.
  */
 static inline void homa_pool_unlock(struct homa_pool *pool)
 	__releases(pool->lock)

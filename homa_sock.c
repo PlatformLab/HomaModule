@@ -9,7 +9,6 @@
 
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
-#include "homa_hijack.h"
 #endif /* See strip.py */
 
 /**
@@ -210,8 +209,6 @@ int homa_sock_init(struct homa_sock *hsk)
 
 	hsk->is_server = false;
 	hsk->shutdown = false;
-	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET) ?
-				sizeof(struct iphdr) : sizeof(struct ipv6hdr);
 	hsk->error_msg = "no error";
 	spin_lock_init(&hsk->lock);
 	atomic_set(&hsk->protect_count, 0);
@@ -237,7 +234,6 @@ int homa_sock_init(struct homa_sock *hsk)
 	/* Initialize fields outside the Homa part. */
 	hsk->sock.sk_sndbuf = homa->wmem_max;
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
-	IF_NO_STRIP(homa_hijack_sock_init(hsk));
 
 	/* This is needed to prevent blocking when allocating memory in
 	 * functions like ip_route_output_flow, which could be invoked

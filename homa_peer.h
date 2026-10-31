@@ -10,10 +10,6 @@
 #include "homa_wire.h"
 #include "homa_sock.h"
 
-#ifndef __STRIP__ /* See strip.py */
-#include "homa_hijack.h"
-#endif /* See strip.py */
-
 #include <linux/rhashtable.h>
 
 struct homa_rpc;
@@ -298,7 +294,7 @@ struct homa_route {
 
 	/**
 	 * @flow: Contains parameters used to generate @dst; must be
-	 * retained and passed to ip*xmit.
+	 * retained for the UDP tunnel transmit helpers.
 	 */
 	struct flowi flow;
 
@@ -376,6 +372,8 @@ int      homa_route_prefer_evict(struct homa_peertab *peertab,
 void     homa_route_remove(struct homa_route *route,
 			   struct homa_peertab *peertab);
 int      homa_route_validate(struct homa_rpc *rpc);
+void     homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
+			 struct homa_route *route, int priority);
 
 extern const struct rhashtable_params peer_ht_params;
 extern const struct rhashtable_params route_ht_params;
@@ -452,32 +450,6 @@ static inline int homa_peer_compare(struct rhashtable_compare_arg *arg,
 
 	return !(ipv6_addr_equal(&key->addr, &peer->ht_key.addr) &&
 		 peer->ht_key.hnet == key->hnet);
-}
-
-/**
- * homa_route_xmit() - Transmit a packet according to a given route.
- * @skb:      Packet to transmit.
- * @hsk:      Socket on which to transmit packet.
- * @route:    Route to use to transmit packet.
- * @priority: Priority for packet.
- * Return:    0 for success, otherwise a negative errno.
- */
-static inline int homa_route_xmit(struct sk_buff *skb, struct homa_sock *hsk,
-				  struct homa_route *route, int priority)
-{
-	rcu_read_lock();
-	dst_hold(rcu_dereference(route->dst));
-	skb_dst_set(skb, rcu_dereference(route->dst));
-	rcu_read_unlock();
-	IF_NO_STRIP(priority = hsk->homa->priority_map[priority]);
-	if (ipv6_addr_v4mapped(&route->peer->addr)) {
-		IF_NO_STRIP(homa_hijack_set_hdr(skb, route, false));
-		hsk->inet.tos = priority << 5;
-		return ip_queue_xmit(&hsk->inet.sk, skb, &route->flow);
-	}
-	IF_NO_STRIP(homa_hijack_set_hdr(skb, route, true));
-	return ip6_xmit(&hsk->inet.sk, skb, &route->flow.u.ip6, 0,
-			NULL, priority << 5, 0);
 }
 
 /**

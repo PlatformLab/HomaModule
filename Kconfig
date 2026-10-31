@@ -6,14 +6,15 @@
 config HOMA
 	tristate "The Homa transport protocol"
 	depends on IPV6
+	select NET_UDP_TUNNEL
 
 	help
 	  Homa is a network transport protocol for communication within
 	  a datacenter. It provides significantly lower latency than TCP,
 	  particularly for workloads containing a mixture of large and small
-	  messages operating at high network utilization. At present, Homa
-	  has been only partially upstreamed; this version provides bare-bones
-	  functionality but is not performant. For more information see the
+	  messages operating at high network utilization. Homa uses a UDP
+	  tunnel on port 5001 for both IPv4 and IPv6 while preserving its
+	  application socket API. For more information see the
 	  homa(7) man page or checkout the Homa Wiki at
 	  https://homa-transport.atlassian.net/wiki/spaces/HOMA/overview.
 

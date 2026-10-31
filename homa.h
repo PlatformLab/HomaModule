@@ -14,6 +14,7 @@
 
 /* IANA-assigned Internet Protocol number for Homa. */
 #define IPPROTO_HOMA 146
+#define HOMA_UDP_PORT 5001
 
 /**
  * define HOMA_MAX_MESSAGE_LENGTH - Maximum bytes of payload in a Homa

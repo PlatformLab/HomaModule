@@ -131,48 +131,21 @@ feel free to contact me (John Ousterhout, ouster@cs.stanford.edu).
    to use fewer levels than that (my experience is that there is not
    much difference in performance between 4 levels and 8).
 
-1. Enable segmentation offload (TSO or GSO). This is essential for good
-   performance on large messages.  If segmentation offload is disabled
-   (the default), Homa generates MTU-sized output packets and each of these
-   packets must pass through the Linux IP stack, which is quite expensive.
-   This limits output throughput. With segmentation offload, Homa generates
-   output packets that are much larger than the network MTU. Once a packet
-   has passed through the IP stack and been handed off to the NIC, the
-   NIC chops the packet up into multiple smaller packets (segments). This
-   reduces IP stack overhead. Virtually all NICs support segmentation offload
-   for TCP (TSO).  Unfortunately, many NICs will not perform segmentation
-   if the packet transport protocol is unknown, which is the case for
-   Homa. You have three options:
-   * If your NICs were made by Mellanox or NVIDIA, they will segment Homa
-     packets by default. All you need to do is set Homa's `max_gso_size`
-     configuration parameter to a large number on each node:
-     ```
-     sudo sysctl .net.homa.max_gso_size=100000
-     ```
-   * Enable TCP hijacking. Homa has a mode called "TCP hijacking" in which
-     it generates output packets that look like TCP packets and are transmitted
-     using the TCP IP protocol. Since the packets look just like TCP
-     packets, NICs will perform TSO on them. The packets have a few bits
-     set in a way that would never occur with real TCP packets; when
-     the packets reach the destination, Homa recognizes them and "steals"
-     them back so they are processed by Homa and not TCP. You can enable
-     TCP hijacking with the following command:
-     ```
-     sudo sysctl .net.homa.hijack_tcp=1
-     ```
-     Once you have done this, set `max_gso_size` as described above.
-     Unfortunately some datacenters employ security mechanisms in their
-     switches that detect TCP packets that "don't seem right" (e.g.,
-     they don't belong to legitimate connections) and drop them. These filters
-     will discard TCP-encapsulated Homa packets, so hijacking will not work.
-   * As a last resort, use software segmentation (GSO). Linux has a mechanism
-     in which packets can be segmented in software after they have passed
-     through the IP stack. This is not as efficient as TSO in the NIC, but it
-     is still more efficient than passing every MTU-sized packet individually
-     through the network stack. Homa has support for GSO, but unfortunately
-     this support is temporarily broken due to other recent changes. If you
-     need GSO before I get around to fixing it, contact me and I will
-     prioritize the fix.
+1. Homa uses UDP port 5001 for both IPv4 and IPv6, with no transport-enable
+   setting or fallback. Permit this UDP traffic between communicating hosts.
+   Applications continue to use Homa sockets and application ports; they do
+   not bind ordinary UDP sockets to the tunnel port.
+
+   Large messages use standard UDP segmentation offload. Each resulting
+   datagram contains a complete Homa header and its own message offset.
+   Linux can segment in software when hardware UDP segmentation is unavailable.
+   Advertised NIC capabilities alone do not establish correct wire behavior;
+   verify segmentation and checksums on the intended topology.
+
+   The existing `max_gso_size` setting controls batching, subject to route,
+   device, kernel, and fragment limits. It is optional tuning, not a
+   prerequisite for enabling UDP. `gso_force_software` requests software
+   segmentation without changing the wire transport.
 
 1. If you are running on Intel CPUs, set the power-saving mode to "performance":
    ```
@@ -184,3 +157,7 @@ feel free to contact me (John Ousterhout, ouster@cs.stanford.edu).
    Homa on each node. It assumes that nodes have names `nodeN` where N is a
    small integer, and it also assumes that you have already run `make` both
    in the top-level directory and in `util`.
+   This script configures the target hosts and loads Homa. Do not execute it
+   if you only want the utility checks that do not load Homa.
+   See the [utility and non-loading checks](README.md#utilities-and-non-loading-checks)
+   for ordinary TCP and raw UDP tests that do not load Homa.

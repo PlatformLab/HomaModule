@@ -539,14 +539,20 @@ struct homa_metrics {
 	u64 peer_dst_refreshes;
 
 	/**
-	 * @control_xmit_errors: total number of times ip_queue_xmit
-	 * failed when transmitting a control packet.
+	 * @control_xmit_errors: total number of control packets rejected
+	 * before being handed to the UDP tunnel helpers because the padded
+	 * packet did not fit the route's MTU (-EMSGSIZE from
+	 * __homa_xmit_control). Failures after the handoff are not counted:
+	 * the helpers return void and report nothing synchronously.
 	 */
 	u64 control_xmit_errors;
 
 	/**
-	 * @data_xmit_errors: total number of times ip_queue_xmit
-	 * failed when transmitting a data packet.
+	 * @data_xmit_errors: total number of times a data packet was not
+	 * sent because the geometry of its message no longer fits the
+	 * route's MTU (-EMSGSIZE from homa_tx_skb_alloc, counted in
+	 * homa_tx_skb_send). Failures after the handoff to the UDP tunnel
+	 * helpers are not counted (they are not reported synchronously).
 	 */
 	u64 data_xmit_errors;
 
@@ -787,15 +793,15 @@ struct homa_metrics {
 
 	/**
 	 * @gro_grant_bypasses: total number of GRANT packets passed directly
-	 * to homa_softirq by homa_gro_receive, bypassing the normal SoftIRQ
-	 * mechanism (triggered by HOMA_GRO_FAST_GRANTS).
+	 * to homa_softirq by homa_udp_gro_receive, bypassing the normal
+	 * SoftIRQ mechanism (triggered by HOMA_GRO_FAST_GRANTS).
 	 */
 	u64 gro_grant_bypasses;
 
 	/**
 	 * @gro_data_bypasses: total number of DATA packets passed directly
-	 * to homa_softirq by homa_gro_receive, bypassing the normal SoftIRQ
-	 * mechanism (triggered by HOMA_GRO_SHORT_BYPASS).
+	 * to homa_softirq by homa_udp_gro_receive, bypassing the normal
+	 * SoftIRQ mechanism (triggered by HOMA_GRO_SHORT_BYPASS).
 	 */
 	u64 gro_data_bypasses;
 

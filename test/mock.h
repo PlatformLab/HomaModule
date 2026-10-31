@@ -5,6 +5,7 @@
 #define _HOMA_MOCK_H
 
 #include <linux/ethtool.h>
+#include <net/udp_tunnel.h>
 
 /* Replace various Linux variables and functions with mocked ones. */
 #undef alloc_pages
@@ -120,6 +121,7 @@
 #define register_net_sysctl mock_register_net_sysctl
 
 #define signal_pending(...) mock_signal_pending
+#define ip4_dst_hoplimit mock_ip4_dst_hoplimit
 
 #undef set_active_memcg
 #define set_active_memcg mock_set_active_memcg
@@ -146,12 +148,6 @@
 #define sock_put(sock) mock_sock_put(sock)
 
 #define spin_unlock mock_spin_unlock
-
-#undef tcp_v4_check
-#define tcp_v4_check(...) (~(__force __sum16)444U)
-
-#undef tcp_v6_check
-#define tcp_v6_check(...) (~(__force __sum16)666U)
 
 #undef this_cpu_ptr
 #define this_cpu_ptr(name) (&name[cpu_number])
@@ -194,8 +190,6 @@ extern int         mock_ethtool_ksettings_errors;
 extern bool        mock_exit_thread;
 extern int         mock_import_iovec_errors;
 extern int         mock_import_ubuf_errors;
-extern int         mock_ip6_xmit_errors;
-extern int         mock_ip_queue_xmit_errors;
 extern bool        mock_ipv6;
 extern bool        mock_ipv6_default;
 extern int         mock_kmalloc_errors;
@@ -238,8 +232,22 @@ extern u64         mock_tt_cycles;
 extern int         mock_vmalloc_errors;
 extern int         mock_wait_intr_irq_errors;
 extern int         mock_xmit_log_verbose;
-extern int         mock_xmit_log_hijack;
 extern char        mock_xmit_prios[];
+extern int         mock_udp_create_errors;
+extern int         mock_udp_create_errno;
+extern int         mock_udp_release_calls;
+extern int         mock_udp_xmit_calls;
+extern struct udp_port_cfg mock_udp_port_cfg[2];
+extern struct udphdr mock_udp_last_header;
+extern int         mock_udp_last_family;
+extern int         mock_udp_last_tos;
+extern int         mock_udp_last_ip_summed;
+extern int         mock_udp_last_csum_start;
+extern int         mock_udp_last_csum_offset;
+extern unsigned int mock_udp_last_gso_type;
+extern unsigned int mock_udp_last_gso_size;
+extern unsigned int mock_udp_last_gso_segs;
+extern int         mock_udp_last_data_bytes;
 
 extern struct task_struct *current_task;
 
@@ -248,6 +256,7 @@ struct page *
 struct Qdisc
 	   *mock_alloc_qdisc(struct netdev_queue *dev_queue);
 int         mock_check_error(int *errorMask);
+int         mock_ip4_dst_hoplimit(const struct dst_entry *dst);
 void        mock_clear_xmit_prios(void);
 s64         mock_cmpxchg(atomic64_t *target, s64 old, s64 new);
 unsigned int mock_compound_order(struct page *page);

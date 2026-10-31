@@ -1,8 +1,6 @@
 /* SPDX-License-Identifier: BSD-2-Clause OR GPL-2.0+ */
 
-/* This file defines functions that are useful during Homa development;
- * they are not present in the upstreamed version of Homa in Linux.
- */
+/* Functions useful during Homa development and diagnostics. */
 
 #ifndef _HOMA_DEVEL_H
 #define _HOMA_DEVEL_H
@@ -134,7 +132,7 @@ int      homa_snprintf(char *buffer, int size, int used,
 		       const char *format, ...) __printf(4, 5);
 char    *homa_symbol_for_type(uint8_t type);
 char    *homa_symbol_for_state(struct homa_rpc *rpc);
-int      homa_tcp_checksum(struct sk_buff *skb);
+int      homa_udp_checksum(struct sk_buff *skb);
 int      homa_validate_incoming(struct homa *homa, int verbose,
 				int *link_errors);
 

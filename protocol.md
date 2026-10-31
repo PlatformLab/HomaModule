@@ -3,6 +3,46 @@
 This file contains a terse summary of the packet protocol used by this
 driver for communication between client and server machines.
 
+## UDP wire format
+
+This variant carries every packet class over IPv4 or IPv6 UDP, with both
+outer ports fixed at `HOMA_UDP_PORT` (5001, defined in [homa.h](homa.h)).
+Both families require valid UDP checksums. There is no native protocol-146
+wire delivery, TCP-shaped header or transport fallback. Protocol 146 remains
+the application Homa socket selector and socket-option level; applications
+continue to bind Homa application ports, not ordinary UDP tunnel sockets.
+
+The packed inner common header contains application source port (2 bytes),
+application destination port (2), packet type (1) and sender RPC ID (8), in
+network byte order. It is 13 bytes, with the ID at offset 5.
+[homa_wire.h](homa_wire.h) is the authoritative kernel layout.
+
+| Packet | Inner header bytes |
+|---|---:|
+| DATA | 41 |
+| GRANT | 18 |
+| RESEND | 22 |
+| UNKNOWN, BUSY, FREEZE, NEED_ACK | 13 |
+| CUTOFFS | 47 |
+| ACK | 65 |
+| START_MSG | 17 |
+
+DATA includes its segment offset at byte 37. UDP segmentation replicates IP
+and UDP headers only: the sender preframes a complete DATA header in every
+segment, including retransmissions and tails. Homa-aware GRO retains complete
+records for receive dispatch; an aggregate is not a single header followed by
+unframed message bytes.
+
+ACK always reserves five 10-byte entries after its 2-byte count, even when
+fewer entries are valid; the count cannot exceed five. Control packets are
+padded to at least 18 inner bytes. New messages use the effective route MTU
+minus the actual family IP header, UDP header and DATA header. Existing
+message geometry is not adaptively rebuilt after a route-MTU change.
+
+Raw injection/capture utilities operate on this wire format and require raw
+socket privileges. Their success with the module unloaded does not establish
+live Homa RPC, GSO/GRO or scheduling correctness.
+
 ## Basics
 Homa implements RPCs (remote procedure calls), in which a client sends
 a *request message* to a server, the server carries out an operation
@@ -12,7 +52,7 @@ packets of data.
 
 ## Packet types
 Homa supports the following packet types; for complete details, see the
-declarations in homa_impl.h.
+declarations in [homa_wire.h](homa_wire.h).
 
 **DATA**: contains a contiguous range of bytes from a message, along with
 additional metadata such as the total length of the message and the

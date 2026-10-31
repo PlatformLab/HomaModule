@@ -229,12 +229,6 @@ struct homa_sock {
 	 */
 	bool shutdown;
 
-	/**
-	 * @ip_header_length: Length of IP headers for this socket (depends
-	 * on IPv4 vs. IPv6).
-	 */
-	int ip_header_length;
-
 	/** @slink: Links this socket into a homa_socktab bucket. */
 	struct homa_sock_link *slink;
 

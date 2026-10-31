@@ -356,34 +356,14 @@ TEST_F(homa_sock, homa_sock_init__all_ports_in_use)
 	unit_sock_destroy(&hsk3);
 	unit_sock_destroy(&hsk4);
 }
-TEST_F(homa_sock, homa_sock_init__ip_header_length)
+TEST_F(homa_sock, homa_sock_init__application_protocol_unchanged)
 {
-	struct homa_sock hsk_v4, hsk_v6;
+	struct homa_sock hsk;
 
-	mock_ipv6 = false;
-	mock_sock_init(&hsk_v4, self->hnet, 0);
-	mock_ipv6 = true;
-	mock_sock_init(&hsk_v6, self->hnet, 0);
-	EXPECT_EQ(sizeof(struct iphdr), hsk_v4.ip_header_length);
-	EXPECT_EQ(sizeof(struct ipv6hdr), hsk_v6.ip_header_length);
-	unit_sock_destroy(&hsk_v4);
-	unit_sock_destroy(&hsk_v6);
+	mock_sock_init(&hsk, self->hnet, 0);
+	EXPECT_EQ(IPPROTO_HOMA, hsk.sock.sk_protocol);
+	unit_sock_destroy(&hsk);
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_sock, homa_sock_init__hijack_tcp)
-{
-	struct homa_sock hijack, no_hijack;
-
-	self->homa.hijack_tcp = 0;
-	mock_sock_init(&no_hijack, self->hnet, 0);
-	self->homa.hijack_tcp = 1;
-	mock_sock_init(&hijack, self->hnet, 0);
-	EXPECT_EQ(IPPROTO_HOMA, no_hijack.sock.sk_protocol);
-	EXPECT_EQ(IPPROTO_TCP, hijack.sock.sk_protocol);
-	unit_sock_destroy(&hijack);
-	unit_sock_destroy(&no_hijack);
-}
-#endif /* See strip.py */
 
 TEST_F(homa_sock, homa_sock_link__basics)
 {
