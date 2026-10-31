@@ -117,6 +117,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	u64 id = homa_local_id(h->sender_id);
 	struct homa_rpc_bucket *bucket;
 	struct homa_rpc *srpc = NULL;
+	struct mem_cgroup *memcg;
 	int msg_length;
 	int err;
 
@@ -140,8 +141,13 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	}
 
 	/* Initialize fields that don't require the socket lock. */
-	if (hsk->sock.sk_memcg) {
-		struct mem_cgroup *old = set_active_memcg(hsk->sock.sk_memcg);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+	memcg = hsk->sock.sk_memcg;
+#else
+	memcg = mem_cgroup_from_sk(&hsk->sock);
+#endif
+	if (memcg) {
+		struct mem_cgroup *old = set_active_memcg(memcg);
 
 		srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC | __GFP_ACCOUNT);
 		set_active_memcg(old);
