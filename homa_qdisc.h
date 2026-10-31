@@ -484,10 +484,11 @@ static inline bool homa_qdisc_precedes(struct homa_rpc *rpc1,
 static inline int homa_qdisc_deferred_offset(struct homa_rpc *rpc)
 {
 	/* This doesn't synchronize, but the worst that can happen is
-	 * to return a slightly out-of-date result.
+	 * to return a slightly out-of-date result. The pacer modifies
+	 * these fields concurrently, under qdev->defer_lock.
 	 */
-	if (skb_queue_len(&rpc->qrpc.packets) > 0)
-		return rpc->msgout.length - rpc->qrpc.tx_left;
+	if (skb_queue_len_lockless(&rpc->qrpc.packets) > 0)
+		return rpc->msgout.length - READ_ONCE(rpc->qrpc.tx_left);
 	return -1;
 }
 
