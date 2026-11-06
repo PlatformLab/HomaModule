@@ -54,6 +54,7 @@ int homa_tx_pool_init(struct homa *homa)
 
 		nid = homa_tx_pool_mem_nid(i);
 		tx_core = &per_cpu(homa_tx_pool_core, i);
+		local_lock_init(&tx_core->bh_lock);
 		tx_core->nid = nid;
 	}
 	pr_notice("%s found max NUMA node %d\n", __func__, homa->max_numa);
@@ -172,6 +173,7 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 	 * task preemption (so we can access per-core info without races).
 	 */
 	local_bh_disable();
+	local_lock_nested_bh(&homa_tx_pool_core.bh_lock);
 	tx_core = &per_cpu(homa_tx_pool_core, smp_processor_id());
 	tx_pool = homa->tx_pools[tx_core->nid];
 
@@ -216,6 +218,7 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 		bytes_left -= skb_frag_size(frag);
 	}
 	nid = tx_core->nid;
+	local_unlock_nested_bh(&homa_tx_pool_core.bh_lock);
 	local_bh_enable();
 	*frags  = cur_frags;
 	*num_frags = frags_allocated;
@@ -226,6 +229,7 @@ error:
 	if (cur_frags != *frags)
 		kfree(cur_frags);
 	*num_frags = 0;
+	local_unlock_nested_bh(&homa_tx_pool_core.bh_lock);
 	local_bh_enable();
 	return err;
 }

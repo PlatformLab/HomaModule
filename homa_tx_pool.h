@@ -57,6 +57,13 @@ struct homa_tx_pool {
  */
 struct homa_tx_pool_core {
 	/**
+	 * @bh_lock: protects @page, @page_size, and @allocated. Disabling
+	 * BHs is not enough on PREEMPT_RT, where another task can run on
+	 * this core while BHs are disabled.
+	 */
+	local_lock_t bh_lock;
+
+	/**
 	 * @page: a page of data that is "owned" by this core and used for
 	 * allocation on this core (or NULL). This pointer is included in
 	 * the page's reference count.
