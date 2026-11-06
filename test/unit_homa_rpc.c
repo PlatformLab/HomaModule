@@ -315,7 +315,7 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__unlink_from_waiting_for_bufs_after_error
 
 	mock_check_bpool_leaks = false;
 	self->data.msg_length = N(1400);
-	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
+	self->hsk.buffer_pool->free_bpages = 0;
 	self->hsk.shutdown = 1;
 	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip,
 				     &self->data.common);
