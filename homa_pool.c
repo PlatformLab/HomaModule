@@ -374,7 +374,9 @@ void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
  */
 int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 {
+#ifndef __UPSTREAM__ /* See strip.py */
 	int freed_pages = 0;
+#endif /* See strip.py */
 	int i, result = 0;
 	bool locked = false;
 
@@ -409,7 +411,9 @@ int homa_pool_free_bufs(struct homa_pool *pool, int num_buffers, u32 *buffers)
 				locked = true;
 			}
 			homa_pool_push_free(pool, bpage_index);
+#ifndef __UPSTREAM__ /* See strip.py */
 			freed_pages++;
+#endif /* See strip.py */
 		}
 	}
 	if (locked) {
