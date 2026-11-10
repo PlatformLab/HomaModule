@@ -245,7 +245,8 @@ struct homa_message_in {
 #ifndef __STRIP__ /* See strip.py */
 /**
  * struct homa_rpc_qdisc - Information that homa_qdisc needs to store in
- * each RPC. Managed entirely by homa_qdisc.
+ * each RPC. Managed entirely by homa_qdisc, normally while holding
+ * qdev->defer_lock.
  */
 struct homa_rpc_qdisc {
 	/**
