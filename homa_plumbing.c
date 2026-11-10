@@ -1797,9 +1797,6 @@ discard:
 		packets = other_pkts;
 	}
 
-#ifndef __STRIP__ /* See strip.py */
-	atomic_dec(&per_cpu(homa_offload_core, raw_smp_processor_id()).softirq_backlog);
-#endif /* See strip.py */
 	INC_METRIC(softirq_cycles, homa_clock() - start);
 	return 0;
 }

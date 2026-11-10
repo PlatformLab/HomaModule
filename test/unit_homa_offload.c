@@ -451,41 +451,51 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	kfree_skb(self->skb);
 }
 
-TEST_F(homa_offload, homa_gro_gen2)
+TEST_F(homa_offload, homa_gro_gen2__check_last_gro)
+{
+	self->homa.gro_policy = HOMA_GRO_GEN2;
+	mock_clock = 1000;
+	self->homa.busy_cycles = 100;
+	mock_set_core(7);
+	mock_softirq_pending_mask |= 1 << 6;
+	per_cpu(homa_offload_core, 7).last_gro = 901;
+	per_cpu(homa_offload_core, 0).last_gro = 950;
+	per_cpu(homa_offload_core, 1).last_gro = 0;
+
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(1, self->skb->hash - 32);
+}
+TEST_F(homa_offload, homa_gro_gen2__check_softirq_pending)
+{
+	self->homa.gro_policy = HOMA_GRO_GEN2;
+	mock_clock = 1000;
+	self->homa.busy_cycles = 100;
+	mock_set_core(1);
+	mock_softirq_pending_mask = 0xb;
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(2, self->skb->hash - 32);
+}
+TEST_F(homa_offload, homa_gro_gen2__all_cores_busy)
 {
 	self->homa.gro_policy = HOMA_GRO_GEN2;
 	mock_clock = 1000;
 	self->homa.busy_cycles = 100;
 	mock_set_core(5);
-	atomic_set(&per_cpu(homa_offload_core, 6).softirq_backlog, 1);
-	per_cpu(homa_offload_core, 6).last_gro = 0;
-	atomic_set(&per_cpu(homa_offload_core, 7).softirq_backlog, 0);
-	per_cpu(homa_offload_core, 7).last_gro = 901;
-	atomic_set(&per_cpu(homa_offload_core, 0).softirq_backlog, 2);
-	per_cpu(homa_offload_core, 0).last_gro = 0;
-	atomic_set(&per_cpu(homa_offload_core, 1).softirq_backlog, 0);
-	per_cpu(homa_offload_core, 1).last_gro = 899;
-	atomic_set(&per_cpu(homa_offload_core, 2).softirq_backlog, 0);
-	per_cpu(homa_offload_core, 2).last_gro = 0;
+	mock_softirq_pending_mask = 0xc3;
+	per_cpu(homa_offload_core, 5).softirq_offset = 2;
 
-	// Avoid busy cores.
-	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(1, self->skb->hash - 32);
-	EXPECT_EQ(1, atomic_read(&per_cpu(homa_offload_core, 1).softirq_backlog));
-
-	// All cores busy; must rotate.
-	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(6, self->skb->hash - 32);
-	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(7, self->skb->hash - 32);
-	EXPECT_EQ(2, per_cpu(homa_offload_core, 5).softirq_offset);
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(0, self->skb->hash - 32);
+	EXPECT_EQ(3, per_cpu(homa_offload_core, 5).softirq_offset);
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(1, self->skb->hash - 32);
+	EXPECT_EQ(4, per_cpu(homa_offload_core, 5).softirq_offset);
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(6, self->skb->hash - 32);
 	EXPECT_EQ(1, per_cpu(homa_offload_core, 5).softirq_offset);
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(7, self->skb->hash - 32);
+	EXPECT_EQ(2, per_cpu(homa_offload_core, 5).softirq_offset);
 }
 
 TEST_F(homa_offload, homa_gro_gen3__basics)

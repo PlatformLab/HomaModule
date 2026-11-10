@@ -292,6 +292,11 @@ char mock_printk_output [5000];
 void **mock_rht_walk_results;
 int mock_rht_num_walk_results;
 
+/* Bit N indicates whether homa_softirq_pending should return true for
+ * core N.
+ */
+u64 mock_softirq_pending_mask;
+
 /* Used instead of HOMA_MIN_DEFAULT_PORT by homa_skb.c. */
 __u16 mock_min_default_port = 0x8000;
 
@@ -2773,6 +2778,12 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 	return skb;
 }
 
+/* Standin for homa_softirq_pending. */
+bool mock_softirq_pending(int core)
+{
+	return (mock_softirq_pending_mask >> core) & 1;
+}
+
 /**
  * mock_tcp_skb() - Allocate and return a TCP packet buffer. The buffer is
  * initialized as if it just arrived from the network.
@@ -2972,6 +2983,7 @@ void mock_teardown(void)
 	mock_printk_output[0] = 0;
 	mock_rht_walk_results = NULL;
 	mock_rht_num_walk_results = 0;
+	mock_softirq_pending_mask = 0;
 	mock_min_default_port = 0x8000;
 	homa_net_id = 0;
 	for (i = 0; i < MOCK_MAX_NETS; i++) {

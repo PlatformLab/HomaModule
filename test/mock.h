@@ -261,6 +261,7 @@ extern int         mock_route_errors;
 extern int         mock_signal_pending;
 extern int         mock_skb_segment_errors;
 extern int         mock_sock_holds;
+extern u64         mock_softirq_pending_mask;
 extern int         mock_sysctl_intval;
 extern struct task_struct
 		   mock_task;
@@ -358,6 +359,7 @@ void        mock_sock_hold(struct sock *sk);
 int         mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet,
 			   int port);
 void        mock_sock_put(struct sock *sk);
+bool        mock_softirq_pending(int core);
 void        mock_spin_lock(spinlock_t *lock);
 void        mock_spin_unlock(spinlock_t *lock);
 struct sk_buff *

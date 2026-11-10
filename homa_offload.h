@@ -26,13 +26,6 @@ struct homa_offload_core {
 	u64 last_gro;
 
 	/**
-	 * @softirq_backlog: the number of batches of packets that have
-	 * been queued for SoftIRQ processing on this core but haven't
-	 * yet been processed.
-	 */
-	atomic_t softirq_backlog;
-
-	/**
 	 * @softirq_offset: used when rotating SoftIRQ assignment among
 	 * the next cores; contains an offset to add to the current core
 	 * to produce the core for SoftIRQ.
@@ -83,5 +76,22 @@ int      homa_offload_end(void);
 int      homa_offload_init(void);
 void     homa_send_ipis(void);
 void     homa_set_softirq_cpu(struct sk_buff *skb, int cpu);
+
+/**
+ * homa_softirq_pending() - Returns true if packets have been backlogged
+ * on a given core for SoftIRQ processing but the SoftIRQ processing has
+ * not yet completed.
+ * @cpu:   The core to check.
+ * Return: True if packets are pending on @cpu, false otherwise.
+ */
+static inline bool homa_softirq_pending(int cpu)
+{
+#ifndef __UNIT_TEST__
+	return test_bit(NAPI_STATE_SCHED,
+			&per_cpu(softnet_data, cpu).backlog.state);
+#else
+	return mock_softirq_pending(cpu);
+#endif
+}
 
 #endif /* _HOMA_OFFLOAD_H */

@@ -36,7 +36,6 @@ int homa_offload_init(void)
 		offload_core = &per_cpu(homa_offload_core, i);
 		offload_core->last_active = 0;
 		offload_core->last_gro = 0;
-		atomic_set(&offload_core->softirq_backlog, 0);
 		offload_core->softirq_offset = 0;
 		offload_core->gen3_softirq_cores[0] = i ^ 1;
 		for (j = 1; j < NUM_GEN3_SOFTIRQ_CORES; j++)
@@ -468,9 +467,9 @@ void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 		if (unlikely(candidate >= nr_cpu_ids))
 			candidate = 0;
 		offload_core = &per_cpu(homa_offload_core, candidate);
-		if (atomic_read(&offload_core->softirq_backlog)  > 0)
+		if ((READ_ONCE(offload_core->last_gro) + homa->busy_cycles) > now)
 			continue;
-		if ((offload_core->last_gro + homa->busy_cycles) > now)
+		if (homa_softirq_pending(candidate))
 			continue;
 		tt_record3("homa_gro_gen2 chose core %d for id %d offset %d",
 			   candidate, homa_local_id(h->common.sender_id),
@@ -494,7 +493,7 @@ void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 			   candidate, homa_local_id(h->common.sender_id),
 			   ntohl(h->seg.offset));
 	}
-	atomic_inc(&per_cpu(homa_offload_core, candidate).softirq_backlog);
+
 	homa_set_softirq_cpu(skb, candidate);
 }
 
