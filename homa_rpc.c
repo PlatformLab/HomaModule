@@ -140,14 +140,10 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	}
 
 	/* Initialize fields that don't require the socket lock. */
-	if (hsk->sock.sk_memcg) {
-		struct mem_cgroup *old = set_active_memcg(hsk->sock.sk_memcg);
-
-		srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC | __GFP_ACCOUNT);
-		set_active_memcg(old);
-	} else {
-		srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC);
-	}
+	/* RHEL8 doesn't export int_active_memcg, so set_active_memcg() can't
+	 * be used from a module; server RPCs are left uncharged.
+	 */
+	srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC);
 	if (!srpc) {
 		err = -ENOMEM;
 		goto error;
