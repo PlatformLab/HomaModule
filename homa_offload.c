@@ -29,20 +29,15 @@ int homa_offload_init(void)
 {
 	int i, result;
 
-	for (i = 0; i < nr_cpu_ids; i++) {
+	for_each_possible_cpu(i) {
 		struct homa_offload_core *offload_core;
 		int j;
 
 		offload_core = &per_cpu(homa_offload_core, i);
-		offload_core->last_active = 0;
-		offload_core->last_gro = 0;
-		offload_core->softirq_offset = 0;
+		memset(offload_core, 0, sizeof(*offload_core));
 		offload_core->gen3_softirq_cores[0] = i ^ 1;
 		for (j = 1; j < NUM_GEN3_SOFTIRQ_CORES; j++)
 			offload_core->gen3_softirq_cores[j] = -1;
-		offload_core->last_app_active = 0;
-		offload_core->held_skb = NULL;
-		offload_core->held_bucket = 0;
 	}
 
 	result = inet_add_offload(&homa_offload, IPPROTO_HOMA);
@@ -242,6 +237,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	u64 *softirq_cycles_metric;
 	struct sk_buff *held_skb;
 	u64 now = homa_clock();
+	int held_bucket;
 	int priority;
 	u32 saddr;
 	u32 hash;
@@ -262,8 +258,8 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 
 	h_new = (struct homa_data_hdr *)skb_transport_header(skb);
 	offload_core = &per_cpu(homa_offload_core, smp_processor_id());
-	busy = (now - offload_core->last_gro) < homa->gro_busy_cycles;
-	offload_core->last_active = now;
+	busy = (now - READ_ONCE(offload_core->last_gro)) < homa->gro_busy_cycles;
+	WRITE_ONCE(offload_core->last_active, now);
 	if (skb_is_ipv6(skb)) {
 		priority = ipv6_hdr(skb)->priority;
 		saddr = ntohl(ipv6_hdr(skb)->saddr.in6_u.u6_addr32[3]);
@@ -316,7 +312,17 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 * core added a Homa packet (if there is such a list).
 	 */
 	hash = skb_get_hash_raw(skb) & (GRO_HASH_BUCKETS - 1);
-	if (offload_core->held_skb) {
+
+	/* For safety under PREEMPT_RT, must snapshot held_skb and
+	 * held_bucket once at the beginning. On PREEMPT_RT, another task
+	 * on this core could change them at any time. That is harmless,
+	 * because the hint is only trusted after it is found on our own
+	 * list, but we need to make sure that we use the same bucket
+	 * throughout the code below.
+	 */
+	held_skb = READ_ONCE(offload_core->held_skb);
+	held_bucket = READ_ONCE(offload_core->held_bucket);
+	if (held_skb) {
 		/* Reverse-engineer the location of the gro_node, so we
 		 * can verify that held_skb is still valid.
 		 */
@@ -329,24 +335,25 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		struct gro_node *gro_node = container_of(gro_list,
 				struct gro_node, hash[hash]);
 #endif
+		struct sk_buff *bucket_skb;
 
-		/* Must verify that offload_core->held_skb points to a packet on
-		 * the list, and that the packet is a Homa packet.
+		/* Must verify that offload_core->held_skb points to a packet
+		 * on the bucket's list, and that the packet is a Homa packet.
 		 * homa_gro_complete isn't always invoked before removing
 		 * packets from the list, so offload_core->held_skb could be a
 		 * dangling pointer (or the skb could have been reused for
 		 * some other protocol).
 		 */
-		list_for_each_entry(held_skb,
+		list_for_each_entry(bucket_skb,
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
-				    &napi->gro_hash[offload_core->held_bucket].list,
+				    &napi->gro_hash[held_bucket].list,
 #else
-				    &gro_node->hash[offload_core->held_bucket].list,
+				    &gro_node->hash[held_bucket].list,
 #endif
 				    list) {
 			int protocol;
 
-			if (held_skb != offload_core->held_skb)
+			if (bucket_skb != held_skb)
 				continue;
 			if (skb_is_ipv6(held_skb))
 				protocol = ipv6_hdr(held_skb)->nexthdr;
@@ -382,20 +389,20 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				 * pushes it upward.
 				 */
 				skb_list_del_init(held_skb);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
+				napi->gro_hash[held_bucket].count--;
+				if (napi->gro_hash[held_bucket].count == 0)
+					__clear_bit(held_bucket,
+						    &napi->gro_bitmask);
+#else
+				gro_node->hash[held_bucket].count--;
+				if (gro_node->hash[held_bucket].count == 0)
+					__clear_bit(held_bucket,
+						    &gro_node->bitmask);
+#endif
 				homa_gro_complete(held_skb, 0);
 				netif_receive_skb(held_skb);
 				homa_send_ipis();
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
-				napi->gro_hash[offload_core->held_bucket].count--;
-				if (napi->gro_hash[offload_core->held_bucket].count == 0)
-					__clear_bit(offload_core->held_bucket,
-						    &napi->gro_bitmask);
-#else
-				gro_node->hash[offload_core->held_bucket].count--;
-				if (gro_node->hash[offload_core->held_bucket].count == 0)
-					__clear_bit(offload_core->held_bucket,
-						    &gro_node->bitmask);
-#endif
 				result = ERR_PTR(-EINPROGRESS);
 			}
 			goto done;
@@ -417,7 +424,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 
 done:
 	homa_qdisc_pacer_check(homa);
-	offload_core->last_gro = homa_clock();
+	WRITE_ONCE(offload_core->last_gro, homa_clock());
 	return result;
 
 bypass:
@@ -430,7 +437,7 @@ bypass:
 	softirq_cycles = *softirq_cycles_metric - saved_softirq_metric;
 	*softirq_cycles_metric = saved_softirq_metric;
 	INC_METRIC(bypass_softirq_cycles, softirq_cycles);
-	offload_core->last_gro = homa_clock();
+	WRITE_ONCE(offload_core->last_gro, homa_clock());
 
 	/* This return value indicates that we have freed skb. */
 	return ERR_PTR(-EINPROGRESS);
@@ -582,7 +589,7 @@ void homa_gro_gen3(struct homa *homa, struct sk_buff *skb)
 		}
 	}
 	homa_set_softirq_cpu(skb, core);
-	per_cpu(homa_offload_core, core).last_active = now;
+	WRITE_ONCE(per_cpu(homa_offload_core, core).last_active, now);
 	tt_record4("homa_gro_gen3 chose core %d for id %d, offset %d, delta %d",
 		   core, homa_local_id(h->common.sender_id),
 		   ntohl(h->seg.offset),
@@ -636,7 +643,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 			core++;
 			if (unlikely(core >= nr_cpu_ids))
 				core = 0;
-			last_active = per_cpu(homa_offload_core, core).last_active;
+			last_active = READ_ONCE(per_cpu(homa_offload_core, core).last_active);
 			if (last_active < best_time) {
 				best_time = last_active;
 				best = core;

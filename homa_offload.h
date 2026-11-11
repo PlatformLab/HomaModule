@@ -13,22 +13,24 @@
  */
 struct homa_offload_core {
 	/**
-	 * @last_active: homa_clock() time of the last known activity
-	 * on this core, such NAPI or SoftIRQ. Used for load balancing.
+	 * @last_active: homa_clock() time of the last known activity on
+	 * this core, such NAPI or SoftIRQ. A hint used for load balancing.
+	 * Accessed by other cores, so use READ_ONCE and WRITE_ONCE.
 	 */
 	u64 last_active;
 
 	/**
 	 * @last_gro: the most recent homa_clock() time when
-	 * homa_gro_receive returned on this core. Used to determine
-	 * whether GRO is keeping a core busy.
+	 * homa_gro_receive returned on this core. A hint used to determine
+	 * whether GRO is keeping a core busy. Accessed by other cores, so
+	 * use READ_ONCE and WRITE_ONCE.
 	 */
 	u64 last_gro;
 
 	/**
 	 * @softirq_offset: used when rotating SoftIRQ assignment among
-	 * the next cores; contains an offset to add to the current core
-	 * to produce the core for SoftIRQ.
+	 * the next cores; contains an offset (hint) to add to the current
+	 * core to produce the core for SoftIRQ.
 	 */
 	int softirq_offset;
 
@@ -44,7 +46,7 @@ struct homa_offload_core {
 	/**
 	 * @last_app_active: the most recent homa_clock() time when an
 	 * application was actively using Homa on this core (e.g., by
-	 * sending or receiving messages). Used for load balancing
+	 * sending or receiving messages). A hint used for load balancing
 	 * (see balance.txt).
 	 */
 	u64 last_app_active;
