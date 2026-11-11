@@ -45,6 +45,11 @@ ifneq ($(KERNELRELEASE),)
 obj-m += homa.o
 homa-y = $(HOMA_OBJS)
 
+# Kernels built without CONFIG_XXHASH don't provide xxh32().
+ifndef CONFIG_XXHASH
+homa-y += compat/xxhash.o
+endif
+
 MY_CFLAGS += -g
 ccflags-y += $(MY_CFLAGS)
 
