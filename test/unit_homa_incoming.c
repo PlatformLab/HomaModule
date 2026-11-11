@@ -87,7 +87,9 @@ FIXTURE(homa_incoming) {
 	struct homa_sock hsk;
 	struct homa_sock hsk2;
 	struct homa_data_hdr data;
+#ifndef __STRIP__ /* See strip.py */
 	struct homa_start_msg_hdr start;
+#endif /* See strip.py */
 };
 FIXTURE_SETUP(homa_incoming)
 {
@@ -126,6 +128,7 @@ FIXTURE_SETUP(homa_incoming)
 	};
 	self->data.msg_length = htonl(10000);
 
+#ifndef __STRIP__ /* See strip.py */
 	memset(&self->start, 0, sizeof(self->start));
 	self->start.common = (struct homa_common_hdr){
 		.sport = htons(self->client_port),
@@ -134,6 +137,7 @@ FIXTURE_SETUP(homa_incoming)
 		.sender_id = cpu_to_be64(self->client_id)
 	};
 	self->start.msg_length = htonl(10000);
+#endif /* See strip.py */
 
 	unit_log_clear();
 	delete_count = 0;
@@ -1943,6 +1947,7 @@ TEST_F(homa_incoming, homa_resend_pkt__response_not_ready_server_sends_busy)
 					  &h.common, 0, 0));
 	EXPECT_STREQ("xmit BUSY", unit_log_get());
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend_send_start_msg)
 {
 	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
@@ -1966,6 +1971,7 @@ TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend_send_start_msg)
 					  &h.common, 0, 0));
 	EXPECT_STREQ("xmit START_MSG 20000", unit_log_get());
 }
+#endif /* See strip.py */
 TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend_send_data)
 {
 	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
@@ -1981,7 +1987,7 @@ TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend_send_data)
 	ASSERT_NE(NULL, srpc);
 	unit_log_clear();
 	srpc->msgout.next_xmit_offset = 2000;
-	srpc->msgout.granted = 3000;
+	IF_NO_STRIP(srpc->msgout.granted = 3000);
 
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
 					  &h.common, 0, 0));
@@ -2140,6 +2146,7 @@ TEST_F(homa_incoming, homa_resend_pkt__requested_data_hasnt_been_sent_yet)
 	EXPECT_SUBSTR("xmit BUSY", unit_log_get());
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_unknown_pkt__client_resend_start_msg)
 {
 	struct homa_rpc_unknown_hdr h = {{.sport = htons(self->server_port),
@@ -2160,6 +2167,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_start_msg)
 					  &h.common, 0, 0));
 	EXPECT_STREQ("xmit START_MSG 10000", unit_log_get());
 }
+#endif /* See strip.py */
 TEST_F(homa_incoming, homa_unknown_pkt__client_resend_all_data)
 {
 	struct homa_rpc_unknown_hdr h = {{.sport = htons(self->server_port),

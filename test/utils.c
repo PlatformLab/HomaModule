@@ -69,6 +69,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		return crpc;
 	crpc->msgout.next_xmit_offset = crpc->msgout.length;
 
+#ifndef __STRIP__ /* See strip.py */
 	if (state == UNIT_RCVD_START_MSG) {
 		struct homa_start_msg_hdr start;
 		memset(&start, 0, sizeof(start));
@@ -84,6 +85,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 				   &start.common, 0, 0));
 		return crpc;
 	}
+#endif /* See strip.py */
 
 	struct homa_data_hdr h;
 	memset(&h, 0, sizeof(h));
@@ -327,6 +329,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	int bytes_received;
 	int status;
 
+#ifndef __STRIP__ /* See strip.py */
 	if (state == UNIT_RCVD_START_MSG) {
 		struct homa_start_msg_hdr start;
 		memset(&start, 0, sizeof(start));
@@ -345,6 +348,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 			homa_rpc_unlock(srpc);
 		return srpc;
 	}
+#endif /* See strip.py */
 
 	memset(&h, 0, sizeof(h));
 	h.common = (struct homa_common_hdr){
