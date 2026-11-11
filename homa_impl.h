@@ -85,6 +85,7 @@ struct homa_peer;
 struct homa_rpc;
 struct homa_route;
 struct homa_sock;
+struct sockaddr_unsized;
 
 /* Features not present in all kernels: */
 #ifndef __cond_acquires
