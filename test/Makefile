@@ -126,7 +126,7 @@ dummyFile:
 rhashtable.o: rhashtable.c
 	$(CC) -c $(CFLAGS) -O2 -fno-sanitize=address $< -o $@
 
-xxhash.o: xxhash.c
+xxhash.o: ../compat/xxhash.c
 	$(CC) -c $(CFLAGS) -O2 -fno-sanitize=address $< -o $@
 
 unit: $(OBJS)

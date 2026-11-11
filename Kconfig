@@ -6,6 +6,7 @@
 config HOMA
 	tristate "The Homa transport protocol"
 	depends on IPV6
+	select XXHASH
 
 	help
 	  Homa is a network transport protocol for communication within
