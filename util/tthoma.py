@@ -1057,6 +1057,20 @@ def get_xmit_time(offset: int, rpc: dict[str, Any],
         return fallback
     return xmit
 
+def interval_avg(node: str, metric: str):
+    """
+    Return the average value of a particular metric across all of the intervals
+    for a particular node.
+    node:       Name of the node to consider
+    metric:     Name of the metric to average
+    """
+
+    global intervals
+    total = 0
+    for interval in intervals[node]:
+        total += interval[metric]
+    return total / len(intervals[node])
+
 def pkt_id(id: int, offset: int) -> str:
     return '%d:%d' % (id, offset)
 
@@ -14270,7 +14284,44 @@ class AnalyzeTxintervals:
             print('--data option wasn\'t specified, so no output generated.')
             return
         print('See data files txintervals_*.dat in %s\n' % (options.data))
-        print('Average transmit throughput:')
+
+        print('Averages across all intervals for each node:')
+        print('Node:        Name of node')
+        print('Gbps:        Average rate of data passed to NIC')
+        print('Reqs:        Average number of request messages that have been '
+                'started but not')
+        print('             fully transmitted')
+        print('Resps:       Average number of response messages that have been '
+                'started but not')
+        print('             fully transmitted')
+        print('QDisc:       Average KB of data in homa_qdisc')
+        print('NQEst:       Average estimated NIC queue length, measured in '
+                'μsecs to xmit')
+        print('             (assumes the NIC can transmit at %.1f Gbps '
+                '(--gbps option))' % (options.gbps))
+        print('InNic:       Average KB of data that have been queued for the '
+                'NIC but whose')
+        print('             packets have not yet been returned after '
+                'transmission')
+        print('NicRx:       Average KB of data still in the NIC\'s possession '
+                    'whose packets')
+        print('             haven\'t been returned after transmission even '
+                'though the data')
+        print('            data has been received by the destination')
+        print('GXmit:       Average KB of grants that have been sent by peer '
+                    'but not yet')
+        print('             received by GRO')
+        print('GGro:        Average KB of grants that have been received by '
+                'GRO but not')
+        print('             yet received by SoftIRQ')
+        print('GAvail:      Average KB of grants received by SoftIRQ but '
+                    'data hasn\'t')
+        print('             been transmitted yet')
+        print('GNew:        Average KB of new grants received by SoftIRQ '
+                    'during the interval')
+
+        print('\nNode        Gbps  Reqs  Resps  QDisc  NQEst  InNic ', end='')
+        print('NicRx GXmit  GGro GAvail  Gnew')
 
         if options.tx_qid != None:
             qid_msg = ' (considers only transmit queue %d)' % (options.tx_qid)
@@ -14390,7 +14441,23 @@ class AnalyzeTxintervals:
                         interval['tx_grant_avl'] * 1e-3,
                         interval['tx_new_grants'] * 1e-3))
             f.close()
-            print('%-10s %6.1f Gbps' % (node, total/len(intervals[node])))
+
+            # Print summary information for the node
+            gbps = interval_avg(node, 'tx_nic_bytes') * 8 / (options.interval *
+                    1000)
+            print(' %-10s %4.1f %5.1f  %5.1f %6.1f  %5.2f  %5.1f ' % (
+                    node, gbps,
+                    interval_avg(node, 'tx_live_req'),
+                    interval_avg(node, 'tx_live_resp'),
+                    interval_avg(node, 'tx_qdisc') * 1e-3,
+                    interval_avg(node, 'tx_q') * 8 / (options.gbps * 1000),
+                    interval_avg(node, 'tx_in_nic') * 1e-3), end='')
+            print('%5.1f %5.1f %5.1f  %5.1f %5.1f' % (
+                    interval_avg(node, 'tx_nic_rx') * 1e-3,
+                    interval_avg(node, 'tx_grant_xmit') * 1e-3,
+                    interval_avg(node, 'tx_grant_gro') * 1e-3,
+                    interval_avg(node, 'tx_grant_avl') * 1e-3,
+                    interval_avg(node, 'tx_new_grants') * 1e-3))
 
 #------------------------------------------------
 # Analyzer: txpkts
