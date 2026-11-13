@@ -104,6 +104,7 @@ struct homa_peertab *homa_peer_alloc_peertab(void)
 		return ERR_PTR(-ENOMEM);
 
 	spin_lock_init(&peertab->lock);
+	mutex_init(&peertab->walk_mutex);
 	err = rhashtable_init(&peertab->peer_ht, &peer_ht_params);
 	if (err)
 		goto error;
@@ -148,7 +149,7 @@ void homa_peer_free_net(struct homa_net *hnet)
 	struct rhashtable_iter iter;
 	struct homa_route *route;
 
-	spin_lock_bh(&peertab->lock);
+	mutex_lock(&peertab->walk_mutex);
 	rhashtable_walk_enter(&peertab->route_ht, &iter);
 	rhashtable_walk_start(&iter);
 	while (1) {
@@ -159,6 +160,7 @@ void homa_peer_free_net(struct homa_net *hnet)
 			continue;
 		if (route->key.hnet != hnet)
 			continue;
+		spin_lock_bh(&peertab->lock);
 		if (rhashtable_remove_fast(&peertab->route_ht,
 					   &route->ht_linkage,
 					   route_ht_params) == 0) {
@@ -166,12 +168,15 @@ void homa_peer_free_net(struct homa_net *hnet)
 			hnet->num_routes--;
 			peertab->num_routes--;
 		}
+		spin_unlock_bh(&peertab->lock);
 	}
 	rhashtable_walk_stop(&iter);
 	rhashtable_walk_exit(&iter);
+	spin_lock_bh(&peertab->lock);
 	WARN(hnet->num_routes != 0, "%s ended up with hnet->num_routes %d",
 	     __func__, hnet->num_routes);
 	spin_unlock_bh(&peertab->lock);
+	mutex_unlock(&peertab->walk_mutex);
 
 	/* homa_route_free uses hnet, which will be freed as soon as we
 	 * return, so wait for the callbacks queued above.
@@ -593,14 +598,23 @@ void homa_route_gc(struct homa_peertab *peertab)
 	int num_victims;
 	int i;
 
-	spin_lock_bh(&peertab->lock);
-	if (peertab->num_routes < peertab->gc_threshold)
-		goto done;
+	if (READ_ONCE(peertab->num_routes) < peertab->gc_threshold)
+		return;
+
+	/* The victims are chosen without holding peertab->lock (see the
+	 * documentation for walk_mutex), so another thread may remove one
+	 * of them before we lock; rhashtable_remove_fast will then fail.
+	 * The RCU read lock keeps such a route from being freed until we're
+	 * done with it.
+	 */
+	mutex_lock(&peertab->walk_mutex);
+	rcu_read_lock();
 	num_victims = homa_route_pick_victims(peertab, victims,
 					      EVICT_BATCH_SIZE);
 	if (num_victims == 0)
 		goto done;
 
+	spin_lock_bh(&peertab->lock);
 	for (i = 0; i < num_victims; i++) {
 		struct homa_route *route = victims[i];
 
@@ -614,8 +628,10 @@ void homa_route_gc(struct homa_peertab *peertab)
 			homa_route_release(route);
 		}
 	}
-done:
 	spin_unlock_bh(&peertab->lock);
+done:
+	rcu_read_unlock();
+	mutex_unlock(&peertab->walk_mutex);
 }
 
 /**
@@ -625,9 +641,14 @@ done:
  * @max_victims:  Limit on how many victims to choose (and size of @victims
  *                array).
  * Return:        The number of routes stored in @victims; may be zero.
+ *
+ * The caller must hold @peertab->walk_mutex and the RCU read lock; the
+ * victims may be removed by other threads, and are only safe to use until
+ * the RCU read lock is released.
  */
 int homa_route_pick_victims(struct homa_peertab *peertab,
 			    struct homa_route *victims[], int max_victims)
+	__must_hold(peertab->walk_mutex)
 {
 	struct homa_route *route;
 	int num_victims = 0;
@@ -669,7 +690,7 @@ int homa_route_pick_victims(struct homa_peertab *peertab,
 		if (idle < peertab->idle_jiffies_min)
 			continue;
 		if (idle < peertab->idle_jiffies_max &&
-		    route->key.hnet->num_routes <= peertab->net_max)
+		    READ_ONCE(route->key.hnet->num_routes) <= peertab->net_max)
 			continue;
 
 		/* Sort the candidate into the existing list of victims. */
@@ -710,14 +731,14 @@ int homa_route_prefer_evict(struct homa_peertab *peertab,
 	/* Prefer a route whose homa_net is over its limit; if both are either
 	 * over or under, then prefer the route with the longest idle time.
 	 */
-	if (route1->key.hnet->num_routes > peertab->net_max) {
-		if (route2->key.hnet->num_routes <= peertab->net_max)
+	if (READ_ONCE(route1->key.hnet->num_routes) > peertab->net_max) {
+		if (READ_ONCE(route2->key.hnet->num_routes) <= peertab->net_max)
 			return true;
 		else
 			return time_before(route1->access_jiffies,
 					   route2->access_jiffies);
 	}
-	if (route2->key.hnet->num_routes > peertab->net_max)
+	if (READ_ONCE(route2->key.hnet->num_routes) > peertab->net_max)
 		return false;
 	else
 		return time_before(route1->access_jiffies,

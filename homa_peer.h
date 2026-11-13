@@ -29,6 +29,15 @@ struct homa_peertab {
 	 */
 	spinlock_t lock;
 
+	/**
+	 * @walk_mutex: Held while scanning @route_ht (also protects
+	 * @route_ht_iter). @lock can't be held for this, because the
+	 * rhashtable walk functions acquire the table's internal lock
+	 * without disabling softirqs, while @lock is acquired at softirq
+	 * level. Must be acquired before @lock.
+	 */
+	struct mutex walk_mutex;
+
 	/** @peer_ht: Hash table that stores struct peers. */
 	struct rhashtable peer_ht;
 
