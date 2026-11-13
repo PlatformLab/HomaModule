@@ -447,12 +447,39 @@ bypass:
  */
 void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 {
-	/* Scan the next several cores in order after the current core,
-	 * trying to find one that is not already busy with SoftIRQ processing,
-	 * and that doesn't appear to be active with NAPI/GRO processing
-	 * either. If there is no such core, just rotate among the next
-	 * cores. See balance.txt for overall design information on load
-	 * balancing.
+	/* The goal of this function is to choose a core for SoftIRQ
+	 * processing in a way that avoids contention for SoftIRQ cores.
+	 * If the load is light it might be possible to reuse a single
+	 * core over and over (this would be advantageous because it minimizes
+	 * cache misses).  Under high load work will need to be distributed
+	 * across multiple cores to avoid hotspots.
+	 *
+	 * This function scans the next several cores after the GRO core
+	 * (in ascending circular order of cores) and picks the first one
+	 * that satisfies the following conditions:
+	 * - Never use the GRO core itself: if a large message is being
+	 *   received, the GRO core will already be busy handling that
+	 *   message, so put SoftIRQ somewhere else.
+	 * - Avoid other cores that have done GRO processing recently, for the
+	 *   same reason.
+	 * - Avoid cores that currently have SoftIRQ work pending. If we
+	 *   overload a core with SoftIRQ processing it may not be able to
+	 *   keep up with completion events for Tx skbs; this can cause
+	 *   the pacer to think the NIC queues are backed up and stop
+	 *   transmitting packets. Thus, under load we will alternate among
+	 *   several SoftIRQ cores.
+	 * If none of the candidate cores satisfies all of the conditions,
+	 * pick an arbitrary core in a fashion that rotates among them (the
+	 * goal here is to spread the load across all of the candidates
+	 * to minimize the degree of overload).
+	 *
+	 * The greatest disadvantage of this approach is the sequential
+	 * scan of cores, which means that the groups for different GRO
+	 * cores overlap. If there happens to be heavy traffic on a few
+	 * adjacent GRO cores, their SoftIRQ cores may become overloaded.
+	 * In a more perfect world the SoftIRQ groups would be chosen so
+	 * that no two GRO cores overlap in more than one of their SoftIRQ
+	 * choices.
 	 */
 	struct homa_data_hdr *h =
 			(struct homa_data_hdr *)skb_transport_header(skb);
@@ -508,8 +535,28 @@ void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
  */
 void homa_gro_gen3(struct homa *homa, struct sk_buff *skb)
 {
-	/* See balance.txt for overall design information on the Gen3
-	 * load balancer.
+	/* The overall strategy behind the Gen3 load balancer is as follows:
+	 * - The number of channels is reduced, so that only 1/4 of the cores
+	 *   do NAPI/GRO processing. This appears to be sufficient capacity
+	 *   to avoid overloads on any of the NAPI/GRO cores.
+	 * - Each NAPI/GRO core has 3 other cores (statically assigned) that
+	 *   it can use for SoftIRQ processing. The SoftIRQ core groups for
+	 *   different NAPI/GRO cores do not overlap. This means that SoftIRQ
+	 *   and GRO will never happen simultaneously on the same core, and
+	 *   there will be no conflicts between the SoftIRQ groups of different
+	 *   NAPI/GRO cores.
+	 * - When an application thread is using Homa actively on a core, the
+	 *   core is marked as "busy". When GRO selects a SoftIRQ core, it
+	 *   attempts to avoid cores that are busy with application threads.
+	 *   If there is a choice of un-busy cores, GRO will try to reuse a
+	 *   single SoftIRQ over and over.
+	 *
+	 * Gen3 was implemented in November of 2023; initial performance
+	 * measurements indicate that it is about the same as Gen2 (slightly
+	 * worse for W2 and W3, slightly better for W5). Gen3 performance on
+	 * W3 appears highly variable: P99 latency can vary by 5-10x from run
+	 * to run; as of December 2023 the reasons for this have not been
+	 * determined.
 	 */
 	struct homa_data_hdr *h =
 			(struct homa_data_hdr *)skb_transport_header(skb);
