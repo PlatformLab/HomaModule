@@ -317,7 +317,7 @@ char *homa_metrics_print(void)
 		M("pacer_bubble_cycles", m->pacer_bubble_cycles,
 		  "Time NIC uplink was idle because pacer was slow\n");
 		M("nic_congest_cycles", m->nic_congest_cycles,
-		  "Time when the amount of data in NIC's possession was excessive\n");
+		  "Time when output was halted because NIC has too much outgoing data\n");
 		M("pacer_checks", m->pacer_checks,
 		  "Calls to homa_qdisc_pacer_check\n");
 		M("pacer_helps", m->pacer_helps,
