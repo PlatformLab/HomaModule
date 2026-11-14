@@ -1677,11 +1677,15 @@ int homa_softirq(struct sk_buff *skb)
 	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. Make a
 	 * pass through the list to process all of the short packets,
 	 * leaving the longer packets in the list. Also, perform various
-	 * prep/cleanup/error checking functions.
+	 * prep/cleanup/error checking functions. IP reassembly can also
+	 * leave a frag_list, but in that case the frag_list is part of
+	 * this packet (its length is included in skb->len), so leave it.
 	 */
 	tt_record("homa_softirq starting");
-	skb->next = skb_shinfo(skb)->frag_list;
-	skb_shinfo(skb)->frag_list = NULL;
+	if (skb->len == skb_pagelen(skb)) {
+		skb->next = skb_shinfo(skb)->frag_list;
+		skb_shinfo(skb)->frag_list = NULL;
+	}
 	packets = skb;
 	prev_link = &packets;
 	for (skb = packets; skb; skb = next) {

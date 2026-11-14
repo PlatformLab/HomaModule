@@ -1767,6 +1767,32 @@ TEST_F(homa_plumbing, homa_softirq__per_rpc_batching)
 			"sk->sk_data_ready invoked",
 			unit_log_get());
 }
+TEST_F(homa_plumbing, homa_softirq__frag_list_from_ip_reassembly)
+{
+	struct sk_buff *skb, *skb2;
+	struct homa_rpc *srpc;
+
+	/* skb2 has a Homa header, but it is just payload in the
+	 * reassembled packet, so it must not be processed separately.
+	 */
+	self->data.common.sender_id = cpu_to_be64(5000);
+	skb2 = mock_skb_alloc(self->client_ip, self->server_ip,
+			      &self->data.common, 400, 0);
+	skb2->dev = NULL;
+	self->data.common.sender_id = cpu_to_be64(self->client_id);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1000, 0);
+	skb_shinfo(skb)->frag_list = skb2;
+	skb->len += skb2->len;
+	skb->data_len += skb2->len;
+	homa_softirq(skb);
+	unit_log_clear();
+	unit_log_active_ids(&self->hsk);
+	EXPECT_STREQ("1235", unit_log_get());
+	srpc = list_first_entry(&self->hsk.active_rpcs, struct homa_rpc,
+				active_links);
+	EXPECT_EQ(10000 - 1000 - skb2->len, srpc->msgin.bytes_remaining);
+}
 
 TEST_F(homa_plumbing, homa_err_handler_v4__port_unreachable)
 {
