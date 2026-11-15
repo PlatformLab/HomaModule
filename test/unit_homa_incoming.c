@@ -49,6 +49,14 @@ static void wait_hook4(char *id)
 		homa_rpc_handoff(hook_rpc);
 }
 
+static void count_packets_data_ready(struct sock *sk)
+{
+	struct homa_rpc *rpc = list_first_entry(&homa_sk(sk)->active_rpcs,
+						struct homa_rpc, active_links);
+
+	hook_count = skb_queue_len(&rpc->msgin.packets);
+}
+
 static void handoff_hook(char *id)
 {
 	if (strcmp(id, "spin_lock") != 0)
@@ -1306,6 +1314,22 @@ TEST_F(homa_incoming, homa_dispatch_pkts__cant_create_server_rpc)
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->server_cant_create_rpcs);
 #endif /* See strip.py */
+}
+TEST_F(homa_incoming, homa_dispatch_pkts__handoff_after_batch)
+{
+	struct sk_buff *skb;
+
+	self->data.msg_length = htonl(3000);
+	skb = mock_skb_alloc(self->client_ip, self->server_ip,
+			     &self->data.common, 1400, 0);
+	self->data.seg.offset = htonl(1400);
+	skb->next = mock_skb_alloc(self->client_ip, self->server_ip,
+				   &self->data.common, 1400, 1400);
+	self->hsk2.sock.sk_data_ready = count_packets_data_ready;
+	hook_count = 0;
+	homa_dispatch_pkts(skb);
+	EXPECT_EQ(1, unit_list_length(&self->hsk2.ready_rpcs));
+	EXPECT_EQ(2, hook_count);
 }
 TEST_F(homa_incoming, homa_dispatch_pkts__existing_server_rpc)
 {
