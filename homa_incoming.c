@@ -647,6 +647,15 @@ discard:
 		kfree_skb(skb);
 	}
 	if (rpc) {
+		/* Hand off packets for copying to user space: do it only at
+		 * the end of a batch to avoid contending for the RPC lock with
+		 * the copying thread.
+		 */
+		if (skb_queue_len(&rpc->msgin.packets) != 0 &&
+		    !test_bit(RPC_PKTS_READY, &rpc->flags)) {
+			set_bit(RPC_PKTS_READY, &rpc->flags);
+			homa_rpc_handoff(rpc);
+		}
 		IF_NO_STRIP(homa_grant_check_rpc(rpc));
 		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc);
@@ -768,20 +777,9 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 
 	drop_reason = homa_add_packet(rpc, skb);
 
-	if (skb_queue_len(&rpc->msgin.packets) != 0 &&
-	    !test_bit(RPC_PKTS_READY, &rpc->flags)) {
-		set_bit(RPC_PKTS_READY, &rpc->flags);
-		homa_rpc_handoff(rpc);
-	}
-
 handle_ack:
-	/* It's important to handle acks *after* calling homa_add_packet.
-	 * Otherwise we can end up with extraneous handoffs: we have to release
-	 * the RPC lock to handle acks, but that could allow some other thread
-	 * to receive a previous handoff made by homa_rpc_alloc_server, even
-	 * though the packet hasn't been added to the RPC. If this happens
-	 * the call to homa_rpc_handoff above will have to make an additional
-	 * handoff.
+	/* Handling acks releases the RPC lock, so the packet is queued
+	 * first: a thread that copies from the RPC meanwhile will find it.
 	 */
 	if (h->ack.client_id) {
 		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
