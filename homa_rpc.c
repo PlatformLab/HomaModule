@@ -97,9 +97,7 @@ error:
 
 /**
  * homa_rpc_alloc_server() - Allocate and initialize a server RPC (one that is
- * used to manage an incoming request). If appropriate, the RPC will also
- * be handed off (we do it here, while we have the socket locked, to avoid
- * acquiring the socket lock a second time later for the handoff).
+ * used to manage an incoming request).
  * @hsk:      Socket that owns this RPC.
  * @source:   IP address (network byte order) of the RPC's client.
  * @h:        Header for the first data packet received for this RPC; used
@@ -210,10 +208,6 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
 	homa_sock_unlock(hsk);
-	if (h->type == DATA && srpc->msgin.num_bpages > 0) {
-		set_bit(RPC_PKTS_READY, &srpc->flags);
-		homa_rpc_handoff(srpc);
-	}
 	INC_METRIC(requests_received, 1);
 	return srpc;
 
