@@ -17,6 +17,8 @@ Notes for Homa implementation in Linux:
   Homa: is it possible to trigger everything from callbacks without a
   thread?
 
+* Mark all outgoing packets "do not fragment".
+
 * Homa's bipartite matching algorithm is failing under very high loads
   in large clusters where there are large backlogs of messages waiting to
   be sent:
