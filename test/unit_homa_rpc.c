@@ -1002,6 +1002,55 @@ TEST_F(homa_rpc, homa_rpc_reap__release_bpages)
 	homa_rpc_reap(&self->hsk);
 	EXPECT_EQ(0, pool_size - homa_pool_avail_bytes(pool));
 }
+static struct homa_sock *hook_hsk;
+static int hook_early_unlocks;
+static void reap_unlock_hook(char *id)
+{
+	struct homa_pool *pool = hook_hsk->buffer_pool;
+
+	if (strcmp(id, "unlock") != 0 || !list_empty(&hook_hsk->dead_rpcs))
+		return;
+	if (refcount_read(&hook_hsk->sock.sk_wmem_alloc) != 1 ||
+	    homa_pool_avail_bytes(pool) != pool->num_bpages * HOMA_BPAGE_SIZE ||
+	    test_bit(HOMA_SOCK_NOSPACE, &hook_hsk->flags))
+		hook_early_unlocks++;
+}
+TEST_F(homa_rpc, homa_rpc_reap__release_socket_resources_before_unlock)
+{
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, 4000, 98, 1000, 150000);
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_end(crpc);
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
+	hook_hsk = &self->hsk;
+	hook_early_unlocks = 0;
+	unit_hook_register(reap_unlock_hook);
+
+	homa_rpc_reap(&self->hsk);
+	unit_hook_clear();
+	EXPECT_EQ(0, hook_early_unlocks);
+	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
+}
+TEST_F(homa_rpc, homa_rpc_reap__no_wakeup_if_no_rpcs_reaped)
+{
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			       self->server_ip, 4000, 98, 1000, 2000);
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_end(crpc);
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
+	homa_rpc_hold(crpc);
+
+	homa_rpc_reap(&self->hsk);
+	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+
+	homa_rpc_put(crpc);
+	homa_rpc_reap(&self->hsk);
+	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+}
 TEST_F(homa_rpc, homa_rpc_reap__skb_memory_accounting)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,

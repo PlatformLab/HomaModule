@@ -540,6 +540,14 @@ int homa_rpc_reap(struct homa_sock *hsk)
 			continue;
 		}
 
+		/* Release the RPC's share of the socket's resources while
+		 * the RPC is still on dead_rpcs and the socket is locked:
+		 * once neither holds, homa_sock_destroy may free them.
+		 */
+		homa_pool_release(rpc);
+		WARN_ON(refcount_sub_and_test(rpc->msgout.frag_bytes,
+					      &hsk->sock.sk_wmem_alloc));
+
 		rpcs[num_rpcs] = rpc;
 		num_rpcs++;
 		list_del(&rpc->dead_links);
@@ -548,10 +556,16 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	}
 	checked_all_rpcs = true;
 
-	/* Free all of the collected resources; release the socket lock
-	 * while doing this.
+	/* Free the rest of the collected resources (none of them belong
+	 * to the socket); release the socket lock while doing this.
 	 */
 release:
+	/* Wake up writers only if this call released memory: a call that
+	 * starts after homa_sock_destroy finds no RPCs, and must not touch
+	 * sk_wq.
+	 */
+	if (num_rpcs > 0)
+		homa_sock_wakeup_wmem(hsk);
 	homa_sock_unlock(hsk);
 	for (i = 0; i < num_rpcs; i++) {
 		IF_NO_STRIP(int tx_left);
@@ -599,11 +613,8 @@ release:
 			homa_route_release(rpc->route);
 			rpc->route = NULL;
 		}
-		homa_pool_release(rpc);
 		homa_tx_pool_free(hsk->homa, rpc->msgout.frag_nid,
 				  rpc->msgout.num_frags, rpc->msgout.frags);
-		WARN_ON(refcount_sub_and_test(rpc->msgout.frag_bytes,
-					      &hsk->sock.sk_wmem_alloc));
 		if (rpc->msgout.frags != &rpc->msgout.frag)
 			kvfree(rpc->msgout.frags);
 		tt_record2("homa_rpc_reap finished reaping id %d, port %d",
@@ -634,7 +645,6 @@ release:
 		rpc->magic = 0;
 		kfree(rpc);
 	}
-	homa_sock_wakeup_wmem(hsk);
 	tt_record3("reaped %d rpcs; %d dead frags remain for port %d",
 		   num_rpcs, hsk->dead_frags, hsk->port);
 	return !checked_all_rpcs;
