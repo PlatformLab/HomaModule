@@ -3920,11 +3920,15 @@ class AnalyzeDelay:
     Prints information about various delays, including delays associated
     with packets at various stages and delays in waking up threads. With
     --verbose, prints information about specific instances of long delays.
+    If --plot is specified, plots will be generated for some statistics,
+    such as delays in freeing tx packets.
     """
 
     def __init__(self, dispatcher: Dispatcher) -> None:
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeIntervals')
+        dispatcher.interest('AnalyzeTcppackets')
 
         # <delay, end time> for gro->softirq handoffs
         self.softirq_wakeups = []
@@ -4455,12 +4459,132 @@ class AnalyzeDelay:
                         100*i/(num-1) if num > 1 else 100)
         return verbose
 
+    def print_pkts_in_nic(self) -> dict[str, list[float]]:
+        """
+        Print information relating to packets in the possession of the NIC.
+        Returns a dictionary mapping from node name to a list of free_delays
+        for packets transmitted by that node (μsecs).
+        """
+        global intervals, options, packets, tcp_packets
+
+        # Node -> list of free_delays for Homa data packets and TCP packets
+        # transmitted by that node.
+        node_delays = defaultdict(list)
+
+        for pkt in itertools.chain(packets.values(), tcp_packets.values()):
+            if not 'tso_length' in pkt:
+                continue
+            if not 'nic' in pkt or not 'free_tx_skb' in pkt:
+                continue
+            if not 'tx_node' in pkt or not pkt['tx_node']:
+                continue
+            delay = pkt['free_tx_skb'] - pkt['nic']
+            if delay > 0:
+                node_delays[pkt['tx_node']].append(delay)
+
+        def get_dist(values: list[float]) -> str:
+            """
+            Returns a string giving the P50, P90, P99, and maximum values
+            from a list, or blanks if the list is empty.
+            values:   Values to summarize; will be sorted
+            """
+            if not values:
+                return ' '*28
+            values.sort()
+            return '%s%s%s %6.1f' % (print_pctl(values, 500, ' %6.1f'),
+                    print_pctl(values, 900, ' %6.1f'),
+                    print_pctl(values, 990, ' %6.1f'), values[-1])
+
+        print('\nStatistics about packets that have been passed to the NIC '
+                'but not yet returned')
+        print('to the kernel after transmission. Large delays in returning '
+                'packets typically')
+        print('indicate that completion events are not being processed in a '
+                'timely fashion')
+        print('(the core is busy with other SoftIRQ events):')
+        print('Node:     Node that transmitted the packets')
+        print('T50:      Median delay between when the NIC received a packet '
+                'and when the')
+        print('          packet was freed after being returned to Linux '
+                '(μsecs)')
+        print('T90:      Same as T50, except 90th percentile')
+        print('T99:      Same as T50, except 99th percentile')
+        print('TMax:     Largest delay for any packet on this node')
+        print('KB50:     Median Kbytes owned by Node\'s NIC (sampled at the '
+                'end of each')
+        print('          %d μsec interval (see --interval option))'
+                % (options.interval))
+        print('KB90:     90th percentile of Kbytes owned by NIC')
+        print('KB99:     99th percentile of Kbytes owned by NIC')
+        print('KBMax:    Largest Kbytes owned by NIC (at interval ends)')
+        print('\nNode          T50    T90    T99   TMax   KB50   KB90   KB99  '
+                'KBMax')
+        print('-------------------------------------------------------------'
+                '-----')
+        for node in get_sorted_nodes():
+            kbytes = []
+            if intervals != None and node in intervals:
+                for interval in intervals[node]:
+                    kbytes.append(interval['tx_in_nic'] * 1e-3)
+            print(('%-10s%s%s' % (node, get_dist(node_delays[node]),
+                    get_dist(kbytes))).rstrip())
+        return node_delays
+
+    def plot_free_delays(self, node_delays: dict[str, list[float]]) -> None:
+        """
+        Generates a compound plot in the --plot directory, with one
+        complementary CDF (log-scale y-axis) for each node showing the
+        distribution of free_delays for packets transmitted by that node.
+        All of the plots use the same x-axis range so they can be compared
+        easily.
+
+        node_delays:  Node -> list of free_delays for packets transmitted
+                      by that node (μsecs)
+        """
+        global options
+
+        nodes = get_sorted_nodes()
+        x_max = 0
+        for node in nodes:
+            node_delays[node].sort()
+            if node_delays[node]:
+                x_max = max(x_max, node_delays[node][-1])
+        if x_max == 0:
+            x_max = 1
+
+        fig, axes = plt.subplots(nrows=len(nodes), ncols=1, sharex=False,
+                figsize=[8, len(nodes)*2], squeeze=False)
+        for i in range(len(nodes)):
+            node = nodes[i]
+            ax = axes[i][0]
+            ax.set_xlim(0, x_max)
+            ax.set_xlabel('Free Delay (μsecs, %s)' % (node))
+            ax.set_yscale("log")
+            ax.set_ylim(1e-3, 1.0)
+            ax.set_ylabel('Cumulative Fraction')
+            ax.tick_params(top=True, which="both", direction="in", length=5)
+            ax.grid(which="major", axis="y")
+            ax.grid(which="major", axis="x")
+            delays = node_delays[node]
+            if delays:
+                n = len(delays)
+                y = [(n - j) / n for j in range(n)]
+                ax.plot(delays, y, color=color_blue)
+        plt.tight_layout()
+        plt.savefig('%s/delay_free_ccdf.pdf' % (options.plot),
+                bbox_inches='tight')
+
     def output(self) -> None:
         global options
 
         delay_verbose = self.print_pkt_delays()
         wakeup_verbose = self.print_wakeup_delays()
         qdisc_verbose = self.print_qdisc_delays()
+        node_delays = self.print_pkts_in_nic()
+        if options.plot != None:
+            self.plot_free_delays(node_delays)
+            print('\nSee %s/delay_free_ccdf.pdf for CCDFs of free delays' %
+                    (options.plot))
         if options.verbose:
             print('')
             print(delay_verbose, end='')
