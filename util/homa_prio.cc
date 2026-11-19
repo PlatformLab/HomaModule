@@ -298,7 +298,7 @@ void read_metrics(const char *path, metrics *metrics)
 		}
 		if (strcmp(s, "large_msg_count") == 0) {
 			metrics->total_messages += count;
-			metrics->large_msg_count = count;
+			metrics->large_msg_count += count;
 		} else {
 			metrics->large_msg_bytes += count;
 			metrics->total_bytes += count;
@@ -378,7 +378,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 		bytes_per_prio = 1 + total_bytes/num_priorities;
 	int64_t next_cutoff_bytes = bytes_per_prio;
 	int next_cutoff = num_priorities - 1;
-	int cum_unsched_bytes = 0;
+	int64_t cum_unsched_bytes = 0;
 	for (interval &interval: diff->intervals) {
 		cum_unsched_bytes += interval.unsched_bytes;
 		if (cum_unsched_bytes >= total_unsched_bytes)
