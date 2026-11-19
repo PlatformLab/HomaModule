@@ -498,17 +498,14 @@ void homa_pool_wakeup_rpc(struct homa_rpc *rpc)
 {
 	struct homa_resend_hdr resend;
 
-#ifndef __STRIP__ /* See strip.py */
-	/* If the RPC is scheduled, all we have to do is issue a grant. */
-	if (test_bit(RPC_GRANTABLE, &rpc->flags)) {
-		homa_grant_check_rpc(rpc);
-		return;
-	}
-#endif /* See strip.py */
-
-	/* Unscheduled: must ask for the message to be retransmitted. */
+	/* Any packets that arrived while the RPC was waiting for buffers
+	 * were dropped, so request retransmission of everything the sender
+	 * has transmitted so far (length -1). Don't request the entire
+	 * message: the sender would treat that as an implicit grant for
+	 * the whole message.
+	 */
 	resend.offset = htonl(0);
-	resend.length = htonl(rpc->msgin.length);
+	resend.length = htonl(-1);
 
 #ifndef __STRIP__ /* See strip.py */
 	/* Use the next-to-highest priority level to provide a priority boost

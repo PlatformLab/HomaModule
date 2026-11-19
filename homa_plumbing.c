@@ -436,8 +436,7 @@ static const u16 header_lengths[] = {
 	sizeof(struct homa_cutoffs_hdr),
 	sizeof(struct homa_freeze_hdr),
 	sizeof(struct homa_need_ack_hdr),
-	sizeof(struct homa_ack_hdr),
-	sizeof(struct homa_start_msg_hdr)
+	sizeof(struct homa_ack_hdr)
 };
 #else /* See strip.py */
 static const u16 header_lengths[] = {
@@ -449,8 +448,7 @@ static const u16 header_lengths[] = {
 	0,
 	0,
 	sizeof(struct homa_need_ack_hdr),
-	sizeof(struct homa_ack_hdr),
-	0
+	sizeof(struct homa_ack_hdr)
 };
 #endif /* See strip.py */
 
@@ -505,9 +503,6 @@ int __init homa_load(void)
 #endif /* See strip.py */
 	BUILD_BUG_ON(sizeof(struct homa_need_ack_hdr) > HOMA_MAX_HEADER);
 	BUILD_BUG_ON(sizeof(struct homa_ack_hdr) > HOMA_MAX_HEADER);
-#ifndef __STRIP__ /* See strip.py */
-	BUILD_BUG_ON(sizeof(struct homa_start_msg_hdr) > HOMA_MAX_HEADER);
-#endif /* See strip.py */
 
 	/* Extra constraints on data packets:
 	 * - Ensure minimum header length so Homa doesn't have to worry about
@@ -1326,14 +1321,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = homa_message_out_init(rpc, msg->msg_iter.count);
 		if (result)
 			goto error;
-#ifndef __STRIP__ /* See strip.py */
-		if (rpc->msgout.granted == 0)
-			homa_xmit_start_msg(rpc, msg->msg_iter.count);
-#endif /* See strip.py */
 		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result)
 			goto error;
-		homa_xmit_data(rpc);
 		args.id = rpc->id;
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_alloc_client. */
 
@@ -1389,16 +1379,11 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = homa_message_out_init(rpc, msg->msg_iter.count);
 		if (result)
 			goto error;
-#ifndef __STRIP__ /* See strip.py */
-		if (rpc->msgout.granted == 0)
-			homa_xmit_start_msg(rpc, msg->msg_iter.count);
-#endif /* See strip.py */
 		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result && rpc->state != RPC_DEAD) {
 			hsk->error_msg = "error copying response message data from user space";
 			goto error;
 		}
-		homa_xmit_data(rpc);
 		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 #ifndef __STRIP__ /* See strip.py */

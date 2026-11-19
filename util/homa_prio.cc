@@ -341,12 +341,17 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 		total_bytes += interval.total_bytes;
 		if (interval.max_size <= unsched_bytes)
 			interval.unsched_bytes = interval.total_bytes;
-		else
-			interval.unsched_bytes = 0;
+		else {
+			interval.unsched_bytes = interval.total_messages
+					* unsched_bytes;
+			if (interval.unsched_bytes > interval.total_bytes)
+				interval.unsched_bytes = interval.total_bytes;
+		}
 		total_unsched_bytes += interval.unsched_bytes;
 		prev_size = interval.max_size;
 	}
 	total_bytes += diff->large_msg_bytes;
+	total_unsched_bytes += diff->large_msg_count * unsched_bytes;
 
 	// Divide priorities between scheduled and unscheduled packets.
 	int64_t unsched_prios = unsched;
@@ -391,7 +396,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 //					next_cutoff_bytes/1000);
 			cutoffs[next_cutoff] = interval.max_size;
 			next_cutoff--;
-			next_cutoff_bytes += bytes_per_prio;
+			next_cutoff_bytes = cum_unsched_bytes + bytes_per_prio;
 			if (next_cutoff_bytes >= total_unsched_bytes)
 				break;
 		}

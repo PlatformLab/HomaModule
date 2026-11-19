@@ -68,6 +68,9 @@ FIXTURE_SETUP(homa_plumbing)
 		.type = DATA,
 		.sender_id = cpu_to_be64(self->client_id)},
 		.msg_length = htonl(10000),
+#ifndef __STRIP__ /* See strip.py */
+		.incoming = htonl(10000),
+#endif /* See strip.py */
 	};
 	memset(&self->recvmsg_args, 0, sizeof(self->recvmsg_args));
 	self->recvmsg_hdr.msg_name = &self->addr;
@@ -1054,14 +1057,6 @@ TEST_F(homa_plumbing, homa_sendmsg__request_sent_successfully)
 	homa_rpc_unlock(crpc);
 }
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_packet_for_scheduled_msg)
-{
-	self->homa.unsched_bytes = 100;
-	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
-		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_SUBSTR("xmit START_MSG 200", unit_log_get());
-	ASSERT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-}
 TEST_F(homa_plumbing, homa_sendmsg__request_metrics)
 {
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
@@ -1140,20 +1135,6 @@ TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_message_out_init_for_response)
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_for_scheduled_response)
-{
-	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
-			self->server_ip, self->client_port, self->server_id,
-			2000, 100);
-	self->sendmsg_args.id = self->server_id;
-	self->homa.unsched_bytes = 100;
-	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
-		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_SUBSTR("xmit START_MSG 200", unit_log_get());
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-}
-#endif /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__homa_tx_copy_from_user_returns_error)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,

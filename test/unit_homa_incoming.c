@@ -95,9 +95,6 @@ FIXTURE(homa_incoming) {
 	struct homa_sock hsk;
 	struct homa_sock hsk2;
 	struct homa_data_hdr data;
-#ifndef __STRIP__ /* See strip.py */
-	struct homa_start_msg_hdr start;
-#endif /* See strip.py */
 };
 FIXTURE_SETUP(homa_incoming)
 {
@@ -135,16 +132,8 @@ FIXTURE_SETUP(homa_incoming)
 		.sender_id = cpu_to_be64(self->client_id)
 	};
 	self->data.msg_length = htonl(10000);
-
 #ifndef __STRIP__ /* See strip.py */
-	memset(&self->start, 0, sizeof(self->start));
-	self->start.common = (struct homa_common_hdr){
-		.sport = htons(self->client_port),
-		.dport = htons(self->server_port),
-		.type = START_MSG,
-		.sender_id = cpu_to_be64(self->client_id)
-	};
-	self->start.msg_length = htonl(10000);
+	self->data.incoming = htonl(10000);
 #endif /* See strip.py */
 
 	unit_log_clear();
@@ -179,7 +168,7 @@ TEST_F(homa_incoming, homa_message_in_init__zero_message_length)
 
 	self->data.msg_length = htonl(0);
 	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip,
-				     &self->data.common);
+				     &self->data);
 	ASSERT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(EINVAL, -PTR_ERR(srpc));
 }
@@ -189,7 +178,7 @@ TEST_F(homa_incoming, homa_message_in_init__message_too_long)
 
 	self->data.msg_length = htonl(HOMA_MAX_MESSAGE_LENGTH+1);
 	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip,
-				     &self->data.common);
+				     &self->data);
 	ASSERT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(EINVAL, -PTR_ERR(srpc));
 }
@@ -198,7 +187,7 @@ TEST_F(homa_incoming, homa_message_in_init__negative_message_length)
 	struct homa_rpc *srpc;
 
 	self->data.msg_length = htonl(-1);
-	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip, &self->data.common);
+	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip, &self->data);
 	ASSERT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(EINVAL, -PTR_ERR(srpc));
 }
@@ -292,25 +281,6 @@ TEST_F(homa_incoming, homa_gap_alloc)
 	IF_NO_STRIP(EXPECT_EQ(2, homa_metrics_per_cpu()->gaps_created));
 }
 
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_incoming, homa_request_retrans__send_start_msg)
-{
-	struct homa_rpc *crpc;
-
-	self->homa.unsched_bytes = 5000;
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			       self->server_ip, self->client_port,
-			       self->client_id, 10000, 100);
-	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(0, crpc->msgout.granted);
-
-	unit_log_clear();
-	homa_rpc_lock(crpc);
-	homa_request_retrans(crpc);
-	homa_rpc_unlock(crpc);
-	EXPECT_STREQ("xmit START_MSG 10000", unit_log_get());
-}
-#endif /* See strip.py */
 TEST_F(homa_incoming, homa_request_retrans__request_gaps)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_RCVD_ONE_PKT,
@@ -1477,27 +1447,6 @@ TEST_F(homa_incoming, homa_dispatch_pkts__multiple_ack_packets)
 	homa_dispatch_pkts(skb);
 	EXPECT_SUBSTR("ack 1239", unit_log_get());
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_incoming, homa_dispatch_pkts__start_msg_creates_new_server_rpc)
-{
-	struct homa_start_msg_hdr h;
-	struct homa_rpc *srpc;
-
-	h.common.sport = htons(self->client_port);
-	h.common.dport = htons(self->server_port);
-	h.common.sender_id = cpu_to_be64(self->client_id);
-	h.common.type = START_MSG;
-	h.msg_length = htonl(1000);
-	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
-					  &h.common, 0, 0));
-	EXPECT_EQ(1,
-		  homa_metrics_per_cpu()->packets_received[START_MSG - DATA]);
-	EXPECT_EQ(1, unit_list_length(&self->hsk2.active_rpcs));
-	srpc = list_first_entry(&self->hsk2.active_rpcs, struct homa_rpc,
-				active_links);
-	EXPECT_EQ(1000, srpc->msgin.length);
-}
-#endif
 TEST_F(homa_incoming, homa_dispatch_pkts__unknown_type)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -1536,9 +1485,10 @@ TEST_F(homa_incoming, homa_dispatch_pkts__handle_ack)
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_dispatch_pkts__invoke_homa_grant_check_rpc)
 {
+	self->data.incoming = htonl(1000);
 	self->data.msg_length = htonl(20000);
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
-					  &self->start.common, 0, 0));
+					  &self->data.common, 0, 0));
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_SUBSTR("id 1235", unit_log_get());
@@ -1861,7 +1811,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = GRANT},
-			.offset = htonl(3000),
+			.offset = htonl(12000),
 			.priority = 3};
 
 	ASSERT_NE(NULL, srpc);
@@ -1873,27 +1823,25 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 	srpc->silent_ticks = 5;
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
 					  &h.common, 0, 0));
-	EXPECT_EQ(3000, srpc->msgout.granted);
-	EXPECT_STREQ("xmit DATA 1400@0; "
-		     "xmit DATA 1400@1400; "
-		     "xmit DATA 1400@2800", unit_log_get());
+	EXPECT_EQ(12000, srpc->msgout.granted);
+	EXPECT_STREQ("xmit DATA 1400@11200", unit_log_get());
 	EXPECT_EQ(0, srpc->silent_ticks);
 
 	/* Don't let grant offset go backwards. */
-	h.offset = htonl(900);
+	h.offset = htonl(10000);
 	unit_log_clear();
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
 					  &h.common, 0, 0));
-	EXPECT_EQ(3000, srpc->msgout.granted);
+	EXPECT_EQ(12000, srpc->msgout.granted);
 	EXPECT_STREQ("", unit_log_get());
 
 	/* Wrong state. */
-	h.offset = htonl(5000);
+	h.offset = htonl(20000);
 	srpc->state = RPC_INCOMING;
 	unit_log_clear();
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
 					  &h.common, 0, 0));
-	EXPECT_EQ(3000, srpc->msgout.granted);
+	EXPECT_EQ(12000, srpc->msgout.granted);
 	EXPECT_STREQ("", unit_log_get());
 
 	/* Must restore old state to avoid potential crashes. */
@@ -1908,14 +1856,14 @@ TEST_F(homa_incoming, homa_grant_pkt__invalid_priority)
 			.offset = htonl(10000),
 			.priority = HOMA_MAX_PRIORITIES};
 	int old_granted = rpc->msgout.granted;
-	int old_priority = rpc->msgout.priority;
+	int old_priority = rpc->msgout.sched_priority;
 
 	homa_rpc_lock(rpc);
 	unit_log_clear();
 	homa_grant_pkt(mock_skb_alloc(self->server_ip, self->client_ip,
 				     &h.common, 0, 0), rpc);
 	EXPECT_EQ(old_granted, rpc->msgout.granted);
-	EXPECT_EQ(old_priority, rpc->msgout.priority);
+	EXPECT_EQ(old_priority, rpc->msgout.sched_priority);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->malformed_packets);
 	EXPECT_STREQ("", unit_log_get());
 	homa_rpc_unlock(rpc);
@@ -2072,31 +2020,6 @@ TEST_F(homa_incoming, homa_resend_pkt__bogus_offset)
 	EXPECT_STREQ("", unit_log_get());
 	IF_NO_STRIP(EXPECT_EQ(2, homa_metrics_per_cpu()->malformed_packets));
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend_send_start_msg)
-{
-	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
-			.dport = htons(self->server_port),
-			.sender_id = cpu_to_be64(self->client_id),
-			.type = RESEND},
-			.offset = htonl(0),
-			.length = htonl(-1)};
-	struct homa_rpc *srpc;
-
-	self->homa.unsched_bytes = 5000;
-	srpc = unit_server_rpc(&self->hsk2, UNIT_OUTGOING, self->client_ip,
-			       self->server_ip, self->client_port,
-			       self->server_id, 2000, 20000);
-	ASSERT_NE(NULL, srpc);
-	EXPECT_EQ(0, srpc->msgout.granted);
-
-	unit_log_clear();
-
-	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
-					  &h.common, 0, 0));
-	EXPECT_STREQ("xmit START_MSG 20000", unit_log_get());
-}
-#endif /* See strip.py */
 TEST_F(homa_incoming, homa_resend_pkt__negative_length_in_resend_send_data)
 {
 	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
@@ -2276,28 +2199,6 @@ TEST_F(homa_incoming, homa_resend_pkt__requested_data_hasnt_been_sent_yet)
 	EXPECT_SUBSTR("xmit BUSY", unit_log_get());
 }
 
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_incoming, homa_rpc_unknown_pkt__client_resend_start_msg)
-{
-	struct homa_rpc_unknown_hdr h = {{.sport = htons(self->server_port),
-			.dport = htons(self->hsk.port),
-			.sender_id = cpu_to_be64(self->server_id),
-			.type = RPC_UNKNOWN}};
-	struct homa_rpc *crpc;
-
-	self->homa.unsched_bytes = 5000;
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			       self->server_ip, self->server_port,
-			       self->client_id, 10000, 2000);
-	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(0, crpc->msgout.granted);
-
-	unit_log_clear();
-	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
-					  &h.common, 0, 0));
-	EXPECT_STREQ("xmit START_MSG 10000", unit_log_get());
-}
-#endif /* See strip.py */
 TEST_F(homa_incoming, homa_rpc_unknown_pkt__client_resend_all_data)
 {
 	struct homa_rpc_unknown_hdr h = {{.sport = htons(self->server_port),
@@ -2647,66 +2548,6 @@ TEST_F(homa_incoming, homa_ack_pkt__target_rpc_doesnt_exist)
 	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc2));
 }
 
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_incoming, homa_start_msg_pkt__handle_states)
-{
-	struct homa_start_msg_hdr h;
-	struct homa_rpc *crpc;
-
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			       self->server_ip, self->server_port,
-			       self->client_id, 20000, 1600);
-	ASSERT_NE(NULL, crpc);
-
-	h.common.sport = htons(self->server_port);
-	h.common.dport = htons(self->hsk.port);
-	h.common.sender_id = cpu_to_be64(self->server_id);
-	h.common.type = START_MSG;
-	h.msg_length = htonl(1000);
-
-	/* First attempt: RPC is already in RPC_INCOMING state. */
-	crpc->state = RPC_INCOMING;
-	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
-					  &h.common, 0, 0));
-	EXPECT_EQ(-1, crpc->msgin.length);
-
-	/* Second attempt: RPC is in RPC_OUTGOING state. */
-	crpc->state = RPC_OUTGOING;
-	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
-					  &h.common, 0, 0));
-	EXPECT_EQ(1000, crpc->msgin.length);
-	EXPECT_EQ(RPC_INCOMING, crpc->state);
-}
-TEST_F(homa_incoming, homa_start_msg_pkt__return_busy)
-{
-	struct homa_start_msg_hdr h;
-	struct homa_rpc *crpc;
-
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			       self->server_ip, self->server_port,
-			       self->client_id, 20000, 1600);
-	ASSERT_NE(NULL, crpc);
-
-	h.common.sport = htons(self->server_port);
-	h.common.dport = htons(self->hsk.port);
-	h.common.sender_id = cpu_to_be64(self->server_id);
-	h.common.type = START_MSG;
-	h.msg_length = htonl(1000);
-
-	/* First packet: don't return BUSY. */
-	unit_log_clear();
-	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
-					  &h.common, 0, 0));
-	EXPECT_EQ(1000, crpc->msgin.length);
-	EXPECT_STREQ("xmit GRANT 1000@0", unit_log_get());
-
-	/* Second attempt: return BUSY. */
-	unit_log_clear();
-	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, self->client_ip,
-					  &h.common, 0, 0));
-	EXPECT_STREQ("xmit BUSY", unit_log_get());
-}
-#endif
 
 TEST_F(homa_incoming, homa_rpc_abort__basics)
 {

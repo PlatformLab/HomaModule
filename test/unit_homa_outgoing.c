@@ -134,15 +134,16 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
-	/* First call: message is scheduled. */
-	self->homa.unsched_bytes = 10000;
-	EXPECT_EQ(0, homa_message_out_init(srpc, 10001));
-	EXPECT_EQ(0, srpc->msgout.granted);
-
-	/* Second call: message is unscheduled. */
+	/* First call: unsched < length. */
+	self->homa.unsched_bytes = 5000;
 	EXPECT_EQ(0, homa_message_out_init(srpc, 10000));
-	EXPECT_EQ(10000, srpc->msgout.granted);
-	EXPECT_EQ(6, srpc->msgout.priority);
+	EXPECT_EQ(5000, srpc->msgout.unscheduled);
+	EXPECT_EQ(5000, srpc->msgout.granted);
+
+	/* Second call: unsched > length. */
+	EXPECT_EQ(0, homa_message_out_init(srpc, 2000));
+	EXPECT_EQ(2000, srpc->msgout.unscheduled);
+	EXPECT_EQ(2000, srpc->msgout.granted);
 }
 #endif /* See strip.py */
 TEST_F(homa_outgoing, homa_message_out_init__mtu_too_small)
@@ -292,6 +293,28 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__homa_copy_iter_to_frags_fails)
 	EXPECT_EQ(EFAULT, -homa_tx_copy_from_user(crpc, iter, false));
 	homa_rpc_unlock(crpc);
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_tx_copy_from_user__call_homa_xmit_data_while_copying)
+{
+	struct homa_rpc *crpc;
+	struct iov_iter *iter;
+	u8 data[10000];
+
+	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
+	iter = unit_iov_iter(data, sizeof(data));
+	unit_log_clear();
+	self->homa.unsched_bytes = 5000;
+	mock_copy_from_iter_no_log = true;
+
+	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
+	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, true));
+	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400; "
+		     "xmit DATA 1400@2800; xmit DATA 1400@4200; "
+		     "homa_tx_copy_to_user done",
+		     unit_log_get());
+	homa_rpc_unlock(crpc);
+}
+#endif /* See strip.py */
 TEST_F(homa_outgoing, homa_tx_copy_from_user__call_homa_xmit_data_at_end)
 {
 	struct homa_rpc *crpc;
@@ -346,7 +369,8 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__basics)
 		EXPECT_EQ(0, -PTR_ERR(skb));
 	EXPECT_EQ(2500, end);
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1234, "
-		     "msg_length 2500, offset 1400, data_length 1100",
+		     "msg_length 2500, offset 1400, data_length 1100"
+		     IF_NO_STRIP(", incoming 2500"),
 		     homa_print_packet(skb, buffer, sizeof(buffer)));
 	unit_log_clear();
 	EXPECT_STREQ("data in frag 0: 1400-2499",
@@ -390,7 +414,8 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__round_end_down_to_msg_length)
 		EXPECT_EQ(0, -PTR_ERR(skb));
 	EXPECT_EQ(100, end);
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1234, "
-		     "msg_length 100, offset 0, data_length 100",
+		     "msg_length 100, offset 0, data_length 100"
+		     IF_NO_STRIP(", incoming 100"),
 		     homa_print_packet(skb, buffer, sizeof(buffer)));
 	kfree_skb(skb);
 }
@@ -540,7 +565,7 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__set_retransmit)
 		ASSERT_EQ(0, -PTR_ERR(skb));
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1234, "
 		     "msg_length 10000, offset 2800, data_length 1400, "
-		     "RETRANSMIT",
+		     IF_NO_STRIP("incoming 10000, ") "RETRANSMIT",
 		     homa_print_packet(skb, buffer, sizeof(buffer)));
 	kfree_skb(skb);
 
@@ -551,7 +576,8 @@ TEST_F(homa_outgoing, homa_tx_skb_alloc__set_retransmit)
 	if (IS_ERR(skb))
 		ASSERT_EQ(0, -PTR_ERR(skb));
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1234, "
-		     "msg_length 10000, offset 7000, data_length 1400",
+		     "msg_length 10000, offset 7000, data_length 1400"
+		     IF_NO_STRIP(", incoming 10000"),
 		     homa_print_packet(skb, buffer, sizeof(buffer)));
 	kfree_skb(skb);
 }
@@ -884,7 +910,8 @@ TEST_F(homa_outgoing, homa_tx_skb_send__priorities)
 			       self->client_id, 20000, 100);
 	ASSERT_NE(NULL, crpc);
 	crpc->msgout.max_gso_segs = 1;
-	crpc->msgout.priority = 2;
+	crpc->msgout.unscheduled = 10000;
+	crpc->msgout.sched_priority = 2;
 	crpc->msgout.retrans_priority = 3;
 	crpc->msgout.next_xmit_offset = 1500;
 	mock_xmit_log_verbose = 1;
@@ -895,10 +922,16 @@ TEST_F(homa_outgoing, homa_tx_skb_send__priorities)
 	EXPECT_EQ(0, homa_tx_skb_send(crpc, 0, &end));
 	EXPECT_STREQ("3", mock_xmit_prios);
 
-	/* Second packet uses msgout priority.*/
+	/* Second packet uses unscheduled priority.*/
 	mock_clear_xmit_prios();
 	end = 2000;
 	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
+	EXPECT_STREQ("6", mock_xmit_prios);
+
+	/* Third packet uses scheduled priority.*/
+	mock_clear_xmit_prios();
+	end = 15010;
+	EXPECT_EQ(0, homa_tx_skb_send(crpc, 15000, &end));
 	EXPECT_STREQ("2", mock_xmit_prios);
 	homa_rpc_unlock(crpc);
 }
@@ -1223,20 +1256,6 @@ TEST_F(homa_outgoing, homa_xmit_unknown__cant_find_peer)
 	kfree_skb(skb);
 }
 
-TEST_F(homa_outgoing, homa_xmit_start_msg)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 6000, 1000);
-
-	mock_xmit_log_verbose = 1;
-	unit_log_clear();
-	homa_rpc_lock(crpc);
-	homa_xmit_start_msg(crpc, 2500);
-	EXPECT_STREQ("xmit START_MSG from 0.0.0.0:40000, dport 99, id 1234, msg_length 2500",
-		     unit_log_get());
-	homa_rpc_unlock(crpc);
-}
 #endif /* See strip.py */
 
 TEST_F(homa_outgoing, homa_xmit_data__basics)
@@ -1306,6 +1325,27 @@ TEST_F(homa_outgoing, homa_xmit_data__stop_because_not_enough_data_copied_from_u
 
 	homa_rpc_unlock(crpc);
 }
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_outgoing, homa_xmit_data__stop_after_unscheduled)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 6000, 1000);
+
+	crpc->msgout.unscheduled = 1300;
+	crpc->msgout.granted = 6000;
+	crpc->msgout.max_gso_segs = 2;
+	crpc->msgout.max_gso_data = 2800;
+
+	unit_log_clear();
+	homa_rpc_lock(crpc);
+	homa_xmit_data(crpc);
+	homa_rpc_unlock(crpc);
+	EXPECT_STREQ("xmit DATA 1400@0; "
+		     "xmit DATA 1400@1400 1400@2800; "
+		     "xmit DATA 1400@4200 400@5600", unit_log_get());
+}
+#endif /* See strip.py */
 TEST_F(homa_outgoing, homa_xmit_data__stop_because_of_error_in_homa_tx_skb_send)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

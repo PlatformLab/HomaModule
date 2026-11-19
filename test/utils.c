@@ -72,24 +72,6 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		return crpc;
 	crpc->msgout.next_xmit_offset = crpc->msgout.length;
 
-#ifndef __STRIP__ /* See strip.py */
-	if (state == UNIT_RCVD_START_MSG) {
-		struct homa_start_msg_hdr start;
-		memset(&start, 0, sizeof(start));
-		start.common = (struct homa_common_hdr){
-			.sport = htons(server_port),
-			.dport = htons(hsk->port),
-			.type = START_MSG,
-			.sender_id = cpu_to_be64(id ^ 1)
-		};
-		start.msg_length = htonl(resp_length);
-
-		homa_dispatch_pkts(mock_skb_alloc(server_ip, client_ip,
-				   &start.common, 0, 0));
-		return crpc;
-	}
-#endif /* See strip.py */
-
 	struct homa_data_hdr h;
 	memset(&h, 0, sizeof(h));
 	h.common = (struct homa_common_hdr){
@@ -99,6 +81,9 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		.sender_id = cpu_to_be64(id ^ 1)
 	};
 	h.msg_length = htonl(resp_length);
+#ifndef __STRIP__ /* See strip.py */
+	h.incoming = htonl(10000);
+#endif /* See strip.py */
 
 	this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
@@ -332,27 +317,6 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	int bytes_received;
 	int status;
 
-#ifndef __STRIP__ /* See strip.py */
-	if (state == UNIT_RCVD_START_MSG) {
-		struct homa_start_msg_hdr start;
-		memset(&start, 0, sizeof(start));
-		start.common = (struct homa_common_hdr){
-			.sport = htons(client_port),
-			.dport = htons(hsk->port),
-			.type = START_MSG,
-			.sender_id = cpu_to_be64(id ^ 1)
-		};
-		start.msg_length = htonl(req_length);
-
-		homa_dispatch_pkts(mock_skb_alloc(client_ip, server_ip,
-				   &start.common, 0, 0));
-		srpc = homa_rpc_find_server(hsk, client_ip, id);
-		if (srpc)
-			homa_rpc_unlock(srpc);
-		return srpc;
-	}
-#endif /* See strip.py */
-
 	memset(&h, 0, sizeof(h));
 	h.common = (struct homa_common_hdr){
 		.sport = htons(client_port),
@@ -361,7 +325,10 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		.sender_id = cpu_to_be64(id ^ 1)
 	};
 	h.msg_length = htonl(req_length);
-	srpc = homa_rpc_alloc_server(hsk, client_ip, &h.common);
+#ifndef __STRIP__ /* See strip.py */
+	h.incoming = htonl(10000);
+#endif /* See strip.py */
+	srpc = homa_rpc_alloc_server(hsk, client_ip, &h);
 
 	if (IS_ERR(srpc))
 		return NULL;
