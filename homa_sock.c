@@ -402,8 +402,8 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 
 /**
  * homa_sock_destroy() - Release all of the internal resources associated
- * with a socket; is invoked at time when that is safe (i.e., all references
- * on the socket have been dropped).
+ * with a socket. Other threads (e.g. homa_timer) may still hold references
+ * to the socket and be reaping its RPCs.
  * @sk:       Socket to destroy.
  */
 void homa_sock_destroy(struct sock *sk)
@@ -435,6 +435,16 @@ void homa_sock_destroy(struct sock *sk)
 		homa_rpc_reap(hsk);
 #endif /* See strip.py */
 	}
+
+	/* Another thread (e.g. homa_timer) may still be in homa_rpc_reap,
+	 * releasing the pool space and sk_wmem_alloc of the last RPCs that
+	 * it took off dead_rpcs and waking up writers through sk_wq, which
+	 * sk_common_release sets to NULL after this function returns. It
+	 * does all of that before it unlocks the socket, so wait for the
+	 * lock.
+	 */
+	homa_sock_lock(hsk);
+	homa_sock_unlock(hsk);
 
 	WARN_ON_ONCE(refcount_read(&hsk->sock.sk_wmem_alloc) != 1);
 #ifdef __UNIT_TEST__
