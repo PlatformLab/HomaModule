@@ -13965,8 +13965,8 @@ class AnalyzeTimeline:
             'first_grant_nic':        'first grant to NIC',
             'last_gro':               'gro gets last response packet',
             'recvmsg_done':           'homa_recvmsg returns response',
-            'copy_out_start':         'finished copying to user space',
-            'copy_out_done':          'started copying to user space',
+            'copy_out_start':         'started copying to user space',
+            'copy_out_done':          'finished copying to user space',
             'copy_in_done':           'finished copying req into pkts',
         }
 
@@ -13975,6 +13975,7 @@ class AnalyzeTimeline:
         self.server_msgs['first_gro'] =       'gro gets first request packet'
         self.server_msgs['first_softirq'] =   'softirq gets first request pkt'
         self.server_msgs['last_gro'] =        'gro gets last request packet'
+        self.server_msgs['recvmsg_done'] =    'homa_recvmsg returns request'
         self.server_msgs['sendmsg_response'] ='homa_sendmsg response'
         self.server_msgs['first_data_xmit'] = 'first response packet to IP'
         self.server_msgs['first_data_nic'] =  'first response packet to NIC'
@@ -13982,41 +13983,80 @@ class AnalyzeTimeline:
 
         return
 
+    def add_pkt_event(self, events: list[list[Any]], event: str,
+            pkts: list[dict[str, Any]], index: int, field: str) -> None:
+        """
+        Adds an event to a list of events if the necessary information is
+        available (it may be missing, e.g., if NIC events weren't traced).
+        events:  List of <event, time> tuples (see get_events); the new
+                 event is appended here.
+        event:   Name of the event to add.
+        pkts:    List of packets (e.g. an RPC's send_data_pkts).
+        index:   Index in pkts of the packet whose time is desired
+                 (e.g. 0 for the first packet or -1 for the last).
+        field:   Name of the field in the packet that holds the event
+                 time (e.g. 'nic').
+        """
+
+        if pkts and field in pkts[index]:
+            events.append([event, pkts[index][field]])
+
+    def add_rpc_event(self, events: list[list[Any]], event: str,
+            rpc: dict[str, Any], field: str) -> None:
+        """
+        Adds an event to a list of events if the RPC contains the
+        necessary information.
+        events:  List of <event, time> tuples (see get_events); the new
+                 event is appended here.
+        event:   Name of the event to add.
+        rpc:     RPC that may contain information about the event.
+        field:   Name of the field in rpc that holds the event time.
+        """
+
+        if field in rpc:
+            events.append([event, rpc[field]])
+
     def get_events(self, rpc: dict[str, Any]) -> list[list[Any]]:
         """
         Extracts from rpc all relevaent events for one side of an RPC (can
         be either client or server); returns a list of <event, time> tuples
         where event is an event name and time is the absolute time when
-        that event occurred.
+        that event occurred. Events for which no information is available
+        are omitted.
         """
 
         result = []
-        result.append(['first_data_xmit', rpc['send_data_pkts'][0]['xmit']])
-        result.append(['first_data_nic', rpc['send_data_pkts'][0]['nic']])
+        self.add_pkt_event(result, 'first_data_xmit', rpc['send_data_pkts'],
+                0, 'xmit')
+        self.add_pkt_event(result, 'first_data_nic', rpc['send_data_pkts'],
+                0, 'nic')
         if rpc['start_msg_xmit']:
             result.append(['start_msg_xmit', rpc['start_msg_xmit'][0]])
         if rpc['start_msg_nic']:
             result.append(['start_msg_nic', rpc['start_msg_nic'][0]])
-        if rpc['softirq_grant_pkts']:
-            result.append(['first_grant_softirq',
-                    rpc['softirq_grant_pkts'][0]['softirq']])
-        result.append(['last_data_nic', rpc['send_data_pkts'][-1]['nic']])
+        self.add_pkt_event(result, 'first_grant_softirq',
+                rpc['softirq_grant_pkts'], 0, 'softirq')
+        self.add_pkt_event(result, 'last_data_nic', rpc['send_data_pkts'],
+                -1, 'nic')
         if rpc['start_msg_gro']:
             result.append(['start_msg_gro', rpc['start_msg_gro'][0]])
         if rpc['start_msg_softirq']:
             result.append(['start_msg_softirq', rpc['start_msg_softirq'][0]])
-        result.append(['first_gro', rpc['gro_data_pkts'][0]['gro']])
-        result.append(['first_softirq',
-                rpc['softirq_data_pkts'][0]['softirq']])
-        if rpc['send_grant_pkts']:
-            result.append(['first_grant_xmit', rpc['send_grant_pkts'][0]['xmit']])
-            result.append(['first_grant_nic', rpc['send_grant_pkts'][0]['nic']])
-        result.append(['last_gro', rpc['gro_data_pkts'][-1]['gro']])
-        result.append(['recvmsg_done', rpc['recvmsg_done']])
+        self.add_pkt_event(result, 'first_gro', rpc['gro_data_pkts'], 0,
+                'gro')
+        self.add_pkt_event(result, 'first_softirq', rpc['softirq_data_pkts'],
+                0, 'softirq')
+        self.add_pkt_event(result, 'first_grant_xmit', rpc['send_grant_pkts'],
+                0, 'xmit')
+        self.add_pkt_event(result, 'first_grant_nic', rpc['send_grant_pkts'],
+                0, 'nic')
+        self.add_pkt_event(result, 'last_gro', rpc['gro_data_pkts'], -1,
+                'gro')
+        self.add_rpc_event(result, 'recvmsg_done', rpc, 'recvmsg_done')
 
         # Handle events that are unique to the server side
         if rpc['id'] & 1:
-            result.append(['sendmsg_response', rpc['sendmsg']])
+            self.add_rpc_event(result, 'sendmsg_response', rpc, 'sendmsg')
 
         return result
 
@@ -14027,9 +14067,9 @@ class AnalyzeTimeline:
         """
 
         result = []
-        result.append(['copy_in_done', rpc['copy_in_done']])
-        result.append(['copy_out_start', rpc['copy_out_start']])
-        result.append(['copy_out_done', rpc['copy_out_done']])
+        self.add_rpc_event(result, 'copy_in_done', rpc, 'copy_in_done')
+        self.add_rpc_event(result, 'copy_out_start', rpc, 'copy_out_start')
+        self.add_rpc_event(result, 'copy_out_done', rpc, 'copy_out_done')
         return result
 
     def accumulate_times(self, events: list[list[Any]], start: float,
@@ -14117,6 +14157,11 @@ class AnalyzeTimeline:
             if ((not crpc['gro_data_pkts']) or
                     (crpc['gro_data_pkts'][0]['offset'] != 0) or
                     (not crpc['send_data_pkts'])):
+                continue
+            if ((not 'sendmsg' in srpc) or (not 'recvmsg_done' in srpc) or
+                    (not srpc['gro_data_pkts']) or
+                    (srpc['gro_data_pkts'][0]['offset'] != 0) or
+                    (not srpc['send_data_pkts'])):
                 continue
             num_rpcs += 1
             start = crpc['sendmsg']
