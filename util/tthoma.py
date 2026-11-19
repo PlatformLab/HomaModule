@@ -1830,6 +1830,13 @@ class Dispatcher:
             if first:
                 trace['first_time'] = t
                 first = False
+            elif t < trace['first_time']:
+                # tt_record reads the clock before claiming a buffer slot,
+                # so a thread preempted in between can write a record
+                # later with an older timestamp. If such a record ends up
+                # before the start of the trace, discard it: analyzers
+                # assume all events fall within [first_time, last_time].
+                continue
             trace['last_time'] = t
             trace['records'] += 1
             prefix = msg[0:self.prefix_length]
