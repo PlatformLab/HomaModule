@@ -139,8 +139,8 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 	/* First call: unsched < length. */
 	self->homa.unsched_bytes = 5000;
 	EXPECT_EQ(0, homa_message_out_init(srpc, 10000));
-	EXPECT_EQ(5000, srpc->msgout.unscheduled);
-	EXPECT_EQ(5000, srpc->msgout.granted);
+	EXPECT_EQ(1, srpc->msgout.unscheduled);
+	EXPECT_EQ(1, srpc->msgout.granted);
 	EXPECT_EQ(4, srpc->msgout.priority);
 
 	/* Second call: unsched > length. */
@@ -306,10 +306,11 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__call_homa_xmit_data_while_copying)
 	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
 	iter = unit_iov_iter(data, sizeof(data));
 	unit_log_clear();
-	self->homa.unsched_bytes = 5000;
 	mock_copy_from_iter_no_log = true;
 
 	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
+	crpc->msgout.unscheduled = 5000;
+	crpc->msgout.granted = 5000;
 	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, true));
 	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400; "
 		     "xmit DATA 1400@2800; xmit DATA 1400@4200; "
@@ -330,6 +331,7 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__call_homa_xmit_data_at_end)
 	mock_copy_from_iter_no_log = true;
 
 	EXPECT_EQ(0, homa_message_out_init(crpc, iter->count));
+	crpc->msgout.unscheduled = 0;
 	EXPECT_EQ(0, homa_tx_copy_from_user(crpc, iter, true));
 	EXPECT_STREQ("homa_tx_copy_to_user done; xmit DATA 500@0",
 		     unit_log_get());

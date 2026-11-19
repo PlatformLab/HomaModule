@@ -37,8 +37,14 @@ int homa_message_out_init(struct homa_rpc *rpc, int length)
 	rpc->msgout.length = length;
 #ifndef __STRIP__ /* See strip.py */
 	rpc->msgout.unscheduled = rpc->hsk->homa->unsched_bytes;
-	if (rpc->msgout.unscheduled > length)
+	if (rpc->msgout.unscheduled >= length)
 		rpc->msgout.unscheduled = length;
+	else
+	        /* If we can't send the entire message unscheduled, send only
+		 * a single packet unscheduled (reduces switch buffer usage at
+		 * the receiver when congested).
+		 */
+		rpc->msgout.unscheduled = 1;
 	rpc->msgout.granted = rpc->msgout.unscheduled;
 	rpc->msgout.priority = homa_unsched_priority(rpc->hsk->homa,
 						     rpc->route->peer,
@@ -159,9 +165,7 @@ int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
 		 * network busy until the first grant arrives.
 		 */
 		if (xmit && rpc->msgout.next_xmit_offset <
-			    rpc->msgout.unscheduled &&
-		    offset >= rpc->msgout.next_xmit_offset +
-			      rpc->msgout.max_gso_data) {
+			    rpc->msgout.unscheduled) {
 			homa_rpc_lock(rpc);
 			homa_xmit_data(rpc);
 			homa_rpc_unlock(rpc);

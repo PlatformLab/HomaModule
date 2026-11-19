@@ -1811,7 +1811,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = GRANT},
-			.offset = htonl(12000),
+			.offset = htonl(5000),
 			.priority = 3};
 
 	ASSERT_NE(NULL, srpc);
@@ -1823,25 +1823,27 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 	srpc->silent_ticks = 5;
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
 					  &h.common, 0, 0));
-	EXPECT_EQ(12000, srpc->msgout.granted);
-	EXPECT_STREQ("xmit DATA 1400@11200", unit_log_get());
+	EXPECT_EQ(5000, srpc->msgout.granted);
+	EXPECT_STREQ("xmit DATA 1400@1400; "
+		     "xmit DATA 1400@2800; "
+		     "xmit DATA 1400@4200", unit_log_get());
 	EXPECT_EQ(0, srpc->silent_ticks);
 
 	/* Don't let grant offset go backwards. */
-	h.offset = htonl(10000);
+	h.offset = htonl(4000);
 	unit_log_clear();
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
 					  &h.common, 0, 0));
-	EXPECT_EQ(12000, srpc->msgout.granted);
+	EXPECT_EQ(5000, srpc->msgout.granted);
 	EXPECT_STREQ("", unit_log_get());
 
 	/* Wrong state. */
-	h.offset = htonl(20000);
+	h.offset = htonl(10000);
 	srpc->state = RPC_INCOMING;
 	unit_log_clear();
 	homa_dispatch_pkts(mock_skb_alloc(self->client_ip, self->server_ip,
 					  &h.common, 0, 0));
-	EXPECT_EQ(12000, srpc->msgout.granted);
+	EXPECT_EQ(5000, srpc->msgout.granted);
 	EXPECT_STREQ("", unit_log_get());
 
 	/* Must restore old state to avoid potential crashes. */
