@@ -1418,7 +1418,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__basics)
 
 	mock_set_ipv6(&self->hsk);
 	crpc->completion_cookie = 1111;
-	IF_NO_STRIP(crpc->msgout.sched_priority = 4);
+	IF_NO_STRIP(crpc->msgout.priority = 4);
 
 	homa_rpc_get_info(crpc, &info);
 	EXPECT_EQ(AF_INET6, info.peer.in6.sin6_family);
@@ -1463,7 +1463,7 @@ TEST_F(homa_rpc, homa_rpc_get_info__tx_incomplete)
 
 	crpc->msgout.granted = 4000;
 	crpc->msgout.next_xmit_offset = 1400;
-	crpc->msgout.sched_priority = 5;
+	crpc->msgout.priority = 5;
 
 	homa_rpc_get_info(crpc, &info);
 	EXPECT_EQ(5000, info.tx_length);

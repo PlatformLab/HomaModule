@@ -818,7 +818,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		if (new_offset > rpc->msgout.granted)
 			rpc->msgout.granted = min_t(u32, new_offset,
 						    rpc->msgout.length);
-		rpc->msgout.sched_priority = h->priority;
+		rpc->msgout.priority = h->priority;
 		homa_xmit_data(rpc);
 	}
 done:

@@ -133,12 +133,15 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
+	homa_peer_set_cutoffs(srpc->route->peer, INT_MAX, 0, 0, INT_MAX, 10000,
+			      5000, 1000, 500);
 
 	/* First call: unsched < length. */
 	self->homa.unsched_bytes = 5000;
 	EXPECT_EQ(0, homa_message_out_init(srpc, 10000));
 	EXPECT_EQ(5000, srpc->msgout.unscheduled);
 	EXPECT_EQ(5000, srpc->msgout.granted);
+	EXPECT_EQ(4, srpc->msgout.priority);
 
 	/* Second call: unsched > length. */
 	EXPECT_EQ(0, homa_message_out_init(srpc, 2000));
@@ -910,8 +913,8 @@ TEST_F(homa_outgoing, homa_tx_skb_send__priorities)
 			       self->client_id, 20000, 100);
 	ASSERT_NE(NULL, crpc);
 	crpc->msgout.max_gso_segs = 1;
-	crpc->msgout.unscheduled = 10000;
-	crpc->msgout.sched_priority = 2;
+	crpc->msgout.granted = 10000;
+	crpc->msgout.priority = 2;
 	crpc->msgout.retrans_priority = 3;
 	crpc->msgout.next_xmit_offset = 1500;
 	mock_xmit_log_verbose = 1;
@@ -922,16 +925,10 @@ TEST_F(homa_outgoing, homa_tx_skb_send__priorities)
 	EXPECT_EQ(0, homa_tx_skb_send(crpc, 0, &end));
 	EXPECT_STREQ("3", mock_xmit_prios);
 
-	/* Second packet uses unscheduled priority.*/
+	/* Second packet uses msgout.priority.*/
 	mock_clear_xmit_prios();
 	end = 2000;
 	EXPECT_EQ(0, homa_tx_skb_send(crpc, 1500, &end));
-	EXPECT_STREQ("6", mock_xmit_prios);
-
-	/* Third packet uses scheduled priority.*/
-	mock_clear_xmit_prios();
-	end = 15010;
-	EXPECT_EQ(0, homa_tx_skb_send(crpc, 15000, &end));
 	EXPECT_STREQ("2", mock_xmit_prios);
 	homa_rpc_unlock(crpc);
 }
@@ -1303,6 +1300,23 @@ TEST_F(homa_outgoing, homa_xmit_data__stop_because_no_more_granted)
 	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
 }
+TEST_F(homa_outgoing, homa_xmit_data__stop_after_unscheduled)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 6000, 1000);
+
+	crpc->msgout.unscheduled = 1300;
+	crpc->msgout.granted = 1300;
+	crpc->msgout.max_gso_segs = 2;
+	crpc->msgout.max_gso_data = 2800;
+
+	unit_log_clear();
+	homa_rpc_lock(crpc);
+	homa_xmit_data(crpc);
+	homa_rpc_unlock(crpc);
+	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
+}
 #endif /* See strip.py */
 TEST_F(homa_outgoing, homa_xmit_data__stop_because_not_enough_data_copied_from_user_space)
 {
@@ -1325,27 +1339,50 @@ TEST_F(homa_outgoing, homa_xmit_data__stop_because_not_enough_data_copied_from_u
 
 	homa_rpc_unlock(crpc);
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_outgoing, homa_xmit_data__stop_after_unscheduled)
+TEST_F(homa_outgoing, homa_xmit_data__send_short_packet_at_message_end)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 6000, 1000);
-
-	crpc->msgout.unscheduled = 1300;
-	crpc->msgout.granted = 6000;
-	crpc->msgout.max_gso_segs = 2;
-	crpc->msgout.max_gso_data = 2800;
-
+	crpc->msgout.next_xmit_offset = 2800;
+	crpc->msgout.max_gso_data = 10000;
 	unit_log_clear();
 	homa_rpc_lock(crpc);
+
 	homa_xmit_data(crpc);
+	EXPECT_STREQ("xmit DATA 1400@2800; "
+		     "xmit DATA 1400@4200; "
+		     "xmit DATA 400@5600", unit_log_get());
 	homa_rpc_unlock(crpc);
-	EXPECT_STREQ("xmit DATA 1400@0; "
-		     "xmit DATA 1400@1400 1400@2800; "
-		     "xmit DATA 1400@4200 400@5600", unit_log_get());
 }
-#endif /* See strip.py */
+TEST_F(homa_outgoing, homa_xmit_data__send_short_packet_for_unscheduled)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 6000, 1000);
+	crpc->msgout.unscheduled = 3200;
+	crpc->msgout.granted = 3200;
+	crpc->msgout.next_xmit_offset = 1400;
+	crpc->msgout.copied_from_user = 2900;
+	crpc->msgout.max_gso_data = 10000;
+	crpc->msgout.max_gso_segs = 5;
+	unit_log_clear();
+	homa_rpc_lock(crpc);
+
+	/* First attempt: can't send short packet because it doesn't contain
+	 * all of the unscheduled data.
+	 */
+	homa_xmit_data(crpc);
+	EXPECT_STREQ("", unit_log_get());
+
+	/* Second attempt: there is now enough data copied for all of the
+	 * unscheduled data.
+	 */
+	crpc->msgout.copied_from_user = 5000;
+	homa_xmit_data(crpc);
+	EXPECT_STREQ("xmit DATA 1400@1400 1400@2800", unit_log_get());
+	homa_rpc_unlock(crpc);
+}
 TEST_F(homa_outgoing, homa_xmit_data__stop_because_of_error_in_homa_tx_skb_send)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

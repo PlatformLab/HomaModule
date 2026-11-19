@@ -1856,14 +1856,14 @@ TEST_F(homa_incoming, homa_grant_pkt__invalid_priority)
 			.offset = htonl(10000),
 			.priority = HOMA_MAX_PRIORITIES};
 	int old_granted = rpc->msgout.granted;
-	int old_priority = rpc->msgout.sched_priority;
+	int old_priority = rpc->msgout.priority;
 
 	homa_rpc_lock(rpc);
 	unit_log_clear();
 	homa_grant_pkt(mock_skb_alloc(self->server_ip, self->client_ip,
 				     &h.common, 0, 0), rpc);
 	EXPECT_EQ(old_granted, rpc->msgout.granted);
-	EXPECT_EQ(old_priority, rpc->msgout.sched_priority);
+	EXPECT_EQ(old_priority, rpc->msgout.priority);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->malformed_packets);
 	EXPECT_STREQ("", unit_log_get());
 	homa_rpc_unlock(rpc);
