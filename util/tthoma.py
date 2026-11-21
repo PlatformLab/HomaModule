@@ -1781,7 +1781,8 @@ class Dispatcher:
         global traces
         start_ns = time.time_ns()
         self.__build_parse_table()
-        prefix_matcher = re.compile(r' *([-0-9.]+) us .* \[C([0-9]+)\] (.*)')
+        # Note: "[^[]*" is much faster than ".*" here (no backtracking).
+        prefix_matcher = re.compile(r' *([-0-9.]+) us [^[]*\[C([0-9]+)\] (.*)')
 
         trace = {}
         trace['file'] = file
