@@ -149,17 +149,19 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__basics_from_data_packet)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	homa_rpc_end(srpc);
 }
-TEST_F(homa_rpc, homa_rpc_alloc_server__no_buffer_pool)
+TEST_F(homa_rpc, homa_rpc_alloc_server__no_buffer_region)
 {
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	char __user *saved_region = pool->region;
 	struct homa_rpc *srpc;
 
-	homa_pool_free(self->hsk.buffer_pool);
-	self->hsk.buffer_pool = NULL;
+	pool->region = NULL;
 	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip,
 				     &self->data);
 	EXPECT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(srpc));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	pool->region = saved_region;
 }
 TEST_F(homa_rpc, homa_rpc_alloc_server__already_exists)
 {
@@ -1113,25 +1115,6 @@ TEST_F(homa_rpc, homa_rpc_reap__no_sk_write_space_if_nothing_reaped)
 	homa_rpc_reap(&self->hsk);
 	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 	homa_rpc_put(crpc);
-}
-TEST_F(homa_rpc, homa_rpc_reap__null_buffer_pool)
-{
-	struct homa_rpc *crpc;
-	struct homa_pool *saved_pool;
-
-	IF_NO_STRIP(self->homa.unsched_bytes = 100000);
-	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
-			       self->server_ip, self->server_port,
-			       self->client_id, 5000, 2000);
-
-	ASSERT_NE(NULL, crpc);
-	homa_rpc_end(crpc);
-	saved_pool = self->hsk.buffer_pool;
-	self->hsk.buffer_pool = NULL;
-	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
-	EXPECT_STREQ("", dead_rpcs(&self->hsk));
-	EXPECT_EQ(0, self->hsk.dead_frags);
-	self->hsk.buffer_pool = saved_pool;
 }
 
 TEST_F(homa_rpc, homa_abort_sock_rpcs__basics)

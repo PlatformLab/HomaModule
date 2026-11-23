@@ -1009,7 +1009,7 @@ int homa_ioc_release(struct socket *sock, unsigned long arg)
 		hsk->error_msg = "invalid HOMAIOCRELEASE arguments";
 		return -EINVAL;
 	}
-	if (!hsk->buffer_pool) {
+	if (!homa_pool_exists(hsk->buffer_pool)) {
 		hsk->error_msg = "SO_HOMA_RECVBUF socket option has not been set";
 		return -EINVAL;
 	}
@@ -1468,7 +1468,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		result = -EINVAL;
 		goto done;
 	}
-	if (!hsk->buffer_pool) {
+	if (!homa_pool_exists(hsk->buffer_pool)) {
 		hsk->error_msg = "SO_HOMA_RECVBUF socket option has not been set";
 		result = -EINVAL;
 		goto done;

@@ -615,17 +615,18 @@ TEST_F(homa_plumbing, homa_ioctl_release__invalid_count)
 	EXPECT_STREQ("invalid HOMAIOCRELEASE arguments", self->hsk.error_msg);
 	self->recvmsg_args.num_bpages = 0;
 }
-TEST_F(homa_plumbing, homa_ioc_release__no_buffer_pool)
+TEST_F(homa_plumbing, homa_ioc_release__no_buffer_region)
 {
-	struct homa_pool *saved_pool = self->hsk.buffer_pool;
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	char __user *saved_region = pool->region;
 
-	self->hsk.buffer_pool = NULL;
+	pool->region = NULL;
 	self->recvmsg_args.num_bpages = 2;
 	EXPECT_EQ(EINVAL, -homa_ioc_release(self->hsk.sock.sk_socket,
 					    (unsigned long)&self->recvmsg_args));
 	EXPECT_STREQ("SO_HOMA_RECVBUF socket option has not been set",
 		     self->hsk.error_msg);
-	self->hsk.buffer_pool = saved_pool;
+	pool->region = saved_region;
 }
 TEST_F(homa_plumbing, homa_ioctl_release__success)
 {
@@ -1244,17 +1245,18 @@ TEST_F(homa_plumbing, homa_recvmsg__reserved_not_zero)
 	EXPECT_EQ(10, self->recvmsg_args.num_bpages);
 	self->recvmsg_args.num_bpages = 0;
 }
-TEST_F(homa_plumbing, homa_recvmsg__no_buffer_pool)
+TEST_F(homa_plumbing, homa_recvmsg__no_buffer_region)
 {
-	struct homa_pool *saved_pool = self->hsk.buffer_pool;
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	char __user *saved_region = pool->region;
 
-	self->hsk.buffer_pool = NULL;
+	pool->region = NULL;
 	self->recvmsg_args.num_bpages = 10;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("SO_HOMA_RECVBUF socket option has not been set",
 		     self->hsk.error_msg);
-	self->hsk.buffer_pool = saved_pool;
+	pool->region = saved_region;
 	EXPECT_EQ(10, self->recvmsg_args.num_bpages);
 	self->recvmsg_args.num_bpages = 0;
 }

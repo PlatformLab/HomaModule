@@ -120,7 +120,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	struct mem_cgroup *memcg;
 	int err;
 
-	if (!hsk->buffer_pool)
+	if (!homa_pool_exists(hsk->buffer_pool))
 		return ERR_PTR(-ENOMEM);
 
 	/* Lock the bucket, and make sure no-one else has already created
