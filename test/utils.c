@@ -417,14 +417,14 @@ char *unit_ack_string(struct homa_ack *ack)
 }
 
 /**
- * unit_sock_destroy() - Invoked by unit tests to cleanup and destroy
- * a socket.
+ * unit_sock_destroy() - Invoked by unit tests to simulate closing a socket.
  * @hsk:    Socket to destroy.
  */
 void unit_sock_destroy(struct homa_sock *hsk)
 {
 	homa_sock_shutdown(hsk);
 	homa_sock_destroy(&hsk->sock);
+	mock_sock_release(&hsk->sock);
 }
 
 /**

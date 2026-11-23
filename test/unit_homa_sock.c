@@ -2,6 +2,7 @@
 
 #include "homa_impl.h"
 #include "homa_interest.h"
+#include "homa_pool.h"
 #include "homa_sock.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
@@ -39,6 +40,12 @@ static void nospace_hook(char *id)
 	if (strcmp(id, "prepare_to_wait") != 0)
 		return;
 	clear_bit(HOMA_SOCK_NOSPACE, &hook_hsk->flags);
+}
+
+static void saved_destruct(struct sock *sk)
+{
+	unit_log_printf("; ", "saved_destruct invoked");
+	mock_sk_destruct(sk);
 }
 
 static void init_scan(struct homa_socktab_scan *scan,
@@ -99,6 +106,9 @@ TEST_F(homa_sock, homa_socktab_destroy)
 
 	homa_socktab_destroy(self->homa.socktab, NULL);
 	EXPECT_EQ(1, hsk3.shutdown);
+	mock_sock_release(&hsk1.sock);
+	mock_sock_release(&hsk2.sock);
+	mock_sock_release(&hsk3.sock);
 }
 
 TEST_F(homa_sock, homa_socktab_start_scan)
@@ -388,6 +398,20 @@ TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 	unit_sock_destroy(&no_hijack);
 }
 #endif /* See strip.py */
+TEST_F(homa_sock, homa_sock_init__set_sk_destruct)
+{
+	EXPECT_TRUE(self->hsk.sock.sk_destruct == homa_sock_destruct);
+	EXPECT_TRUE(self->hsk.saved_destruct == mock_sk_destruct);
+}
+TEST_F(homa_sock, homa_sock_init__dont_set_sk_destruct_on_error)
+{
+	struct homa_sock hsk;
+
+	mock_kmalloc_errors = 2;
+	EXPECT_EQ(ENOMEM, -mock_sock_init(&hsk, self->hnet, 0));
+	EXPECT_TRUE(hsk.sock.sk_destruct == mock_sk_destruct);
+	unit_sock_destroy(&hsk);
+}
 
 TEST_F(homa_sock, homa_sock_link__basics)
 {
@@ -547,6 +571,26 @@ TEST_F(homa_sock, homa_sock_destroy__unlink_socket)
 	homa_sock_destroy(&hsk.sock);
 	EXPECT_EQ(NULL, homa_sock_find(self->hnet, port));
 	EXPECT_EQ(NULL, hsk.slink);
+	mock_sock_release(&hsk.sock);
+}
+TEST_F(homa_sock, homa_sock_destroy__shutdown_buffer_pool)
+{
+	homa_sock_destroy(&self->hsk.sock);
+	EXPECT_TRUE(self->hsk.buffer_pool->shutdown);
+}
+
+TEST_F(homa_sock, homa_sock_destruct__basics)
+{
+	struct homa_sock hsk;
+
+	mock_sock_init(&hsk, self->hnet, 0);
+	hsk.saved_destruct = saved_destruct;
+	homa_sock_shutdown(&hsk);
+	homa_sock_destroy(&hsk.sock);
+	unit_log_clear();
+	homa_sock_destruct(&hsk.sock);
+	EXPECT_EQ(NULL, hsk.buffer_pool);
+	EXPECT_STREQ("saved_destruct invoked", unit_log_get());
 }
 
 TEST_F(homa_sock, homa_sock_bind)

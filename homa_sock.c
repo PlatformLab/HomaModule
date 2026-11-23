@@ -271,8 +271,11 @@ int homa_sock_init(struct homa_sock *hsk)
 	}
 	result = homa_sock_link(hsk, hnet->prev_default_port);
 	spin_unlock_bh(&socktab->write_lock);
-	if (result == 0)
+	if (result == 0) {
+		hsk->saved_destruct = hsk->sock.sk_destruct;
+		hsk->sock.sk_destruct = homa_sock_destruct;
 		return result;
+	}
 
 error:
 	hsk->shutdown = true;
@@ -409,14 +412,18 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 }
 
 /**
- * homa_sock_destroy() - Release all of the internal resources associated
- * with a socket; is invoked at time when that is safe (i.e., all references
- * on the socket have been dropped).
+ * homa_sock_destroy() - Invoked (as sk_prot->destroy) when a socket is
+ * closed: shuts down the socket and releases all of its RPCs.
  * @sk:       Socket to destroy.
  */
 void homa_sock_destroy(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
+
+	/* Note: other threads may still hold references to the socket at
+	 * this point, so any cleanup that expects the socket to be
+	 * quiescent must go in homa_sock_destruct.
+	 */
 
 	IF_NO_STRIP(int i = 0);
 
@@ -428,7 +435,13 @@ void homa_sock_destroy(struct sock *sk)
 	 * sk_common_release).
 	 */
 	homa_sock_shutdown(hsk);
+	homa_pool_shutdown(hsk->buffer_pool);
 
+	/* All RPCs must be reaped here, rather than in homa_sock_destruct:
+	 * their tx memory is included in sk_wmem_alloc, and the kernel will
+	 * not free the socket (so homa_sock_destruct will not be invoked)
+	 * until sk_wmem_alloc drops to zero.
+	 */
 	tt_record1("Starting to destroy socket %d", hsk->port);
 	while (!list_empty(&hsk->dead_rpcs)) {
 #ifndef __STRIP__ /* See strip.py */
@@ -444,7 +457,6 @@ void homa_sock_destroy(struct sock *sk)
 #endif /* See strip.py */
 	}
 
-	WARN_ON_ONCE(refcount_read(&hsk->sock.sk_wmem_alloc) != 1);
 #ifdef __UNIT_TEST__
 	{
 		u64 tx_memory = refcount_read(&hsk->sock.sk_wmem_alloc);
@@ -454,12 +466,28 @@ void homa_sock_destroy(struct sock *sk)
 			     tx_memory, hsk->port);
 	}
 #endif /* __UNIT_TEST__ */
-
-	if (hsk->buffer_pool) {
-		homa_pool_free(hsk->buffer_pool);
-		hsk->buffer_pool = NULL;
-	}
 	tt_record1("Finished destroying socket %d", hsk->port);
+}
+
+/**
+ * homa_sock_destruct() - Invoked (as sk_destruct) when the last reference
+ * to a socket has been released, just before the socket is freed. Provides
+ * a final opportunity to release resources.
+ * @sk:       Socket whose memory is about to be freed.
+ */
+void homa_sock_destruct(struct sock *sk)
+{
+	struct homa_sock *hsk = homa_sk(sk);
+
+	/* Note: this function may be invoked in atomic context, so it must
+	 * not sleep.
+	 */
+	tt_record1("homa_sock_destruct invoked for port %d", hsk->port);
+	WARN_ON_ONCE(!list_empty(&hsk->active_rpcs) ||
+		     !list_empty(&hsk->dead_rpcs));
+	homa_pool_free(hsk->buffer_pool);
+	hsk->buffer_pool = NULL;
+	hsk->saved_destruct(sk);
 }
 
 /**

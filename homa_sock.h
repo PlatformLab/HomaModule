@@ -209,6 +209,13 @@ struct homa_sock {
 	struct homa_pool *buffer_pool;
 
 	/**
+	 * @saved_destruct: The value of sock.sk_destruct (e.g.
+	 * inet_sock_destruct) before Homa replaced it with
+	 * homa_sock_destruct; homa_sock_destruct must invoke it.
+	 */
+	void (*saved_destruct)(struct sock *sk);
+
+	/**
 	 * @port: Port number: identifies this socket uniquely among all
 	 * those on this node.
 	 */
@@ -361,6 +368,7 @@ void               homa_sock_lock_slow(struct homa_sock *hsk);
 int                homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 				  u16 port);
 void               homa_sock_destroy(struct sock *sk);
+void               homa_sock_destruct(struct sock *sk);
 void               homa_socktab_fill_scan(struct homa_socktab_scan *scan);
 struct homa_sock  *homa_sock_find(struct homa_net *hnet, u16 port);
 int                homa_sock_init(struct homa_sock *hsk);

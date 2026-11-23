@@ -684,8 +684,11 @@ TEST_F(homa_plumbing, homa_socket__success)
 	hsk.sock.sk_net.net = mock_net_for_hnet(self->hnet);
 	refcount_set(&hsk.sock.sk_wmem_alloc, 1);
 
-	/* Normally set by sock_init_data before homa_socket is invoked. */
+	/* The following initialization is normally done by mock_sock_init. */
+	atomic_set(&hsk.sock.sk_refcnt.refs, 1);
 	hsk.sock.sk_state_change = mock_state_change;
+	hsk.sock.sk_destruct = mock_sk_destruct;
+
 	EXPECT_EQ(0, homa_socket(&hsk.sock));
 	unit_sock_destroy(&hsk);
 }

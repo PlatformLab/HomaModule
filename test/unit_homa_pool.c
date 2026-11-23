@@ -168,6 +168,24 @@ TEST_F(homa_pool, homa_pool_set_region__success)
 	EXPECT_EQ(-1, this_cpu_ptr(pool->cores)->page);
 }
 
+TEST_F(homa_pool, homa_pool_shutdown__basics)
+{
+	homa_pool_shutdown(self->hsk.buffer_pool);
+	EXPECT_TRUE(self->hsk.buffer_pool->shutdown);
+	EXPECT_STREQ("cancel_work_sync invoked", unit_log_get());
+}
+TEST_F(homa_pool, homa_pool_shutdown__null_pool)
+{
+	/* Just make sure this doesn't crash. */
+	homa_pool_shutdown(NULL);
+}
+
+TEST_F(homa_pool, homa_pool_free__null_pool)
+{
+	/* Just make sure this doesn't crash. */
+	homa_pool_free(NULL);
+}
+
 TEST_F(homa_pool, homa_pool_get_rcvbuf)
 {
 	struct homa_rcvbuf_args args;

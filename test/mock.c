@@ -349,8 +349,10 @@ int mock_netif_schedule_calls;
  */
 bool mock_check_bpool_leaks = true;
 
-/* Keeps track of all of the sockets created during the current test.
- * Used to attribute calls to refcount_inc_not_zero to a socket (or not).
+/* Keeps track of all of the sockets created by mock_sock_init during the
+ * current test that have not yet been destructed. Used to attribute calls
+ * to refcount_inc_not_zero to a socket (or not), and to destruct sockets
+ * at the end of each test.
  */
 #define MOCK_MAX_SOCKS 100
 struct homa_sock *mock_socks[MOCK_MAX_SOCKS];
@@ -470,6 +472,7 @@ void call_rcu(struct rcu_head *head, void free_func(struct rcu_head *head))
 
 bool cancel_work_sync(struct work_struct *work)
 {
+	unit_log_printf("; ", "cancel_work_sync invoked");
 	return false;
 }
 
@@ -2828,18 +2831,50 @@ int mock_skb_count(void)
 	return unit_hash_size(skbs_in_use);
 }
 
+/**
+ * mock_sk_destruct() - Used in place of inet_sock_destruct as the initial
+ * value of sk->sk_destruct for sockets created by mock_sock_init. Removes
+ * the socket from mock_socks.
+ * @sk:    Socket being destructed.
+ */
+void mock_sk_destruct(struct sock *sk)
+{
+	int i;
+
+	for (i = 0; i < mock_num_socks; i++) {
+		if (&mock_socks[i]->sock == sk) {
+			mock_num_socks--;
+			mock_socks[i] = mock_socks[mock_num_socks];
+			return;
+		}
+	}
+}
+
 void mock_sock_hold(struct sock *sk)
 {
 	atomic_inc(&sk->sk_refcnt.refs);
 	mock_sock_holds++;
 }
 
+/**
+ * mock_sock_release() - Releases the reference to a socket that was
+ * created by mock_sock_init (as sk_common_release does when a socket is
+ * closed); destructs the socket if there are no other references.
+ * @sk:    Socket to release.
+ */
+void mock_sock_release(struct sock *sk)
+{
+	if (atomic_dec_and_test(&sk->sk_refcnt.refs))
+		sk->sk_destruct(sk);
+}
+
 void mock_sock_put(struct sock *sk)
 {
-	atomic_dec(&sk->sk_refcnt.refs);
 	if (mock_sock_holds == 0)
 		FAIL(" sock_put invoked when there were no active sock_holds");
 	mock_sock_holds--;
+	if (atomic_dec_and_test(&sk->sk_refcnt.refs))
+		sk->sk_destruct(sk);
 }
 
 /**
@@ -2857,6 +2892,17 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	struct sock *sk = &hsk->sock;
 	int saved_port;
 	int err = 0;
+	int i;
+
+	/* If @hsk is being reused, the previous socket in it must be
+	 * destructed (otherwise its resources will leak).
+	 */
+	for (i = 0; i < mock_num_socks; i++) {
+		if (mock_socks[i] == hsk) {
+			sk->sk_destruct(sk);
+			break;
+		}
+	}
 
 	if (mock_num_socks < MOCK_MAX_SOCKS) {
 		mock_socks[mock_num_socks] = hsk;
@@ -2870,6 +2916,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	atomic_set(&sk->sk_refcnt.refs, 1);
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_state_change = mock_state_change;
+	sk->sk_destruct = mock_sk_destruct;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	sk->sk_socket = &mock_socket;
 	memset(&mock_socket, 0, sizeof(mock_socket));
@@ -2934,6 +2981,19 @@ void mock_teardown(void)
 {
 	int count, i;
 
+	/* Destruct any sockets that haven't already been destructed (e.g.
+	 * because the test didn't release their last reference). Must be
+	 * done before checking for leaks below.
+	 */
+	while (mock_num_socks > 0) {
+		struct homa_sock *hsk = mock_socks[mock_num_socks - 1];
+
+		count = mock_num_socks;
+		hsk->sock.sk_destruct(&hsk->sock);
+		if (mock_num_socks == count)
+			FAIL(" sk_destruct didn't remove socket from mock_socks");
+		mock_num_socks = count - 1;
+	}
 	mock_rcu_free();
 
 	cpu_number = 1;
