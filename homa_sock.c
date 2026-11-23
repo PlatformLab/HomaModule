@@ -419,16 +419,16 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 void homa_sock_destroy(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
+	u64 warn_time;
 
 	/* Note: other threads may still hold references to the socket at
 	 * this point, so any cleanup that expects the socket to be
 	 * quiescent must go in homa_sock_destruct.
 	 */
 
-	IF_NO_STRIP(int i = 0);
-
 	if (!hsk->homa)
 		return;
+	tt_record1("Starting to destroy socket %d", hsk->port);
 
 	/* Normally homa_close has already done this, but not if socket
 	 * creation failed after homa_socket (inet_create calls only
@@ -442,19 +442,13 @@ void homa_sock_destroy(struct sock *sk)
 	 * not free the socket (so homa_sock_destruct will not be invoked)
 	 * until sk_wmem_alloc drops to zero.
 	 */
-	tt_record1("Starting to destroy socket %d", hsk->port);
+	warn_time = homa_clock() + 5000 * homa_clock_khz();
 	while (!list_empty(&hsk->dead_rpcs)) {
-#ifndef __STRIP__ /* See strip.py */
 		if (!homa_rpc_reap(hsk)) {
-			i++;
-			if (i == 5) {
-				tt_record("Freezing because reap seems hung");
-				tt_freeze();
-			}
+			if (homa_clock() > warn_time)
+				WARN_ONCE(true, "homa_sock_destroy: reap seems hung");
 		}
-#else /* See strip.py */
-		homa_rpc_reap(hsk);
-#endif /* See strip.py */
+		cond_resched();
 	}
 
 #ifdef __UNIT_TEST__

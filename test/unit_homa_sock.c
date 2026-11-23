@@ -578,6 +578,21 @@ TEST_F(homa_sock, homa_sock_destroy__shutdown_buffer_pool)
 	homa_sock_destroy(&self->hsk.sock);
 	EXPECT_TRUE(self->hsk.buffer_pool->shutdown);
 }
+TEST_F(homa_sock, homa_sock_destroy__reap_rpcs)
+{
+	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			20000, 1600);
+	unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id+2,
+			5000, 5000);
+
+	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.dead_rpcs));
+	homa_sock_destroy(&self->hsk.sock);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.dead_rpcs));
+}
 
 TEST_F(homa_sock, homa_sock_destruct__basics)
 {
