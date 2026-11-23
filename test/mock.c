@@ -1868,6 +1868,12 @@ int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 	return -EOPNOTSUPP;
 }
 
+int sock_wake_async(struct socket_wq *wq, int how, int band)
+{
+	unit_log_printf("; ", "sock_wake_async how %d band %d", how, band);
+	return 0;
+}
+
 void synchronize_rcu(void)
 {}
 

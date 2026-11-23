@@ -611,6 +611,7 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 	if (nonblocking)
 		timeo = 0;
 	set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+	sk_set_bit(SOCKWQ_ASYNC_NOSPACE, &hsk->sock);
 	tt_record2("homa_sock_wait_wmem waiting on port %d, wmem %d",
 		   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
 
@@ -671,5 +672,6 @@ void homa_sock_write_space(struct sock *sk)
 	if (skwq_has_sleeper(wq))
 		wake_up_interruptible_poll(&wq->wait, EPOLLOUT | EPOLLWRNORM |
 					   EPOLLWRBAND);
+	sk_wake_async_rcu(sk, SOCK_WAKE_SPACE, POLL_OUT);
 	rcu_read_unlock();
 }

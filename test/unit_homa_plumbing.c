@@ -1871,8 +1871,11 @@ TEST_F(homa_plumbing, homa_poll__no_tx_buffer_space)
 	struct socket sock = {.sk = &self->hsk.sock};
 
 	self->hsk.sock.sk_sndbuf = 0;
+	sock_set_flag(&self->hsk.sock, SOCK_FASYNC);
 	EXPECT_EQ(0, homa_poll(NULL, &sock, NULL));
 	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+	EXPECT_EQ(1, test_bit(SOCKWQ_ASYNC_NOSPACE,
+			      &self->hsk.sock.sk_wq_raw->flags));
 }
 TEST_F(homa_plumbing, homa_poll__not_readable)
 {

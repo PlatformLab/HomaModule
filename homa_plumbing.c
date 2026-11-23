@@ -1888,10 +1888,12 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	tt_record2("homa_poll found sk_wmem_alloc %d, sk_sndbuf %d",
 		   refcount_read(&hsk->sock.sk_wmem_alloc),
 		   hsk->sock.sk_sndbuf);
-	if (homa_sock_wmem_avl(hsk))
+	if (homa_sock_wmem_avl(hsk)) {
 		mask |= EPOLLOUT | EPOLLWRNORM;
-	else
+	} else {
 		set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+		sk_set_bit(SOCKWQ_ASYNC_NOSPACE, &hsk->sock);
+	}
 
 	/* These flags mimic what datagram_poll does when sk_shutdown is
 	 * SHUTDOWN_MASK.
