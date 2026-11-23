@@ -30,18 +30,14 @@ void homa_socktab_init(struct homa_socktab *socktab)
  * homa_socktab_destroy() - Destructor for homa_socktabs: deletes all
  * existing sockets.
  * @socktab:  The object to destroy.
- * @hnet:     If non-NULL, only sockets for this namespace are deleted.
  */
-void homa_socktab_destroy(struct homa_socktab *socktab, struct homa_net *hnet)
+void homa_socktab_destroy(struct homa_socktab *socktab)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 
 	for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
 			hsk = homa_socktab_next(&scan)) {
-		if (hnet && hnet != hsk->hnet)
-			continue;
-
 		/* In actual use there should be no sockets left when this
 		 * function is invoked, so the code below will never be
 		 * invoked. However, it is useful during unit tests.
@@ -76,9 +72,45 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
 					  struct homa_socktab_scan *scan)
 {
 	scan->socktab = socktab;
+	scan->hnet = NULL;
 	scan->hsk = NULL;
 	scan->current_bucket = 0;
 	scan->avail = 0;
+	scan->sequence = U64_MAX;
+
+	return homa_socktab_next(scan);
+}
+
+/**
+ * homa_socktab_start_scan_all() - Begin an iteration over all of the
+ * sockets in all network namespaces. This function is the same as
+ * homa_socktab_start_scan except that the iteration covers the socktabs
+ * of all of the homa_nets in homa->nets.
+ * @homa:      Overall information about the Homa transport.
+ * @scan:      Will hold the current state of the scan; any existing
+ *             contents are discarded. The caller must eventually pass this
+ *             to homa_socktab_end_scan.
+ *
+ * Return:     The first socket, or NULL if there are no sockets. If
+ *             non-NULL, a reference is held on the socket to prevent its
+ *             deletion.
+ *
+ * The caller must keep homa_nets from being destroyed until the scan
+ * is finished, by holding either homa->nets_mutex or the RCU read lock
+ * from before this function is invoked until the last call to
+ * homa_socktab_next has returned.
+ */
+struct homa_sock *homa_socktab_start_scan_all(struct homa *homa,
+					      struct homa_socktab_scan *scan)
+{
+	scan->hsk = NULL;
+	scan->avail = 0;
+	scan->hnet = list_first_or_null_rcu(&homa->nets, struct homa_net,
+					    links);
+	if (!scan->hnet)
+		return NULL;
+	scan->socktab = scan->hnet->socktab;
+	scan->current_bucket = 0;
 	scan->sequence = U64_MAX;
 
 	return homa_socktab_next(scan);
@@ -127,7 +159,8 @@ void homa_socktab_fill_scan(struct homa_socktab_scan *scan)
  * @scan:      State of the scan.
  *
  * Return:     The next socket in the table, or NULL if the iteration has
- *             returned all of the sockets in the table.  If non-NULL, a
+ *             returned all of the sockets in the table (or in all of the
+ *             tables, for homa_socktab_start_scan_all).  If non-NULL, a
  *             reference is held on the socket to prevent its deletion (this
  *             module will release the reference in the next call to
  *             homa_socktab_next or homa_socktab_end). Sockets are not returned
@@ -141,10 +174,24 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 		scan->hsk = NULL;
 	}
 
-	if (scan->avail == 0) {
+	while (scan->avail == 0) {
 		homa_socktab_fill_scan(scan);
-		if (scan->avail == 0)
+		if (scan->avail != 0)
+			break;
+
+		/* The current socktab is finished; if the scan covers all
+		 * network namespaces, move on to the next one.
+		 */
+		if (!scan->hnet)
 			return NULL;
+		scan->hnet = list_next_or_null_rcu(&scan->hnet->homa->nets,
+						   &scan->hnet->links,
+						   struct homa_net, links);
+		if (!scan->hnet)
+			return NULL;
+		scan->socktab = scan->hnet->socktab;
+		scan->current_bucket = 0;
+		scan->sequence = U64_MAX;
 	}
 
 	scan->hsk = scan->socks[scan->avail - 1];
@@ -191,7 +238,7 @@ int homa_sock_init(struct homa_sock *hsk)
 	hnet = (struct homa_net *)net_generic(sock_net(&hsk->sock),
 					      homa_net_id);
 	homa = hnet->homa;
-	socktab = homa->socktab;
+	socktab = hnet->socktab;
 
 	/* Do things requiring memory allocation before locking the socket,
 	 * so that GFP_ATOMIC is not needed.
@@ -293,9 +340,9 @@ error:
  * Return:  0 for success, otherwise a negative errno.
  */
 int homa_sock_link(struct homa_sock *hsk, int port)
-	__must_hold(hsk->homa->socktab->write_lock)
+	__must_hold(hsk->hnet->socktab->write_lock)
 {
-	struct homa_socktab *socktab = hsk->homa->socktab;
+	struct homa_socktab *socktab = hsk->hnet->socktab;
 	struct homa_sock_link *slink;
 
 	slink = kmalloc(sizeof(*slink), GFP_ATOMIC | __GFP_ACCOUNT);
@@ -306,8 +353,7 @@ int homa_sock_link(struct homa_sock *hsk, int port)
 	slink->sequence = socktab->next_sequence;
 	socktab->next_sequence++;
 	hlist_add_head_rcu(&slink->links,
-			   &socktab->buckets[homa_socktab_bucket(hsk->hnet,
-								 port)]);
+			   &socktab->buckets[homa_socktab_bucket(port)]);
 	hsk->port = port;
 	hsk->inet.inet_num = port;
 	hsk->inet.inet_sport = htons(port);
@@ -322,7 +368,7 @@ int homa_sock_link(struct homa_sock *hsk, int port)
  *        socktab.
  */
 void homa_sock_unlink(struct homa_sock *hsk)
-	__must_hold(hsk->homa->socktab->write_lock)
+	__must_hold(hsk->hnet->socktab->write_lock)
 {
 	struct homa_sock_link *slink;
 
@@ -378,7 +424,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	atomic_inc(&hsk->protect_count);
 	homa_sock_unlock(hsk);
 
-	socktab = hsk->homa->socktab;
+	socktab = hsk->hnet->socktab;
 	spin_lock_bh(&socktab->write_lock);
 	homa_sock_unlink(hsk);
 	spin_unlock_bh(&socktab->write_lock);
@@ -469,7 +515,7 @@ void homa_sock_destroy(struct sock *sk)
 int homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 		   u16 port)
 {
-	struct homa_socktab *socktab = hnet->homa->socktab;
+	struct homa_socktab *socktab = hnet->socktab;
 	struct homa_sock *owner;
 	int result = 0;
 
@@ -515,17 +561,16 @@ done:
  */
 struct homa_sock *homa_sock_find(struct homa_net *hnet, u16 port)
 {
-	int bucket = homa_socktab_bucket(hnet, port);
+	int bucket = homa_socktab_bucket(port);
 	struct homa_sock *result = NULL;
 	struct homa_sock_link *slink;
 	struct homa_sock *hsk;
 
 	rcu_read_lock();
-	hlist_for_each_entry_rcu(slink, &hnet->homa->socktab->buckets[bucket],
+	hlist_for_each_entry_rcu(slink, &hnet->socktab->buckets[bucket],
 				 links) {
 		hsk = slink->hsk;
-		if (hsk && hsk->port == port && hsk->hnet == hnet &&
-		    !hsk->shutdown &&
+		if (hsk && hsk->port == port && !hsk->shutdown &&
 		    refcount_inc_not_zero(&hsk->sock.sk_refcnt)) {
 			result = hsk;
 			break;

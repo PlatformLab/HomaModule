@@ -314,6 +314,29 @@ TEST_F(homa_timer, homa_timer__basics)
 #endif /* See strip.py */
 	EXPECT_EQ(ETIMEDOUT, -crpc->error);
 }
+TEST_F(homa_timer, homa_timer__multiple_hnets)
+{
+	struct homa_rpc *crpc1, *crpc2;
+	struct homa_net *hnet2;
+	struct homa_sock hsk2;
+
+	hnet2 = mock_hnet(1, &self->homa);
+	mock_sock_init(&hsk2, hnet2, 0);
+	crpc1 = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
+				self->client_ip, self->server_ip,
+				self->server_port, self->client_id, 200, 5000);
+	crpc2 = unit_client_rpc(&hsk2, UNIT_RCVD_ONE_PKT,
+				self->client_ip, self->server_ip,
+				self->server_port, self->client_id + 2, 200,
+				5000);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	unit_log_clear();
+	homa_timer(&self->homa);
+	EXPECT_EQ(1, crpc1->silent_ticks);
+	EXPECT_EQ(1, crpc2->silent_ticks);
+	unit_sock_destroy(&hsk2);
+}
 TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 {
 	struct homa_rpc *dead;

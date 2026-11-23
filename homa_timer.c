@@ -243,8 +243,12 @@ void homa_timer(struct homa *homa)
 	prev_grant_count = total_grants;
 #endif /* See strip.py */
 
-	/* Scan all existing RPCs in all sockets. */
-	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
+	/* Scan all existing RPCs in all sockets. Use a mutex rather than
+	 * RCU to keep network namespaces from being deleted during the scan,
+	 * because the scan may block.
+	 */
+	mutex_lock(&homa->nets_mutex);
+	for (hsk = homa_socktab_start_scan_all(homa, &scan);
 			hsk; hsk = homa_socktab_next(&scan)) {
 		while (hsk->dead_frags > homa->dead_frags_limit) {
 			/* If we get here, it means that Homa isn't keeping
@@ -303,6 +307,7 @@ void homa_timer(struct homa *homa)
 		homa_unprotect_rpcs(hsk);
 	}
 	homa_socktab_end_scan(&scan);
+	mutex_unlock(&homa->nets_mutex);
 #ifndef __STRIP__ /* See strip.py */
 	if (total_incoming_rpcs > 0)
 		tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",

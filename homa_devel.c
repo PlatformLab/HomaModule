@@ -427,9 +427,7 @@ void homa_freeze_peers(void)
 	/* Find a socket to use (any socket for the namespace will do). */
 	hnet = homa_net(&init_net);
 	rcu_read_lock();
-	hsk = homa_socktab_start_scan(hnet->homa->socktab, &scan);
-	while (hsk && hsk->hnet != hnet)
-		hsk = homa_socktab_next(&scan);
+	hsk = homa_socktab_start_scan(hnet->socktab, &scan);
 	homa_socktab_end_scan(&scan);
 	if (!hsk) {
 		tt_record("homa_freeze_peers couldn't find a socket");
@@ -735,7 +733,7 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
 
 	pr_notice("Logging active Homa RPCs:\n");
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
+	for (hsk = homa_socktab_start_scan_all(homa, &scan);
 	     hsk; hsk = homa_socktab_next(&scan)) {
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
@@ -830,7 +828,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 
 	tt_record("Logging Homa RPCs:");
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
+	for (hsk = homa_socktab_start_scan_all(homa, &scan);
 			hsk; hsk = homa_socktab_next(&scan)) {
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
@@ -888,7 +886,7 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 		   atomic_read(&homa->grant->total_incoming));
 	*link_errors = 0;
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
+	for (hsk = homa_socktab_start_scan_all(homa, &scan);
 			hsk; hsk = homa_socktab_next(&scan)) {
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;

@@ -207,6 +207,17 @@ TEST_F(homa_plumbing, homa_load__destroy_after_unregister)
 				destroy + strlen("homa_destroy"));
 }
 
+TEST_F(homa_plumbing, homa_net_pre_exit)
+{
+	struct homa_net *hnet;
+
+	hnet = mock_hnet(1, &self->homa);
+	EXPECT_EQ(2, unit_list_length(&self->homa.nets));
+	homa_net_pre_exit(mock_net_for_hnet(hnet));
+	EXPECT_EQ(1, unit_list_length(&self->homa.nets));
+	homa_net_exit(mock_net_for_hnet(hnet));
+}
+
 TEST_F(homa_plumbing, homa_net_exit__free_route)
 {
 	struct in6_addr addr1 = unit_get_in_addr("1.2.3.4");
@@ -218,6 +229,7 @@ TEST_F(homa_plumbing, homa_net_exit__free_route)
 	homa_route_release(homa_route_get(&self->hsk, &addr3));
 
 	EXPECT_EQ(3, unit_count_routes(&self->homa));
+	homa_net_pre_exit(mock_net_for_hnet(self->hsk.hnet));
 	homa_net_exit(mock_net_for_hnet(self->hsk.hnet));
 	EXPECT_EQ(0, unit_count_routes(&self->homa));
 }
