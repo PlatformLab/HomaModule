@@ -41,11 +41,6 @@ static void nospace_hook(char *id)
 	clear_bit(HOMA_SOCK_NOSPACE, &hook_hsk->flags);
 }
 
-static void write_space(struct sock *sk)
-{
-	unit_log_printf("; ", "sk->sk_write_space invoked");
-}
-
 static void init_scan(struct homa_socktab_scan *scan,
 		      struct homa_socktab *socktab)
 {
@@ -766,14 +761,6 @@ TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_but_times_out)
 	EXPECT_EQ(EWOULDBLOCK, -homa_sock_wait_wmem(&self->hsk, 0));
 }
 
-TEST_F(homa_sock, homa_sock_write_space__no_one_waiting)
-{
-	mock_log_wakeups = 1;
-	unit_log_clear();
-	homa_sock_write_space(&self->hsk.sock);
-	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
-	EXPECT_STREQ("", unit_log_get());
-}
 TEST_F(homa_sock, homa_sock_write_space__no_memory_available)
 {
 	self->hsk.sock.sk_sndbuf = 0;
@@ -783,6 +770,14 @@ TEST_F(homa_sock, homa_sock_write_space__no_memory_available)
 	homa_sock_write_space(&self->hsk.sock);
 	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_sock, homa_sock_write_space__wakeup_even_if_nospace_not_set)
+{
+	mock_log_wakeups = 1;
+	unit_log_clear();
+	homa_sock_write_space(&self->hsk.sock);
+	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+	EXPECT_STREQ("wake_up", unit_log_get());
 }
 TEST_F(homa_sock, homa_sock_write_space__wakeup)
 {
@@ -814,19 +809,4 @@ TEST_F(homa_sock, homa_sock_write_space__socket_orphaned)
 	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 	EXPECT_STREQ("", unit_log_get());
 	rcu_assign_pointer(self->hsk.sock.sk_wq, wq);
-}
-
-TEST_F(homa_sock, homa_sock_wakeup_wmem)
-{
-	self->hsk.sock.sk_write_space = write_space;
-
-	/* First call: no-one is waiting for memory. */
-	unit_log_clear();
-	homa_sock_wakeup_wmem(&self->hsk);
-	EXPECT_STREQ("", unit_log_get());
-
-	/* Second call: someone is waiting. */
-	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
-	homa_sock_wakeup_wmem(&self->hsk);
-	EXPECT_STREQ("sk->sk_write_space invoked", unit_log_get());
 }

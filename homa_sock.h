@@ -274,16 +274,16 @@ struct homa_sock {
 	unsigned long flags;
 
 	/* Valid bit numbers for @flags:
-	 * HOMA_SOCK_NOSPACE -     Nonzero means that the socket has hit its
-	 *                         limit on tx buffer space and threads are
-	 *                         blocked waiting for skbs to be released. Used
-	 *                         instead of the SOCK_NOSPACE flag in
-	 *                         @sock.sk_socket->flags. This is because
-	 *                         @sock.sk_socket can become NULL unexpectedly
-	 *                         (especially since Homa never acquires the
-	 *                         Linux socket lock). Thus code using sk_socket
-	 *                         requires tricky synchronization and is
-	 *                         error-prone.
+	 * HOMA_SOCK_NOSPACE -     Nonzero means that a thread has found tx
+	 *                         memory unavailable and memory has not become
+	 *                         available since then. It is not safe to
+	 *                         use this flag to decide whether to wake up
+	 *                         waiting threads (there is a race between a
+	 *                         thread wanting memory and one freeing it).
+	 *                         Used instead of SOCK_NOSPACE in
+	 *                         @sock.sk_socket->flags because sk_socket can
+	 *                         become NULL while Homa is still using the
+	 *                         socket.
 	 */
 #define HOMA_SOCK_NOSPACE        0
 
@@ -519,21 +519,6 @@ static inline struct homa_sock *homa_sk(const struct sock *sk)
 static inline bool homa_sock_wmem_avl(struct homa_sock *hsk)
 {
 	return refcount_read(&hsk->sock.sk_wmem_alloc) < hsk->sock.sk_sndbuf;
-}
-
-/**
- * homa_sock_wakeup_wmem() - Invoked when tx packet memory has been freed;
- * wakes up processes waiting for tx memory, if any.
- * @hsk:   Socket of interest. The caller must hold a reference on it.
- */
-static inline void homa_sock_wakeup_wmem(struct homa_sock *hsk)
-{
-	/* This check is redundant with one in homa_sock_write_space, but
-	 * it's cheap and avoids an indirect call in the common case where
-	 * no-one is waiting for memory.
-	 */
-	if (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags))
-		hsk->sock.sk_write_space(&hsk->sock);
 }
 
 #endif /* _HOMA_SOCK_H */

@@ -656,16 +656,18 @@ void homa_sock_write_space(struct sock *sk)
 	struct homa_sock *hsk = homa_sk(sk);
 	struct socket_wq *wq;
 
-	if (!test_bit(HOMA_SOCK_NOSPACE, &hsk->flags) ||
-	    !homa_sock_wmem_avl(hsk))
+	if (!homa_sock_wmem_avl(hsk))
 		return;
-	tt_record2("homa_sock_write_space waking up port %d, wmem %d",
-		   hsk->port, refcount_read(&sk->sk_wmem_alloc));
-	clear_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+	if (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags)) {
+		tt_record2("homa_sock_write_space clearing NOSPACE for port %d, wmem %d",
+			   hsk->port, refcount_read(&sk->sk_wmem_alloc));
+		clear_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+	}
 
 	/* The code below follows the pattern of sock_def_write_space to
 	 * deal with situations where the socket has been closed and sk_wq
-	 * is NULL.
+	 * is NULL. skwq_has_sleeper provides a race-free way to determine
+	 * whether a wakeup is needed (HOMA_SOCK_NOSPACE does not).
 	 */
 	rcu_read_lock();
 	wq = rcu_dereference(sk->sk_wq);

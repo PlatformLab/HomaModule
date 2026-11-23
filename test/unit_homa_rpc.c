@@ -1088,7 +1088,7 @@ TEST_F(homa_rpc, homa_rpc_reap__metrics_for_server_response)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->server_responses_done);
 }
 #endif /* See strip.py */
-TEST_F(homa_rpc, homa_rpc_reap__call_homa_sock_wakeup_wmem)
+TEST_F(homa_rpc, homa_rpc_reap__call_sk_write_space)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
@@ -1099,6 +1099,20 @@ TEST_F(homa_rpc, homa_rpc_reap__call_homa_sock_wakeup_wmem)
 	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
 	homa_rpc_reap(&self->hsk);
 	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+}
+TEST_F(homa_rpc, homa_rpc_reap__no_sk_write_space_if_nothing_reaped)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			4000, 98, 1000,	2000);
+
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_end(crpc);
+	homa_rpc_hold(crpc);
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
+	homa_rpc_reap(&self->hsk);
+	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+	homa_rpc_put(crpc);
 }
 TEST_F(homa_rpc, homa_rpc_reap__null_buffer_pool)
 {

@@ -629,7 +629,8 @@ release:
 		rpc->magic = 0;
 		kfree(rpc);
 	}
-	homa_sock_wakeup_wmem(hsk);
+	if (num_rpcs > 0)
+		hsk->sock.sk_write_space(&hsk->sock);
 	tt_record3("reaped %d rpcs; %d dead frags remain for port %d",
 		   num_rpcs, hsk->dead_frags, hsk->port);
 	return !checked_all_rpcs;
