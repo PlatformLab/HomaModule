@@ -304,6 +304,11 @@ __u16 mock_min_default_port = 0x8000;
  * Its sk field points to the most recently created Homa socket. */
 static struct socket mock_socket;
 
+/* Linked into the wait queue of mock_socket by mock_sock_init, so that
+ * the queue appears to have a sleeper.
+ */
+static struct wait_queue_entry mock_sleeper;
+
 /* Each of the entries in mock_hnets below is associated with the
  * corresonding entry in mock_nets.
  */
@@ -2858,6 +2863,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	memset(hsk, 0, sizeof(*hsk));
 	atomic_set(&sk->sk_refcnt.refs, 1);
 	sk->sk_data_ready = mock_data_ready;
+	sk->sk_state_change = mock_state_change;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	sk->sk_socket = &mock_socket;
 	memset(&mock_socket, 0, sizeof(mock_socket));
@@ -2865,6 +2871,8 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	sk->sk_net.net = mock_net_for_hnet(hnet);
 	refcount_set(&sk->sk_wmem_alloc, 1);
 	init_waitqueue_head(&mock_socket.wq.wait);
+	INIT_LIST_HEAD(&mock_socket.wq.wait.head);
+	list_add(&mock_sleeper.entry, &mock_socket.wq.wait.head);
 	rcu_assign_pointer(sk->sk_wq, &mock_socket.wq);
 	sk->sk_sndtimeo = MAX_SCHEDULE_TIMEOUT;
 	sk->sk_protocol = IPPROTO_HOMA;
@@ -2898,6 +2906,16 @@ void mock_spin_unlock(spinlock_t *lock)
 {
 	UNIT_HOOK("unlock");
 	mock_record_unlocked(lock);
+}
+
+/**
+ * mock_state_change() - Invoked through sk->sk_state_change; logs a message
+ * to indicate that it was invoked.
+ * @sk:    Associated socket; not used here.
+ */
+void mock_state_change(struct sock *sk)
+{
+	unit_log_printf("; ", "sk->sk_state_change invoked");
 }
 
 /**

@@ -362,6 +362,7 @@ void        mock_sock_put(struct sock *sk);
 bool        mock_softirq_pending(int core);
 void        mock_spin_lock(spinlock_t *lock);
 void        mock_spin_unlock(spinlock_t *lock);
+void        mock_state_change(struct sock *sk);
 struct sk_buff *
 	    mock_tcp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
 			 int sequence, int extra_bytes);

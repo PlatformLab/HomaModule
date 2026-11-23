@@ -237,6 +237,7 @@ int homa_sock_init(struct homa_sock *hsk)
 	/* Initialize fields outside the Homa part. */
 	hsk->sock.sk_sndbuf = homa->wmem_max;
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
+	hsk->sock.sk_write_space = homa_sock_write_space;
 	IF_NO_STRIP(homa_hijack_sock_init(hsk));
 
 	/* This is needed to prevent blocking when allocating memory in
@@ -372,6 +373,9 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 */
 	hsk->shutdown = true;
 
+	/* Not used by Homa, but needed by other parts of the kernel. */
+	hsk->sock.sk_shutdown = SHUTDOWN_MASK;
+
 	/* This protects against RPC deletions during the RCU scan of
 	 * active_rpcs below.
 	 */
@@ -389,7 +393,6 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc);
 	}
-	wake_up_interruptible_poll(sk_sleep(&hsk->sock), EPOLLOUT);
 	rcu_read_unlock();
 	homa_unprotect_rpcs(hsk);
 
@@ -397,6 +400,11 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	while (!list_empty(&hsk->interests))
 		homa_interest_notify_shared(hsk, NULL);
 	homa_sock_unlock(hsk);
+
+	/* Wake up all threads waiting on the socket's wait queue (e.g. in
+	 * poll or homa_sock_wait_wmem) so they will notice the shutdown.
+	 */
+	hsk->sock.sk_state_change(&hsk->sock);
 	tt_record1("Finished shutdown for socket %d", hsk->port);
 }
 
@@ -632,4 +640,36 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 	if (result == 0)
 		return -EWOULDBLOCK;
 	return 0;
+}
+
+/**
+ * homa_sock_write_space() - If there are threads waiting for tx memory and
+ * the socket is now below its limit, wake them up. Used by Homa in place of
+ * sock_def_write_space (Homa needs to use a different test to decide whether
+ * enough memory is available).
+ * @sk:    Socket for which tx memory may have become available. The
+ *         caller must hold a reference on it.
+ */
+void homa_sock_write_space(struct sock *sk)
+{
+	struct homa_sock *hsk = homa_sk(sk);
+	struct socket_wq *wq;
+
+	if (!test_bit(HOMA_SOCK_NOSPACE, &hsk->flags) ||
+	    !homa_sock_wmem_avl(hsk))
+		return;
+	tt_record2("homa_sock_write_space waking up port %d, wmem %d",
+		   hsk->port, refcount_read(&sk->sk_wmem_alloc));
+	clear_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+
+	/* The code below follows the pattern of sock_def_write_space to
+	 * deal with situations where the socket has been closed and sk_wq
+	 * is NULL.
+	 */
+	rcu_read_lock();
+	wq = rcu_dereference(sk->sk_wq);
+	if (skwq_has_sleeper(wq))
+		wake_up_interruptible_poll(&wq->wait, EPOLLOUT | EPOLLWRNORM |
+					   EPOLLWRBAND);
+	rcu_read_unlock();
 }

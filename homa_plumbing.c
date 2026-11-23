@@ -1893,8 +1893,11 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	else
 		set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
 
+	/* These flags mimic what datagram_poll does when sk_shutdown is
+	 * SHUTDOWN_MASK.
+	 */
 	if (hsk->shutdown)
-		mask |= EPOLLIN;
+		mask |= EPOLLIN | EPOLLRDNORM | EPOLLRDHUP | EPOLLHUP;
 
 	if (!list_empty(&hsk->ready_rpcs))
 		mask |= EPOLLIN | EPOLLRDNORM;

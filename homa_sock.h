@@ -368,6 +368,7 @@ int                homa_sock_link(struct homa_sock *hsk, int port);
 void               homa_sock_shutdown(struct homa_sock *hsk);
 void               homa_sock_unlink(struct homa_sock *hsk);
 int                homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking);
+void               homa_sock_write_space(struct sock *sk);
 void               homa_socktab_destroy(struct homa_socktab *socktab,
 					struct homa_net *hnet);
 void               homa_socktab_end_scan(struct homa_socktab_scan *scan);
@@ -522,25 +523,17 @@ static inline bool homa_sock_wmem_avl(struct homa_sock *hsk)
 
 /**
  * homa_sock_wakeup_wmem() - Invoked when tx packet memory has been freed;
- * if memory usage is below the limit and there are tasks waiting for memory,
- * wake them up.
- * @hsk:   Socket of interest.
+ * wakes up processes waiting for tx memory, if any.
+ * @hsk:   Socket of interest. The caller must hold a reference on it.
  */
 static inline void homa_sock_wakeup_wmem(struct homa_sock *hsk)
 {
-	/* Note: can't use sk_stream_write_space for this functionality
-	 * because it uses a different test to determine whether enough
-	 * memory is available.
+	/* This check is redundant with one in homa_sock_write_space, but
+	 * it's cheap and avoids an indirect call in the common case where
+	 * no-one is waiting for memory.
 	 */
-	if (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags) &&
-	    homa_sock_wmem_avl(hsk)) {
-		tt_record2("homa_sock_wakeup_wmem waking up port %d, wmem %d",
-			   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
-		clear_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
-		rcu_read_lock();
-		wake_up_interruptible_poll(sk_sleep(&hsk->sock), EPOLLOUT);
-		rcu_read_unlock();
-	}
+	if (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags))
+		hsk->sock.sk_write_space(&hsk->sock);
 }
 
 #endif /* _HOMA_SOCK_H */

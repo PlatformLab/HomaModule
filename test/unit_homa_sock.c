@@ -41,6 +41,11 @@ static void nospace_hook(char *id)
 	clear_bit(HOMA_SOCK_NOSPACE, &hook_hsk->flags);
 }
 
+static void write_space(struct sock *sk)
+{
+	unit_log_printf("; ", "sk->sk_write_space invoked");
+}
+
 static void init_scan(struct homa_socktab_scan *scan,
 		      struct homa_socktab *socktab)
 {
@@ -369,6 +374,10 @@ TEST_F(homa_sock, homa_sock_init__ip_header_length)
 	unit_sock_destroy(&hsk_v4);
 	unit_sock_destroy(&hsk_v6);
 }
+TEST_F(homa_sock, homa_sock_init__set_sk_write_space)
+{
+	EXPECT_TRUE(self->hsk.sock.sk_write_space == homa_sock_write_space);
+}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 {
@@ -488,6 +497,13 @@ TEST_F(homa_sock, homa_sock_shutdown__already_shutdown)
 	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
 	self->hsk.shutdown = 0;
 }
+TEST_F(homa_sock, homa_sock_shutdown__set_sk_shutdown)
+{
+	EXPECT_EQ(0, self->hsk.sock.sk_shutdown);
+	homa_sock_shutdown(&self->hsk);
+	EXPECT_EQ(SHUTDOWN_MASK, self->hsk.sock.sk_shutdown);
+	unit_sock_destroy(&self->hsk);
+}
 TEST_F(homa_sock, homa_sock_shutdown__delete_rpcs)
 {
 	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
@@ -501,7 +517,7 @@ TEST_F(homa_sock, homa_sock_shutdown__delete_rpcs)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	unit_sock_destroy(&self->hsk);
 }
-TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests_and_wmem)
+TEST_F(homa_sock, homa_sock_shutdown__wakeup_other_threads)
 {
 	struct homa_interest interest1, interest2;
 
@@ -517,7 +533,8 @@ TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests_and_wmem)
 	EXPECT_EQ(NULL, interest1.rpc);
 	EXPECT_EQ(NULL, interest2.rpc);
 	EXPECT_TRUE(list_empty(&interest1.links));
-	EXPECT_STREQ("wake_up; wake_up; wake_up", unit_log_get());
+	EXPECT_STREQ("wake_up; wake_up; sk->sk_state_change invoked",
+		     unit_log_get());
 	unit_sock_destroy(&self->hsk);
 }
 
@@ -741,20 +758,59 @@ TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_but_times_out)
 	EXPECT_EQ(EWOULDBLOCK, -homa_sock_wait_wmem(&self->hsk, 0));
 }
 
-TEST_F(homa_sock, homa_sock_wakeup_wmem)
+TEST_F(homa_sock, homa_sock_write_space__no_one_waiting)
+{
+	mock_log_wakeups = 1;
+	unit_log_clear();
+	homa_sock_write_space(&self->hsk.sock);
+	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_sock, homa_sock_write_space__no_memory_available)
 {
 	self->hsk.sock.sk_sndbuf = 0;
 	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
-
-	/* First call: no memory available. */
-	homa_sock_wakeup_wmem(&self->hsk);
-	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
-
-	/* Second call: memory now available. */
-	self->hsk.sock.sk_sndbuf = 1000000;
 	mock_log_wakeups = 1;
 	unit_log_clear();
-	homa_sock_wakeup_wmem(&self->hsk);
+	homa_sock_write_space(&self->hsk.sock);
+	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_sock, homa_sock_write_space__wakeup)
+{
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
+	mock_log_wakeups = 1;
+	unit_log_clear();
+	homa_sock_write_space(&self->hsk.sock);
 	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 	EXPECT_STREQ("wake_up", unit_log_get());
+}
+TEST_F(homa_sock, homa_sock_write_space__socket_orphaned)
+{
+	struct socket_wq *wq = rcu_dereference(self->hsk.sock.sk_wq);
+
+	/* Simulate sock_orphan, which sets sk_wq to NULL during close. */
+	rcu_assign_pointer(self->hsk.sock.sk_wq, NULL);
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
+	mock_log_wakeups = 1;
+	unit_log_clear();
+	homa_sock_write_space(&self->hsk.sock);
+	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+	EXPECT_STREQ("", unit_log_get());
+	rcu_assign_pointer(self->hsk.sock.sk_wq, wq);
+}
+
+TEST_F(homa_sock, homa_sock_wakeup_wmem)
+{
+	self->hsk.sock.sk_write_space = write_space;
+
+	/* First call: no-one is waiting for memory. */
+	unit_log_clear();
+	homa_sock_wakeup_wmem(&self->hsk);
+	EXPECT_STREQ("", unit_log_get());
+
+	/* Second call: someone is waiting. */
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
+	homa_sock_wakeup_wmem(&self->hsk);
+	EXPECT_STREQ("sk->sk_write_space invoked", unit_log_get());
 }

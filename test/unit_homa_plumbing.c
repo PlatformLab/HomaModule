@@ -683,6 +683,9 @@ TEST_F(homa_plumbing, homa_socket__success)
 	memset(&hsk, 0, sizeof(hsk));
 	hsk.sock.sk_net.net = mock_net_for_hnet(self->hnet);
 	refcount_set(&hsk.sock.sk_wmem_alloc, 1);
+
+	/* Normally set by sock_init_data before homa_socket is invoked. */
+	hsk.sock.sk_state_change = mock_state_change;
 	EXPECT_EQ(0, homa_socket(&hsk.sock));
 	unit_sock_destroy(&hsk);
 }
@@ -1882,7 +1885,8 @@ TEST_F(homa_plumbing, homa_poll__socket_shutdown)
 	struct socket sock = {.sk = &self->hsk.sock};
 
 	unit_sock_destroy(&self->hsk);
-	EXPECT_EQ(POLLIN | POLLOUT | POLLWRNORM, homa_poll(NULL, &sock, NULL));
+	EXPECT_EQ(POLLIN | POLLRDNORM | POLLRDHUP | POLLHUP | POLLOUT |
+		  POLLWRNORM, homa_poll(NULL, &sock, NULL));
 }
 TEST_F(homa_plumbing, homa_poll__socket_readable)
 {
