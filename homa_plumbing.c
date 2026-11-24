@@ -1683,14 +1683,18 @@ int homa_softirq(struct sk_buff *skb)
 
 		if (!homa_make_header_avl(skb)) {
 #ifndef __STRIP__ /* See strip.py */
-			const struct in6_addr saddr =
-					skb_canonical_ipv6_saddr(skb);
 
-			if (homa->verbose)
+			if (homa->verbose) {
+				struct in6_addr saddr;
+
+				saddr = skb_canonical_ipv6_saddr(skb);
+				h = (struct homa_common_hdr *)
+				    skb_transport_header(skb);
 				pr_warn("Homa %s packet from %s too short or bogus type: %d bytes\n",
 					homa_symbol_for_type(h->type),
 					homa_print_ipv6_addr(&saddr),
 					skb->len);
+			}
 #endif /* See strip.py */
 			reason = SKB_DROP_REASON_PKT_TOO_SMALL;
 			goto discard;
