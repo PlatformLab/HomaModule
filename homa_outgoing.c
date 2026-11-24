@@ -667,6 +667,7 @@ void homa_xmit_data(struct homa_rpc *rpc)
 		end = rpc->msgout.length;
 #endif /* See strip.py */
 
+#ifndef __STRIP__ /* See strip.py */
 		/* Don't transmit if there isn't enough data available to fill
 		 * a maximum-size packet, unless we can't actually send a
 		 * full-size packet now anyway (e.g., we're at the end of
@@ -680,6 +681,12 @@ void homa_xmit_data(struct homa_rpc *rpc)
 		      rpc->msgout.copied_from_user >=
 		      rpc->msgout.unscheduled))
 			break;
+#else /* See strip.py */
+		if (xmit_offset + rpc->msgout.max_gso_data >
+		    rpc->msgout.copied_from_user &&
+		    rpc->msgout.copied_from_user < rpc->msgout.length)
+			break;
+#endif /* See strip.py */
 		if (homa_tx_skb_send(rpc, xmit_offset, &end) != 0)
 			break;
 #ifndef __STRIP__ /* See strip.py */

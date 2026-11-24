@@ -318,7 +318,6 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__call_homa_xmit_data_while_copying)
 		     unit_log_get());
 	homa_rpc_unlock(crpc);
 }
-#endif /* See strip.py */
 TEST_F(homa_outgoing, homa_tx_copy_from_user__call_homa_xmit_data_at_end)
 {
 	struct homa_rpc *crpc;
@@ -337,6 +336,7 @@ TEST_F(homa_outgoing, homa_tx_copy_from_user__call_homa_xmit_data_at_end)
 		     unit_log_get());
 	homa_rpc_unlock(crpc);
 }
+#endif /* See strip.py */
 TEST_F(homa_outgoing, homa_tx_copy_from_user__xmit_false)
 {
 	struct homa_rpc *crpc;
@@ -1357,6 +1357,7 @@ TEST_F(homa_outgoing, homa_xmit_data__send_short_packet_at_message_end)
 		     "xmit DATA 400@5600", unit_log_get());
 	homa_rpc_unlock(crpc);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_outgoing, homa_xmit_data__send_short_packet_for_unscheduled)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -1385,6 +1386,7 @@ TEST_F(homa_outgoing, homa_xmit_data__send_short_packet_for_unscheduled)
 	EXPECT_STREQ("xmit DATA 1400@1400 1400@2800", unit_log_get());
 	homa_rpc_unlock(crpc);
 }
+#endif /* See strip.py */
 TEST_F(homa_outgoing, homa_xmit_data__stop_because_of_error_in_homa_tx_skb_send)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
