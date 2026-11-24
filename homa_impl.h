@@ -92,10 +92,31 @@ struct sockaddr_unsized;
 #define __cond_acquires(x)
 #endif
 
+
 #ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"
 #include "homa_metrics.h"
 #endif /* See strip.py */
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
+#define __COND_ACQUIRES(lock) __cond_acquires(lock)
+#else
+#define __COND_ACQUIRES(lock) __cond_acquires(nonnull, lock)
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)
+#define SOCKADDR sockaddr
+#else
+#define SOCKADDR sockaddr_unsized
+#endif
+
+#ifndef local_lock_nested_bh
+/* Not present before 6.9; on non-RT kernels local_bh_disable already
+ * provides the needed exclusion.
+ */
+#define local_lock_nested_bh(lock) do { } while (0)
+#define local_unlock_nested_bh(lock) do { } while (0)
+#endif
 
 /**
  * union sockaddr_in_union - Holds either an IPv4 or IPv6 address (smaller
@@ -153,7 +174,6 @@ struct homa {
 
 	/**
 	 * @tx_pools: One tx_page_pool for each NUMA node on the machine.
-	 * If there are no cores for a node, then its value is NULL.
 	 */
 	struct homa_tx_pool *tx_pools[MAX_NUMNODES];
 
@@ -284,12 +304,6 @@ struct homa {
 	 * @timeout_ticks: abort an RPC if its silent_ticks reaches this value.
 	 */
 	int timeout_ticks;
-
-	/**
-	 * @timeout_resends: Assume that a server is dead if it has not
-	 * responded after this many RESENDs have been sent to it.
-	 */
-	int timeout_resends;
 
 	/**
 	 * @request_ack_ticks: How many timer ticks we'll wait for the
@@ -618,23 +632,6 @@ static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 	return mapped;
 }
 
-/**
- * homa_make_header_avl() - Invokes pskb_may_pull to make sure that all the
- * Homa header information for a packet is in the linear part of the skb
- * where it can be addressed using skb_transport_header.
- * @skb:     Packet for which header is needed.
- * Return:   The result of pskb_may_pull (true for success)
- */
-static inline bool homa_make_header_avl(struct sk_buff *skb)
-{
-	int pull_length;
-
-	pull_length = skb_transport_header(skb) - skb->data + HOMA_MAX_HEADER;
-	if (pull_length > skb->len)
-		pull_length = skb->len;
-	return pskb_may_pull(skb, pull_length);
-}
-
 #ifndef __UPSTREAM__ /* See strip.py */
 #ifdef __UNIT_TEST__
 void unit_log_printf(const char *separator, const char *format, ...)
@@ -653,8 +650,9 @@ extern unsigned int homa_net_id;
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);
 enum skb_drop_reason homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
-int      homa_bind(struct socket *sk, struct sockaddr *addr,
+int      homa_bind(struct socket *sk, struct SOCKADDR *addr,
 		   int addr_len);
+void     homa_busy_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_close(struct sock *sock, long timeout);
 int      homa_copy_to_user(struct homa_rpc *rpc);
 void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
@@ -671,9 +669,11 @@ int      homa_hash(struct sock *sk);
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer);
 int      homa_init(struct homa *homa);
 int      homa_ioc_info(struct socket *sock, unsigned long arg);
+int      homa_ioc_release(struct socket *sock, unsigned long arg);
 int      homa_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
 int      homa_load(void);
-void     homa_message_out_init(struct homa_rpc *rpc, int length);
+bool     homa_make_header_avl(struct sk_buff *skb);
+int      homa_message_out_init(struct homa_rpc *rpc, int length);
 void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			   struct homa_rpc *rpc);
 void     homa_net_destroy(struct homa_net *hnet);
@@ -699,6 +699,7 @@ int      homa_socket(struct sock *sk);
 int      homa_softirq(struct sk_buff *skb);
 void     homa_spin(int ns);
 void     homa_timer(struct homa *homa);
+void     homa_timer_check_ack(struct homa_rpc *rpc);
 void     homa_timer_check_rpc(struct homa_rpc *rpc);
 int      homa_timer_main(void *transport);
 int      homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
@@ -716,6 +717,7 @@ int      __homa_xmit_control(void *contents, size_t length,
 			     struct homa_route *route, struct homa_sock *hsk);
 void     homa_xmit_data(struct homa_rpc *rpc);
 void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
+int      next_int_from_string(char **p, int *value);
 
 #ifndef __STRIP__ /* See strip.py */
 void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
@@ -725,13 +727,11 @@ void     homa_incoming_sysctl_changed(struct homa *homa);
 int      homa_ioc_abort(struct socket *sock, unsigned long arg);
 int      homa_message_in_init(struct homa_rpc *rpc, int length, int unsched);
 void     homa_prios_changed(struct homa *homa);
-void     homa_start_msg_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 int      homa_sysctl_softirq_cores(struct ctl_table *table,
 				   int write, void *buffer, size_t *lenp,
 				   loff_t *ppos);
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			       int length);
-void     homa_xmit_start_msg(struct homa_rpc *rpc, int length);
 #else /* See strip.py */
 int      homa_message_in_init(struct homa_rpc *rpc, int length);
 #endif /* See strip.py */

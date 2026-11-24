@@ -14,7 +14,8 @@
 #define atomic64_cmpxchg_relaxed mock_cmpxchg
 
 #undef alloc_percpu_gfp
-#define alloc_percpu_gfp(type, flags) __kmalloc(10 * sizeof(type), flags)
+#define alloc_percpu_gfp(type, flags) mock_malloc(10 * sizeof(type), flags, \
+						  "free_percpu")
 
 #define compound_order mock_compound_order
 
@@ -38,8 +39,17 @@
 #undef DEFINE_PER_CPU
 #define DEFINE_PER_CPU(type, name) type name[10]
 
+#undef first_node
+#define first_node(...) 0
+
+#undef for_each_node
+#define for_each_node(nid) for (nid = 0; nid < mock_num_numas; nid++)
+
+#undef for_each_possible_cpu
+#define for_each_possible_cpu(i) for (i = 0; i < nr_cpu_ids; i++)
+
 #undef free_percpu
-#define free_percpu(name) kfree(name)
+#define free_percpu(name) mock_free(name, "free_percpu")
 
 #define get_page mock_get_page
 
@@ -59,8 +69,12 @@
 
 #define homa_rpc_put mock_rpc_put
 
+#undef kmalloc
+#define kmalloc(size, flags) mock_malloc((size), (flags), "kfree")
+
 #undef kmalloc_array
-#define kmalloc_array(count, size, type) __kmalloc((count) * (size), type)
+#define kmalloc_array(count, size, type) mock_malloc((count) * (size), type, \
+						     "kfree")
 
 #ifdef kmap_local_page
 #undef kmap_local_page
@@ -70,8 +84,20 @@
 #undef kthread_complete_and_exit
 #define kthread_complete_and_exit(...)
 
+#undef local_bh_disable
+#define local_bh_disable() mock_local_bh_disable()
+
+#undef local_bh_enable
+#define local_bh_enable() mock_local_bh_enable()
+
 #undef local_irq_save
 #define local_irq_save(flags) (flags) = 0
+
+#undef local_lock_nested_bh
+#define local_lock_nested_bh(lock) mock_local_lock_nested_bh()
+
+#undef local_unlock_nested_bh
+#define local_unlock_nested_bh(lock) mock_local_unlock_nested_bh()
 
 #undef MAX_SKB_FRAGS
 #define MAX_SKB_FRAGS mock_max_skb_frags
@@ -94,6 +120,9 @@
 #define per_cpu_ptr(name, core) (&name[core])
 
 #define put_page mock_put_page
+
+#undef raw_smp_processor_id
+#define raw_smp_processor_id() (cpu_number)
 
 #define rcu_read_lock mock_rcu_read_lock
 
@@ -148,7 +177,13 @@
 #define this_cpu_ptr(name) (&name[cpu_number])
 
 #undef __this_cpu_read
-#define __this_cpu_read(name) (name)
+#define __this_cpu_read(name) (name[cpu_number])
+
+#undef this_cpu_read
+#define this_cpu_read(name) (name[cpu_number])
+
+#undef this_cpu_write
+#define this_cpu_write(name, val) (name[cpu_number] = (val))
 
 #undef vmalloc
 #define vmalloc mock_vmalloc
@@ -185,6 +220,8 @@ extern int         mock_ethtool_ksettings_errors;
 extern bool        mock_exit_thread;
 extern int         mock_import_iovec_errors;
 extern int         mock_import_ubuf_errors;
+extern int         mock_inet_add_offload_errors;
+extern int         mock_inet6_add_offload_errors;
 extern int         mock_ip6_xmit_errors;
 extern int         mock_ip_queue_xmit_errors;
 extern bool        mock_ipv6;
@@ -192,6 +229,7 @@ extern bool        mock_ipv6_default;
 extern int         mock_kmalloc_errors;
 extern int         mock_kthread_create_errors;
 extern int         mock_link_mbps;
+extern int         mock_log_mallocs;
 extern int         mock_log_wakeups;
 extern int         mock_log_rcu_sched;
 extern int         mock_max_grants;
@@ -202,9 +240,10 @@ extern struct netdev_queue
 		   mock_net_queue;
 extern int         mock_netif_schedule_calls;
 extern struct net  mock_nets[];
+extern int         mock_num_numas;
+extern int         mock_numa_nodes[20];
 extern bool        mock_no_high_order_pages;
 extern int         mock_num_drop_reasons;
-extern int         mock_numa_mask;
 extern int         mock_page_nid_mask;
 extern int         mock_peer_free_no_fail;
 extern int         mock_prepare_to_wait_errors;
@@ -220,7 +259,10 @@ extern void      **mock_rht_walk_results;
 extern int         mock_rht_num_walk_results;
 extern int         mock_route_errors;
 extern int         mock_signal_pending;
+extern int         mock_skb_segment_errors;
 extern int         mock_sock_holds;
+extern u64         mock_softirq_pending_mask;
+extern int         mock_sysctl_intval;
 extern struct task_struct
 		   mock_task;
 extern int         mock_total_spin_locks;
@@ -249,6 +291,7 @@ struct net_device
 	   *mock_dev(int index, struct homa *homa);
 struct dst_entry
 	   *mock_dst_check(struct dst_entry *, __u32 cookie);
+void        mock_free(const void *block, const char *free_type);
 void        mock_free_pool(struct homa_pool *pool);
 cycles_t    mock_get_cycles(void);
 int         mock_get_link_ksettings(struct net_device *dev,
@@ -259,6 +302,11 @@ void        mock_get_page(struct page *page);
 struct homa_net
 	   *mock_hnet(int index, struct homa *homa);
 bool        mock_is_locked(void *lock);
+void        mock_local_bh_disable(void);
+void        mock_local_bh_enable(void);
+void        mock_local_lock_nested_bh(void);
+void        mock_local_unlock_nested_bh(void);
+void       *mock_malloc(size_t size, gfp_t flags, const char *free_type);
 struct net *mock_net_for_hnet(struct homa_net *hnet);
 void       *mock_net_generic(const struct net *net, unsigned int id);
 int         mock_page_refs(struct page *page);
@@ -307,12 +355,16 @@ struct sk_buff *
 int         mock_skb_count(void);
 void        mock_sock_destroy(struct homa_sock *hsk,
 			      struct homa_socktab *socktab);
+void        mock_sk_destruct(struct sock *sk);
 void        mock_sock_hold(struct sock *sk);
 int         mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet,
 			   int port);
 void        mock_sock_put(struct sock *sk);
+void        mock_sock_release(struct sock *sk);
+bool        mock_softirq_pending(int core);
 void        mock_spin_lock(spinlock_t *lock);
 void        mock_spin_unlock(spinlock_t *lock);
+void        mock_state_change(struct sock *sk);
 struct sk_buff *
 	    mock_tcp_skb(struct in6_addr *saddr, struct in6_addr *daddr,
 			 int sequence, int extra_bytes);

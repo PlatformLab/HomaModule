@@ -145,7 +145,12 @@ struct homa_grant *homa_grant_alloc(struct homa *homa)
 	grant->window_param = 0;
 	grant->max_overcommit = 8;
 	grant->fifo_grant_increment = 50000;
-	grant->fifo_fraction = 50;
+
+	/* Disable FIFO grants by default: there are pathologies at high
+	 * load where too many FIFO grants are being issued, resulting in
+	 * a significant drop in througput.
+	 */
+	grant->fifo_fraction = 0;
 
 #ifndef __STRIP__ /* See strip.py */
 	grant->sysctl_header = register_net_sysctl(&init_net, "net/homa",
@@ -334,6 +339,12 @@ int homa_grant_find_victim(struct homa_grant *grant, struct homa_rpc *rpc)
 			return i;
 		cand_peer = grant->active_rpcs[i].peer;
 		cand_peer_active = cand_peer->active_rpcs;
+		if (!rpc->route) {
+			tt_record1("Freezing because route for id %d is NULL",
+				   rpc->id);
+			tt_freeze();
+			tt_printk();
+		}
 		if (cand_peer == rpc->route->peer)
 			/* This increment reflects the state if both this
 			 * RPC and @rpc are active.
@@ -1154,11 +1165,23 @@ void homa_grant_update_sysctl_deps(struct homa_grant *grant)
 	u64 fifo_mbps, clocks_per_fifo_mbit, interval;
 	int i;
 
-	if (grant->max_overcommit > HOMA_MAX_GRANTS)
-		grant->max_overcommit = HOMA_MAX_GRANTS;
-
+	/* Clamp values to safe ranges. */
+	if (grant->fifo_grant_increment < 0)
+		grant->fifo_grant_increment = 0;
 	if (grant->fifo_fraction > 500)
 		grant->fifo_fraction = 500;
+	if (grant->fifo_fraction < 0)
+		grant->fifo_fraction = 0;
+	/* max_grantable_rpcs:  no constraints */
+	if (grant->max_incoming < 0)
+		grant->max_incoming = 0;
+	if (grant->max_overcommit > HOMA_MAX_GRANTS)
+		grant->max_overcommit = HOMA_MAX_GRANTS;
+	if (grant->max_overcommit < 1)
+		grant->max_overcommit = 1;
+	if (grant->window_param < 0)
+		grant->window_param = 0;
+
 	fifo_mbps = (u64)grant->homa->link_mbps * grant->fifo_fraction;
 	do_div(fifo_mbps, 1000);
 	if (fifo_mbps > 0 && grant->fifo_grant_increment > 0) {
@@ -1197,9 +1220,11 @@ void homa_grant_update_sysctl_deps(struct homa_grant *grant)
  * is invoked to read and write grant-related sysctl values.
  * @table:    sysctl table describing value to be read or written.
  * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space of the input/output data.
- * @lenp:     Not exactly sure.
- * @ppos:     Not exactly sure.
+ * @buffer:   Address in kernel space of the input/output data.
+ * @lenp:     Points to available space in buffer; must be modified to hold
+ *            number of bytes actually read or written.
+ * @ppos:     File pointer; must be incremented by number of bytes read
+ *            or written.
  *
  * Return: 0 for success, nonzero for error.
  */

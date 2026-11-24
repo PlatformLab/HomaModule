@@ -45,7 +45,7 @@ public:
 	 */
 	inline size_t contiguous(size_t offset) const
 	{
-		if (static_cast<ssize_t>(offset) >= msg_length)
+		if (msg_length < 0 || offset >= static_cast<size_t>(msg_length))
 			return 0;
 		if ((offset >> HOMA_BPAGE_SHIFT) == (control.num_bpages - 1))
 			return msg_length - offset;
@@ -83,7 +83,8 @@ public:
 	inline T* get(size_t offset, T* storage = nullptr) const {
 		int buf_num = offset >> HOMA_BPAGE_SHIFT;
 
-		if (static_cast<ssize_t>(offset + sizeof(T)) > msg_length)
+		if (msg_length < 0 || offset > static_cast<size_t>(msg_length)
+		    || sizeof(T) > static_cast<size_t>(msg_length) - offset)
 			return nullptr;
 		if (contiguous(offset) >= sizeof(T))
 			return reinterpret_cast<T*>(buf_region

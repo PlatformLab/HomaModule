@@ -13,7 +13,6 @@ timetrace will be written to standard output, with (new_time - old_time)
 added to each timestamp.
 """
 
-from __future__ import division, print_function
 from glob import glob
 from optparse import OptionParser
 import math

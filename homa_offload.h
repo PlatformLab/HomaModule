@@ -13,29 +13,24 @@
  */
 struct homa_offload_core {
 	/**
-	 * @last_active: homa_clock() time of the last known activity
-	 * on this core, such NAPI or SoftIRQ. Used for load balancing.
+	 * @last_active: homa_clock() time of the last known activity on
+	 * this core, such NAPI or SoftIRQ. A hint used for load balancing.
+	 * Accessed by other cores, so use READ_ONCE and WRITE_ONCE.
 	 */
 	u64 last_active;
 
 	/**
 	 * @last_gro: the most recent homa_clock() time when
-	 * homa_gro_receive returned on this core. Used to determine
-	 * whether GRO is keeping a core busy.
+	 * homa_gro_receive returned on this core. A hint used to determine
+	 * whether GRO is keeping a core busy. Accessed by other cores, so
+	 * use READ_ONCE and WRITE_ONCE.
 	 */
 	u64 last_gro;
 
 	/**
-	 * @softirq_backlog: the number of batches of packets that have
-	 * been queued for SoftIRQ processing on this core but haven't
-	 * yet been processed.
-	 */
-	atomic_t softirq_backlog;
-
-	/**
 	 * @softirq_offset: used when rotating SoftIRQ assignment among
-	 * the next cores; contains an offset to add to the current core
-	 * to produce the core for SoftIRQ.
+	 * the next cores; contains an offset (hint) to add to the current
+	 * core to produce the core for SoftIRQ.
 	 */
 	int softirq_offset;
 
@@ -51,7 +46,7 @@ struct homa_offload_core {
 	/**
 	 * @last_app_active: the most recent homa_clock() time when an
 	 * application was actively using Homa on this core (e.g., by
-	 * sending or receiving messages). Used for load balancing
+	 * sending or receiving messages). A hint used for load balancing
 	 * (see balance.txt).
 	 */
 	u64 last_app_active;
@@ -69,5 +64,22 @@ int      homa_offload_end(void);
 int      homa_offload_init(void);
 void     homa_send_ipis(void);
 void     homa_set_softirq_cpu(struct sk_buff *skb, int cpu);
+
+/**
+ * homa_softirq_pending() - Returns true if packets have been backlogged
+ * on a given core for SoftIRQ processing but the SoftIRQ processing has
+ * not yet completed.
+ * @cpu:   The core to check.
+ * Return: True if packets are pending on @cpu, false otherwise.
+ */
+static inline bool homa_softirq_pending(int cpu)
+{
+#ifndef __UNIT_TEST__
+	return test_bit(NAPI_STATE_SCHED,
+			&per_cpu(softnet_data, cpu).backlog.state);
+#else
+	return mock_softirq_pending(cpu);
+#endif
+}
 
 #endif /* _HOMA_OFFLOAD_H */

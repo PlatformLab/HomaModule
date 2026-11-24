@@ -171,7 +171,7 @@ TEST_F(homa_grant, homa_grant_alloc__success)
 	grant = homa_grant_alloc(&self->homa);
 	EXPECT_EQ(-1, grant->active_remaining[0]);
 	EXPECT_EQ(-1, grant->active_remaining[HOMA_MAX_GRANTS - 1]);
-	EXPECT_EQ(50, grant->fifo_fraction);
+	EXPECT_EQ(8, grant->max_overcommit);
 	homa_grant_free(grant);
 }
 TEST_F(homa_grant, homa_grant_alloc__cant_allocate_memory)
@@ -2081,29 +2081,33 @@ TEST_F(homa_grant, homa_grant_lock_slow)
 	EXPECT_EQ(500, homa_metrics_per_cpu()->grant_lock_miss_cycles);
 }
 
-TEST_F(homa_grant, homa_grant_update_sysctl_deps__max_overcommit)
+TEST_F(homa_grant, homa_grant_update_sysctl_deps__clamp_values)
 {
-	self->homa.grant->max_overcommit = 2;
+	self->homa.grant->fifo_grant_increment = -100;
 	homa_grant_update_sysctl_deps(self->homa.grant);
-	EXPECT_EQ(2, self->homa.grant->max_overcommit);
+	EXPECT_EQ(0, self->homa.grant->fifo_grant_increment);
 
-	self->homa.grant->max_overcommit = HOMA_MAX_GRANTS;
+	self->homa.grant->fifo_fraction = -10;
 	homa_grant_update_sysctl_deps(self->homa.grant);
-	EXPECT_EQ(HOMA_MAX_GRANTS, self->homa.grant->max_overcommit);
+	EXPECT_EQ(0, self->homa.grant->fifo_fraction);
+	self->homa.grant->fifo_fraction = 800;
+	homa_grant_update_sysctl_deps(self->homa.grant);
+	EXPECT_EQ(500, self->homa.grant->fifo_fraction);
+
+	self->homa.grant->max_incoming = -10;
+	homa_grant_update_sysctl_deps(self->homa.grant);
+	EXPECT_EQ(0, self->homa.grant->max_incoming);
 
 	self->homa.grant->max_overcommit = HOMA_MAX_GRANTS+1;
 	homa_grant_update_sysctl_deps(self->homa.grant);
 	EXPECT_EQ(HOMA_MAX_GRANTS, self->homa.grant->max_overcommit);
-}
-TEST_F(homa_grant, homa_grant_update_sysctl_deps__fifo_fraction)
-{
-	self->homa.grant->fifo_fraction = 499;
+	self->homa.grant->max_overcommit = -1;
 	homa_grant_update_sysctl_deps(self->homa.grant);
-	EXPECT_EQ(499, self->homa.grant->fifo_fraction);
+	EXPECT_EQ(1, self->homa.grant->max_overcommit);
 
-	self->homa.grant->fifo_fraction = 501;
+	self->homa.grant->window_param = -5;
 	homa_grant_update_sysctl_deps(self->homa.grant);
-	EXPECT_EQ(500, self->homa.grant->fifo_fraction);
+	EXPECT_EQ(0, self->homa.grant->window_param);
 }
 TEST_F(homa_grant, homa_grant_update_sysctl_deps__fifo_interval)
 {

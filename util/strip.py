@@ -62,6 +62,7 @@ Here are details about the #ifdefs used for stripping:
     #endif /* See strip.py */
 """
 
+from __future__ import annotations
 from collections import defaultdict
 from glob import glob
 from optparse import OptionParser
@@ -74,7 +75,7 @@ import sys
 
 exit_code = 0
 
-def remove_close(line):
+def remove_close(line: str) -> str:
     """
     Given a line of text containing a '}', remove the '}' and any
     following white space. If there is no '}', returns the original line.
@@ -87,7 +88,7 @@ def remove_close(line):
             break
     return line[0:i] + line [j:]
 
-def remove_open(line):
+def remove_open(line: str) -> str:
     """
     Given a line of text containing a '{', remove the '{' and any
     preceding white space. If there is no '{', returns the original line.
@@ -101,7 +102,7 @@ def remove_open(line):
             break
     return line[0:j+1] + line [i+1:]
 
-def leading_space(line):
+def leading_space(line: str) -> int:
     """
     Return the number of characters of leading space in a line (a tab counts
     as 8 spaces).
@@ -117,7 +118,7 @@ def leading_space(line):
             break
     return count
 
-def last_non_blank(s):
+def last_non_blank(s: str) -> str | None:
     """
     Return the last non-blank character in s, or None if there is no
     non-blank character in s.
@@ -127,7 +128,7 @@ def last_non_blank(s):
         return s2[-1]
     return None
 
-def blank_next_ok(line):
+def blank_next_ok(line: str) -> bool:
     """
     Given a line, return True if it is OK for this line to be followed by
     a blank line. False means that if the next line to be output is blank,
@@ -140,7 +141,7 @@ def blank_next_ok(line):
         return False
     return True
 
-def scan(file):
+def scan(file: str) -> list[str]:
     """
     Read a file, remove information that shouldn't appear in the Linux kernel
     version, and return an array of lines representing the stripped file.
@@ -328,7 +329,9 @@ def scan(file):
                 in_unit = None
                 continue
             if line.startswith('#else /* __UNIT_TEST__ */'):
-                in_unit = 'else'
+                # Keep the side that isn't for unit tests (after
+                # '#ifndef __UNIT_TEST__' that is the first side).
+                in_unit = 'if' if in_unit == 'else' else 'else'
                 continue
             if in_unit == 'if':
                 continue
@@ -377,7 +380,9 @@ def scan(file):
                         print('%s:%d: stripping creates empty block' %
                                 (file, line_num), file=sys.stderr)
                         exit_code = 1
-                    if statements_in_block == 1:
+                    # Keep braces before "else": a nested "if" could take it.
+                    if (statements_in_block == 1 and
+                            not pline.startswith('} else')):
                         slines[open_index] = remove_open(slines[open_index])
                         line = remove_close(line)
                         if not line.strip():

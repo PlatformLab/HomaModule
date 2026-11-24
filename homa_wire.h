@@ -35,10 +35,7 @@ enum homa_packet_type {
 #endif /* See strip.py */
 	NEED_ACK           = 0x17,
 	ACK                = 0x18,
-#ifndef __STRIP__ /* See strip.py */
-	START_MSG         = 0x19,
-#endif /* See strip.py */
-	MAX_OP             = 0x19,
+	MAX_OP             = 0x18,
 	/* If you add a new type here, you must also do the following:
 	 * 1. Change MAX_OP so it is the highest valid opcode
 	 * 2. Add support for the new opcode in homa_print_packet,
@@ -89,6 +86,14 @@ enum homa_packet_type {
  */
 #define HOMA_MAX_PRIORITIES 8
 #endif /* See strip.py */
+
+/**
+ * define HOMA_MIN_SEG_DATA - Homa will consider a host unreachable if
+ * there isn't room for at least this many bytes of message data in DATA
+ * packets for that host (the exact number is somewhat arbitrary; what's
+ * absolutely essential is that the value must be greater than zero).
+ */
+#define HOMA_MIN_SEG_DATA 100
 
 /**
  * struct homa_common_hdr - Wire format for the first bytes in every Homa
@@ -161,7 +166,7 @@ struct homa_common_hdr {
 	 * @checksum: occupies the same bytes as the checksum in a TCP
 	 * header. Set by Homa only during TCP hijacking.
 	 */
-	__be16 checksum;
+	__sum16 checksum;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
@@ -240,10 +245,6 @@ struct homa_ack {
  * TSO may not adjust @homa_common_hdr.sequence in the segments, so Homa
  * sprinkles correct offsets (in homa_seg_hdrs) throughout the segment data;
  * TSO/GSO will include a different homa_seg_hdr in each generated packet.
- *
- * If the first packet that a receiver sees for an incoming message is DATA
- * (rather than START_MSG) it means that this message is unscheduled: the
- * sender will transmit all of its packets without waiting for grants.
  */
 struct homa_seg_hdr {
 	/**
@@ -260,13 +261,17 @@ struct homa_data_hdr {
 	__be32 msg_length;
 
 #ifndef __STRIP__ /* See strip.py */
-	/* Previously used for incoming; retained as of 10/2026 so that
-	 * header size stays the same (otherwise kernel timetraces won't
-	 * work with older Homa versions: offset will be read from the
-	 * wrong place).
+	/**
+	 * @incoming: The receiver can expect the sender to send all of the
+	 * bytes in the message up to at least this offset (exclusive),
+	 * even without additional grants. This includes unscheduled
+	 * bytes, granted bytes, plus any additional bytes the sender
+	 * transmits unilaterally (e.g., to round up to a full GSO batch).
 	 */
-#endif /* See strip.py */
+	__be32 incoming;
+#else /* See strip.py */
 	__be32 reserved1;
+#endif /* See strip.py */
 
 	/** @ack: If the @client_id field of this is nonzero, provides info
 	 * about an RPC that the recipient can now safely free. Note: in
@@ -470,26 +475,6 @@ struct homa_ack_hdr {
 	/** @acks: Info about RPCs that are no longer active. */
 	struct homa_ack acks[HOMA_MAX_ACKS_PER_PKT];
 } __packed;
-
-#ifndef __STRIP__ /* See strip.py */
-/**
- * struct homa_start_msg_hdr - Wire format for START_MSG packets.
- *
- * A START_MSG packet is sent to begin the transmission of a scheduled
- * message, so that the receiver knows that the message exists and can begin
- * sending GRANTs for the message. The client will not sent any DATA packets
- * for the message until it receives GRANTs. START_MSG packets are not used for
- * unscheduled messages: the sender sends DATA packets without waiting for
- * GRANTs.
- */
-struct homa_start_msg_hdr {
-	/** @common: Fields common to all packet types. */
-	struct homa_common_hdr common;
-
-	/** @msg_length: Number of bytes in the message. */
-	__be32 msg_length;
-} __packed;
-#endif /* See strip.py */
 
 /**
  * homa_local_id(): given an RPC identifier from an input packet (which

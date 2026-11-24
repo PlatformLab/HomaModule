@@ -30,7 +30,8 @@ CCINCLUDES := \
 
 DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
-	     -D KBUILD_MODNAME='"homa"'
+	     -D KBUILD_MODNAME='"homa"' \
+	     -DCC_USING_FENTRY
 ifneq ($(__STRIP__),)
 DEFS +=      -D__STRIP__
 endif
@@ -84,7 +85,10 @@ HOMA_SRCS +=  homa_grant.c \
 	      homa_offload.c \
 	      homa_qdisc.c
 endif
-HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS)) rbtree.o rhashtable.o xxhash.o
+
+HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS))
+
+LINUX_OBJS := rbtree_v6_17_8.o rhashtable_v6_17_8.o xxhash.o
 
 OTHER_SRCS := ccutils.cc \
 	      main.c \
@@ -92,7 +96,7 @@ OTHER_SRCS := ccutils.cc \
 	      utils.c
 OTHER_OBJS := $(patsubst %.c,%.o,$(patsubst %.cc,%.o,$(OTHER_SRCS)))
 
-OBJS := $(TEST_OBJS) $(HOMA_OBJS) $(OTHER_OBJS)
+OBJS := $(TEST_OBJS) $(HOMA_OBJS) $(LINUX_OBJS) $(OTHER_OBJS)
 
 CLEANS = unit $(OBJS) *.d .deps
 
@@ -123,7 +127,7 @@ dummyFile:
 
 # Note: Without -O2 there will be strange compiler errors such as
 # 'asm operand 2 probably does not match constraints'.
-rhashtable.o: rhashtable.c
+rhashtable%.o: rhashtable%.c
 	$(CC) -c $(CFLAGS) -O2 -fno-sanitize=address $< -o $@
 
 xxhash.o: ../compat/xxhash.c
@@ -201,3 +205,15 @@ clean:
 # prints the value of a make variable.
 print-%:
 	@echo $* = $($*)
+
+# User-space receiver tests can run without a kernel build tree.
+receiver_unit: unit_homa_receiver.cc ../homa_receiver.cc ../homa_receiver.h ../homa.h
+	$(CXX) -std=c++17 -Wall -Wextra -Werror -g -I.. \
+		-fsanitize=address,undefined -fno-omit-frame-pointer \
+		unit_homa_receiver.cc ../homa_receiver.cc -o $@
+
+receiver_test: receiver_unit
+	./receiver_unit
+
+CLEANS += receiver_unit
+.PHONY: receiver_test

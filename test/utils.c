@@ -43,6 +43,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	int bytes_received, this_size;
 	struct homa_rpc *crpc;
 	u8 *tx_msg;
+	int status;
 
 	server_addr.in6.sin6_family = AF_INET6;
 	server_addr.in6.sin6_addr = *server_ip;
@@ -54,7 +55,9 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		return NULL;
 	tx_msg = kmalloc(req_length, GFP_ATOMIC);
 	unit_fill_data(tx_msg, req_length, 0);
-	homa_message_out_init(crpc, req_length);
+	status = homa_message_out_init(crpc, req_length);
+	if (status != 0)
+		return NULL;
 	if (homa_tx_copy_from_user(crpc, unit_iov_iter(tx_msg, req_length),
 				   false) != 0) {
 		homa_rpc_end(crpc);
@@ -69,24 +72,6 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		return crpc;
 	crpc->msgout.next_xmit_offset = crpc->msgout.length;
 
-#ifndef __STRIP__ /* See strip.py */
-	if (state == UNIT_RCVD_START_MSG) {
-		struct homa_start_msg_hdr start;
-		memset(&start, 0, sizeof(start));
-		start.common = (struct homa_common_hdr){
-			.sport = htons(server_port),
-			.dport = htons(hsk->port),
-			.type = START_MSG,
-			.sender_id = cpu_to_be64(id ^ 1)
-		};
-		start.msg_length = htonl(resp_length);
-
-		homa_dispatch_pkts(mock_skb_alloc(server_ip, client_ip,
-				   &start.common, 0, 0));
-		return crpc;
-	}
-#endif /* See strip.py */
-
 	struct homa_data_hdr h;
 	memset(&h, 0, sizeof(h));
 	h.common = (struct homa_common_hdr){
@@ -96,6 +81,9 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		.sender_id = cpu_to_be64(id ^ 1)
 	};
 	h.msg_length = htonl(resp_length);
+#ifndef __STRIP__ /* See strip.py */
+	h.incoming = htonl(10000);
+#endif /* See strip.py */
 
 	this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
@@ -329,27 +317,6 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	int bytes_received;
 	int status;
 
-#ifndef __STRIP__ /* See strip.py */
-	if (state == UNIT_RCVD_START_MSG) {
-		struct homa_start_msg_hdr start;
-		memset(&start, 0, sizeof(start));
-		start.common = (struct homa_common_hdr){
-			.sport = htons(client_port),
-			.dport = htons(hsk->port),
-			.type = START_MSG,
-			.sender_id = cpu_to_be64(id ^ 1)
-		};
-		start.msg_length = htonl(req_length);
-
-		homa_dispatch_pkts(mock_skb_alloc(client_ip, server_ip,
-				   &start.common, 0, 0));
-		srpc = homa_rpc_find_server(hsk, client_ip, id);
-		if (srpc)
-			homa_rpc_unlock(srpc);
-		return srpc;
-	}
-#endif /* See strip.py */
-
 	memset(&h, 0, sizeof(h));
 	h.common = (struct homa_common_hdr){
 		.sport = htons(client_port),
@@ -358,7 +325,10 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		.sender_id = cpu_to_be64(id ^ 1)
 	};
 	h.msg_length = htonl(req_length);
-	srpc = homa_rpc_alloc_server(hsk, client_ip, &h.common);
+#ifndef __STRIP__ /* See strip.py */
+	h.incoming = htonl(10000);
+#endif /* See strip.py */
+	srpc = homa_rpc_alloc_server(hsk, client_ip, &h);
 
 	if (IS_ERR(srpc))
 		return NULL;
@@ -386,7 +356,9 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	if (state == UNIT_IN_SERVICE)
 		return srpc;
 	homa_rpc_lock(srpc);
-	homa_message_out_init(srpc, resp_length);
+	status = homa_message_out_init(srpc, resp_length);
+	if (status != 0)
+		goto error;
 	status = homa_tx_copy_from_user(srpc, unit_iov_iter((void *) 2000,
 				        resp_length), false);
 	homa_rpc_unlock(srpc);
@@ -445,14 +417,14 @@ char *unit_ack_string(struct homa_ack *ack)
 }
 
 /**
- * unit_sock_destroy() - Invoked by unit tests to cleanup and destroy
- * a socket.
+ * unit_sock_destroy() - Invoked by unit tests to simulate closing a socket.
  * @hsk:    Socket to destroy.
  */
 void unit_sock_destroy(struct homa_sock *hsk)
 {
 	homa_sock_shutdown(hsk);
 	homa_sock_destroy(&hsk->sock);
+	mock_sock_release(&hsk->sock);
 }
 
 /**
@@ -558,4 +530,30 @@ void unit_alloc_frags(int num_frags, skb_frag_t *frags, ...)
 		frags[i].page_offset = offset;
 		skb_frag_size_set(&frags[i], length);
 	}
+}
+
+/**
+ * unit_sysctl() - A convenience function for invoking a sysctl handler
+ * such as homa_dointvec.
+ * @fn:     The actual sysctl handler to invoke, such as homa_dointvec.
+ * @table:  The ctl_table containing an entry for @name: the entry must
+ *          exit in the table.
+ * @name:   The name of the value to modify.
+ * @value:  The value to assign to the sysctl variable.
+ * Return:  Zero for success, otherwise a negative errno.
+ */
+int unit_sysctl(int (*fn)(struct ctl_table *table, int write, void *buffer,
+			  size_t *lenp, loff_t *ppos),
+		struct ctl_table *table, char *name, int value)
+{
+	static char *buffer = "abcdef";
+	struct ctl_table *entry;
+	size_t length = 6;
+
+	mock_sysctl_intval = value;
+	for (entry = table; ; entry++) {
+		if (strcmp(entry->procname, name) == 0)
+			return fn(entry, 1, buffer, &length, NULL);
+	}
+	return -ENOENT;
 }

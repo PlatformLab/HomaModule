@@ -33,7 +33,7 @@ struct homa_message_out {
 	 * homa_seg_hdr followed by the data for that segment. These
 	 * fragments will be incorporated into skb's to transmit the message.
 	 * If this doesn't point to @frag below then it is dynamically
-	 * allocated and must be freed.
+	 * allocated and must be freed with kvfree.  Immutable once allocated.
 	 */
 	skb_frag_t *frags;
 
@@ -41,10 +41,29 @@ struct homa_message_out {
 	int num_frags;
 
 	/**
+	 * @cur_frag: Index of a fragment in @frags (typically the most
+	 * recent fragment used by homa_tx_skb_alloc). Used to avoid
+	 * rescanning fragments from the beginning.
+	 */
+	int cur_frag;
+
+	/**
+	 * @cur_frag_offset: Byte offset within the message of
+	 * @frags[@cur_frag].
+	 */
+	int cur_frag_offset;
+
+	/**
 	 * @frag_bytes: Total amount of memory in all of @frags; this is
 	 * included in sk_wmem_alloc.
 	 */
 	int frag_bytes;
+
+	/**
+	 * @frag_nid: NUMA node to which the fragments should be
+	 * returned when freed.
+	 */
+	int frag_nid;
 
 	/**
 	 * @frag: @frags will point here if the message data all fits in a
@@ -87,15 +106,21 @@ struct homa_message_out {
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
-	 * @granted: Total number of initial bytes we are currently permitted
-	 * to send; must wait for grants before sending bytes at or beyond
-	 * this position. For unscheduled messages, equals @length. Never
-	 * larger than @length.
+	 * @unscheduled: Initial bytes of message that we'll send
+	 * without waiting for grants.
+	 */
+	int unscheduled;
+
+	/**
+	 * @granted: Total number of bytes we are currently permitted to
+	 * send, including unscheduled bytes; must wait for grants before
+	 * sending bytes at or beyond this position. Never larger than
+	 * @length.
 	 */
 	int granted;
 
 	/**
-	 * @priority: Priority level to use for transmitted packets.
+	 * @priority: Priority level to use for outgoing DATA packets.
 	 */
 	u8 priority;
 
@@ -161,6 +186,7 @@ struct homa_message_in {
 	/**
 	 * @gaps: List of homa_gaps describing all of the bytes with
 	 * offsets less than @recv_end that have not yet been received.
+	 * Entries are ordered by increasing start offset and never overlap.
 	 */
 	struct list_head gaps;
 
@@ -195,16 +221,14 @@ struct homa_message_in {
 
 	/**
 	 * @granted: Total # of bytes (starting from offset 0) that the sender
-	 * will transmit without additional grants. If nonzero, then either
-	 * the message is entirely unscheduled (in which case @granted equals
-	 * @length) or it is the offset sent in the most recent grant packet.
+	 * will transmit without additional grants, including unscheduled bytes.
 	 * Never larger than @length. Managed by homa_grant.c.
 	 */
 	int granted;
 
 	/**
 	 * @prev_grant: Offset in the last GRANT packet sent for this RPC
-	 * (initially 0).
+	 * (initially set to unscheduled bytes). Managed by homa_grant.c.
 	 */
 	int prev_grant;
 
@@ -225,7 +249,8 @@ struct homa_message_in {
 #ifndef __STRIP__ /* See strip.py */
 /**
  * struct homa_rpc_qdisc - Information that homa_qdisc needs to store in
- * each RPC. Managed entirely by homa_qdisc.
+ * each RPC. Managed entirely by homa_qdisc, normally while holding
+ * qdev->defer_lock.
  */
 struct homa_rpc_qdisc {
 	/**
@@ -423,8 +448,8 @@ struct homa_rpc {
 	struct list_head ready_links;
 
 	/**
-	 * @buf_links: Used to link this RPC into @hsk->waiting_for_bufs.
-	 * If the RPC isn't on @hsk->waiting_for_bufs, this is an empty
+	 * @buf_links: Used to link this RPC into @pool->waiting_for_bufs.
+	 * If the RPC isn't on @pool->waiting_for_bufs, this is an empty
 	 * list pointing to itself.
 	 */
 	struct list_head buf_links;
@@ -504,7 +529,7 @@ struct homa_rpc
 struct homa_rpc
 	*homa_rpc_alloc_server(struct homa_sock *hsk,
 			       const struct in6_addr *source,
-			       struct homa_common_hdr *h);
+			       struct homa_data_hdr *h);
 void     homa_rpc_end(struct homa_rpc *rpc);
 struct homa_rpc
 	*homa_rpc_find_client(struct homa_sock *hsk, u64 id);
@@ -533,7 +558,7 @@ static inline void homa_rpc_lock(struct homa_rpc *rpc)
  *             currently owned by someone else.
  */
 static inline int homa_rpc_try_lock(struct homa_rpc *rpc)
-	__cond_acquires(rpc->bucket->lock)
+	__COND_ACQUIRES(rpc->bucket->lock)
 {
 	if (!spin_trylock_bh(&rpc->bucket->lock))
 		return 0;

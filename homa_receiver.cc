@@ -2,6 +2,9 @@
  * SPDX-License-Identifier: BSD-1-Clause
  */
 
+#include <algorithm>
+#include <errno.h>
+#include <sys/ioctl.h>
 #include <string.h>
 
 #include "homa_receiver.h"
@@ -52,17 +55,19 @@ homa::receiver::~receiver()
  */
 void homa::receiver::copy_out(void *dest, size_t offset, size_t count) const
 {
+	if (msg_length < 0 || offset >= static_cast<size_t>(msg_length))
+		return;
 	char *cdest = static_cast<char *>(dest);
-	ssize_t limit = offset + count;
+	size_t remaining = std::min(count,
+			static_cast<size_t>(msg_length) - offset);
 
-	if (limit > msg_length)
-		limit = msg_length;
-	while (static_cast<ssize_t>(offset) < limit) {
-		size_t chunk_size = contiguous(offset);
+	while (remaining != 0) {
+		size_t chunk_size = std::min(contiguous(offset), remaining);
 
 		memcpy(cdest, get<char>(offset), chunk_size);
 		offset += chunk_size;
 		cdest += chunk_size;
+		remaining -= chunk_size;
 	}
 }
 
@@ -102,9 +107,7 @@ void homa::receiver::release()
 	if (control.num_bpages == 0)
 		return;
 
-	/* This recvmsg request will do nothing except return buffer space. */
-	control.id = 0;
-	recvmsg(fd, &hdr, MSG_DONTWAIT);
+	ioctl(fd, HOMAIOCRELEASE, &control);
 	control.num_bpages = 0;
 	msg_length = -1;
 }

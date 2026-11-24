@@ -49,8 +49,8 @@
  * maintained by the dynamic queue limits mechanism (DQL). DQL keeps
  * counters for each netdev_queue that indicate how many bytes are in the
  * NIC's possession for each queue (i.e. packets that have been passed
- * to the NIC but not yet returned after transmission). If the number of
- * outstanding bytes for any queue exceeds a limit (determined by the
+ * to the NIC but not yet returned after transmission). If the total number of
+ * outstanding bytes in the NIC exceeds a limit (determined by the
  * max_nic_queue_usecs sysctl parameter) then the NIC is considered
  * congested and Homa will stop queuing more packets until the congestion
  * subsides. This reduces worst-case total NIC queuing by 2-3x (as of
@@ -472,7 +472,10 @@ void homa_qdisc_destroy(struct Qdisc *qdisc)
 
 	homa_qdisc_lock_qdev(q->qdev);
 	while (!skb_queue_empty(&q->deferred_tcp))
-		kfree_skb(__skb_dequeue(&q->deferred_tcp));
+		kfree_skb_reason(__skb_dequeue(&q->deferred_tcp),
+				 SKB_DROP_REASON_QDISC_DROP);
+	if (q->qdev->next_qdisc == &q->defer_links)
+		q->qdev->next_qdisc = q->defer_links.next;
 	list_del_init(&q->defer_links);
 	homa_qdisc_unlock_qdev(q->qdev);
 	homa_qdisc_qdev_put(q->qdev);
@@ -651,6 +654,7 @@ bool homa_qdisc_can_bypass(struct sk_buff *skb, struct homa_qdisc *q)
 		if (ipv6_hdr(skb)->nexthdr != IPPROTO_TCP)
 			return false;
 		daddr = ipv6_hdr(skb)->daddr.in6_u.u6_addr32[0] ^
+			ipv6_hdr(skb)->daddr.in6_u.u6_addr32[1] ^
 			ipv6_hdr(skb)->daddr.in6_u.u6_addr32[2] ^
 			ipv6_hdr(skb)->daddr.in6_u.u6_addr32[3];
 	} else {
@@ -753,7 +757,7 @@ void homa_qdisc_defer_homa(struct homa_qdisc_dev *qdev, struct sk_buff *skb)
 		h = (struct homa_data_hdr *)skb_transport_header(skb);
 		bytes_left = rpc->msgout.length - ntohl(h->seg.offset);
 		if (bytes_left < rpc->qrpc.tx_left)
-			rpc->qrpc.tx_left = bytes_left;
+			WRITE_ONCE(rpc->qrpc.tx_left, bytes_left);
 		rpc->qrpc.qdev = qdev;
 		homa_qdisc_insert_rb(qdev, rpc);
 	}
@@ -861,7 +865,7 @@ int homa_qdisc_xmit_deferred_tcp(struct homa_qdisc_dev *qdev)
 	 * will choose a new output queue for the skb, which could result
 	 * in undesirable packet reordering.
 	 */
-	qdisc = container_of((void *)q, struct Qdisc, privdata);
+	qdisc = homa_qdisc_from_priv(q);
 	spin_lock_bh(qdisc_lock(qdisc));
 	qdisc_enqueue_tail(skb, qdisc);
 	spin_unlock_bh(qdisc_lock(qdisc));
@@ -931,7 +935,8 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 		qrpc = &rpc->qrpc;
 		node = &qrpc->rb_node;
 	}
-	skb = skb_dequeue(&qrpc->packets);
+	/* qdev->defer_lock protects all mutations of this packet queue. */
+	skb = __skb_dequeue(&qrpc->packets);
 	if (skb_queue_len(&qrpc->packets) == 0) {
 		rb_erase_cached(node, &qdev->deferred_rpcs);
 		if (rpc == qdev->oldest_rpc)
@@ -949,7 +954,7 @@ struct sk_buff *homa_qdisc_get_deferred_homa(struct homa_qdisc_dev *qdev)
 	bytes_left = rpc->msgout.length - (ntohl(h->seg.offset) +
 					   info->data_bytes);
 	if (bytes_left < qrpc->tx_left)
-		qrpc->tx_left = bytes_left;
+		WRITE_ONCE(qrpc->tx_left, bytes_left);
 	if (fifo) {
 		if (skb_queue_len(&qrpc->packets) > 0) {
 			rb_erase_cached(node, &qdev->deferred_rpcs);
@@ -1040,10 +1045,13 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_qdisc_dev *qdev = rpc->qrpc.qdev;
+	struct sk_buff_head packets;
+	struct sk_buff *skb;
 
 	if (!qdev)
 		return;
 
+	__skb_queue_head_init(&packets);
 	INC_METRIC(qdisc_flushes, 1);
 	homa_qdisc_lock_qdev(qdev);
 	if (skb_queue_len(&rpc->qrpc.packets) > 0) {
@@ -1052,10 +1060,10 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 		if (rpc == qdev->oldest_rpc)
 			qdev->oldest_rpc = NULL;
 
-		/* Free all of the RPC's deferred packets. */
-		while (skb_queue_len(&rpc->qrpc.packets) > 0)
-			kfree_skb_reason(skb_dequeue(&rpc->qrpc.packets),
-					 SKB_DROP_REASON_NO_SOCKET);
+		/* Detach the packets while holding qdev->defer_lock. The local
+		 * queue is private, so freeing it needs no queue lock.
+		 */
+		skb_queue_splice_init(&rpc->qrpc.packets, &packets);
 
 		if (!rb_first_cached(&qdev->deferred_rpcs) &&
 		    list_empty(&qdev->deferred_qdiscs)) {
@@ -1064,6 +1072,8 @@ void homa_qdisc_flush_rpc(struct homa_rpc *rpc)
 		}
 	}
 	homa_qdisc_unlock_qdev(qdev);
+	while ((skb = __skb_dequeue(&packets)) != NULL)
+		kfree_skb_reason(skb, SKB_DROP_REASON_NO_SOCKET);
 }
 
 /**
@@ -1350,10 +1360,11 @@ void homa_qdisc_refresh_from_dql(struct homa_qdisc_dev *qdev)
  * homa_qdisc_dointvec() - This function is a wrapper around proc_dointvec. It
  * is invoked to read and write pacer-related sysctl values.
  * @table:    sysctl table describing value to be read or written.
- * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space of the input/output data.
- * @lenp:     Not exactly sure.
- * @ppos:     Not exactly sure.
+ * @buffer:   Address in kernel space of the input/output data.
+ * @lenp:     Points to available space in buffer; must be modified to hold
+ *            number of bytes actually read or written.
+ * @ppos:     File pointer; must be incremented by number of bytes read
+ *            or written.
  *
  * Return: 0 for success, nonzero for error.
  */
@@ -1393,7 +1404,9 @@ void homa_qdev_update_sysctl(struct homa_qdisc_dev *qdev)
 	qdev->link_mbps = homa->link_mbps;
 	ops = qdev->dev->ethtool_ops;
 	if (ops && ops->get_link_ksettings) {
-		if (ops->get_link_ksettings(qdev->dev, &ksettings) == 0)
+		if (ops->get_link_ksettings(qdev->dev, &ksettings) == 0 &&
+		    ksettings.base.speed != 0 &&
+		    ksettings.base.speed != SPEED_UNKNOWN)
 			qdev->link_mbps = ksettings.base.speed;
 	}
 
@@ -1439,15 +1452,17 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 	struct homa_qdisc_dev *qdev;
 	u64 tmp;
 
-	if (qshared->fifo_fraction > 0) {
-		tmp = (1000 - qshared->fifo_fraction) << HOMA_FIFO_WEIGHT_SHIFT;
-		do_div(tmp, qshared->fifo_fraction);
-		qshared->fifo_weight = tmp;
-	}
-
-	qshared->max_nic_est_backlog_cycles = homa_ns_to_cycles(1000 *
-			qshared->max_nic_est_backlog_usecs);
-
+	/* Clamp values to safe ranges. */
+	if (qshared->max_nic_est_backlog_usecs < 0)
+		qshared->max_nic_est_backlog_usecs = 0;
+	if (qshared->max_nic_queue_usecs < 0)
+		qshared->max_nic_queue_usecs = 0;
+	if (qshared->fifo_fraction > 500)
+		qshared->fifo_fraction = 500;
+	if (qshared->fifo_fraction < 0)
+		qshared->fifo_fraction = 0;
+	if (qshared->defer_min_bytes < 0)
+		qshared->defer_min_bytes = 0;
 	if (qshared->homa_share < 0)
 		qshared->homa_share = 0;
 	if (qshared->homa_share > 100)
@@ -1456,6 +1471,15 @@ void homa_qdisc_update_sysctl_deps(struct homa_qdisc_shared *qshared)
 		qshared->max_link_usage = 5;
 	if (qshared->max_link_usage > 100)
 		qshared->max_link_usage = 100;
+
+	if (qshared->fifo_fraction > 0) {
+		tmp = (1000 - qshared->fifo_fraction) << HOMA_FIFO_WEIGHT_SHIFT;
+		do_div(tmp, qshared->fifo_fraction);
+		qshared->fifo_weight = tmp;
+	}
+
+	qshared->max_nic_est_backlog_cycles = homa_ns_to_cycles(1000 *
+			qshared->max_nic_est_backlog_usecs);
 
 	/* Use a mutex rather than RCU to prevent qdev deletion while we
 	 * traverse the list. This is more expensive, but RCU isn't safe

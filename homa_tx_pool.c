@@ -28,32 +28,34 @@ static void frag_page_set(skb_frag_t *frag, struct page *page)
 int homa_tx_pool_init(struct homa *homa)
 {
 	u64 min_kb;
-	int i;
+	int i, nid;
 
-	homa->tx_page_pool_min_kb = 1000;
 	min_kb = 3 * HOMA_MAX_MESSAGE_LENGTH;
 	do_div(min_kb, 1000);
 	homa->tx_page_pool_min_kb = min_kb;
 
-	/* Initialize NUMA-specfific page pools. */
+	/* Create a page pool for each NUMA node. */
 	homa->max_numa = -1;
-	for (i = 0; i < nr_cpu_ids; i++) {
+	for_each_node(nid) {
+		struct homa_tx_pool *pool;
+
+		pool = kzalloc(sizeof(struct homa_tx_pool), GFP_KERNEL);
+		if (!pool)
+			goto error;
+		spin_lock_init(&pool->mutex);
+		homa->tx_pools[nid] = pool;
+		homa->max_numa = nid;
+	}
+
+	/* Associate each core with the appropriate NUMA node. */
+	for_each_possible_cpu(i) {
 		struct homa_tx_pool_core *tx_core;
-		int numa = cpu_to_node(i);
+		int nid;
 
-		BUG_ON(numa >= MAX_NUMNODES);
-		if (numa > homa->max_numa)
-			homa->max_numa = numa;
-		if (!homa->tx_pools[numa]) {
-			struct homa_tx_pool *pool;
-
-			pool = kzalloc(sizeof(*pool), GFP_ATOMIC);
-			if (!pool)
-				goto error;
-			homa->tx_pools[numa] = pool;
-		}
+		nid = homa_tx_pool_mem_nid(i);
 		tx_core = &per_cpu(homa_tx_pool_core, i);
-		tx_core->pool = homa->tx_pools[numa];
+		local_lock_init(&tx_core->preempt_lock);
+		tx_core->nid = nid;
 	}
 	pr_notice("%s found max NUMA node %d\n", __func__, homa->max_numa);
 	return 0;
@@ -64,30 +66,63 @@ error:
 }
 
 /**
+ * homa_tx_pool_mem_nid() - Given a core number, return the NUMA node id
+ * that will be used by default for allocating memory on that core. This may
+ * be different from core's NUMA node if core's NUMA node is memoryless.
+ * @core:   Core whose memory NUMA node is needed.
+ */
+#ifndef __UNIT_TEST__
+int homa_tx_pool_mem_nid(int core)
+{
+	/* This function regrettably duplicates code from __next_zones_zonelist,
+	 * which isn't exported for modules.
+	 */
+	enum zone_type highest = gfp_zone(GFP_ATOMIC);
+	int nid = cpu_to_node(core);
+	struct zoneref *z;
+
+	if (nid >= 0 && nid < MAX_NUMNODES) {
+		for (z = node_zonelist(nid, GFP_ATOMIC)->_zonerefs;
+		z->zone; z++) {
+			if (zonelist_zone_idx(z) <= highest)
+				return zone_to_nid(z->zone);
+		}
+	}
+
+	/* Shouldn't ever get here; fall back to some node with memory
+	 * (only impact will be poor caching of pages).
+	 */
+	return first_node(node_states[N_MEMORY]);
+}
+#else /* __UNIT_TEST__ */
+int homa_tx_pool_mem_nid(int core) {
+	return cpu_to_node(core);
+}
+#endif /* __UNIT_TEST__ */
+
+/**
  * homa_tx_pool_cleanup() - Invoked when a struct homa is deleted; cleans
  * up information related to this module.
- * @homa:  Overall information about the Homa transport.
+ * @homa:  Overall information about the Homa transport. Once this module
+ *         returns, the APIs in this file must not be used with @homa.
  */
 void homa_tx_pool_cleanup(struct homa *homa)
 {
 	int i, j;
 
-	for (i = 0; i < nr_cpu_ids; i++) {
+	for_each_possible_cpu(i) {
 		struct homa_tx_pool_core *tx_core;
 
 		tx_core = &per_cpu(homa_tx_pool_core, i);
-		if (!tx_core)
-			continue;
 		if (tx_core->page) {
 			put_page(tx_core->page);
 			tx_core->page = NULL;
 			tx_core->page_size = 0;
 			tx_core->allocated = 0;
 		}
-		tx_core->pool = NULL;
 	}
 
-	for (i = 0; i < MAX_NUMNODES; i++) {
+	for_each_node(i) {
 		struct homa_tx_pool *pool = homa->tx_pools[i];
 
 		if (!pool)
@@ -108,42 +143,59 @@ void homa_tx_pool_cleanup(struct homa *homa)
  * homa_tx_pool_alloc() - Allocate a block of memory in one or more
  * fragments.
  * @homa:        Shared information about the Homa transport.
- * @length:       Total number of bytes to allocate.
+ * @length:      Total number of bytes to allocate.
  * @num_frags:   Number of fragments of storage initially available at **frags;
  *               modified to hold the total number of fragments
  *               allocated.
  * @frags:       Pointer to pointer to space in which to store fragments;
  *               if this initial space is insufficient to hold all of the
- *               fragments needed, will be overwritten with a dynamically
- *               allocated block.
- * Return:       0 for success, negative errno on error.
+ *               fragments needed, will be overwritten with a block
+ *               dynamically allocated with kvmalloc.
+ * Return:       On success, returns the NUMA node id on whose behalf the
+ *               memory was allocated; this should be passed into
+ *               homa_tx_pool_free when freeing the frags. On error, returns
+ *               a negative errno.
  */
 int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 		       skb_frag_t **frags)
 {
 	struct homa_tx_pool_core *tx_core;
+	struct homa_tx_pool *tx_pool;
 	skb_frag_t *cur_frags = *frags;
 	int max_frags = *num_frags;
 	int bytes_left = length;
 	int frags_allocated = 0;
 	skb_frag_t *frag;
+	int nid;
 	int err;
 
 	/* Asssure atomicity with respect to SoftIRQ invocations or
 	 * task preemption (so we can access per-core info without races).
 	 */
 	local_bh_disable();
+	local_lock_nested_bh(&homa_tx_pool_core.preempt_lock);
 	tx_core = &per_cpu(homa_tx_pool_core, smp_processor_id());
+	nid = READ_ONCE(tx_core->nid);
+	tx_pool = homa->tx_pools[nid];
 
 	while (bytes_left  > 0) {
 		/* Expand the frag array if needed. */
 		if (frags_allocated == max_frags) {
 			skb_frag_t *new_frags;
-			int num_new;
+			int num_new, order;
 
-			num_new = ((bytes_left + HOMA_TX_PAGE_SIZE - 1) >>
-				   (PAGE_SHIFT + HOMA_TX_PAGE_ORDER)) +
-				  frags_allocated;
+			/* If this is the first time we've expanded the array,
+			 * get enough space to meet all our needs with
+			 * high-order pages. If it's the second time, we must
+			 * not have been able to allocate high-order pages, so
+			 * assume fragments will only hold a single page.
+			 */
+			if (cur_frags == *frags)
+				order = HOMA_TX_PAGE_ORDER;
+			else
+				order = 0;
+			num_new = ((bytes_left + (PAGE_SIZE << order) - 1) >>
+				   (PAGE_SHIFT + order)) + frags_allocated;
 			new_frags = kvmalloc_array(num_new, sizeof(*new_frags),
 						   GFP_ATOMIC);
 			if (!new_frags) {
@@ -153,28 +205,31 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 			memcpy(new_frags, cur_frags,
 			       frags_allocated * sizeof(*new_frags));
 			if (cur_frags != *frags)
-				kfree(cur_frags);
+				kvfree(cur_frags);
 			cur_frags = new_frags;
 			max_frags = num_new;
 		}
 
 		frag = &cur_frags[frags_allocated];
-		err = __homa_tx_pool_alloc_frag(tx_core, bytes_left, frag);
+		err = __homa_tx_pool_alloc_frag(tx_core, tx_pool, bytes_left,
+						frag);
 		if (err != 0)
 			goto error;
 		frags_allocated++;
 		bytes_left -= skb_frag_size(frag);
 	}
+	local_unlock_nested_bh(&homa_tx_pool_core.preempt_lock);
 	local_bh_enable();
 	*frags  = cur_frags;
 	*num_frags = frags_allocated;
-	return 0;
+	return nid;
 
 error:
-	homa_tx_pool_free(homa, frags_allocated, cur_frags);
+	homa_tx_pool_free(homa, nid, frags_allocated, cur_frags);
 	if (cur_frags != *frags)
-		kfree(cur_frags);
+		kvfree(cur_frags);
 	*num_frags = 0;
+	local_unlock_nested_bh(&homa_tx_pool_core.preempt_lock);
 	local_bh_enable();
 	return err;
 }
@@ -183,6 +238,7 @@ error:
  * __homa_tx_pool_alloc_frag() - Allocate space for a single fragment.
  * Caller must have disabled interrupts.
  * @tx_core:   Core-specific information to use for the allocation.
+ * @tx_pool:   NUMA-specific page pool to use for allocation, if needed.
  * @length:    Desired length: actual length of fragment may be less
  *             than this.
  * @frag:      Store information about the allocated fragment here. Its
@@ -190,7 +246,8 @@ error:
  *             on its page.
  * Return:     0 for success, otherwise a negative errno.
  */
-int __homa_tx_pool_alloc_frag(struct homa_tx_pool_core *tx_core, int length,
+int __homa_tx_pool_alloc_frag(struct homa_tx_pool_core *tx_core,
+			      struct homa_tx_pool *pool, int length,
 			      skb_frag_t *frag)
 {
 	struct page *page;
@@ -213,7 +270,7 @@ int __homa_tx_pool_alloc_frag(struct homa_tx_pool_core *tx_core, int length,
 	}
 
 	/* Must allocate a new page. */
-	page = homa_tx_pool_alloc_page(tx_core, &page_size);
+	page = homa_tx_pool_alloc_page(tx_core, pool, &page_size);
 	if (!page)
 		return -ENOMEM;
 	frag_page_set(frag, page);
@@ -223,8 +280,8 @@ int __homa_tx_pool_alloc_frag(struct homa_tx_pool_core *tx_core, int length,
 	/* Retain the leftover part of the page as the core's cached page,
 	 * if it has more space available than the current cached page.
 	 */
-	if (!tx_core->page || (tx_core->page_size - tx_core->allocated) <
-			       (page_size - skb_frag_size(frag))) {
+	if (tx_core->page_size - tx_core->allocated <
+	    page_size - skb_frag_size(frag)) {
 		if (tx_core->page)
 			put_page(tx_core->page);
 		get_page(page);
@@ -236,39 +293,18 @@ int __homa_tx_pool_alloc_frag(struct homa_tx_pool_core *tx_core, int length,
 }
 
 /**
- * homa_tx_pool_alloc_frag() - Allocate space for a single fragment.
- * @homa:      Overall information about the Homa transport.
- * @length:    Desired length: actual length of fragment may be less
- *             than this.
- * @frag:      Store information about the allocated fragment here. Its
- *             length may be less than @length. A reference will be taken
- *             on its page.
- * Return:     0 for success, otherwise a negative errno.
- */
-int homa_tx_pool_alloc_frag(struct homa *homa, int length, skb_frag_t *frag)
-{
-	struct homa_tx_pool_core *tx_core;
-	int result;
-
-	tx_core = &per_cpu(homa_tx_pool_core, smp_processor_id());
-	local_bh_disable();
-	result = __homa_tx_pool_alloc_frag(tx_core, length, frag);
-	local_bh_enable();
-	return result;
-}
-
-/**
  * homa_tx_pool_alloc_page() - Allocate a new page for skb allocation for a
  * given core. Any existing page is released.
- * @tx_core:    Core-specific info; the page will be allocated in this core.
+ * @tx_core:    Core-specific info; the page will be allocated using the pool
+ *              for this core.
+ * @tx_pool:    NUMA-specific page pool to use for allocation, if needed.
  * @length:     The length of the allocated page (if any) will be stored here.
  * Return:      The allocated page (with reference count 1) or NULL if
  *              no page could be allocated.
  */
 struct page *homa_tx_pool_alloc_page(struct homa_tx_pool_core *tx_core,
-				     int *length)
+				     struct homa_tx_pool *pool, int *length)
 {
-	struct homa_tx_pool *pool;
 	struct page *page;
 
 	IF_NO_STRIP(u64 start);
@@ -284,7 +320,6 @@ struct page *homa_tx_pool_alloc_page(struct homa_tx_pool_core *tx_core,
 	}
 
 	/* Step 2: can we retrieve a page from the pool for this NUMA node? */
-	pool = tx_core->pool;
 	if (pool->avail) {
 		UNIT_HOOK("tx_pool_race");
 		spin_lock_bh(&pool->mutex);
@@ -327,11 +362,15 @@ struct page *homa_tx_pool_alloc_page(struct homa_tx_pool_core *tx_core,
  * homa_tx_pool_free() - Release one or more fragments previously allocated
  * by homa_tx_pool_alloc.
  * @homa:        Shared information about the Homa transport.
+ * @nid:         NUMA node used to allocate the fragments (returned by
+ *               homa_tx_pool_alloc); used to cache fragments with that
+ *               node instead of freeing.
  * @num_frags:   Number of fragments at *frags.
  * @frags:       Pointer to array of fragments to free; must not be used
  *               after this function returns.
  */
-void homa_tx_pool_free(struct homa *homa, int num_frags, skb_frag_t *frags)
+void homa_tx_pool_free(struct homa *homa, int nid, int num_frags,
+		       skb_frag_t *frags)
 {
 	struct homa_tx_pool *pool;
 	int i;
@@ -339,12 +378,20 @@ void homa_tx_pool_free(struct homa *homa, int num_frags, skb_frag_t *frags)
 	if (num_frags <= 0)
 		return;
 
-	pool = homa->tx_pools[page_to_nid(skb_frag_page(&frags[0]))];
+	pool = homa->tx_pools[nid];
 	spin_lock_bh(&pool->mutex);
 	for (i = 0; i < num_frags; i++) {
 		struct page *page = skb_frag_page(&frags[i]);
 
+		/* Don't save this page for future use unless it is "full
+		 * size". Also, if the page doesn't actually live on the
+		 * given NUMA node (perhaps that node ran out of space so the
+		 * page was allocated on another node) then don't cache it;
+		 * hopefully there will be space on the NUMA node available
+		 * in the future.
+		 */
 		if (compound_order(page) == HOMA_TX_PAGE_ORDER &&
+		    page_to_nid(page) == nid &&
 		    page_ref_count(page) == 1 &&
 		    pool->avail < HOMA_TX_POOL_LIMIT) {
 			pool->pages[pool->avail] = page;
@@ -360,6 +407,7 @@ void homa_tx_pool_free(struct homa *homa, int num_frags, skb_frag_t *frags)
  * homa_tx_pool_gc() - This function is invoked occasionally; its
  * job is to gradually release pages from the page pools back to
  * Linux, based on sysctl parameters such as tx_page_frees_per_sec.
+ * It also updates NUMA hints for cores.
  * @homa:  Overall information about the Homa transport.
  */
 void homa_tx_pool_gc(struct homa *homa)
@@ -416,8 +464,8 @@ void homa_tx_pool_gc(struct homa *homa)
 	 * releasing the lock, since freeing is expensive).
 	 */
 	spin_lock_bh(&max_pool->mutex);
-	min_pages = ((homa->tx_page_pool_min_kb * 1000)
-			+ (HOMA_TX_PAGE_SIZE - 1)) >> HOMA_TX_PAGE_SHIFT;
+	min_pages = (int)((((u64)homa->tx_page_pool_min_kb * 1000) +
+			   (HOMA_TX_PAGE_SIZE - 1)) >> HOMA_TX_PAGE_SHIFT);
 
 	/* Note: may need to adjust max_low_mark to reflect changes made
 	 * while lock wasn't held.
@@ -442,6 +490,19 @@ void homa_tx_pool_gc(struct homa *homa)
 		tt_record2("homa_tx_pool_gc releasing page 0x%08x%08x",
 			   tt_hi(page), tt_lo(page));
 		put_page(page);
+	}
+
+	/* Check each core to make sure its NUMA node is still correct
+	 * (the value will only change in the face of hotplug updates).
+	 */
+	for_each_possible_cpu(i) {
+		struct homa_tx_pool_core *tx_core;
+		int nid;
+
+		nid = homa_tx_pool_mem_nid(i);
+		tx_core = &per_cpu(homa_tx_pool_core, i);
+		if (READ_ONCE(tx_core->nid) != nid)
+			WRITE_ONCE(tx_core->nid, nid);
 	}
 }
 
@@ -528,7 +589,7 @@ int homa_copy_iter_to_frags(struct homa_frag_filler *filler,
 				      filler->offset, bytes_this_frag, p,
 				      p_off, p_len, copied) {
 			int result;
-			void *vaddr = kmap_local_page(p);
+			u8 *vaddr = kmap_local_page(p);
 
 			result = copy_from_iter(vaddr + p_off, p_len, iter);
 			kunmap_local(vaddr);

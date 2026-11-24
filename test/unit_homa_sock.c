@@ -2,6 +2,7 @@
 
 #include "homa_impl.h"
 #include "homa_interest.h"
+#include "homa_pool.h"
 #include "homa_sock.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
@@ -39,6 +40,12 @@ static void nospace_hook(char *id)
 	if (strcmp(id, "prepare_to_wait") != 0)
 		return;
 	clear_bit(HOMA_SOCK_NOSPACE, &hook_hsk->flags);
+}
+
+static void saved_destruct(struct sock *sk)
+{
+	unit_log_printf("; ", "saved_destruct invoked");
+	mock_sk_destruct(sk);
 }
 
 static void init_scan(struct homa_socktab_scan *scan,
@@ -99,6 +106,9 @@ TEST_F(homa_sock, homa_socktab_destroy)
 
 	homa_socktab_destroy(self->homa.socktab, NULL);
 	EXPECT_EQ(1, hsk3.shutdown);
+	mock_sock_release(&hsk1.sock);
+	mock_sock_release(&hsk2.sock);
+	mock_sock_release(&hsk3.sock);
 }
 
 TEST_F(homa_sock, homa_socktab_start_scan)
@@ -369,6 +379,10 @@ TEST_F(homa_sock, homa_sock_init__ip_header_length)
 	unit_sock_destroy(&hsk_v4);
 	unit_sock_destroy(&hsk_v6);
 }
+TEST_F(homa_sock, homa_sock_init__set_sk_write_space)
+{
+	EXPECT_TRUE(self->hsk.sock.sk_write_space == homa_sock_write_space);
+}
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 {
@@ -387,6 +401,20 @@ TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 	unit_sock_destroy(&no_hijack);
 }
 #endif /* See strip.py */
+TEST_F(homa_sock, homa_sock_init__set_sk_destruct)
+{
+	EXPECT_TRUE(self->hsk.sock.sk_destruct == homa_sock_destruct);
+	EXPECT_TRUE(self->hsk.saved_destruct == mock_sk_destruct);
+}
+TEST_F(homa_sock, homa_sock_init__dont_set_sk_destruct_on_error)
+{
+	struct homa_sock hsk;
+
+	mock_kmalloc_errors = 2;
+	EXPECT_EQ(ENOMEM, -mock_sock_init(&hsk, self->hnet, 0));
+	EXPECT_TRUE(hsk.sock.sk_destruct == mock_sk_destruct);
+	unit_sock_destroy(&hsk);
+}
 
 TEST_F(homa_sock, homa_sock_link__basics)
 {
@@ -491,6 +519,13 @@ TEST_F(homa_sock, homa_sock_shutdown__already_shutdown)
 	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
 	self->hsk.shutdown = 0;
 }
+TEST_F(homa_sock, homa_sock_shutdown__set_sk_shutdown)
+{
+	EXPECT_EQ(0, self->hsk.sock.sk_shutdown);
+	homa_sock_shutdown(&self->hsk);
+	EXPECT_EQ(SHUTDOWN_MASK, self->hsk.sock.sk_shutdown);
+	unit_sock_destroy(&self->hsk);
+}
 TEST_F(homa_sock, homa_sock_shutdown__delete_rpcs)
 {
 	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
@@ -504,7 +539,7 @@ TEST_F(homa_sock, homa_sock_shutdown__delete_rpcs)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	unit_sock_destroy(&self->hsk);
 }
-TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests_and_wmem)
+TEST_F(homa_sock, homa_sock_shutdown__wakeup_other_threads)
 {
 	struct homa_interest interest1, interest2;
 
@@ -520,8 +555,60 @@ TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests_and_wmem)
 	EXPECT_EQ(NULL, interest1.rpc);
 	EXPECT_EQ(NULL, interest2.rpc);
 	EXPECT_TRUE(list_empty(&interest1.links));
-	EXPECT_STREQ("wake_up; wake_up; wake_up", unit_log_get());
+	EXPECT_STREQ("wake_up; wake_up; sk->sk_state_change invoked",
+		     unit_log_get());
 	unit_sock_destroy(&self->hsk);
+}
+
+TEST_F(homa_sock, homa_sock_destroy__unlink_socket)
+{
+	struct homa_sock hsk;
+	int port;
+
+	/* This is the path taken when inet_create fails after ->init
+	 * (e.g. a cgroup BPF program rejects the socket): ->destroy runs
+	 * without ->close.
+	 */
+	mock_sock_init(&hsk, self->hnet, 0);
+	port = hsk.port;
+	homa_sock_destroy(&hsk.sock);
+	EXPECT_EQ(NULL, homa_sock_find(self->hnet, port));
+	EXPECT_EQ(NULL, hsk.slink);
+	mock_sock_release(&hsk.sock);
+}
+TEST_F(homa_sock, homa_sock_destroy__shutdown_buffer_pool)
+{
+	homa_sock_destroy(&self->hsk.sock);
+	EXPECT_TRUE(self->hsk.buffer_pool->shutdown);
+}
+TEST_F(homa_sock, homa_sock_destroy__reap_rpcs)
+{
+	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			20000, 1600);
+	unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id+2,
+			5000, 5000);
+
+	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.dead_rpcs));
+	homa_sock_destroy(&self->hsk.sock);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.dead_rpcs));
+}
+
+TEST_F(homa_sock, homa_sock_destruct__basics)
+{
+	struct homa_sock hsk;
+
+	mock_sock_init(&hsk, self->hnet, 0);
+	hsk.saved_destruct = saved_destruct;
+	homa_sock_shutdown(&hsk);
+	homa_sock_destroy(&hsk.sock);
+	unit_log_clear();
+	homa_sock_destruct(&hsk.sock);
+	EXPECT_EQ(NULL, hsk.buffer_pool);
+	EXPECT_STREQ("saved_destruct invoked", unit_log_get());
 }
 
 TEST_F(homa_sock, homa_sock_bind)
@@ -679,6 +766,14 @@ TEST_F(homa_sock, homa_sock_wait_wmem__nonblocking)
 	EXPECT_EQ(EWOULDBLOCK, -homa_sock_wait_wmem(&self->hsk, 1));
 	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 }
+TEST_F(homa_sock, homa_sock_wait_wmem__set_async_nospace)
+{
+	self->hsk.sock.sk_sndbuf = 0;
+	sock_set_flag(&self->hsk.sock, SOCK_FASYNC);
+	EXPECT_EQ(EWOULDBLOCK, -homa_sock_wait_wmem(&self->hsk, 1));
+	EXPECT_EQ(1, test_bit(SOCKWQ_ASYNC_NOSPACE,
+			      &self->hsk.sock.sk_wq_raw->flags));
+}
 TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_then_wakes)
 {
 	self->hsk.sock.sk_sndbuf = 0;
@@ -728,20 +823,52 @@ TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_but_times_out)
 	EXPECT_EQ(EWOULDBLOCK, -homa_sock_wait_wmem(&self->hsk, 0));
 }
 
-TEST_F(homa_sock, homa_sock_wakeup_wmem)
+TEST_F(homa_sock, homa_sock_write_space__no_memory_available)
 {
 	self->hsk.sock.sk_sndbuf = 0;
 	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
-
-	/* First call: no memory available. */
-	homa_sock_wakeup_wmem(&self->hsk);
-	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
-
-	/* Second call: memory now available. */
-	self->hsk.sock.sk_sndbuf = 1000000;
 	mock_log_wakeups = 1;
 	unit_log_clear();
-	homa_sock_wakeup_wmem(&self->hsk);
+	homa_sock_write_space(&self->hsk.sock);
+	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_sock, homa_sock_write_space__wakeup_even_if_nospace_not_set)
+{
+	mock_log_wakeups = 1;
+	unit_log_clear();
+	homa_sock_write_space(&self->hsk.sock);
 	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
 	EXPECT_STREQ("wake_up", unit_log_get());
+}
+TEST_F(homa_sock, homa_sock_write_space__wakeup)
+{
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
+	mock_log_wakeups = 1;
+	unit_log_clear();
+	homa_sock_write_space(&self->hsk.sock);
+	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+	EXPECT_STREQ("wake_up", unit_log_get());
+}
+TEST_F(homa_sock, homa_sock_write_space__send_sigio)
+{
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
+	sock_set_flag(&self->hsk.sock, SOCK_FASYNC);
+	unit_log_clear();
+	homa_sock_write_space(&self->hsk.sock);
+	EXPECT_STREQ("sock_wake_async how 2 band 2", unit_log_get());
+}
+TEST_F(homa_sock, homa_sock_write_space__socket_orphaned)
+{
+	struct socket_wq *wq = rcu_dereference(self->hsk.sock.sk_wq);
+
+	/* Simulate sock_orphan, which sets sk_wq to NULL during close. */
+	rcu_assign_pointer(self->hsk.sock.sk_wq, NULL);
+	set_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags);
+	mock_log_wakeups = 1;
+	unit_log_clear();
+	homa_sock_write_space(&self->hsk.sock);
+	EXPECT_EQ(0, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+	EXPECT_STREQ("", unit_log_get());
+	rcu_assign_pointer(self->hsk.sock.sk_wq, wq);
 }

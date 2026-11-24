@@ -305,10 +305,11 @@ struct homa_qdisc_shared {
 
 	/**
 	 * @max_nic_queue_usecs: An additional limit on NIC queue buildup:
-	 * if any individual NIC queue reaches a length where it would
-	 * take at least this many microseconds to transmit all of its packets,
-	 * then no more packets will be queued for *any* NIC queue until
-	 * the queue gets below this limit. Set externally via sysctl.
+	 * if the total number of bytes in all packets that have been handed
+	 * off to the NIC but not yet returned after transmission would take
+	 * at least this many microseconds to transmit, then no more packets
+	 * will be queued for the NIC queue until the packets in its
+	 * posession get below this limit. Set externally via sysctl.
 	 */
 	int max_nic_queue_usecs;
 
@@ -406,6 +407,17 @@ void            homa_rcu_kfree(void *object);
 void            homa_rcu_kfree_callback(struct rcu_head *head);
 
 /**
+ * homa_qdisc_from_priv() - Given a pointer to qdisc private data (e.g. a
+ * struct homa_disc *), return a pointer to the Qdisc.
+ * @priv:    Private data associated with a qdisc.
+ * Return:   See above.
+ */
+static inline struct Qdisc *homa_qdisc_from_priv(void *priv)
+{
+	return container_of(priv, struct Qdisc, privdata);
+}
+
+/**
  * homa_qdisc_active() - Return true if homa qdiscs are enabled for @hnet
  * (so the old pacer should not be used), false otherwise.
  * @homa:    Information about the Homa transport.
@@ -476,10 +488,11 @@ static inline bool homa_qdisc_precedes(struct homa_rpc *rpc1,
 static inline int homa_qdisc_deferred_offset(struct homa_rpc *rpc)
 {
 	/* This doesn't synchronize, but the worst that can happen is
-	 * to return a slightly out-of-date result.
+	 * to return a slightly out-of-date result. The pacer modifies
+	 * these fields concurrently, under qdev->defer_lock.
 	 */
-	if (skb_queue_len(&rpc->qrpc.packets) > 0)
-		return rpc->msgout.length - rpc->qrpc.tx_left;
+	if (skb_queue_len_lockless(&rpc->qrpc.packets) > 0)
+		return rpc->msgout.length - READ_ONCE(rpc->qrpc.tx_left);
 	return -1;
 }
 

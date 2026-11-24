@@ -6,6 +6,7 @@
 # This file provides a collection of functions that plot data generated
 # by tthoma.py. Invoke with the --help option for more information.
 
+from __future__ import annotations
 from glob import glob
 from optparse import OptionParser
 import math
@@ -19,7 +20,7 @@ import sys
 
 import plot
 
-def backlog(data_file, plot_file):
+def backlog(data_file: str, plot_file: str) -> None:
     """
     Generates a plot of network backlog data produced by the "net"
     analyzer of tthoma.py.
@@ -51,7 +52,7 @@ def backlog(data_file, plot_file):
     plt.savefig(plot_file)
 
 
-def colors(plot_file):
+def colors(plot_file: str) -> None:
     """
     Generates a plot displaying standard colors.
 

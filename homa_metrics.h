@@ -571,10 +571,11 @@ struct homa_metrics {
 	u64 unknown_packet_types;
 
 	/**
-	 * @short_packets: total number of times a packet was discarded
-	 * because it was too short to hold all the required information.
+	 * @malformed_packets: total number of times a packet was discarded
+	 * because it was incorrectly formatted: too short, illegal field
+	 * value, etc.
 	 */
-	u64 short_packets;
+	u64 malformed_packets;
 
 	/**
 	 * @packet_discards: total number of times a normal (non-retransmitted)
@@ -650,15 +651,16 @@ struct homa_metrics {
 	u64 socket_lock_misses;
 
 	/**
-	 * @peer_ack_lock_miss_cycles: total time spent waiting for peer lock misses.
+	 * @route_ack_lock_miss_cycles: total time spent waiting for route ack
+	 * lock misses.
 	 */
-	u64 peer_ack_lock_miss_cycles;
+	u64 route_ack_lock_miss_cycles;
 
 	/**
-	 * @peer_ack_lock_misses: total number of times that Homa had to wait
-	 * to acquire the lock used for managing acks for a peer.
+	 * @route_ack_lock_misses: total number of times that Homa had to wait
+	 * to acquire the lock used for managing acks for a route.
 	 */
-	u64 peer_ack_lock_misses;
+	u64 route_ack_lock_misses;
 
 	/**
 	 * @grant_lock_miss_cycles: total time spent waiting for grant lock
@@ -722,7 +724,7 @@ struct homa_metrics {
 	u64 reaper_calls;
 
 	/**
-	 * @ack_overflows: total number of times that homa_peer_add_ack
+	 * @ack_overflows: total number of times that homa_route_add_ack
 	 * found insufficient space for the new id and hence had to send an
 	 * ACK message.
 	 */
@@ -733,6 +735,18 @@ struct homa_metrics {
 	 * was ignored because the RPC's result hadn't been fully received.
 	 */
 	u64 ignored_need_acks;
+
+	/**
+	 * @bpool_lock_misses: total number of times that Homa had to wait
+	 * to acquire the lock for a buffer pool.
+	 */
+	u64 bpool_lock_misses;
+
+	/**
+	 * @bpool_lock_miss_cycles: total time spent waiting for buffer pool
+	 * lock misses.
+	 */
+	u64 bpool_lock_miss_cycles;
 
 	/**
 	 * @bpage_reuses: total number of times that, when an owned page
@@ -855,7 +869,8 @@ static inline struct homa_metrics *homa_metrics_per_cpu(void)
 
 extern struct homa_metrics_output homa_mout;
 
-void     homa_metric_append(const char *name, u64 value, const char *format, ...);
+void     homa_metric_append(const char *name, u64 value,
+			    const char *format, ...) __printf(3, 4);
 void     homa_metrics_end(void);
 int      homa_metrics_init(void);
 loff_t   homa_metrics_lseek(struct file *file, loff_t offset,

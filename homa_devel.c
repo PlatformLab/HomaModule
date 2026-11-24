@@ -176,9 +176,9 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		offset = ntohl(h->seg.offset);
 #ifndef __STRIP__ /* See strip.py */
 		used = homa_snprintf(buffer, buf_len, used,
-				     ", msg_length %d, offset %d, data_length %d",
+				     ", msg_length %d, offset %d, data_length %d, incoming %d",
 				     ntohl(h->msg_length), offset,
-				     seg_length);
+				     seg_length, ntohl(h->incoming));
 		if (ntohs(h->cutoff_version) != 0)
 			used = homa_snprintf(buffer, buf_len, used,
 					     ", cutoff_version %d",
@@ -282,16 +282,6 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		}
 		break;
 	}
-#ifndef __STRIP__ /* See strip.py */
-	case START_MSG: {
-		struct homa_start_msg_hdr *h;
-
-		h = (struct homa_start_msg_hdr *)header;
-		used = homa_snprintf(buffer, buf_len, used, ", msg_length %d",
-				     ntohl(h->msg_length));
-		break;
-	}
-#endif /* See strip.py */
 	}
 
 	buffer[buf_len - 1] = 0;
@@ -390,16 +380,6 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 	case ACK:
 		snprintf(buffer, buf_len, "ACK");
 		break;
-#ifndef __STRIP__ /* See strip.py */
-	case START_MSG: {
-		struct homa_start_msg_hdr *h;
-
-		h = (struct homa_start_msg_hdr *)header;
-		snprintf(buffer, buf_len, "START_MSG %d",
-			 ntohl(h->msg_length));
-		break;
-	}
-#endif /* See strip.py */
 	default:
 		snprintf(buffer, buf_len, "unknown packet type 0x%x",
 			 common->type);
@@ -423,6 +403,10 @@ void homa_freeze_peers(void)
 	struct homa_net *hnet;
 	int wrong_family;
 	int err;
+
+#ifdef __UNIT_TEST__
+	return;
+#endif
 
 	/* Find a socket to use (any socket for the namespace will do). */
 	hnet = homa_net(&init_net);
@@ -516,12 +500,12 @@ int homa_snprintf(char *buffer, int size, int used, const char *format, ...)
 	int new_chars;
 	va_list ap;
 
-	va_start(ap, format);
-
 	if (used >= (size - 1))
 		return used;
 
+	va_start(ap, format);
 	new_chars = vsnprintf(buffer + used, size - used, format, ap);
+	va_end(ap);
 	if (new_chars < 0)
 		return used;
 	if (new_chars >= (size - used))
@@ -588,10 +572,6 @@ char *homa_symbol_for_type(uint8_t type)
 		return "NEED_ACK";
 	case ACK:
 		return "ACK";
-#ifndef __STRIP__ /* See strip.py */
-	case START_MSG:
-		return "START_MSG";
-#endif /* See strip.py */
 	}
 	return "??";
 }

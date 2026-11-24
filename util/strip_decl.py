@@ -41,7 +41,7 @@ symbols = [
         'int      homa_tx_copy_from_user(',
         'struct sk_buff *homa_tx_skb_alloc(',
         'int      homa_tx_skb_send(',
-        'void     homa_message_out_init(',
+        'int      homa_message_out_init(',
         'int      homa_resend_data(',
         'int      homa_rpc_tx_end(',
         'struct sk_buff *__homa_skb_alloc(',

@@ -28,27 +28,26 @@ static const struct net_offload homa_offload = {
  */
 int homa_offload_init(void)
 {
-	int i, res1, res2;
+	int i, result;
 
-	for (i = 0; i < nr_cpu_ids; i++) {
+	for_each_possible_cpu(i) {
 		struct homa_offload_core *offload_core;
 		int j;
 
 		offload_core = &per_cpu(homa_offload_core, i);
-		offload_core->last_active = 0;
-		offload_core->last_gro = 0;
-		atomic_set(&offload_core->softirq_backlog, 0);
-		offload_core->softirq_offset = 0;
+		memset(offload_core, 0, sizeof(*offload_core));
 		offload_core->gen3_softirq_cores[0] = i ^ 1;
 		for (j = 1; j < NUM_GEN3_SOFTIRQ_CORES; j++)
 			offload_core->gen3_softirq_cores[j] = -1;
-		offload_core->last_app_active = 0;
 	}
 
-	res1 = inet_add_offload(&homa_offload, IPPROTO_HOMA);
-	res2 = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
-
-	return res1 ? res1 : res2;
+	result = inet_add_offload(&homa_offload, IPPROTO_HOMA);
+	if (result)
+		return result;
+	result = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
+	if (result)
+		inet_del_offload(&homa_offload, IPPROTO_HOMA);
+	return result;
 }
 
 /**
@@ -75,20 +74,58 @@ int homa_offload_end(void)
  */
 void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 0)
 	struct rps_sock_flow_table *sock_flow_table;
-	int hash;
+	u32 hash, index;
 
 	rcu_read_lock();
 	sock_flow_table = rcu_dereference(rps_sock_flow_table);
 	if (sock_flow_table) {
 		hash = cpu + rps_cpu_mask + 1;
-		if (sock_flow_table->ents[hash] != hash) {
-			sock_flow_table = rcu_dereference(rps_sock_flow_table);
-			sock_flow_table->ents[hash] = hash;
-		}
+		index = hash & sock_flow_table->mask;
+		if (READ_ONCE(sock_flow_table->ents[index]) != hash)
+			WRITE_ONCE(sock_flow_table->ents[index], hash);
 		__skb_set_sw_hash(skb, hash, false);
 	}
 	rcu_read_unlock();
+#else
+	struct rps_sock_flow_table *sock_flow_table;
+	u32 table_index, hash, mask;
+	rps_tag_ptr tagptr;
+
+	rcu_read_lock();
+	tagptr = READ_ONCE(net_hotdata.rps_sock_flow_table);
+	sock_flow_table = rps_tag_to_table(tagptr);
+
+	if (sock_flow_table) {
+		mask = rps_tag_to_mask(tagptr);
+
+		/* Directing a packet to a given CPU works as follows:
+		 * - One entry in the flow table is used for each target
+		 *   CPU (not each flow, as is the normal usage!). This
+		 *   minimizes consumption of flow table entries and
+		 *   maximizes cache hits.
+		 * - The first entries in the flow table are used for
+		 *   this purpose.
+		 * - The hash stored in the skb is the desired cpu (entry index)
+		 *   plus the size of the flow table. This ensures that the
+		 *   hash is never zero (which would mean "no hash").
+		 * - The contents of the flow table entry must be the same
+		 *   as the hash. The low-order bits will be used as cpu,
+		 *   and get_rps_cpu checks the high-order bits to make
+		 *   sure they match the hash.
+		 */
+		hash = cpu + mask + 1;
+		table_index = hash & mask;
+
+		if (READ_ONCE(sock_flow_table[table_index].ent) != hash)
+			WRITE_ONCE(sock_flow_table[table_index].ent, hash);
+		__skb_set_sw_hash(skb, hash, false);
+		tt_record3("homa_set_softirq_cpu set value 0x%x for flow table entry 0x%x, mask 0x%x",
+			   hash, table_index, mask);
+	}
+	rcu_read_unlock();
+#endif
 }
 
 /**
@@ -128,7 +165,8 @@ void homa_send_ipis(void)
  * into multiple smaller packets.
  * @skb:       Packet to split.
  * @features:  Passed through to skb_segment.
- * Return: A list of packets, or NULL if for the packet couldn't be split.
+ * Return:     A list of packets, or NULL or negative errno if the packet
+ *             couldn't be split.
  */
 struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 				 netdev_features_t features)
@@ -144,6 +182,8 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 	__skb_pull(skb, sizeof(struct homa_data_hdr)
 			- sizeof(struct homa_seg_hdr));
 	segs = skb_segment(skb, features);
+	if (IS_ERR_OR_NULL(segs))
+		return segs;
 
 	/* Set incrementing ids in each of the segments (mimics behavior
 	 * of Mellanox NICs and other segmenters).
@@ -203,8 +243,13 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 	int busy;
 
 	UNIT_LOG("; ", "homa_gro_receive");
-	if (!homa_make_header_avl(skb))
-		tt_record("homa_gro_receive couldn't pull enough data from packet");
+	if (!homa_make_header_avl(skb)) {
+		tt_record2("homa_gro_receive couldn't access packet header, packet length %d, type %d",
+			   skb->len - (skb_transport_header(skb) - skb->data),
+			   ((struct homa_common_hdr *)skb_transport_header(skb))->type);
+		kfree_skb_reason(skb, SKB_DROP_REASON_PKT_TOO_SMALL);
+		return ERR_PTR(-EINPROGRESS);
+	}
 
 	// if (homa_drop_packet(homa)) {
 	// 	kfree_skb(skb);
@@ -213,8 +258,8 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 
 	h_new = (struct homa_data_hdr *)skb_transport_header(skb);
 	offload_core = &per_cpu(homa_offload_core, smp_processor_id());
-	busy = (now - offload_core->last_gro) < homa->gro_busy_cycles;
-	offload_core->last_active = now;
+	busy = (now - READ_ONCE(offload_core->last_gro)) < homa->gro_busy_cycles;
+	WRITE_ONCE(offload_core->last_active, now);
 	if (skb_is_ipv6(skb)) {
 		priority = ipv6_hdr(skb)->priority;
 		saddr = ntohl(ipv6_hdr(skb)->saddr.in6_u.u6_addr32[3]);
@@ -249,10 +294,6 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 			goto bypass;
 		}
 #ifndef __STRIP__ /* See strip.py */
-	} else if (h_new->common.type == START_MSG) {
-		tt_record3("homa_gro_receive got START_MSG from 0x%x, id %llu, msg_length %d",
-			   saddr, homa_local_id(h_new->common.sender_id),
-			   ntohl(((struct homa_start_msg_hdr *)h_new)->msg_length));
 	} else {
 		tt_record4("homa_gro_receive got packet from 0x%x id %llu, type 0x%x, priority %d",
 			   saddr, homa_local_id(h_new->common.sender_id),
@@ -322,7 +363,7 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 
 done:
 	homa_qdisc_pacer_check(homa);
-	offload_core->last_gro = homa_clock();
+	WRITE_ONCE(offload_core->last_gro, homa_clock());
 	return result;
 
 bypass:
@@ -335,7 +376,7 @@ bypass:
 	softirq_cycles = *softirq_cycles_metric - saved_softirq_metric;
 	*softirq_cycles_metric = saved_softirq_metric;
 	INC_METRIC(bypass_softirq_cycles, softirq_cycles);
-	offload_core->last_gro = homa_clock();
+	WRITE_ONCE(offload_core->last_gro, homa_clock());
 
 	/* This return value indicates that we have freed skb. */
 	return ERR_PTR(-EINPROGRESS);
@@ -352,12 +393,39 @@ bypass:
  */
 void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 {
-	/* Scan the next several cores in order after the current core,
-	 * trying to find one that is not already busy with SoftIRQ processing,
-	 * and that doesn't appear to be active with NAPI/GRO processing
-	 * either. If there is no such core, just rotate among the next
-	 * cores. See balance.txt for overall design information on load
-	 * balancing.
+	/* The goal of this function is to choose a core for SoftIRQ
+	 * processing in a way that avoids contention for SoftIRQ cores.
+	 * If the load is light it might be possible to reuse a single
+	 * core over and over (this would be advantageous because it minimizes
+	 * cache misses).  Under high load work will need to be distributed
+	 * across multiple cores to avoid hotspots.
+	 *
+	 * This function scans the next several cores after the GRO core
+	 * (in ascending circular order of cores) and picks the first one
+	 * that satisfies the following conditions:
+	 * - Never use the GRO core itself: if a large message is being
+	 *   received, the GRO core will already be busy handling that
+	 *   message, so put SoftIRQ somewhere else.
+	 * - Avoid other cores that have done GRO processing recently, for the
+	 *   same reason.
+	 * - Avoid cores that currently have SoftIRQ work pending. If we
+	 *   overload a core with SoftIRQ processing it may not be able to
+	 *   keep up with completion events for Tx skbs; this can cause
+	 *   the pacer to think the NIC queues are backed up and stop
+	 *   transmitting packets. Thus, under load we will alternate among
+	 *   several SoftIRQ cores.
+	 * If none of the candidate cores satisfies all of the conditions,
+	 * pick an arbitrary core in a fashion that rotates among them (the
+	 * goal here is to spread the load across all of the candidates
+	 * to minimize the degree of overload).
+	 *
+	 * The greatest disadvantage of this approach is the sequential
+	 * scan of cores, which means that the groups for different GRO
+	 * cores overlap. If there happens to be heavy traffic on a few
+	 * adjacent GRO cores, their SoftIRQ cores may become overloaded.
+	 * In a more perfect world the SoftIRQ groups would be chosen so
+	 * that no two GRO cores overlap in more than one of their SoftIRQ
+	 * choices.
 	 */
 	struct homa_data_hdr *h =
 			(struct homa_data_hdr *)skb_transport_header(skb);
@@ -372,9 +440,9 @@ void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 		if (unlikely(candidate >= nr_cpu_ids))
 			candidate = 0;
 		offload_core = &per_cpu(homa_offload_core, candidate);
-		if (atomic_read(&offload_core->softirq_backlog)  > 0)
+		if ((READ_ONCE(offload_core->last_gro) + homa->busy_cycles) > now)
 			continue;
-		if ((offload_core->last_gro + homa->busy_cycles) > now)
+		if (homa_softirq_pending(candidate))
 			continue;
 		tt_record3("homa_gro_gen2 chose core %d for id %d offset %d",
 			   candidate, homa_local_id(h->common.sender_id),
@@ -398,7 +466,7 @@ void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 			   candidate, homa_local_id(h->common.sender_id),
 			   ntohl(h->seg.offset));
 	}
-	atomic_inc(&per_cpu(homa_offload_core, candidate).softirq_backlog);
+
 	homa_set_softirq_cpu(skb, candidate);
 }
 
@@ -413,8 +481,28 @@ void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
  */
 void homa_gro_gen3(struct homa *homa, struct sk_buff *skb)
 {
-	/* See balance.txt for overall design information on the Gen3
-	 * load balancer.
+	/* The overall strategy behind the Gen3 load balancer is as follows:
+	 * - The number of channels is reduced, so that only 1/4 of the cores
+	 *   do NAPI/GRO processing. This appears to be sufficient capacity
+	 *   to avoid overloads on any of the NAPI/GRO cores.
+	 * - Each NAPI/GRO core has 3 other cores (statically assigned) that
+	 *   it can use for SoftIRQ processing. The SoftIRQ core groups for
+	 *   different NAPI/GRO cores do not overlap. This means that SoftIRQ
+	 *   and GRO will never happen simultaneously on the same core, and
+	 *   there will be no conflicts between the SoftIRQ groups of different
+	 *   NAPI/GRO cores.
+	 * - When an application thread is using Homa actively on a core, the
+	 *   core is marked as "busy". When GRO selects a SoftIRQ core, it
+	 *   attempts to avoid cores that are busy with application threads.
+	 *   If there is a choice of un-busy cores, GRO will try to reuse a
+	 *   single SoftIRQ over and over.
+	 *
+	 * Gen3 was implemented in November of 2023; initial performance
+	 * measurements indicate that it is about the same as Gen2 (slightly
+	 * worse for W2 and W3, slightly better for W5). Gen3 performance on
+	 * W3 appears highly variable: P99 latency can vary by 5-10x from run
+	 * to run; as of December 2023 the reasons for this have not been
+	 * determined.
 	 */
 	struct homa_data_hdr *h =
 			(struct homa_data_hdr *)skb_transport_header(skb);
@@ -440,7 +528,7 @@ void homa_gro_gen3(struct homa *homa, struct sk_buff *skb)
 		}
 	}
 	homa_set_softirq_cpu(skb, core);
-	per_cpu(homa_offload_core, core).last_active = now;
+	WRITE_ONCE(per_cpu(homa_offload_core, core).last_active, now);
 	tt_record4("homa_gro_gen3 chose core %d for id %d, offset %d, delta %d",
 		   core, homa_local_id(h->common.sender_id),
 		   ntohl(h->seg.offset),
@@ -493,7 +581,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 			core++;
 			if (unlikely(core >= nr_cpu_ids))
 				core = 0;
-			last_active = per_cpu(homa_offload_core, core).last_active;
+			last_active = READ_ONCE(per_cpu(homa_offload_core, core).last_active);
 			if (last_active < best_time) {
 				best_time = last_active;
 				best = core;

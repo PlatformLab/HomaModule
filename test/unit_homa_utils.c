@@ -130,6 +130,8 @@ TEST_F(homa_utils, homa_net_destroy__delete_sockets)
 	EXPECT_EQ(1, hsk2.shutdown);
 	EXPECT_EQ(0, hsk3.shutdown);
 
+	mock_sock_release(&hsk1.sock);
+	mock_sock_release(&hsk2.sock);
 	unit_sock_destroy(&hsk3);
 }
 TEST_F(homa_utils, homa_net_destroy__delete_peers)
@@ -154,6 +156,7 @@ TEST_F(homa_utils, homa_net_destroy__delete_peers)
 
 	homa_net_destroy(hnet);
 	EXPECT_EQ(1, unit_count_routes(&self->homa));
+	mock_sock_release(&hsk2.sock);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -216,12 +219,27 @@ TEST_F(homa_utils, homa_prios_changed__basics)
 	EXPECT_EQ(1, self->homa.max_sched_prio);
 	EXPECT_EQ(1, self->homa.cutoff_version);
 }
+TEST_F(homa_utils, homa_prios_changed__nonpositive_priority_count)
+{
+	int values[] = {0, -1, INT_MIN};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(values); i++) {
+		self->homa.num_priorities = values[i];
+		homa_prios_changed(&self->homa);
+		EXPECT_EQ(1, self->homa.num_priorities);
+		EXPECT_EQ(INT_MAX, self->homa.unsched_cutoffs[0]);
+		EXPECT_EQ(0, self->homa.unsched_cutoffs[1]);
+		EXPECT_EQ(0, self->homa.max_sched_prio);
+	}
+}
 TEST_F(homa_utils, homa_prios_changed__num_priorities_too_large)
 {
 	self->homa.num_priorities = 100;
 	homa_prios_changed(&self->homa);
 	EXPECT_EQ(8, self->homa.num_priorities);
 }
+
 TEST_F(homa_utils, homa_prios_changed__share_lowest_priority)
 {
 	set_cutoffs(&self->homa, 90, 80, 70, 60, 50, 40, 30, 0);
@@ -233,3 +251,67 @@ TEST_F(homa_utils, homa_prios_changed__share_lowest_priority)
 	EXPECT_EQ(0, self->homa.max_sched_prio);
 }
 #endif /* See strip.py */
+
+TEST_F(homa_utils, next_int_from_string__basics)
+{
+	char buffer[100];
+	int value;
+	char *p;
+
+	strcpy(buffer, " 10 -4\t\n 6  ");
+	p = buffer;
+
+	EXPECT_EQ(0, -next_int_from_string(&p, &value));
+	EXPECT_EQ(10, value);
+	EXPECT_STREQ("-4\t\n 6  ", p);
+
+	EXPECT_EQ(0, -next_int_from_string(&p, &value));
+	EXPECT_EQ(-4, value);
+	EXPECT_STREQ("\n 6  ", p);
+
+	EXPECT_EQ(0, -next_int_from_string(&p, &value));
+	EXPECT_EQ(6, value);
+	EXPECT_STREQ(" ", p);
+
+	EXPECT_EQ(ENOMSG, -next_int_from_string(&p, &value));
+	EXPECT_EQ(NULL, p);
+}
+TEST_F(homa_utils, next_int_from_string__nothing_after_value)
+{
+	char buffer[100];
+	int value;
+	char *p;
+
+	strcpy(buffer, "100");
+	p = buffer;
+
+	EXPECT_EQ(0, -next_int_from_string(&p, &value));
+	EXPECT_EQ(100, value);
+	EXPECT_EQ(NULL, p);
+}
+TEST_F(homa_utils, next_int_from_string__errors)
+{
+	char buffer[100];
+	int value;
+	char *p;
+
+	strcpy(buffer, "gorp xyz");
+	p = buffer;
+	EXPECT_EQ(EINVAL, -next_int_from_string(&p, &value));
+	EXPECT_STREQ("xyz", p);
+
+	strcpy(buffer, "999999999999999999999  abc");
+	p = buffer;
+	EXPECT_EQ(ERANGE, -next_int_from_string(&p, &value));
+	EXPECT_STREQ(" abc", p);
+}
+TEST_F(homa_utils, next_int_from_string__null_pointer)
+{
+	int value;
+	char *p;
+
+	p = NULL;
+
+	EXPECT_EQ(ENOMSG, -next_int_from_string(&p, &value));
+	EXPECT_EQ(NULL, p);
+}

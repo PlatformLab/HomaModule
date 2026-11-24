@@ -20,6 +20,8 @@
 
 #include <linux/swait.h>
 
+#include <errno.h>
+
 /* It isn't safe to include some header files, such as stdlib, because
  * they conflict with kernel header files. The explicit declarations
  * below replace those header files.
@@ -49,6 +51,8 @@ int mock_dst_check_errors;
 int mock_ethtool_ksettings_errors;
 int mock_import_ubuf_errors;
 int mock_import_iovec_errors;
+int mock_inet_add_offload_errors;
+int mock_inet6_add_offload_errors;
 int mock_ip6_xmit_errors;
 int mock_ip_queue_xmit_errors;
 int mock_kmalloc_errors;
@@ -60,6 +64,7 @@ int mock_register_sysctl_errors;
 int mock_rht_init_errors;
 int mock_rht_insert_errors;
 int mock_route_errors;
+int mock_skb_segment_errors;
 int mock_trylock_errors;
 int mock_vmalloc_errors;
 int mock_wait_intr_irq_errors;
@@ -71,9 +76,6 @@ int mock_prepare_to_wait_status = -ERESTARTSYS;
 
 /* The return value from calls to signal_pending(). */
 int mock_signal_pending;
-
-/* Used as current task during tests. Also returned by kthread_run. */
-struct task_struct mock_task;
 
 /* If a test sets this variable to nonzero, ip*xmit will log
  * outgoing packets using the long format rather than short.
@@ -94,6 +96,13 @@ int mock_log_wakeups;
  * whenever it is invoked.
  */
 int mock_log_rcu_sched;
+
+/* If set by a test to nonzero, kmalloc will log whenever it is invoked.
+ * The value is the expected "units" of allocation, in bytes (e.g. the size
+ * of each object in an array); the log message will indicate how many
+ * units were requested.
+ */
+int mock_log_mallocs;
 
 /* True means copy_from_iter should not log anything; false means
  * it will log info about what it has copied.
@@ -124,7 +133,8 @@ bool mock_no_high_order_pages = false;
 static struct unit_hash *spinlocks_held;
 
 /* Keeps track of all the blocks of memory that have been allocated by
- * kmalloc but not yet freed by kfree. Reset for each test.
+ * kmalloc but not yet freed by kfree. The value is a string indicating
+ * whethher the block must be freed with kfree or kvfree. Reset for each test.
  */
 static struct unit_hash *kmallocs_in_use;
 
@@ -200,6 +210,21 @@ int mock_sock_holds;
  */
 int mock_rpc_holds;
 
+/* The number of times local_bh_disable() has been invoked, minus the
+ * number of times local_bh_enable has been invoked.
+ */
+static int mock_local_bh_disables;
+
+/* The number of times local_lock_nested_bh() has been invoked, minus the
+ * number of times local_unlock_nested_bh has been invoked.
+ */
+static int mock_local_bh_locks;
+
+/* The number of times preempt_disable() has been invoked, minus the
+ * number of times preempt_enable has been invoked.
+ */
+static int mock_preempt_disables;
+
 /* Used as the return value for calls to homa_clock. */
 u64 mock_clock;
 
@@ -248,8 +273,11 @@ int mock_mtu;
 /* Used instead of MAX_SKB_FRAGS when running some unit tests. */
 int mock_max_skb_frags = 10;
 
-/* Each bit gives the NUMA node (0 or 1) for a particular core.*/
-int mock_numa_mask = 5;
+/* Indices are core numbers, value is NUMA node for that core. */
+int mock_numa_nodes[20];
+
+/* Defines range of NUMA ids. */
+int mock_num_numas = 5;
 
 /* Bits determine the result of successive calls to compound order, starting
  * at the lowest bit. 0 means return HOMA_SKB_PAGE_ORDER, 1 means return 0.
@@ -268,12 +296,25 @@ char mock_printk_output [5000];
 void **mock_rht_walk_results;
 int mock_rht_num_walk_results;
 
+/* Bit N indicates whether homa_softirq_pending should return true for
+ * core N.
+ */
+u64 mock_softirq_pending_mask;
+
 /* Used instead of HOMA_MIN_DEFAULT_PORT by homa_skb.c. */
 __u16 mock_min_default_port = 0x8000;
 
 /* Used as sk_socket for all sockets created by mock_sock_init.
  * Its sk field points to the most recently created Homa socket. */
 static struct socket mock_socket;
+
+/* mock_socket.wq will point here. */
+struct socket_wq mock_wq;
+
+/* Linked into the wait queue of mock_socket by mock_sock_init, so that
+ * the queue appears to have a sleeper.
+ */
+static struct wait_queue_entry mock_sleeper;
 
 /* Each of the entries in mock_hnets below is associated with the
  * corresonding entry in mock_nets.
@@ -282,6 +323,12 @@ static struct socket mock_socket;
 struct net mock_nets[MOCK_MAX_NETS];
 struct homa_net *mock_hnets[MOCK_MAX_NETS];
 struct net_device mock_devices[MOCK_MAX_NETS];
+
+/* Connects mock_task to mock_nets. */
+struct nsproxy mock_nsproxy = {.net_ns = &mock_nets[0]};
+
+/* Used as current task during tests. Also returned by kthread_run. */
+struct task_struct mock_task = {.nsproxy = &mock_nsproxy};
 
 /* Nonzero means don't generate a unit test failure when freeing peers
  * if the reference count isn't zero (log a message instead).
@@ -309,8 +356,10 @@ int mock_netif_schedule_calls;
  */
 bool mock_check_bpool_leaks = true;
 
-/* Keeps track of all of the sockets created during the current test.
- * Used to attribute calls to refcount_inc_not_zero to a socket (or not).
+/* Keeps track of all of the sockets created by mock_sock_init during the
+ * current test that have not yet been destructed. Used to attribute calls
+ * to refcount_inc_not_zero to a socket (or not), and to destruct sockets
+ * at the end of each test.
  */
 #define MOCK_MAX_SOCKS 100
 struct homa_sock *mock_socks[MOCK_MAX_SOCKS];
@@ -320,6 +369,11 @@ int mock_num_socks;
 #define MAX_DROP_REASONS 10
 enum skb_drop_reason mock_drop_reasons[MAX_DROP_REASONS];
 int mock_num_drop_reasons;
+
+/* Integer value that will be used for the value of the sysctl variable
+ * in calls to functions like proc_dointvec.
+ */
+int mock_sysctl_intval;
 
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
@@ -347,6 +401,8 @@ struct rps_sock_flow_table *rps_sock_flow_table
 __u32 rps_cpu_mask = 0x1f;
 struct paravirt_patch_template pv_ops;
 struct workqueue_struct *system_wq;
+struct workqueue_struct *system_percpu_wq;
+struct workqueue_struct *system_highpri_wq;
 struct static_key_true validate_usercopy_range;
 unsigned long __per_cpu_offset[NR_CPUS];
 struct tracepoint __tracepoint_sched_set_state_tp;
@@ -425,6 +481,7 @@ void call_rcu(struct rcu_head *head, void free_func(struct rcu_head *head))
 
 bool cancel_work_sync(struct work_struct *work)
 {
+	unit_log_printf("; ", "cancel_work_sync invoked");
 	return false;
 }
 
@@ -532,12 +589,14 @@ void __copy_overflow(int size, unsigned long count)
 	abort();
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
 __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 			const struct in6_addr *daddr,
 			__u32 len, __u8 proto, __wsum csum)
 {
 	return ~666;
 }
+#endif
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 int debug_lockdep_rcu_enabled(void)
@@ -605,16 +664,21 @@ u64 hrtimer_forward(struct hrtimer *timer, ktime_t now,
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
 ktime_t hrtimer_get_time(void)
 {
 	return 0;
 }
+#endif
 
 void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 		  enum hrtimer_mode mode)
 {
 	timer->base = &clock_base;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+	/* struct hrtimer_clock_base lost its get_time member in 6.18. */
 	clock_base.get_time = &hrtimer_get_time;
+#endif
 }
 
 void hrtimer_setup(struct hrtimer *timer,
@@ -622,7 +686,9 @@ void hrtimer_setup(struct hrtimer *timer,
 		   clockid_t clock_id, enum hrtimer_mode mode)
 {
 	timer->base = &clock_base;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
 	clock_base.get_time = &hrtimer_get_time;
+#endif
 	timer->function = function;
 }
 
@@ -667,6 +733,13 @@ ssize_t import_iovec(int type, const struct iovec __user *uvector,
 
 int inet6_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	UNIT_LOG("; ", "inet6_add_offload for protocol %d", protocol);
+	if (mock_check_error(&mock_inet6_add_offload_errors))
+		return -EEXIST;
+	if (inet6_offloads[protocol] != NULL)
+		FAIL("inet6_add_offload found existing registration for protocol %d",
+		     protocol);
+	inet6_offloads[protocol] = prot;
 	return 0;
 }
 
@@ -677,6 +750,8 @@ int inet6_add_protocol(const struct inet6_protocol *prot, unsigned char num)
 
 int inet6_del_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	UNIT_LOG("; ", "inet6_del_offload for protocol %d", protocol);
+	inet6_offloads[protocol] = NULL;
 	return 0;
 }
 
@@ -715,6 +790,13 @@ void inet6_unregister_protosw(struct inet_protosw *p)
 
 int inet_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	UNIT_LOG("; ", "inet_add_offload for protocol %d", protocol);
+	if (mock_check_error(&mock_inet_add_offload_errors))
+		return -EEXIST;
+	if (inet_offloads[protocol] != NULL)
+		FAIL("inet_add_offload found existing registration for protocol %d",
+		     protocol);
+	inet_offloads[protocol] = prot;
 	return 0;
 }
 
@@ -725,6 +807,8 @@ int inet_add_protocol(const struct net_protocol *prot, unsigned char num)
 
 int inet_del_offload(const struct net_offload *prot, unsigned char protocol)
 {
+	UNIT_LOG("; ", "inet_del_offload for protocol %d", protocol);
+	inet_offloads[protocol] = NULL;
 	return 0;
 }
 
@@ -734,7 +818,7 @@ int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
 	return 0;
 }
 
-int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
+int inet_dgram_connect(struct socket *sock, struct SOCKADDR *uaddr,
 		       int addr_len, int flags)
 {
 	return 0;
@@ -802,7 +886,7 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
-int ip6_datagram_connect(struct sock *sk, struct sockaddr *addr, int addr_len)
+int ip6_datagram_connect(struct sock *sk, struct SOCKADDR *addr, int addr_len)
 {
 	return 0;
 }
@@ -830,7 +914,12 @@ struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 	atomic_set(&route->dst.__refcnt, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_devices[0];
-	route->dst.obsolete = 0;
+
+	/* This forces all calls to dst_check to invoke mock_dst_check,
+	 * which gives us control over whether an error is returned
+	 * (via mock_dst_check_errors).
+	 */
+	route->dst.obsolete = 1;
 	if (!routes_in_use)
 		routes_in_use = unit_hash_new();
 	unit_hash_set(routes_in_use, route, "used");
@@ -946,14 +1035,19 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 	atomic_set(&route->dst.__refcnt, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_devices[0];
-	route->dst.obsolete = 0;
+
+	/* This forces all calls to dst_check to invoke mock_dst_check,
+	 * which gives us control over whether an error is returned
+	 * (via mock_dst_check_errors).
+	 */
+	route->dst.obsolete = 1;
 	if (!routes_in_use)
 		routes_in_use = unit_hash_new();
 	unit_hash_set(routes_in_use, route, "used");
 	return route;
 }
 
-int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
+int ip4_datagram_connect(struct sock *sk, struct SOCKADDR *uaddr,
 		int addr_len)
 {
 	return 0;
@@ -1008,15 +1102,7 @@ ssize_t kernel_write(struct file *file, const void *buf, size_t count,
 
 void kfree(const void *block)
 {
-	if (block == NULL)
-		return;
-	UNIT_HOOK("kfree");
-	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
-		FAIL(" %s on unknown block %p", __func__, block);
-		return;
-	}
-	unit_hash_erase(kmallocs_in_use, block);
-	free((void *) block);
+	mock_free(block, "kfree");
 }
 
 void kfree_skb(struct sk_buff *skb)
@@ -1056,7 +1142,7 @@ void kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
 
 void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 {
-	return kmalloc(size, gfpflags);
+	return mock_malloc(size, gfpflags, "kfree");
 }
 
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
@@ -1068,36 +1154,29 @@ void __might_sleep(const char *file, int line)
 
 void *__kmalloc(size_t size, gfp_t flags)
 {
-	void *block;
-
-	UNIT_HOOK("kmalloc");
-	if (mock_check_error(&mock_kmalloc_errors))
-		return NULL;
-	if (unit_hash_size(spinlocks_held)  > 0 &&
-	    !(flags & GFP_ATOMIC))
-		FAIL(" incorrect flags 0x%x passed to mock_kmalloc; expected GFP_ATOMIC (0x%x)",
-		     flags, GFP_ATOMIC);
-	block = malloc(size);
-	if (!block) {
-		FAIL(" malloc failed");
-		return NULL;
-	}
-	if (flags & __GFP_ZERO)
-		memset(block, 0, size);
-	if (!kmallocs_in_use)
-		kmallocs_in_use = unit_hash_new();
-	unit_hash_set(kmallocs_in_use, block, "used");
-	return block;
+	return mock_malloc(size, flags, "kfree");
 }
 
 void *__kmalloc_noprof(size_t size, gfp_t flags)
 {
-	return kmalloc(size, flags);
+	return mock_malloc(size, flags, "kfree");
 }
 
 void *kmem_cache_alloc_trace(struct kmem_cache *s, gfp_t flags, size_t size)
 {
-	return __kmalloc(size, flags);
+	return mock_malloc(size, flags, "kfree");
+}
+
+int kstrtoint(const char *s, unsigned int base, int *res)
+{
+        long int strtol(const char *nptr, char **endptr, int base);
+        char *end;
+
+        errno = 0;
+        *res = strtol(s, &end, base);
+        if (end == s)
+                return -EINVAL;
+        return -errno;
 }
 
 struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
@@ -1128,10 +1207,18 @@ void kvfree(const void *addr)
 
 void kvfree_call_rcu(struct rcu_head *head, rcu_callback_t func)
 {
-	/* This frees the object containing head; func is actually the
-	 * offset of head within the containing object.
-	 */
-	kvfree((char *)head - (uintptr_t)func);
+        /* func is actually the offset of head within the object to free. */
+        void *block = (char *)head - (uintptr_t)func;
+
+        UNIT_HOOK("kfree");
+        if (num_rcu_frees >= MAX_RCU_FREES) {
+                FAIL(" num_rcu_frees exceeded MAX_RCU_FREES (%d)",
+                     MAX_RCU_FREES);
+                mock_free(block, "kvfree");
+        } else {
+                rcu_frees[num_rcu_frees] = block;
+                num_rcu_frees++;
+        }
 }
 
 void *kvmalloc_node(size_t size, gfp_t flags, int node)
@@ -1201,8 +1288,14 @@ ssize_t __modver_version_show(struct module_attribute *mattr,
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)
 void __mutex_init(struct mutex *lock, const char *name,
 			 struct lock_class_key *key)
+{}
+#endif
+
+/* since 6.19, static inline __mutex_init() calls mutex_init_generic(). */
+void mutex_init_generic(struct mutex *lock)
 {}
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
@@ -1302,6 +1395,10 @@ int proc_dointvec(const struct ctl_table *table, int write,
 		     void __user *buffer, size_t *lenp, loff_t *ppos)
 #endif
 {
+	if (table->maxlen == sizeof(int))
+		*((int *)table->data) = mock_sysctl_intval;
+	else
+		*((int64_t *)table->data) = mock_sysctl_intval;
 	return 0;
 }
 
@@ -1316,6 +1413,11 @@ void proc_remove(struct proc_dir_entry *de)
 	}
 	unit_hash_erase(proc_files_in_use, de);
 	free(de);
+
+}
+
+void proc_set_user(struct proc_dir_entry *de, kuid_t uid, kgid_t gid)
+{
 
 }
 
@@ -1337,6 +1439,8 @@ void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 bool queue_work_on(int cpu, struct workqueue_struct *wq,
 		   struct work_struct *work)
 {
+	if (wq == system_highpri_wq)
+		unit_log_printf("; ", "work queued for system_highpri_wq");
 	return true;
 }
 
@@ -1637,6 +1741,9 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 	struct homa_data_hdr h;
 	int offset, length;
 
+	if (mock_check_error(&mock_skb_segment_errors))
+		return ERR_PTR(-ENOMEM);
+
 	/* Split the existing packet into two packets. */
 	memcpy(&h, skb_transport_header(head_skb), sizeof(h));
 	offset = ntohl(h.seg.offset);
@@ -1669,33 +1776,45 @@ int sock_common_setsockopt(struct socket *sock, int level, int optname,
 int sock_no_accept(struct socket *sock, struct socket *newsock,
 		   int dummy1, bool dummy2)
 {
-	return 0;
+	return -EOPNOTSUPP;
+}
+
+int sock_no_connect(struct socket *sock, struct SOCKADDR *saddr, int len,
+		    int flags)
+{
+	return -EOPNOTSUPP;
 }
 
 int sock_no_listen(struct socket *sock, int backlog)
 {
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 int sock_no_mmap(struct file *file, struct socket *sock,
 		struct vm_area_struct *vma)
 {
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 int sock_no_shutdown(struct socket *sock, int how)
 {
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 ssize_t sock_no_sendpage(struct socket *sock, struct page *page, int offset,
 		size_t size, int flags)
 {
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 {
+	return -EOPNOTSUPP;
+}
+
+int sock_wake_async(struct socket_wq *wq, int how, int band)
+{
+	unit_log_printf("; ", "sock_wake_async how %d band %d", how, band);
 	return 0;
 }
 
@@ -1748,6 +1867,17 @@ int vfs_fsync(struct file *file, int datasync)
 {
 	return 0;
 }
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
+#else
+struct vlan_type_depth __vlan_get_protocol_offset(const struct sk_buff *skb,
+						  __be16 type,
+						  int mac_offset)
+{
+	struct vlan_type_depth result = {0, 0};
+	return result;
+}
+#endif
 
 void wait_for_completion(struct completion *x) {}
 
@@ -1892,9 +2022,7 @@ void mock_cpu_relax(void)
  */
 int mock_cpu_to_node(int core)
 {
-	if (mock_numa_mask & (1<<core))
-		return 1;
-	return 0;
+	return mock_numa_nodes[core];
 }
 
 /**
@@ -1946,6 +2074,36 @@ struct dst_entry *mock_dst_check(struct dst_entry *dst, __u32 cookie)
 	if (mock_check_error(&mock_dst_check_errors))
 		return NULL;
 	return dst;
+}
+
+/**
+ * mock_free() - Called instead of kfree and kvfree when Homa is compiled for
+ * unit testing.
+ * @block:       Pointer to the memory block to free.
+ * @free_type:   Indicates how the block was freed (e.g.,"kfree" or "kvfree").
+ *               Must match the free_type passed to mock_malloc when the
+ *               block was allocated.
+ */
+void mock_free(const void *block, const char *free_type)
+{
+	const char *alloc_type;
+
+	if (block == NULL)
+		return;
+	UNIT_HOOK("kfree");
+	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
+		FAIL(" %s on unknown block %p", __func__, block);
+		return;
+	}
+	alloc_type = unit_hash_get(kmallocs_in_use, block);
+	if (strcmp(alloc_type, free_type) != 0)
+		/* It's OK to use kvfree on something allocated with kmalloc. */
+		if (strcmp(alloc_type, "kfree") != 0 ||
+		    strcmp(free_type, "kvfree") != 0)
+			FAIL(" %s used to free block but should have been %s",
+			     free_type, alloc_type);
+	unit_hash_erase(kmallocs_in_use, block);
+	free((void *) block);
 }
 
 /**
@@ -2043,6 +2201,68 @@ bool mock_is_locked(void *lock)
 	return unit_hash_get(spinlocks_held, lock) != NULL;
 }
 
+void mock_local_bh_disable(void)
+{
+	mock_local_bh_disables++;
+}
+
+void mock_local_bh_enable(void)
+{
+	if (mock_local_bh_disables == 0)
+		FAIL(" lcoal_bh_enable invoked without local_bh_disable");
+	mock_local_bh_disables--;
+}
+
+void mock_local_lock_nested_bh(void)
+{
+	if (mock_local_bh_disables == 0)
+		FAIL(" local_lock_nested_bh invoked without local_bh_disable");
+	mock_local_bh_locks++;
+}
+
+void mock_local_unlock_nested_bh(void)
+{
+	if (mock_local_bh_locks == 0)
+		FAIL(" local_unlock_nested_bh invoked without local_lock_nested_bh");
+	mock_local_bh_locks--;
+}
+
+/**
+ * mock_malloc() - Called instead of kmalloc and kvmalloc when Homa is
+ * compiled for unit testing.
+ * @size:       Number of bytes to allocate.
+ * @flags:      GFP flags for the allocation.
+ * @free_type:  String indicating how the memory will be freed (e.g.,"kfree"
+ *              or "kvfree"). Used to detect bugs such as kfree-ing a block
+ *              that was allocated with kvmalloc.
+ */
+void *mock_malloc(size_t size, gfp_t flags, const char *free_type)
+{
+	void *block;
+
+	UNIT_HOOK("kmalloc");
+	if (mock_log_mallocs)
+		UNIT_LOG("; ", "kmalloc %lu units",
+			 (size + mock_log_mallocs - 1) / mock_log_mallocs);
+	if (mock_check_error(&mock_kmalloc_errors))
+		return NULL;
+	if (unit_hash_size(spinlocks_held)  > 0 &&
+	    !(flags & GFP_ATOMIC))
+		FAIL(" incorrect flags 0x%x passed to mock_malloc; expected GFP_ATOMIC (0x%x)",
+		     flags, GFP_ATOMIC);
+	block = malloc(size);
+	if (!block) {
+		FAIL(" malloc failed");
+		return NULL;
+	}
+	if (flags & __GFP_ZERO)
+		memset(block, 0, size);
+	if (!kmallocs_in_use)
+		kmallocs_in_use = unit_hash_new();
+	unit_hash_set(kmallocs_in_use, block, free_type);
+	return block;
+}
+
 /**
  * mock_net_for_hnet() - Return the struct net associated with a struct
  * homa_net, or NULL if the struct net can't be identified.
@@ -2090,7 +2310,7 @@ int mock_page_to_nid(struct page *page)
 	int result;
 
 	if (mock_page_nid_mask & 1)
-		result = 1;
+		result = 2;
 	else
 		result = 0;
 	mock_page_nid_mask >>= 1;
@@ -2221,7 +2441,7 @@ void mock_rcu_free(void)
 
 	while (num_rcu_frees > 0) {
 		num_rcu_frees--;
-		free(rcu_frees[num_rcu_frees]);
+		mock_free(rcu_frees[num_rcu_frees], "kvfree");
 	}
 }
 
@@ -2481,11 +2701,6 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		case ACK:
 			header_size = sizeof(struct homa_ack_hdr);
 			break;
-#ifndef __STRIP__ /* See strip.py */
-		case START_MSG:
-			header_size = sizeof(struct homa_start_msg_hdr);
-			break;
-#endif /* See strip.py */
 		default:
 			header_size = sizeof(struct homa_common_hdr);
 			break;
@@ -2512,6 +2727,12 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 	}
 	qdisc_skb_cb(skb)->pkt_len = extra_bytes + 100;
 	return skb;
+}
+
+/* Standin for homa_softirq_pending. */
+bool mock_softirq_pending(int core)
+{
+	return (mock_softirq_pending_mask >> core) & 1;
 }
 
 /**
@@ -2552,18 +2773,50 @@ int mock_skb_count(void)
 	return unit_hash_size(skbs_in_use);
 }
 
+/**
+ * mock_sk_destruct() - Used in place of inet_sock_destruct as the initial
+ * value of sk->sk_destruct for sockets created by mock_sock_init. Removes
+ * the socket from mock_socks.
+ * @sk:    Socket being destructed.
+ */
+void mock_sk_destruct(struct sock *sk)
+{
+	int i;
+
+	for (i = 0; i < mock_num_socks; i++) {
+		if (&mock_socks[i]->sock == sk) {
+			mock_num_socks--;
+			mock_socks[i] = mock_socks[mock_num_socks];
+			return;
+		}
+	}
+}
+
 void mock_sock_hold(struct sock *sk)
 {
 	atomic_inc(&sk->sk_refcnt.refs);
 	mock_sock_holds++;
 }
 
+/**
+ * mock_sock_release() - Releases the reference to a socket that was
+ * created by mock_sock_init (as sk_common_release does when a socket is
+ * closed); destructs the socket if there are no other references.
+ * @sk:    Socket to release.
+ */
+void mock_sock_release(struct sock *sk)
+{
+	if (atomic_dec_and_test(&sk->sk_refcnt.refs))
+		sk->sk_destruct(sk);
+}
+
 void mock_sock_put(struct sock *sk)
 {
-	atomic_dec(&sk->sk_refcnt.refs);
 	if (mock_sock_holds == 0)
 		FAIL(" sock_put invoked when there were no active sock_holds");
 	mock_sock_holds--;
+	if (atomic_dec_and_test(&sk->sk_refcnt.refs))
+		sk->sk_destruct(sk);
 }
 
 /**
@@ -2581,6 +2834,17 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	struct sock *sk = &hsk->sock;
 	int saved_port;
 	int err = 0;
+	int i;
+
+	/* If @hsk is being reused, the previous socket in it must be
+	 * destructed (otherwise its resources will leak).
+	 */
+	for (i = 0; i < mock_num_socks; i++) {
+		if (mock_socks[i] == hsk) {
+			sk->sk_destruct(sk);
+			break;
+		}
+	}
 
 	if (mock_num_socks < MOCK_MAX_SOCKS) {
 		mock_socks[mock_num_socks] = hsk;
@@ -2593,13 +2857,19 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	memset(hsk, 0, sizeof(*hsk));
 	atomic_set(&sk->sk_refcnt.refs, 1);
 	sk->sk_data_ready = mock_data_ready;
+	sk->sk_state_change = mock_state_change;
+	sk->sk_destruct = mock_sk_destruct;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	sk->sk_socket = &mock_socket;
 	memset(&mock_socket, 0, sizeof(mock_socket));
+	mock_socket.wq = &mock_wq;
+	memset(&mock_wq, 0, sizeof(mock_wq));
 	mock_socket.sk = sk;
 	sk->sk_net.net = mock_net_for_hnet(hnet);
 	refcount_set(&sk->sk_wmem_alloc, 1);
 	init_waitqueue_head(&mock_socket.wq->wait);
+	INIT_LIST_HEAD(&mock_socket.wq->wait.head);
+	list_add(&mock_sleeper.entry, &mock_socket.wq->wait.head);
 	rcu_assign_pointer(sk->sk_wq, &mock_socket.wq);
 	sk->sk_sndtimeo = MAX_SCHEDULE_TIMEOUT;
 	sk->sk_protocol = IPPROTO_HOMA;
@@ -2619,7 +2889,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
 		+ sizeof(struct homa_data_hdr);
 	mock_devices[0].gso_max_size = mock_mtu;
-	err = homa_pool_set_region(hsk, (void *) 0x1000000,
+	err = homa_pool_set_region(hsk->buffer_pool, (void *) 0x1000000,
 				   100*HOMA_BPAGE_SIZE);
 	return err;
 }
@@ -2636,6 +2906,16 @@ void mock_spin_unlock(spinlock_t *lock)
 }
 
 /**
+ * mock_state_change() - Invoked through sk->sk_state_change; logs a message
+ * to indicate that it was invoked.
+ * @sk:    Associated socket; not used here.
+ */
+void mock_state_change(struct sock *sk)
+{
+	unit_log_printf("; ", "sk->sk_state_change invoked");
+}
+
+/**
  * mock_teardown() - Invoked at the end of each unit test to check for
  * consistency issues with all of the information managed by this file.
  * This function also cleans up the mocking information, so it is ready
@@ -2645,6 +2925,19 @@ void mock_teardown(void)
 {
 	int count, i;
 
+	/* Destruct any sockets that haven't already been destructed (e.g.
+	 * because the test didn't release their last reference). Must be
+	 * done before checking for leaks below.
+	 */
+	while (mock_num_socks > 0) {
+		struct homa_sock *hsk = mock_socks[mock_num_socks - 1];
+
+		count = mock_num_socks;
+		hsk->sock.sk_destruct(&hsk->sock);
+		if (mock_num_socks == count)
+			FAIL(" sk_destruct didn't remove socket from mock_socks");
+		mock_num_socks = count - 1;
+	}
 	mock_rcu_free();
 	cpu_number = 1;
 	current_task = &mock_task;
@@ -2668,6 +2961,8 @@ void mock_teardown(void)
 	mock_dst_check_errors = 0;
 	mock_import_ubuf_errors = 0;
 	mock_import_iovec_errors = 0;
+	mock_inet_add_offload_errors = 0;
+	mock_inet6_add_offload_errors = 0;
 	mock_ip6_xmit_errors = 0;
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
@@ -2678,6 +2973,7 @@ void mock_teardown(void)
 	mock_register_sysctl_errors = 0;
 	mock_rht_init_errors = 0;
 	mock_rht_insert_errors = 0;
+	mock_skb_segment_errors = 0;
 	mock_wait_intr_irq_errors = 0;
 	mock_copy_from_iter_no_log = false;
 	mock_copy_to_user_dont_copy = 0;
@@ -2687,10 +2983,14 @@ void mock_teardown(void)
 	mock_xmit_prios_offset = 0;
 	mock_xmit_prios[0] = 0;
 	mock_log_rcu_sched = 0;
+	mock_log_mallocs = 0;
 	mock_route_errors = 0;
 	mock_trylock_errors = 0;
 	mock_vmalloc_errors = 0;
+	memset(&mock_nsproxy, 0, sizeof(mock_nsproxy));
+	mock_nsproxy.net_ns = &mock_nets[0];
 	memset(&mock_task, 0, sizeof(mock_task));
+	mock_task.nsproxy = &mock_nsproxy;
 	mock_prepare_to_wait_status = -ERESTARTSYS;
 	mock_signal_pending = 0;
 	mock_xmit_log_verbose = 0;
@@ -2698,12 +2998,14 @@ void mock_teardown(void)
 	mock_log_wakeups = 0;
 	mock_mtu = 0;
 	mock_max_skb_frags = 10;
-	mock_numa_mask = 5;
+	memset(mock_numa_nodes, 0, sizeof(mock_numa_nodes));
+	mock_num_numas = 5;
 	mock_compound_order_mask = 0;
 	mock_page_nid_mask = 0;
 	mock_printk_output[0] = 0;
 	mock_rht_walk_results = NULL;
 	mock_rht_num_walk_results = 0;
+	mock_softirq_pending_mask = 0;
 	mock_min_default_port = 0x8000;
 	homa_net_id = 0;
 	for (i = 0; i < MOCK_MAX_NETS; i++) {
@@ -2723,12 +3025,24 @@ void mock_teardown(void)
 	mock_num_drop_reasons = 0;
 	for (i = 0; i < MAX_DROP_REASONS; i++)
 		mock_drop_reasons[i] = -1;
+	mock_sysctl_intval = 0;
+	for (i = 0; i < MAX_INET_PROTOS; i++) {
+		if (i == IPPROTO_TCP)
+			continue;
+		if (inet_offloads[i] != NULL)
+			FAIL("IPv4 offload callbacks not removed for protocol %d",
+			      i);
+		if (inet6_offloads[i] != NULL)
+			FAIL("IPv6 offload callbacks not removed for protocol %d",
+			      i);
+	}
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));
 	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
 			&tcp_v6_offload;
 	jiffies = 1100;
+	nr_cpu_ids = 8;
 
 	count = unit_hash_size(skbs_in_use);
 	if (count > 0)
@@ -2803,6 +3117,21 @@ void mock_teardown(void)
 		FAIL(" __preempt_count %d after test",
 				__preempt_count);
 	__preempt_count = 0;
+
+	if (mock_local_bh_disables != 0)
+		FAIL(" %d local_bh_disables still active after test",
+				mock_local_bh_disables);
+	mock_local_bh_disables = 0;
+
+	if (mock_local_bh_locks != 0)
+		FAIL(" %d local_lock_nested_bhs still active after test",
+				mock_local_bh_locks);
+	mock_local_bh_locks = 0;
+
+	if (mock_preempt_disables != 0)
+		FAIL(" %d preempt_disables still active after test",
+				mock_preempt_disables);
+	mock_preempt_disables = 0;
 
 #ifndef __STRIP__ /* See strip.py */
 	memset(homa_metrics, 0, sizeof(homa_metrics));

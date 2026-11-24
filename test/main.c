@@ -45,5 +45,6 @@ int main(int argc, char **argv)
 		} else
 			break;
 	}
-	test_harness_run(argc-i, argv+i, verbose);
+	mock_ipv6 = mock_ipv6_default;
+	return test_harness_run(argc-i, argv+i, verbose);
 }

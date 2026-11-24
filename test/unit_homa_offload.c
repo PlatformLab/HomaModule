@@ -53,6 +53,7 @@ FIXTURE_SETUP(homa_offload)
 		.sender_id = cpu_to_be64(1000)
 	};
 	self->header.msg_length = htonl(10000);
+	self->header.incoming = htonl(10000);
 	self->header.seg.offset = htonl(2000);
 
 	self->skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
@@ -95,6 +96,33 @@ FIXTURE_TEARDOWN(homa_offload)
 	unit_teardown();
 }
 
+TEST_F(homa_offload, homa_offload_init__ipv4_registration_failure)
+{
+	homa_offload_end();
+	unit_log_clear();
+	mock_inet_add_offload_errors = 1;
+	EXPECT_EQ(-EEXIST, homa_offload_init());
+	EXPECT_STREQ("inet_add_offload for protocol 146", unit_log_get());
+}
+TEST_F(homa_offload, homa_offload_init__ipv6_failure_rolls_back_ipv4)
+{
+	homa_offload_end();
+
+	/* First try: IPv4 succeeds, IPv6 fails. */
+	unit_log_clear();
+	mock_inet6_add_offload_errors = 1;
+	EXPECT_EQ(-EEXIST, homa_offload_init());
+	EXPECT_STREQ("inet_add_offload for protocol 146; "
+		     "inet6_add_offload for protocol 146; "
+		     "inet_del_offload for protocol 146", unit_log_get());
+
+	/* Second try: both succeed*/
+	unit_log_clear();
+	EXPECT_EQ(0, homa_offload_init());
+	EXPECT_STREQ("inet_add_offload for protocol 146; "
+		     "inet6_add_offload for protocol 146", unit_log_get());
+}
+
 TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 {
 	struct sk_buff *skb, *segs;
@@ -115,7 +143,28 @@ TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 	kfree_skb(segs->next);
 	kfree_skb(segs);
 }
+TEST_F(homa_offload, homa_gso_segment__skb_segment_failure)
+{
+	struct sk_buff *skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			&self->header.common, 1400, 2000);
+	struct sk_buff *segs;
 
+	mock_skb_segment_errors = 1;
+	segs = homa_gso_segment(skb, 0);
+	EXPECT_TRUE(IS_ERR(segs));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(segs));
+	kfree_skb(skb);
+}
+
+TEST_F(homa_offload, homa_gro_receive__homa_make_header_avl_fails)
+{
+	struct sk_buff *skb = mock_skb_alloc(&self->src_ip, &self->dst_ip,
+			&self->header.common, 1400, 2000);
+
+	skb->data_len = skb->len - 20;
+	EXPECT_EQ(-EINPROGRESS,
+		  PTR_ERR(homa_gro_receive(&self->empty_list, skb)));
+}
 TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 {
 	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");
@@ -135,6 +184,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	h.common.type = DATA;
 	h.common.sender_id = cpu_to_be64(client_id);
 	h.msg_length = htonl(10000);
+	h.incoming = htonl(10000);
 	h.seg.offset = htonl(2000);
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
@@ -163,6 +213,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 
 	/* Third attempt: bypass should happen. */
 	h.msg_length = htonl(1400);
+	h.incoming = htonl(1400);
 	cur_offload_core->last_gro = 400;
 	skb3 = mock_skb_alloc(&self->src_ip, &self->dst_ip, &h.common, 1400,
 			      4000);
@@ -207,7 +258,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	h.common.dport = htons(self->hsk.port);
 	h.common.sender_id = cpu_to_be64(client_id);
 	h.common.type = GRANT;
-	h.offset = htonl(1000);
+	h.offset = htonl(12000);
 	h.priority = 3;
 
 	/* First attempt: HOMA_GRO_FAST_GRANTS not enabled. */
@@ -225,7 +276,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	result = homa_gro_receive(&self->empty_list, skb2);
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_grant_bypasses);
-	EXPECT_SUBSTR("xmit DATA 1400@0", unit_log_get());
+	EXPECT_SUBSTR("xmit DATA 1400@11200", unit_log_get());
 
 	/* Third attempt: core is too busy for fast grants. */
 	cur_offload_core->last_gro = 600;
@@ -249,32 +300,6 @@ TEST_F(homa_offload, homa_gro_receive__no_held_skbs)
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(0, same_flow);
 	kfree_skb(skb);
-}
-TEST_F(homa_offload, homa_gro_receive__skip_held_skbs_that_arent_homa_packets)
-{
-	struct sk_buff *skb;
-	int same_flow;
-
-	if (skb_is_ipv6(self->skb))
-		ipv6_hdr(self->skb)->nexthdr = IPPROTO_TCP;
-	else
-		ip_hdr(self->skb)->protocol = IPPROTO_TCP;
-
-	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_alloc(&self->src_ip, &self->dst_ip, &self->header.common,
-			     1400, 0);
-	NAPI_GRO_CB(skb)->same_flow = 0;
-	EXPECT_EQ(NULL, homa_gro_receive(&self->gro_list, skb));
-	same_flow = NAPI_GRO_CB(skb)->same_flow;
-	EXPECT_EQ(1, same_flow);
-	unit_log_clear();
-	unit_log_frag_list(self->skb, 0);
-	EXPECT_STREQ("",
-			unit_log_get());
-	unit_log_clear();
-	unit_log_frag_list(self->skb2, 0);
-	EXPECT_STREQ("DATA 1400@6000",
-			unit_log_get());
 }
 TEST_F(homa_offload, homa_gro_receive__add_to_frag_list)
 {
@@ -322,41 +347,51 @@ TEST_F(homa_offload, homa_gro_receive__set_softirq_cpu)
 	kfree_skb(skb);
 }
 
-TEST_F(homa_offload, homa_gro_gen2)
+TEST_F(homa_offload, homa_gro_gen2__check_last_gro)
+{
+	self->homa.gro_policy = HOMA_GRO_GEN2;
+	mock_clock = 1000;
+	self->homa.busy_cycles = 100;
+	mock_set_core(7);
+	mock_softirq_pending_mask |= 1 << 6;
+	per_cpu(homa_offload_core, 7).last_gro = 901;
+	per_cpu(homa_offload_core, 0).last_gro = 950;
+	per_cpu(homa_offload_core, 1).last_gro = 0;
+
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(1, self->skb->hash - 32);
+}
+TEST_F(homa_offload, homa_gro_gen2__check_softirq_pending)
+{
+	self->homa.gro_policy = HOMA_GRO_GEN2;
+	mock_clock = 1000;
+	self->homa.busy_cycles = 100;
+	mock_set_core(1);
+	mock_softirq_pending_mask = 0xb;
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(2, self->skb->hash - 32);
+}
+TEST_F(homa_offload, homa_gro_gen2__all_cores_busy)
 {
 	self->homa.gro_policy = HOMA_GRO_GEN2;
 	mock_clock = 1000;
 	self->homa.busy_cycles = 100;
 	mock_set_core(5);
-	atomic_set(&per_cpu(homa_offload_core, 6).softirq_backlog, 1);
-	per_cpu(homa_offload_core, 6).last_gro = 0;
-	atomic_set(&per_cpu(homa_offload_core, 7).softirq_backlog, 0);
-	per_cpu(homa_offload_core, 7).last_gro = 901;
-	atomic_set(&per_cpu(homa_offload_core, 0).softirq_backlog, 2);
-	per_cpu(homa_offload_core, 0).last_gro = 0;
-	atomic_set(&per_cpu(homa_offload_core, 1).softirq_backlog, 0);
-	per_cpu(homa_offload_core, 1).last_gro = 899;
-	atomic_set(&per_cpu(homa_offload_core, 2).softirq_backlog, 0);
-	per_cpu(homa_offload_core, 2).last_gro = 0;
+	mock_softirq_pending_mask = 0xc3;
+	per_cpu(homa_offload_core, 5).softirq_offset = 2;
 
-	// Avoid busy cores.
-	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(1, self->skb->hash - 32);
-	EXPECT_EQ(1, atomic_read(&per_cpu(homa_offload_core, 1).softirq_backlog));
-
-	// All cores busy; must rotate.
-	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(6, self->skb->hash - 32);
-	homa_gro_complete(self->skb, 0);
-	EXPECT_EQ(7, self->skb->hash - 32);
-	EXPECT_EQ(2, per_cpu(homa_offload_core, 5).softirq_offset);
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(0, self->skb->hash - 32);
+	EXPECT_EQ(3, per_cpu(homa_offload_core, 5).softirq_offset);
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(1, self->skb->hash - 32);
+	EXPECT_EQ(4, per_cpu(homa_offload_core, 5).softirq_offset);
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(6, self->skb->hash - 32);
 	EXPECT_EQ(1, per_cpu(homa_offload_core, 5).softirq_offset);
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(7, self->skb->hash - 32);
+	EXPECT_EQ(2, per_cpu(homa_offload_core, 5).softirq_offset);
 }
 
 TEST_F(homa_offload, homa_gro_gen3__basics)

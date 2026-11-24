@@ -5,6 +5,9 @@
 
 # This file provides a library of functions for generating plots.
 
+from __future__ import annotations
+from typing import Any
+
 import matplotlib
 import matplotlib.pyplot as plt
 import os
@@ -38,7 +41,7 @@ matplotlib.rc('mathtext', default='regular')
 # in that column.
 file_data = {}
 
-def __read_file(file):
+def __read_file(file: str) -> None:
     """
     Read a file and add its contents to the file_data variable. If the
     file has already been read, then this function does nothing.
@@ -83,7 +86,7 @@ def __read_file(file):
     f.close()
     file_data[file] = columns
 
-def get_column(file, column):
+def get_column(file: str, column: str) -> list[float | str]:
     """
     Return a list containing the values of a given column in a given file.
 
@@ -96,7 +99,7 @@ def get_column(file, column):
         raise Exception('Column %s doesn\'t exist in %s' % (column, name))
     return file_data[file][column]
 
-def get_column_names(file):
+def get_column_names(file: str) -> Any:
     """
     Returns a list containing the names of all of the columns in file.
     """
@@ -104,7 +107,7 @@ def get_column_names(file):
     __read_file(file)
     return file_data[file].keys()
 
-def get_numbers(file):
+def get_numbers(file: str) -> list[int]:
     """
     Scans all of the column names in file for numbers and returns a
     sorted list of all the unique numbers found.
@@ -117,7 +120,7 @@ def get_numbers(file):
             numbers.add(int(match.group(1)))
     return sorted(list(numbers))
 
-def max_value(file, columns):
+def max_value(file: str, columns: list[str]) -> float | str | None:
     """
     Returns the largest value in a set of columns.
 
@@ -131,7 +134,7 @@ def max_value(file, columns):
             overall_max = col_max
     return overall_max
 
-def node_name(file):
+def node_name(file: str) -> str:
     """
     Given the name of a trace file, return a shorter name that can be
     used (e.g. in titles) to identify the node represented by the file.
@@ -142,8 +145,8 @@ def node_name(file):
         name = name[i+1:]
     return name
 
-def start_plot(max_x, max_y, title="", x_label="", y_label="", size=10,
-       figsize=[6,4]):
+def start_plot(max_x: float, max_y: float, title: str = "", x_label: str = "",
+       y_label: str = "", size: int = 10, figsize: list[int] = [6,4]) -> Any:
     """
     Create a basic pyplot graph without plotting any data. Returns the
     Axes object for the plot.
@@ -169,7 +172,7 @@ def start_plot(max_x, max_y, title="", x_label="", y_label="", size=10,
         ax.set_ylabel(y_label, size=size)
     return ax
 
-def plot_colors(file):
+def plot_colors(file: str) -> None:
     """
     Generates a test plot that shows the standard colors defined above.
 

@@ -92,6 +92,18 @@ static void defer_hook(char *id)
 	}
 }
 
+static struct homa_rpc *flush_hook_rpc;
+static int flush_hook_skbs_at_unlock;
+static int flush_hook_queued_at_unlock;
+static void flush_unlock_hook(char *id)
+{
+	if (strcmp(id, "unlock") != 0 || !flush_hook_rpc ||
+	    !mock_is_locked(&flush_hook_rpc->qrpc.qdev->defer_lock))
+		return;
+	flush_hook_skbs_at_unlock = mock_skb_count();
+	flush_hook_queued_at_unlock = skb_queue_len(&flush_hook_rpc->qrpc.packets);
+}
+
 static int create_hook_count;
 static struct net_device *hook_dev;
 static void qdev_create_hook(char *id)
@@ -436,7 +448,7 @@ TEST_F(homa_qdisc, homa_qdisc_init__cant_create_new_qdisc_dev)
 	kfree(qdisc);
 }
 
-TEST_F(homa_qdisc, homa_qdisc_destroy)
+TEST_F(homa_qdisc, homa_qdisc_destroy__basics)
 {
 	struct Qdisc *qdisc, *qdisc2;
 	struct homa_qdisc_dev *qdev;
@@ -469,6 +481,34 @@ TEST_F(homa_qdisc, homa_qdisc_destroy)
 
 	homa_qdisc_destroy(qdisc2);
 	EXPECT_EQ(0, unit_list_length(&self->homa.qshared->qdevs));
+	kfree(qdisc);
+	kfree(qdisc2);
+}
+TEST_F(homa_qdisc, homa_qdisc_destroy__advance_next_qdisc)
+{
+	struct Qdisc *qdisc, *qdisc2;
+	struct homa_qdisc_dev *qdev;
+	struct homa_qdisc *q, *q2;
+
+	qdisc = mock_alloc_qdisc(&mock_net_queue);
+	EXPECT_EQ(0, homa_qdisc_init(qdisc, NULL, NULL));
+	q = qdisc_priv(qdisc);
+	qdisc2 = mock_alloc_qdisc(&mock_net_queue);
+	EXPECT_EQ(0, homa_qdisc_init(qdisc2, NULL, NULL));
+	q2 = qdisc_priv(qdisc2);
+	qdev = q->qdev;
+
+	homa_qdisc_defer_tcp(q, mock_tcp_skb(&self->addr, &self->addr2, 5000,
+					     1000));
+	homa_qdisc_defer_tcp(q2, mock_tcp_skb(&self->addr, &self->addr2, 6000,
+					      1100));
+	qdev->next_qdisc = &q2->defer_links;
+
+	/* The pacer must not be left pointing at the destroyed qdisc. */
+	homa_qdisc_destroy(qdisc2);
+	EXPECT_EQ(&qdev->deferred_qdiscs, qdev->next_qdisc);
+
+	homa_qdisc_destroy(qdisc);
 	kfree(qdisc);
 	kfree(qdisc2);
 }
@@ -831,6 +871,26 @@ TEST_F(homa_qdisc, homa_qdisc_can_bypass__skb_not_tcp)
 	 */
 	skb = mock_tcp_skb(&self->addr, &self->addr2, 4000, 100);
 	EXPECT_EQ(1, homa_qdisc_can_bypass(skb, q));
+	kfree_skb(skb);
+}
+TEST_F(homa_qdisc, homa_qdisc_can_bypass__ipv6_address_uses_all_words)
+{
+	struct in6_addr daddr = unit_get_in_addr("1:2:3::4");
+	struct homa_qdisc *q = init_qdisc(self->qdiscs[3]);
+	struct sk_buff *skb;
+
+	mock_ipv6 = true;
+	skb = mock_tcp_skb(&self->addr, &daddr, 4000, 100);
+	homa_qdisc_defer_tcp(q, skb);
+
+	/* Same flow: must not bypass the deferred packet. */
+	skb = mock_tcp_skb(&self->addr, &daddr, 5000, 200);
+	EXPECT_EQ(0, homa_qdisc_can_bypass(skb, q));
+
+	/* Address differs only in the second 32-bit word. */
+	ipv6_hdr(skb)->daddr = unit_get_in_addr("1:2:5::4");
+	EXPECT_EQ(1, homa_qdisc_can_bypass(skb, q));
+
 	kfree_skb(skb);
 }
 TEST_F(homa_qdisc, homa_qdisc_can_bypass__ack)
@@ -1809,6 +1869,41 @@ TEST_F(homa_qdisc, homa_qdisc_flush_rpc__free_packets)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->qdisc_flushes);
         homa_qdisc_qdev_put(qdev);
 }
+TEST_F(homa_qdisc, homa_qdisc_flush_rpc__free_after_unlock)
+{
+	int counts[] = {0, 1, 128};
+	struct homa_qdisc_dev *qdev;
+	struct homa_rpc *crpc;
+	int before, i, j;
+
+	qdev = homa_qdisc_qdev_get(self->dev);
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, &self->client_ip,
+			      &self->server_ip, self->server_port,
+			      self->client_id, 100000, 100000);
+	ASSERT_NE(NULL, crpc);
+	flush_hook_rpc = crpc;
+	unit_hook_register(flush_unlock_hook);
+	for (i = 0; i < ARRAY_SIZE(counts); i++) {
+		before = mock_skb_count();
+		for (j = 0; j < counts[i]; j++)
+			homa_qdisc_defer_homa(qdev, new_test_skb(crpc,
+					 &self->addr, &self->addr2, j * 500, 500));
+		/* Cover empty queues with a non-NULL qdev as well. */
+		crpc->qrpc.qdev = qdev;
+		flush_hook_skbs_at_unlock = -1;
+		flush_hook_queued_at_unlock = -1;
+		homa_qdisc_flush_rpc(crpc);
+		EXPECT_EQ(0, flush_hook_queued_at_unlock);
+		EXPECT_EQ(before + counts[i], flush_hook_skbs_at_unlock);
+		EXPECT_EQ(before, mock_skb_count());
+		EXPECT_FALSE(mock_is_locked(&qdev->defer_lock));
+		EXPECT_STREQ("", unit_log_deferred(qdev));
+	}
+	flush_hook_rpc = NULL;
+	unit_hook_clear();
+	homa_qdisc_qdev_put(qdev);
+}
+
 TEST_F(homa_qdisc, homa_qdisc_flush_rpc__update_last_defer_and_metrics)
 {
 	struct homa_rpc *crpc1, *crpc2;
@@ -2455,7 +2550,58 @@ TEST_F(homa_qdisc, homa_qdev_update_sysctl__cant_get_link_speed_from_dev)
 
 	homa_qdisc_qdev_put(qdev);
 }
+TEST_F(homa_qdisc, homa_qdev_update_sysctl__link_speed_unknown)
+{
+	struct homa_qdisc_dev *qdev;
 
+	qdev = homa_qdisc_qdev_get(self->dev);
+	EXPECT_FALSE(IS_ERR(qdev));
+
+	/* Some drivers, such as virtio_net, don't know the link speed. */
+	self->homa.link_mbps = 16000;
+	mock_link_mbps = SPEED_UNKNOWN;
+	homa_qdev_update_sysctl(qdev);
+	EXPECT_EQ(16000, qdev->link_mbps);
+	EXPECT_EQ(529583, qdev->cycles_per_mibyte);
+
+	homa_qdisc_qdev_put(qdev);
+}
+
+TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__clamp_values)
+{
+	self->homa.qshared->max_nic_est_backlog_usecs = -100;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->max_nic_est_backlog_usecs);
+
+	self->homa.qshared->max_nic_queue_usecs = -100;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->max_nic_queue_usecs);
+
+	self->homa.qshared->fifo_fraction = 2000;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(500, self->homa.qshared->fifo_fraction);
+	self->homa.qshared->fifo_fraction = -1;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->fifo_fraction);
+
+	self->homa.qshared->defer_min_bytes = -100;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->defer_min_bytes);
+
+	self->homa.qshared->homa_share = -100;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(0, self->homa.qshared->homa_share);
+	self->homa.qshared->homa_share = 150;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(100, self->homa.qshared->homa_share);
+
+	self->homa.qshared->max_link_usage = 4;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(5, self->homa.qshared->max_link_usage);
+	self->homa.qshared->max_link_usage = 102;
+	homa_qdisc_update_sysctl_deps(self->homa.qshared);
+	EXPECT_EQ(100, self->homa.qshared->max_link_usage);
+}
 TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__fifo_fraction)
 {
 	self->homa.qshared->fifo_fraction = 500;
@@ -2466,10 +2612,6 @@ TEST_F(homa_qdisc, homa_qdisc_update_sysctl_deps__fifo_fraction)
 	homa_qdisc_update_sysctl_deps(self->homa.qshared);
 	EXPECT_EQ(4 * (1 << HOMA_FIFO_WEIGHT_SHIFT),
 		  self->homa.qshared->fifo_weight);
-
-	self->homa.qshared->fifo_fraction = 800;
-	homa_qdisc_update_sysctl_deps(self->homa.qshared);
-	EXPECT_EQ((1 << HOMA_FIFO_WEIGHT_SHIFT) / 4, self->homa.qshared->fifo_weight);
 
 	self->homa.qshared->fifo_fraction = 0;
 	self->homa.qshared->fifo_weight = -1;

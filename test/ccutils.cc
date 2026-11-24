@@ -22,7 +22,7 @@
  * Provides simple hash tables for test code written in C.
  */
 struct unit_hash {
-	std::unordered_map<const void *, void *> map;
+	std::unordered_map<const void *, const void *> map;
 };
 
 /* These variables are used during individual unit tests, and are
@@ -66,9 +66,9 @@ void unit_hash_free(struct unit_hash *hash)
  * Return:      The value of the entry corresponding to @key, or NULL
  *              if no such entry exists.
  */
-void *unit_hash_get(struct unit_hash *hash, const void *key)
+const void *unit_hash_get(struct unit_hash *hash, const void *key)
 {
-	std::unordered_map<const void *, void *>::iterator iter =
+	std::unordered_map<const void *, const void *>::iterator iter =
 			hash->map.find(key);
 	if (iter == hash->map.end()) {
 		return NULL;
@@ -91,7 +91,7 @@ struct unit_hash *unit_hash_new(void)
  * @key:           Key for the entry
  * @value:         Value for the entry
  */
-void unit_hash_set(struct unit_hash *hash, const void *key, void *value)
+void unit_hash_set(struct unit_hash *hash, const void *key, const void *value)
 {
 	hash->map[key] = value;
 }

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 
 """
 Reads lines and extracts the first floating-point number to appear on
@@ -6,7 +6,6 @@ each line; prints both the individual values and the average of them.
 Usage: avg.py [file]
 """
 
-from __future__ import division, print_function
 from glob import glob
 from optparse import OptionParser
 import math

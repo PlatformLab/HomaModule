@@ -113,7 +113,7 @@ int tt_init(char *proc_file)
 	for (i = 0; i < nr_cpu_ids; i++) {
 		struct tt_buffer *buffer;
 
-		buffer = kmalloc(sizeof(*buffer), GFP_KERNEL);
+		buffer = kvmalloc(sizeof(*buffer), GFP_KERNEL);
 		if (!buffer) {
 			pr_err("tt_init couldn't allocate trace buffer for cpu %d\n",
 			       i);
@@ -192,7 +192,7 @@ void tt_destroy(void)
 			proc_remove(tt_dir_entry);
 	}
 	for (i = 0; i < nr_cpu_ids; i++) {
-		kfree(tt_buffers[i]);
+		kvfree(tt_buffers[i]);
 		tt_buffers[i] = NULL;
 	}
 

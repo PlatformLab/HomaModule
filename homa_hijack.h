@@ -71,7 +71,7 @@ static inline bool homa_skb_hijacked(struct sk_buff *skb)
 
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	return h->flags == HOMA_HIJACK_FLAGS &&
-	       h->urgent == ntohs(HOMA_HIJACK_URGENT);
+	       h->urgent == htons(HOMA_HIJACK_URGENT);
 }
 
 void     homa_hijack_end(void);

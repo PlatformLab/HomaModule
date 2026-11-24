@@ -9,7 +9,7 @@ Compare two .rtts files to identify differences between them.
 Usage: diff_rtts.py file1 file2
 """
 
-from __future__ import division, print_function
+from __future__ import annotations
 from glob import glob
 from operator import itemgetter
 from optparse import OptionParser
@@ -19,7 +19,7 @@ import re
 import string
 import sys
 
-def read_rtts(file):
+def read_rtts(file: str) -> list[list[float]]:
     """
     Read a .rtts file and returns a list of (length, slowdown) pairs.
 
@@ -44,7 +44,7 @@ def read_rtts(file):
     f.close()
     return slowdowns
 
-def avg_slowdown(slowdowns):
+def avg_slowdown(slowdowns: list[list[float]]) -> float:
     """
     Return average slowdown from a list of (length, slowdown) pairs.
 
@@ -55,7 +55,7 @@ def avg_slowdown(slowdowns):
         sum += item[1]
     return sum/len(slowdowns)
 
-def deciles(slowdowns):
+def deciles(slowdowns: list[list[float]]) -> tuple[list[float], list[float], list[float], list[float], list[float], list[float]]:
     """
     Given a list of (length, slowdown) pairs, divide into 10 groups by
     length, then returns 6 lists (each with one entry per decile),

@@ -27,15 +27,23 @@ struct homa_metrics_output homa_mout;
  */
 int homa_metrics_init(void)
 {
+	kuid_t root_uid = KUIDT_INIT(0);
+	kgid_t root_gid = KGIDT_INIT(0);
+
+	/* The metrics file (/proc/homa_metrics) restricts access to
+	 * root only, since it contains information that is private to
+	 * a network namespace.
+	 */
 	mutex_init(&homa_mout.mutex);
 	homa_mout.output = NULL;
-	homa_mout.dir_entry = proc_create("homa_metrics", 0444,
+	homa_mout.dir_entry = proc_create("homa_metrics", 0400,
 					  init_net.proc_net,
 					  &homa_metrics_ops);
 	if (!homa_mout.dir_entry) {
 		pr_err("couldn't create /proc/net/homa_metrics\n");
 		return -ENOMEM;
 	}
+	proc_set_user(homa_mout.dir_entry, root_uid, root_gid);
 	return 0;
 }
 
@@ -309,7 +317,7 @@ char *homa_metrics_print(void)
 		M("pacer_bubble_cycles", m->pacer_bubble_cycles,
 		  "Time NIC uplink was idle because pacer was slow\n");
 		M("nic_congest_cycles", m->nic_congest_cycles,
-		  "Time when the amount of data in NIC's possession was excessive\n");
+		  "Time when output was halted because NIC has too much outgoing data\n");
 		M("pacer_checks", m->pacer_checks,
 		  "Calls to homa_qdisc_pacer_check\n");
 		M("pacer_helps", m->pacer_helps,
@@ -350,8 +358,8 @@ char *homa_metrics_print(void)
 		  "Packets discarded because server couldn't create RPC\n");
 		M("unknown_packet_types", m->unknown_packet_types,
 		  "Packets discarded because of unsupported type\n");
-		M("short_packets", m->short_packets,
-		  "Packets discarded because too short\n");
+		M("malformed_packets", m->malformed_packets,
+		  "Packets discarded because of invalid format\n");
 		M("packet_discards", m->packet_discards,
 		  "Non-resent packets discarded because data already received\n");
 		M("resent_discards", m->resent_discards,
@@ -376,10 +384,10 @@ char *homa_metrics_print(void)
 		  "Socket lock misses\n");
 		M("socket_lock_miss_cycles", m->socket_lock_miss_cycles,
 		  "Time lost waiting for socket locks\n");
-		M("peer_ack_lock_misses", m->peer_ack_lock_misses,
-		  "Misses on peer ack locks\n");
-		M("peer_ack_lock_miss_cycles", m->peer_ack_lock_miss_cycles,
-		  "Time lost waiting for peer ack locks\n");
+		M("route_ack_lock_misses", m->route_ack_lock_misses,
+		  "Misses on route ack locks\n");
+		M("route_ack_lock_miss_cycles", m->route_ack_lock_miss_cycles,
+		  "Time lost waiting for route ack locks\n");
 		M("grant_locks", m->grant_locks,
 		  "Grant lock acquisitions\n");
 		M("grant_lock_misses", m->grant_lock_misses,
@@ -401,9 +409,13 @@ char *homa_metrics_print(void)
 		M("reaper_calls", m->reaper_calls,
 		  "Reaper invocations that were not disabled\n");
 		M("ack_overflows", m->ack_overflows,
-		  "Explicit ACKs sent because peer->acks was full\n");
+		  "Explicit ACKs sent because route->acks was full\n");
 		M("ignored_need_acks", m->ignored_need_acks,
 		  "NEED_ACKs ignored because RPC result not yet received\n");
+		M("bpool_lock_misses", m->bpool_lock_misses,
+		  "Buffer pool lock misses\n");
+		M("bpool_lock_miss_cycles", m->bpool_lock_miss_cycles,
+		  "Time lost waiting for buffer pool lock\n");
 		M("bpage_reuses", m->bpage_reuses,
 		  "Buffer page could be reused because ref count was zero\n");
 		M("buffer_alloc_failures", m->buffer_alloc_failures,

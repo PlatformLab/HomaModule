@@ -16,11 +16,11 @@ CEXTERN void          unit_fill_data(unsigned char *data, int length,
 			int first_value);
 CEXTERN void          unit_hash_erase(struct unit_hash *hash, const void *key);
 CEXTERN void          unit_hash_free(struct unit_hash *hash);
-CEXTERN void         *unit_hash_get(struct unit_hash *hash, const void *key);
+CEXTERN const void   *unit_hash_get(struct unit_hash *hash, const void *key);
 CEXTERN struct unit_hash *
                       unit_hash_new(void);
 CEXTERN void          unit_hash_set(struct unit_hash *hash, const void *key,
-				void *value);
+				const void *value);
 CEXTERN int           unit_hash_size(struct unit_hash *hash);
 CEXTERN void          unit_hook(char *id);
 CEXTERN void          unit_hook_clear(void);

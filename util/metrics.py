@@ -13,7 +13,8 @@ saves current metrics each time it is run, so that the next run can determine
 what has changed. File defaults to ~/.homa_metrics.
 """
 
-from __future__ import division, print_function
+from __future__ import annotations
+from typing import TextIO
 from glob import glob
 from optparse import OptionParser
 import math
@@ -42,7 +43,7 @@ docs = {}
 # Read in metrics, parse the results for internal use, and, optionally
 # copy the raw metrics to an output file. Also reinitialize symbols
 
-def read_metrics(metrics_file, out):
+def read_metrics(metrics_file: str, out: TextIO | None) -> list[dict[str, int]]:
     """
     Read metrics from the file whose name is "metrics_file" and generate
     a data structure in the format described above for "prev". In
@@ -80,7 +81,7 @@ def read_metrics(metrics_file, out):
     f.close()
     return metrics
 
-def scale_number(number):
+def scale_number(number: float) -> str:
     """
     Return a string describing a number, but with a "K", "M", or "G"
     suffix to keep the number small and readable
@@ -352,7 +353,8 @@ if elapsed_secs != 0:
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
-    for lock in ["client", "server", "socket", "grant", "peer_ack", "qdisc"]:
+    for lock in ["client", "server", "socket", "grant", "route_ack", "qdisc",
+            "bpool"]:
         misses = float(deltas[lock + "_lock_misses"])
         cycles = float(deltas[lock + "_lock_miss_cycles"])
         if misses == 0:
@@ -500,7 +502,7 @@ if elapsed_secs != 0:
             "peer_kmalloc_errors", "peer_route_errors", "control_xmit_errors",
             "data_xmit_errors",
             "server_cant_create_rpcs", "server_cant_create_rpcs",
-            "short_packets", "rpc_timeouts", "server_rpc_discards",
+            "malformed_packets", "rpc_timeouts", "server_rpc_discards",
             "server_rpcs_unknown", "buffer_alloc_failures",
             "dropped_data_no_bufs", "linux_pkt_alloc_bytes"]:
         if deltas[symbol] == 0:
