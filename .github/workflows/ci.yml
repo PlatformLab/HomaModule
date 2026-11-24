@@ -1,7 +1,14 @@
 # Build homa.ko and run the unit tests against a configured Linux tree.
 name: CI
 
-on: [push, pull_request, workflow_dispatch]
+# Don't run CI against RHEL branches, since they require a different set
+# of Linux header files.
+on:
+  push:
+    branches-ignore: [rhel8, rhel_9.5]
+  pull_request:
+    branches-ignore: [rhel8, rhel_9.5]
+  workflow_dispatch:
 
 jobs:
   build-and-test:
