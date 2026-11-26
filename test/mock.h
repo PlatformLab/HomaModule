@@ -98,6 +98,8 @@
 #undef MAX_SKB_FRAGS
 #define MAX_SKB_FRAGS mock_max_skb_frags
 
+#define maybe_get_net mock_maybe_get_net
+
 #define net_generic(net, id) mock_net_generic(net, id)
 
 #ifdef page_address
@@ -120,6 +122,8 @@
 
 #undef preempt_enable
 #define preempt_enable() mock_preempt_enable()
+
+#define put_net mock_put_net
 
 #define put_page mock_put_page
 
@@ -230,9 +234,11 @@ extern int         mock_kmalloc_errors;
 extern int         mock_kthread_create_errors;
 extern int         mock_link_mbps;
 extern int         mock_log_mallocs;
+extern int         mock_log_net_refs;
 extern int         mock_log_wakeups;
 extern int         mock_log_rcu_sched;
 extern int         mock_max_grants;
+extern int         mock_maybe_get_net_errors;
 extern int         mock_max_skb_frags;
 extern __u16       mock_min_default_port;
 extern int         mock_mtu;
@@ -301,12 +307,15 @@ unsigned int
 void        mock_get_page(struct page *page);
 struct homa_net
 	   *mock_hnet(int index, struct homa *homa);
+void        mock_hnet_unlink(struct homa_net *hnet);
+void        mock_hnets_destroy(void);
 bool        mock_is_locked(void *lock);
 void        mock_local_bh_disable(void);
 void        mock_local_bh_enable(void);
 void        mock_local_lock_nested_bh(void);
 void        mock_local_unlock_nested_bh(void);
 void       *mock_malloc(size_t size, gfp_t flags, const char *free_type);
+struct net *mock_maybe_get_net(struct net *net);
 struct net *mock_net_for_hnet(struct homa_net *hnet);
 void       *mock_net_generic(const struct net *net, unsigned int id);
 int         mock_page_refs(struct page *page);
@@ -315,6 +324,7 @@ int         mock_page_to_nid(struct page *page);
 void        mock_preempt_disable(void);
 void        mock_preempt_enable(void);
 int         mock_processor_id(void);
+void        mock_put_net(struct net *net);
 void        mock_put_page(struct page *page);
 struct sk_buff *
 	    mock_raw_skb(struct in6_addr *saddr, struct in6_addr *daddr,

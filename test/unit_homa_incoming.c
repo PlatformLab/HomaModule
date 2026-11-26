@@ -143,6 +143,7 @@ FIXTURE_SETUP(homa_incoming)
 }
 FIXTURE_TEARDOWN(homa_incoming)
 {
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

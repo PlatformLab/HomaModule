@@ -72,45 +72,9 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
 					  struct homa_socktab_scan *scan)
 {
 	scan->socktab = socktab;
-	scan->hnet = NULL;
 	scan->hsk = NULL;
 	scan->current_bucket = 0;
 	scan->avail = 0;
-	scan->sequence = U64_MAX;
-
-	return homa_socktab_next(scan);
-}
-
-/**
- * homa_socktab_start_scan_all() - Begin an iteration over all of the
- * sockets in all network namespaces. This function is the same as
- * homa_socktab_start_scan except that the iteration covers the socktabs
- * of all of the homa_nets in homa->nets.
- * @homa:      Overall information about the Homa transport.
- * @scan:      Will hold the current state of the scan; any existing
- *             contents are discarded. The caller must eventually pass this
- *             to homa_socktab_end_scan.
- *
- * Return:     The first socket, or NULL if there are no sockets. If
- *             non-NULL, a reference is held on the socket to prevent its
- *             deletion.
- *
- * The caller must keep homa_nets from being destroyed until the scan
- * is finished, by holding either homa->nets_mutex or the RCU read lock
- * from before this function is invoked until the last call to
- * homa_socktab_next has returned.
- */
-struct homa_sock *homa_socktab_start_scan_all(struct homa *homa,
-					      struct homa_socktab_scan *scan)
-{
-	scan->hsk = NULL;
-	scan->avail = 0;
-	scan->hnet = list_first_or_null_rcu(&homa->nets, struct homa_net,
-					    links);
-	if (!scan->hnet)
-		return NULL;
-	scan->socktab = scan->hnet->socktab;
-	scan->current_bucket = 0;
 	scan->sequence = U64_MAX;
 
 	return homa_socktab_next(scan);
@@ -159,8 +123,7 @@ void homa_socktab_fill_scan(struct homa_socktab_scan *scan)
  * @scan:      State of the scan.
  *
  * Return:     The next socket in the table, or NULL if the iteration has
- *             returned all of the sockets in the table (or in all of the
- *             tables, for homa_socktab_start_scan_all).  If non-NULL, a
+ *             returned all of the sockets in the table.  If non-NULL, a
  *             reference is held on the socket to prevent its deletion (this
  *             module will release the reference in the next call to
  *             homa_socktab_next or homa_socktab_end). Sockets are not returned
@@ -174,24 +137,10 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 		scan->hsk = NULL;
 	}
 
-	while (scan->avail == 0) {
+	if (scan->avail == 0) {
 		homa_socktab_fill_scan(scan);
-		if (scan->avail != 0)
-			break;
-
-		/* The current socktab is finished; if the scan covers all
-		 * network namespaces, move on to the next one.
-		 */
-		if (!scan->hnet)
+		if (scan->avail == 0)
 			return NULL;
-		scan->hnet = list_next_or_null_rcu(&scan->hnet->homa->nets,
-						   &scan->hnet->links,
-						   struct homa_net, links);
-		if (!scan->hnet)
-			return NULL;
-		scan->socktab = scan->hnet->socktab;
-		scan->current_bucket = 0;
-		scan->sequence = U64_MAX;
 	}
 
 	scan->hsk = scan->socks[scan->avail - 1];

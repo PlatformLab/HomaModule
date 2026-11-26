@@ -185,10 +185,12 @@ timeout:
  */
 void homa_timer(struct homa *homa)
 {
+	struct homa_socktab *socktab;
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc;
 	int rpc_count = 0;
+	struct net *net;
 
 #ifndef __STRIP__ /* See strip.py */
 	static u64 prev_grant_count;
@@ -239,71 +241,88 @@ void homa_timer(struct homa *homa)
 	prev_grant_count = total_grants;
 #endif /* See strip.py */
 
-	/* Scan all existing RPCs in all sockets. Use a mutex rather than
-	 * RCU to keep network namespaces from being deleted during the scan,
-	 * because the scan may block.
+	/* Scan all existing RPCs in all sockets in all network namespaces.
+	 * The scan of a namespace can block, so it can't be done while
+	 * holding the RCU read lock; a reference on the namespace keeps it
+	 * from being deleted instead.
 	 */
-	mutex_lock(&homa->nets_mutex);
-	for (hsk = homa_socktab_start_scan_all(homa, &scan);
-			hsk; hsk = homa_socktab_next(&scan)) {
-		while (hsk->dead_frags > homa->dead_frags_limit) {
-			/* If we get here, it means that Homa isn't keeping
-			 * up with RPC reaping, so we'll help out.  See
-			 * "RPC Reaping Strategy" in homa_rpc_reap code for
-			 * details.
-			 */
+	rcu_read_lock();
+	for_each_net_rcu(net) {
+		if (!maybe_get_net(net))
+			continue;
+		rcu_read_unlock();
+		socktab = homa_net(net)->socktab;
+		for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
+		     hsk = homa_socktab_next(&scan)) {
+			while (hsk->dead_frags > homa->dead_frags_limit) {
+				/* If we get here, it means that Homa isn't
+				 * keeping up with RPC reaping, so we'll help
+				 * out.  See "RPC Reaping Strategy" in
+				 * homa_rpc_reap code for details.
+				 */
 #ifndef __STRIP__ /* See strip.py */
-			u64 rpc_start = homa_clock();
+				u64 rpc_start = homa_clock();
 #endif /* See strip.py */
 
-			tt_record("homa_timer calling homa_rpc_reap");
-			if (homa_rpc_reap(hsk) == 0)
-				break;
-			INC_METRIC(timer_reap_cycles, homa_clock() - rpc_start);
-		}
+				tt_record("homa_timer calling homa_rpc_reap");
+				if (homa_rpc_reap(hsk) == 0)
+					break;
+				INC_METRIC(timer_reap_cycles,
+					   homa_clock() - rpc_start);
+			}
 
-		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
-			continue;
-
-		if (!homa_protect_rpcs(hsk))
-			continue;
-		rcu_read_lock();
-		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-			IF_NO_STRIP(total_rpcs++);
-
-			homa_rpc_lock(rpc);
-			if (rpc->state == RPC_IN_SERVICE) {
-				rpc->silent_ticks = 0;
-				homa_rpc_unlock(rpc);
+			if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 				continue;
+
+			if (!homa_protect_rpcs(hsk))
+				continue;
+			rcu_read_lock();
+			list_for_each_entry_rcu(rpc, &hsk->active_rpcs,
+						active_links) {
+				IF_NO_STRIP(total_rpcs++);
+
+				homa_rpc_lock(rpc);
+				if (rpc->state == RPC_IN_SERVICE) {
+					rpc->silent_ticks = 0;
+					homa_rpc_unlock(rpc);
+					continue;
 #ifndef __STRIP__ /* See strip.py */
-			} else if (rpc->state == RPC_INCOMING) {
-				total_incoming_rpcs += 1;
-				sum_incoming_rec += rpc->msgin.rec_incoming;
-				sum_incoming += rpc->msgin.granted
+				} else if (rpc->state == RPC_INCOMING) {
+					total_incoming_rpcs += 1;
+					sum_incoming_rec +=
+						rpc->msgin.rec_incoming;
+					sum_incoming += rpc->msgin.granted
 						- (rpc->msgin.length
 						- rpc->msgin.bytes_remaining);
 #endif /* See strip.py */
+				}
+				rpc->silent_ticks++;
+				homa_timer_check_rpc(rpc);
+				homa_rpc_unlock(rpc);
+				rpc_count++;
+				if (rpc_count >= 10) {
+					/* Give other kernel threads a chance
+					 * to run on this core.
+					 */
+					rcu_read_unlock();
+					schedule();
+					rcu_read_lock();
+					rpc_count = 0;
+				}
 			}
-			rpc->silent_ticks++;
-			homa_timer_check_rpc(rpc);
-			homa_rpc_unlock(rpc);
-			rpc_count++;
-			if (rpc_count >= 10) {
-				/* Give other kernel threads a chance to run
-				 * on this core.
-				 */
-				rcu_read_unlock();
-				schedule();
-				rcu_read_lock();
-				rpc_count = 0;
-			}
+			rcu_read_unlock();
+			homa_unprotect_rpcs(hsk);
 		}
-		rcu_read_unlock();
-		homa_unprotect_rpcs(hsk);
+		homa_socktab_end_scan(&scan);
+
+		/* Must reacquire the RCU read lock before releasing the
+		 * reference: this keeps net from being freed until the
+		 * loop has advanced to the next namespace.
+		 */
+		rcu_read_lock();
+		put_net(net);
 	}
-	homa_socktab_end_scan(&scan);
-	mutex_unlock(&homa->nets_mutex);
+	rcu_read_unlock();
 #ifndef __STRIP__ /* See strip.py */
 	if (total_incoming_rpcs > 0)
 		tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",

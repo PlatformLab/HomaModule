@@ -149,17 +149,6 @@ struct homa {
 	struct homa_peertab *peertab;
 
 	/**
-	 * @nets: Contains all of the homa_nets that currently exist (one
-	 * for each network namespace), linked through their @links fields.
-	 * Modified only while holding @nets_mutex; can be scanned while
-	 * holding either @nets_mutex or the RCU read lock.
-	 */
-	struct list_head nets;
-
-	/** @nets_mutex: Synchronizes access to @nets. */
-	struct mutex nets_mutex;
-
-	/**
 	 * @tx_pools: One tx_page_pool for each NUMA node on the machine.
 	 */
 	struct homa_tx_pool *tx_pools[MAX_NUMNODES];
@@ -508,9 +497,6 @@ struct homa_net {
 	 */
 	struct homa_socktab *socktab;
 
-	/** @links: Used to link this object into homa->nets. */
-	struct list_head links;
-
 	/**
 	 * @prev_default_port: The most recent port number assigned from
 	 * the range of default ports.
@@ -675,9 +661,7 @@ void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 void     homa_net_destroy(struct homa_net *hnet);
 void     homa_net_exit(struct net *net);
 int      homa_net_init(struct homa_net *hnet, struct homa *homa);
-void     homa_net_pre_exit(struct net *net);
 int      homa_net_start(struct net *net);
-void     homa_net_unlink(struct homa_net *hnet);
 __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait);
 int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
@@ -878,14 +862,12 @@ static inline int homa_high_priority(struct homa *homa)
  * Lock Ordering:
  *
  * There are several other locks in Homa besides RPC locks, all of which
- * are spinlocks except homa->nets_mutex. When multiple locks are held, they
- * must be acquired in a consistent order in order to prevent deadlock. Here
- * are the rules for Homa:
- * 1. Except for RPC locks, socket locks, the grant lock, and
- *    homa->nets_mutex, all locks should be considered "leaf" locks: don't
- *    acquire other locks while holding them.
+ * are spinlocks. When multiple locks are held, they must be acquired in a
+ * consistent order in order to prevent deadlock. Here are the rules for Homa:
+ * 1. Except for RPC locks, socket locks, and the grant lock, all locks
+ *    should be considered "leaf" locks: don't acquire other locks while
+ *    holding them.
  * 2. The lock order is:
- *    * homa->nets_mutex
  *    * Grant lock
  *    * RPC lock
  *    * Socket lock
@@ -914,9 +896,8 @@ static inline int homa_high_priority(struct homa *homa)
  *
  * Spinlock Implications:
  *
- * Except for homa->nets_mutex, Homa uses spinlocks exclusively; this is
- * needed because locks typically need to be acquired at atomic level, such
- * as in SoftIRQ code.
+ * Homa uses spinlocks exclusively; this is needed because locks typically
+ * need to be acquired at atomic level, such as in SoftIRQ code.
  *
  * Operations that can block, such as memory allocation and copying data
  * to/from user space, are not permitted while holding spinlocks (spinlocks

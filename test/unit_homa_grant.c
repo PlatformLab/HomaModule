@@ -127,6 +127,7 @@ FIXTURE_SETUP(homa_grant)
 }
 FIXTURE_TEARDOWN(homa_grant)
 {
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

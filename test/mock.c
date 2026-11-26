@@ -53,6 +53,7 @@ int mock_ip6_xmit_errors;
 int mock_ip_queue_xmit_errors;
 int mock_kmalloc_errors;
 int mock_kthread_create_errors;
+int mock_maybe_get_net_errors;
 int mock_prepare_to_wait_errors;
 int mock_register_protosw_errors;
 int mock_register_qdisc_errors;
@@ -87,6 +88,12 @@ int mock_xmit_log_hijack;
  * wake_up_all will be logged.
  */
 int mock_log_wakeups;
+
+/* If a test sets this variable to nonzero, maybe_get_net and put_net
+ * will log whenever they are invoked, including the number of
+ * rcu_read_locks active at the time.
+ */
+int mock_log_net_refs;
 
 /* If a test sets this variable to nonzero, call_rcu_sched will log
  * whenever it is invoked.
@@ -175,6 +182,11 @@ static int mock_active_locks;
 
 /* Total number of successful spinlock acquisitions during current test. */
 int mock_total_spin_locks;
+
+/* The number of times maybe_get_net has succeeded minus the number of
+ * times put_net has been called.
+ */
+static int mock_net_holds;
 
 /* The number of times rcu_read_lock has been called minus the number
  * of times rcu_read_unlock has been called.
@@ -310,7 +322,8 @@ static struct socket mock_socket;
 static struct wait_queue_entry mock_sleeper;
 
 /* Each of the entries in mock_hnets below is associated with the
- * corresonding entry in mock_nets.
+ * corresonding entry in mock_nets. A mock_net is linked into
+ * net_namespace_list as long as its mock_hnet exists.
  */
 #define MOCK_MAX_NETS 10
 struct net mock_nets[MOCK_MAX_NETS];
@@ -377,6 +390,7 @@ static struct hrtimer_clock_base clock_base;
 struct task_struct *current_task = &mock_task;
 unsigned long ex_handler_refcount;
 struct net init_net;
+struct list_head net_namespace_list = LIST_HEAD_INIT(net_namespace_list);
 unsigned long volatile jiffies = 1100;
 unsigned int nr_cpu_ids = 8;
 unsigned long page_offset_base;
@@ -2246,10 +2260,43 @@ struct homa_net *mock_hnet(int index, struct homa *homa)
 		hnet = malloc(sizeof(*hnet));
 		mock_hnets[index] = hnet;
 		homa_net_init(hnet, homa);
+		list_add_tail_rcu(&mock_nets[index].list, &net_namespace_list);
 		if (index == 0)
 			mock_dev(0, homa);
 	}
 	return hnet;
+}
+
+/**
+ * mock_hnet_unlink() - Remove the struct net for a homa_net from
+ * net_namespace_list, as Linux does before it destroys a namespace. Tests
+ * that invoke homa_net_destroy themselves must invoke this first, so that
+ * mock_hnets_destroy doesn't destroy the homa_net again.
+ * @hnet:   A homa_net returned by mock_hnet.
+ */
+void mock_hnet_unlink(struct homa_net *hnet)
+{
+	list_del_rcu(&mock_net_for_hnet(hnet)->list);
+}
+
+/**
+ * mock_hnets_destroy() - Destroy all of the homa_nets whose struct nets
+ * are still in net_namespace_list (along with any sockets still open in
+ * them). Tests must invoke this before homa_destroy, just as Linux destroys
+ * all of the homa_nets in unregister_pernet_subsys before homa_destroy is
+ * invoked.
+ */
+void mock_hnets_destroy(void)
+{
+	struct net *net, *next;
+
+	/* Make sure that homa_peer_free_net sees the real routes. */
+	mock_rht_walk_results = NULL;
+	mock_rht_num_walk_results = 0;
+	list_for_each_entry_safe(net, next, &net_namespace_list, list) {
+		list_del_rcu(&net->list);
+		homa_net_destroy(mock_net_generic(net, homa_net_id));
+	}
 }
 
 void mock_local_bh_disable(void)
@@ -2312,6 +2359,24 @@ void *mock_malloc(size_t size, gfp_t flags, const char *free_type)
 		kmallocs_in_use = unit_hash_new();
 	unit_hash_set(kmallocs_in_use, block, free_type);
 	return block;
+}
+
+/**
+ * mock_maybe_get_net() - Called instead of maybe_get_net; counts the
+ * references so that mock_teardown can detect leaks.
+ * @net:      Network namespace to reference.
+ * Return:    @net, or NULL if mock_maybe_get_net_errors says to fail (as
+ *            if the namespace were being deleted).
+ */
+struct net *mock_maybe_get_net(struct net *net)
+{
+	if (mock_check_error(&mock_maybe_get_net_errors))
+		return NULL;
+	if (mock_log_net_refs)
+		unit_log_printf("; ", "maybe_get_net, rcu depth %d",
+				mock_active_rcu_locks);
+	mock_net_holds++;
+	return net;
 }
 
 /**
@@ -2383,6 +2448,18 @@ void mock_preempt_enable()
 int mock_processor_id()
 {
 	return cpu_number;
+}
+
+/**
+ * mock_put_net() - Called instead of put_net.
+ * @net:      Network namespace whose reference is to be released.
+ */
+void mock_put_net(struct net *net)
+{
+	if (mock_log_net_refs)
+		unit_log_printf("; ", "put_net, rcu depth %d",
+				mock_active_rcu_locks);
+	mock_net_holds--;
 }
 
 void mock_put_page(struct page *page)
@@ -3024,6 +3101,7 @@ void mock_teardown(void)
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
 	mock_kthread_create_errors = 0;
+	mock_maybe_get_net_errors = 0;
 	mock_prepare_to_wait_errors = 0;
 	mock_register_protosw_errors = 0;
 	mock_register_qdisc_errors = 0;
@@ -3039,6 +3117,7 @@ void mock_teardown(void)
 	mock_no_high_order_pages = false;
 	mock_xmit_prios_offset = 0;
 	mock_xmit_prios[0] = 0;
+	mock_log_net_refs = 0;
 	mock_log_rcu_sched = 0;
 	mock_log_mallocs = 0;
 	mock_route_errors = 0;
@@ -3071,6 +3150,7 @@ void mock_teardown(void)
 			mock_hnets[i] = NULL;
 		}
 	}
+	INIT_LIST_HEAD(&net_namespace_list);
 	memset(mock_devices, 0, sizeof(mock_devices));
 	mock_peer_free_no_fail = 0;
 	mock_link_mbps = 10000;
@@ -3159,6 +3239,11 @@ void mock_teardown(void)
 		FAIL(" %d rcu_read_locks still active after test",
 				mock_active_rcu_locks);
 	mock_active_rcu_locks = 0;
+
+	if (mock_net_holds != 0)
+		FAIL(" %d net references still active after test",
+				mock_net_holds);
+	mock_net_holds = 0;
 
 	if (mock_sock_holds != 0)
 		FAIL(" %d sock_holds still active after test",

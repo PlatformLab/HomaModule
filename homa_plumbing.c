@@ -23,7 +23,6 @@ unsigned int homa_net_id;
  */
 static struct pernet_operations homa_net_ops = {
 	.init = homa_net_start,
-	.pre_exit = homa_net_pre_exit,
 	.exit = homa_net_exit,
 	.id = &homa_net_id,
 	.size = sizeof(struct homa_net)
@@ -743,17 +742,6 @@ int homa_net_start(struct net *net)
 {
 	pr_notice("Homa attaching to net namespace\n");
 	return homa_net_init(homa_net(net), &homa_data);
-}
-
-/**
- * homa_net_pre_exit() - Invoked when a network namespace is about to be
- * destroyed; Linux waits for an RCU grace period between this function
- * and homa_net_exit.
- * @net:    The net that is about to be destroyed.
- */
-void homa_net_pre_exit(struct net *net)
-{
-	homa_net_unlink(homa_net(net));
 }
 
 /**

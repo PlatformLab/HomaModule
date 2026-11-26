@@ -72,6 +72,7 @@ FIXTURE_SETUP(homa_rpc)
 }
 FIXTURE_TEARDOWN(homa_rpc)
 {
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

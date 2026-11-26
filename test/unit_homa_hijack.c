@@ -69,6 +69,7 @@ FIXTURE_SETUP(homa_hijack)
 FIXTURE_TEARDOWN(homa_hijack)
 {
 	homa_offload_end();
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

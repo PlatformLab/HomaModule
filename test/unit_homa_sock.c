@@ -52,7 +52,6 @@ static void init_scan(struct homa_socktab_scan *scan,
 		      struct homa_socktab *socktab)
 {
 	scan->socktab = socktab;
-	scan->hnet = NULL;
 	scan->hsk = NULL;
 	scan->current_bucket = 0;
 	scan->avail = 0;
@@ -83,6 +82,7 @@ FIXTURE_SETUP(homa_sock)
 }
 FIXTURE_TEARDOWN(homa_sock)
 {
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
@@ -124,28 +124,6 @@ TEST_F(homa_sock, homa_socktab_start_scan)
 	EXPECT_EQ(HOMA_SOCKTAB_BUCKETS - 1, scan.current_bucket);
 	EXPECT_EQ(1, mock_sock_holds);
 	homa_socktab_end_scan(&scan);
-}
-
-TEST_F(homa_sock, homa_socktab_start_scan_all__basics)
-{
-	struct homa_socktab_scan scan;
-
-	EXPECT_EQ(&self->hsk, homa_socktab_start_scan_all(&self->homa, &scan));
-	EXPECT_EQ(self->hnet, scan.hnet);
-	EXPECT_EQ(self->hnet->socktab, scan.socktab);
-	EXPECT_EQ(1, mock_sock_holds);
-	homa_socktab_end_scan(&scan);
-}
-TEST_F(homa_sock, homa_socktab_start_scan_all__no_hnets)
-{
-	struct homa_socktab_scan scan;
-	struct homa homa2;
-
-	homa_init(&homa2);
-	EXPECT_EQ(NULL, homa_socktab_start_scan_all(&homa2, &scan));
-	EXPECT_EQ(NULL, scan.hnet);
-	homa_socktab_end_scan(&scan);
-	homa_destroy(&homa2);
 }
 
 TEST_F(homa_sock, homa_socktab_fill_scan__basics)
@@ -299,29 +277,6 @@ TEST_F(homa_sock, homa_socktab_next__refill_scan)
 	unit_sock_destroy(&hsk1);
 	unit_sock_destroy(&hsk2);
 }
-TEST_F(homa_sock, homa_socktab_next__advance_to_next_hnet)
-{
-	struct homa_socktab_scan scan;
-	struct homa_net *hnet3;
-	struct homa_sock hsk3;
-
-	/* The second namespace has no sockets. */
-	mock_hnet(1, &self->homa);
-	hnet3 = mock_hnet(2, &self->homa);
-	mock_sock_init(&hsk3, hnet3, self->hsk.port);
-
-	EXPECT_EQ(&self->hsk, homa_socktab_start_scan_all(&self->homa, &scan));
-	EXPECT_EQ(self->hnet, scan.hnet);
-	EXPECT_EQ(&hsk3, homa_socktab_next(&scan));
-	EXPECT_EQ(hnet3, scan.hnet);
-	EXPECT_EQ(hnet3->socktab, scan.socktab);
-	EXPECT_EQ(NULL, homa_socktab_next(&scan));
-	EXPECT_EQ(NULL, scan.hnet);
-
-	homa_socktab_end_scan(&scan);
-	unit_sock_destroy(&hsk3);
-}
-
 TEST_F(homa_sock, homa_socktab_end_scan__release_references)
 {
 	struct homa_sock hsk1, hsk2, hsk3, hsk4;

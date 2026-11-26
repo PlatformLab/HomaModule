@@ -16,8 +16,7 @@ struct homa_sock;
 
 /**
  * struct homa_socktab - A hash table that maps from port numbers (either
- * client or server) to homa_sock objects. There is one of these for each
- * network namespace.
+ * client or server) to homa_sock objects.
  *
  * This table is managed exclusively by homa_socktab.c, using RCU to
  * minimize synchronization during lookups.
@@ -81,13 +80,6 @@ struct homa_sock_link {
 struct homa_socktab_scan {
 	/** @socktab: The table that is being scanned. */
 	struct homa_socktab *socktab;
-
-	/**
-	 * @hnet: NULL means that only @socktab is being scanned. Otherwise
-	 * the scan covers the socktabs of all network namespaces and this
-	 * is the namespace that @socktab belongs to.
-	 */
-	struct homa_net *hnet;
 
 	/**
 	 * @hsk: Points to the current socket in the iteration, or NULL if
@@ -391,8 +383,6 @@ void               homa_socktab_init(struct homa_socktab *socktab);
 struct homa_sock  *homa_socktab_next(struct homa_socktab_scan *scan);
 struct homa_sock  *homa_socktab_start_scan(struct homa_socktab *socktab,
 					   struct homa_socktab_scan *scan);
-struct homa_sock  *homa_socktab_start_scan_all(struct homa *homa,
-					       struct homa_socktab_scan *scan);
 
 #ifndef __STRIP__ /* See strip.py */
 /**

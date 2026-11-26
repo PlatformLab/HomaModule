@@ -121,6 +121,7 @@ FIXTURE_SETUP(homa_outgoing)
 FIXTURE_TEARDOWN(homa_outgoing)
 {
 	homa_route_release(self->route);
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

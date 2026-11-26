@@ -28,8 +28,6 @@ int homa_init(struct homa *homa)
 
 	memset(homa, 0, sizeof(*homa));
 
-	INIT_LIST_HEAD(&homa->nets);
-	mutex_init(&homa->nets_mutex);
 	atomic64_set(&homa->next_outgoing_id, 2);
 	homa->link_mbps = 25000;
 #ifndef __STRIP__ /* See strip.py */
@@ -117,21 +115,9 @@ error:
  */
 void homa_destroy(struct homa *homa)
 {
-	struct homa_net *hnet, *next;
-
 	UNIT_LOG("; ", "homa_destroy");
 
 	/* The order of the following cleanups matters! */
-
-	/* In actual use all of the homa_nets have already been destroyed
-	 * when this function is invoked, so the code below will never be
-	 * invoked. However, it is useful during unit tests.
-	 */
-	list_for_each_entry_safe(hnet, next, &homa->nets, links) {
-		homa_net_unlink(hnet);
-		homa_socktab_destroy(hnet->socktab);
-		kfree(hnet->socktab);
-	}
 #ifndef __STRIP__ /* See strip.py */
 	if (homa->grant) {
 		homa_grant_free(homa->grant);
@@ -164,29 +150,13 @@ int homa_net_init(struct homa_net *hnet, struct homa *homa)
 		return -ENOMEM;
 	homa_socktab_init(hnet->socktab);
 	hnet->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
-	mutex_lock(&homa->nets_mutex);
-	list_add_tail_rcu(&hnet->links, &homa->nets);
-	mutex_unlock(&homa->nets_mutex);
 	return 0;
-}
-
-/**
- * homa_net_unlink() - Remove a homa_net from homa->nets, so that it will
- * no longer be found by scans of all the network namespaces. Must be
- * invoked at least one RCU grace period before homa_net_destroy.
- * @hnet:    Object to unlink.
- */
-void homa_net_unlink(struct homa_net *hnet)
-{
-	mutex_lock(&hnet->homa->nets_mutex);
-	list_del_rcu(&hnet->links);
-	mutex_unlock(&hnet->homa->nets_mutex);
 }
 
 /**
  * homa_net_destroy() - Release any resources associated with a homa_net.
  * @hnet:    Object to destroy; must not be used again after this function
- *           returns. Must already have been unlinked with homa_net_unlink.
+ *           returns.
  */
 void homa_net_destroy(struct homa_net *hnet)
 {
