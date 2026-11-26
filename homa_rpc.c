@@ -97,13 +97,11 @@ error:
 
 /**
  * homa_rpc_alloc_server() - Allocate and initialize a server RPC (one that is
- * used to manage an incoming request). If appropriate, the RPC will also
- * be handed off (we do it here, while we have the socket locked, to avoid
- * acquiring the socket lock a second time later for the handoff).
+ * used to manage an incoming request).
  * @hsk:      Socket that owns this RPC.
  * @source:   IP address (network byte order) of the RPC's client.
  * @h:        Header for the first data packet received for this RPC; used
- *            to initialize the RPC. Must have type DATA or START_MSG.
+ *            to initialize the RPC.
  *
  * Return:  A pointer to a new RPC, which is locked, or a negative errno
  *          if an error occurred. If there is already an RPC corresponding
@@ -111,17 +109,16 @@ error:
  */
 struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 				       const struct in6_addr *source,
-				       struct homa_common_hdr *h)
+				       struct homa_data_hdr *h)
 	__COND_ACQUIRES(srpc->bucket->lock)
 {
-	u64 id = homa_local_id(h->sender_id);
+	u64 id = homa_local_id(h->common.sender_id);
 	struct homa_rpc_bucket *bucket;
 	struct homa_rpc *srpc = NULL;
 	struct mem_cgroup *memcg;
-	int msg_length;
 	int err;
 
-	if (!hsk->buffer_pool)
+	if (!homa_pool_exists(hsk->buffer_pool))
 		return ERR_PTR(-ENOMEM);
 
 	/* Lock the bucket, and make sure no-one else has already created
@@ -131,7 +128,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	homa_bucket_lock(bucket, id);
 	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
 		if (srpc->id == id &&
-		    srpc->dport == ntohs(h->sport) &&
+		    srpc->dport == ntohs(h->common.sport) &&
 		    ipv6_addr_equal(&srpc->route->peer->addr, source)) {
 			/* RPC already exists; just return it instead
 			 * of creating a new RPC.
@@ -172,7 +169,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 		srpc->route = NULL;
 		goto error;
 	}
-	srpc->dport = ntohs(h->sport);
+	srpc->dport = ntohs(h->common.sport);
 	srpc->id = id;
 	srpc->msgin.length = -1;
 	srpc->msgout.length = -1;
@@ -186,16 +183,12 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_time = homa_clock();
 #ifndef __STRIP__ /* See strip.py */
-	if (h->type == DATA) {
-		msg_length = ntohl(((struct homa_data_hdr *)h)->msg_length);
-		err = homa_message_in_init(srpc, msg_length, msg_length);
-	} else {
-		msg_length = ntohl(((struct homa_start_msg_hdr *)h)->msg_length);
-		err = homa_message_in_init(srpc, msg_length, 0);
-	}
+	tt_record2("Incoming message for id %d has %d unscheduled bytes",
+		   srpc->id, ntohl(h->incoming));
+	err = homa_message_in_init(srpc, ntohl(h->msg_length),
+				   ntohl(h->incoming));
 #else /* See strip.py */
-	msg_length = ntohl(((struct homa_data_hdr *)h)->msg_length);
-	err = homa_message_in_init(srpc, msg_length);
+	err = homa_message_in_init(srpc, ntohl(h->msg_length));
 #endif /* See strip.py */
 	if (err != 0)
 		goto error;
@@ -210,10 +203,6 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
 	homa_sock_unlock(hsk);
-	if (h->type == DATA && srpc->msgin.num_bpages > 0) {
-		set_bit(RPC_PKTS_READY, &srpc->flags);
-		homa_rpc_handoff(srpc);
-	}
 	INC_METRIC(requests_received, 1);
 	return srpc;
 
@@ -635,7 +624,8 @@ release:
 		rpc->magic = 0;
 		kfree(rpc);
 	}
-	homa_sock_wakeup_wmem(hsk);
+	if (num_rpcs > 0)
+		hsk->sock.sk_write_space(&hsk->sock);
 	tt_record3("reaped %d rpcs; %d dead frags remain for port %d",
 		   num_rpcs, hsk->dead_frags, hsk->port);
 	return !checked_all_rpcs;

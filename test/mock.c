@@ -304,6 +304,11 @@ __u16 mock_min_default_port = 0x8000;
  * Its sk field points to the most recently created Homa socket. */
 static struct socket mock_socket;
 
+/* Linked into the wait queue of mock_socket by mock_sock_init, so that
+ * the queue appears to have a sleeper.
+ */
+static struct wait_queue_entry mock_sleeper;
+
 /* Each of the entries in mock_hnets below is associated with the
  * corresonding entry in mock_nets.
  */
@@ -344,8 +349,10 @@ int mock_netif_schedule_calls;
  */
 bool mock_check_bpool_leaks = true;
 
-/* Keeps track of all of the sockets created during the current test.
- * Used to attribute calls to refcount_inc_not_zero to a socket (or not).
+/* Keeps track of all of the sockets created by mock_sock_init during the
+ * current test that have not yet been destructed. Used to attribute calls
+ * to refcount_inc_not_zero to a socket (or not), and to destruct sockets
+ * at the end of each test.
  */
 #define MOCK_MAX_SOCKS 100
 struct homa_sock *mock_socks[MOCK_MAX_SOCKS];
@@ -465,6 +472,7 @@ void call_rcu(struct rcu_head *head, void free_func(struct rcu_head *head))
 
 bool cancel_work_sync(struct work_struct *work)
 {
+	unit_log_printf("; ", "cancel_work_sync invoked");
 	return false;
 }
 
@@ -1863,6 +1871,12 @@ int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 	return -EOPNOTSUPP;
 }
 
+int sock_wake_async(struct socket_wq *wq, int how, int band)
+{
+	unit_log_printf("; ", "sock_wake_async how %d band %d", how, band);
+	return 0;
+}
+
 void synchronize_rcu(void)
 {}
 
@@ -2745,11 +2759,6 @@ struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct in6_addr *daddr,
 		case ACK:
 			header_size = sizeof(struct homa_ack_hdr);
 			break;
-#ifndef __STRIP__ /* See strip.py */
-		case START_MSG:
-			header_size = sizeof(struct homa_start_msg_hdr);
-			break;
-#endif /* See strip.py */
 		default:
 			header_size = sizeof(struct homa_common_hdr);
 			break;
@@ -2822,18 +2831,50 @@ int mock_skb_count(void)
 	return unit_hash_size(skbs_in_use);
 }
 
+/**
+ * mock_sk_destruct() - Used in place of inet_sock_destruct as the initial
+ * value of sk->sk_destruct for sockets created by mock_sock_init. Removes
+ * the socket from mock_socks.
+ * @sk:    Socket being destructed.
+ */
+void mock_sk_destruct(struct sock *sk)
+{
+	int i;
+
+	for (i = 0; i < mock_num_socks; i++) {
+		if (&mock_socks[i]->sock == sk) {
+			mock_num_socks--;
+			mock_socks[i] = mock_socks[mock_num_socks];
+			return;
+		}
+	}
+}
+
 void mock_sock_hold(struct sock *sk)
 {
 	atomic_inc(&sk->sk_refcnt.refs);
 	mock_sock_holds++;
 }
 
+/**
+ * mock_sock_release() - Releases the reference to a socket that was
+ * created by mock_sock_init (as sk_common_release does when a socket is
+ * closed); destructs the socket if there are no other references.
+ * @sk:    Socket to release.
+ */
+void mock_sock_release(struct sock *sk)
+{
+	if (atomic_dec_and_test(&sk->sk_refcnt.refs))
+		sk->sk_destruct(sk);
+}
+
 void mock_sock_put(struct sock *sk)
 {
-	atomic_dec(&sk->sk_refcnt.refs);
 	if (mock_sock_holds == 0)
 		FAIL(" sock_put invoked when there were no active sock_holds");
 	mock_sock_holds--;
+	if (atomic_dec_and_test(&sk->sk_refcnt.refs))
+		sk->sk_destruct(sk);
 }
 
 /**
@@ -2851,6 +2892,17 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	struct sock *sk = &hsk->sock;
 	int saved_port;
 	int err = 0;
+	int i;
+
+	/* If @hsk is being reused, the previous socket in it must be
+	 * destructed (otherwise its resources will leak).
+	 */
+	for (i = 0; i < mock_num_socks; i++) {
+		if (mock_socks[i] == hsk) {
+			sk->sk_destruct(sk);
+			break;
+		}
+	}
 
 	if (mock_num_socks < MOCK_MAX_SOCKS) {
 		mock_socks[mock_num_socks] = hsk;
@@ -2863,6 +2915,8 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	memset(hsk, 0, sizeof(*hsk));
 	atomic_set(&sk->sk_refcnt.refs, 1);
 	sk->sk_data_ready = mock_data_ready;
+	sk->sk_state_change = mock_state_change;
+	sk->sk_destruct = mock_sk_destruct;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	sk->sk_socket = &mock_socket;
 	memset(&mock_socket, 0, sizeof(mock_socket));
@@ -2870,6 +2924,8 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	sk->sk_net.net = mock_net_for_hnet(hnet);
 	refcount_set(&sk->sk_wmem_alloc, 1);
 	init_waitqueue_head(&mock_socket.wq.wait);
+	INIT_LIST_HEAD(&mock_socket.wq.wait.head);
+	list_add(&mock_sleeper.entry, &mock_socket.wq.wait.head);
 	rcu_assign_pointer(sk->sk_wq, &mock_socket.wq);
 	sk->sk_sndtimeo = MAX_SCHEDULE_TIMEOUT;
 	sk->sk_protocol = IPPROTO_HOMA;
@@ -2906,6 +2962,16 @@ void mock_spin_unlock(spinlock_t *lock)
 }
 
 /**
+ * mock_state_change() - Invoked through sk->sk_state_change; logs a message
+ * to indicate that it was invoked.
+ * @sk:    Associated socket; not used here.
+ */
+void mock_state_change(struct sock *sk)
+{
+	unit_log_printf("; ", "sk->sk_state_change invoked");
+}
+
+/**
  * mock_teardown() - Invoked at the end of each unit test to check for
  * consistency issues with all of the information managed by this file.
  * This function also cleans up the mocking information, so it is ready
@@ -2915,6 +2981,19 @@ void mock_teardown(void)
 {
 	int count, i;
 
+	/* Destruct any sockets that haven't already been destructed (e.g.
+	 * because the test didn't release their last reference). Must be
+	 * done before checking for leaks below.
+	 */
+	while (mock_num_socks > 0) {
+		struct homa_sock *hsk = mock_socks[mock_num_socks - 1];
+
+		count = mock_num_socks;
+		hsk->sock.sk_destruct(&hsk->sock);
+		if (mock_num_socks == count)
+			FAIL(" sk_destruct didn't remove socket from mock_socks");
+		mock_num_socks = count - 1;
+	}
 	mock_rcu_free();
 
 	cpu_number = 1;

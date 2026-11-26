@@ -17,41 +17,37 @@
  * situations require special handling.
  *
  * The bullet points below walk through the life of an RPC, showing how
- * packet loss at each point is handled. If you see this comment in a
- * version of Homa where the packet type START_MSG is not defined, then
- * there will be no START_MSG packets and all messages will be unscheduled.
+ * packet loss at each point is handled.
  *
- * 1. The START_MSG packet for a scheduled request is lost: the client notices
- *    that it has not received any grants from the peer, so it retransmits the
- *    START_MSG.
- * 2. All of the DATA packets for an unscheduled request are lost, so the server
- *    has no knowledge of the RPC: the client sends a RESEND packet for the
+ * 1. All of the DATA packets for a request are lost, so the server has no
+ *    knowledge of the RPC: the client sends a RESEND packet for the
  *    response; the server returns an RPC_UNKNOWN packet; then the client
- *    retransmits the entire request message.
- * 3. DATA packets for a request are lost, but the server has received at
- *    least one DATA or START_MSG packet: the server's homa_timer notices
- *    an excessive delay in the arrival of data and sends RESEND packet(s)
- *    to request retransmission.
- * 4. The START_MSG packet for a scheduled response is lost: the client sends
- *    a RESEND packet for the response; the server then retransmits the
- *    START_MSG packet (it sends START_MSG rather than DATA so that the client
- *    knows it must issue grants for the message).
- * 5. All of the DATA packets for an unscheduled response are lost: the
- *    client sends a RESEND packet for the response; the server then
- *    retransmits the response message.
- * 6. DATA packets for a response are lost, but the client has received at
- *    least one DATA or START_MSG packet: the client's homa_timer notices
- *    an excessive delay in the arrival of data and sends RESEND packet(s)
- *    to request retransmission.
+ *    retransmits the request data it has already sent.
+ * 2. Some DATA packets for a request are lost, but the server has received
+ *    at least one DATA packet: the server's homa_timer notices an excessive
+ *    delay in the arrival of data and sends RESEND packet(s) to request
+ *    retransmission.
+ * 3. All of the DATA packets for a response are lost: the client sends a
+ *    RESEND packet for the response; the server then retransmits the
+ *    response data it has already sent.
+ * 4. Some DATA packets for a response are lost, but the client has received
+ *    at least one DATA packet: the client's homa_timer notices an excessive
+ *    delay in the arrival of data and sends RESEND packet(s) to request
+ *    retransmission.
  *
- * To the client, cases 2, 4, and 5 are initially indistinguishable and
- * are all handled the same way, by issuing a RESEND for the entire response.
+ * To the client, cases 1 and 3 are initially indistinguishable and are
+ * handled the same way, by issuing a RESEND for the entire response.
+ *
+ * GRANT packets can also be lost. The receiver's timer will eventually
+ * issue a RESEND for data beyond the last grant the sender received; when
+ * the sender receives a RESEND for data that it hasn't been granted, it
+ * assumes that a GRANT packet was lost and treats the RESEND as a grant.
  *
  * There are some situations where a RESEND packet is sent but the
  * recipient has not yet transmitted the "missing" packets (intentionally).
  * For example, if the server application takes a long time to generate a
- * response message, the client may issue a RESEND (this appears like cases 2,
- * 4, and 5). Another example is if the sender of a message has not sent
+ * response message, the client may issue a RESEND (this appears like cases 1
+ * and 3). Another example is if the sender of a message has not sent
  * packets because it has been using its uplink bandwidth for higher priority
  * messages. In cases like this, when a RESEND packet arrives the recipient
  * returns a BUSY packet to indicate that it cannot (or has chosen not to)

@@ -298,7 +298,7 @@ void read_metrics(const char *path, metrics *metrics)
 		}
 		if (strcmp(s, "large_msg_count") == 0) {
 			metrics->total_messages += count;
-			metrics->large_msg_count = count;
+			metrics->large_msg_count += count;
 		} else {
 			metrics->large_msg_bytes += count;
 			metrics->total_bytes += count;
@@ -341,12 +341,17 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 		total_bytes += interval.total_bytes;
 		if (interval.max_size <= unsched_bytes)
 			interval.unsched_bytes = interval.total_bytes;
-		else
-			interval.unsched_bytes = 0;
+		else {
+			interval.unsched_bytes = interval.total_messages
+					* unsched_bytes;
+			if (interval.unsched_bytes > interval.total_bytes)
+				interval.unsched_bytes = interval.total_bytes;
+		}
 		total_unsched_bytes += interval.unsched_bytes;
 		prev_size = interval.max_size;
 	}
 	total_bytes += diff->large_msg_bytes;
+	total_unsched_bytes += diff->large_msg_count * unsched_bytes;
 
 	// Divide priorities between scheduled and unscheduled packets.
 	int64_t unsched_prios = unsched;
@@ -378,7 +383,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 		bytes_per_prio = 1 + total_bytes/num_priorities;
 	int64_t next_cutoff_bytes = bytes_per_prio;
 	int next_cutoff = num_priorities - 1;
-	int cum_unsched_bytes = 0;
+	int64_t cum_unsched_bytes = 0;
 	for (interval &interval: diff->intervals) {
 		cum_unsched_bytes += interval.unsched_bytes;
 		if (cum_unsched_bytes >= total_unsched_bytes)
@@ -391,7 +396,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 //					next_cutoff_bytes/1000);
 			cutoffs[next_cutoff] = interval.max_size;
 			next_cutoff--;
-			next_cutoff_bytes += bytes_per_prio;
+			next_cutoff_bytes = cum_unsched_bytes + bytes_per_prio;
 			if (next_cutoff_bytes >= total_unsched_bytes)
 				break;
 		}

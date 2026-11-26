@@ -82,7 +82,7 @@ int homa_tx_pool_mem_nid(int core)
 	struct zoneref *z;
 
 	if (nid >= 0 && nid < MAX_NUMNODES) {
-		for (z = node_zonelist(cpu_to_node(core), GFP_ATOMIC)->_zonerefs;
+		for (z = node_zonelist(nid, GFP_ATOMIC)->_zonerefs;
 		z->zone; z++) {
 			if (zonelist_zone_idx(z) <= highest)
 				return zone_to_nid(z->zone);
@@ -175,7 +175,8 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 	local_bh_disable();
 	local_lock_nested_bh(&homa_tx_pool_core.preempt_lock);
 	tx_core = &per_cpu(homa_tx_pool_core, smp_processor_id());
-	tx_pool = homa->tx_pools[tx_core->nid];
+	nid = READ_ONCE(tx_core->nid);
+	tx_pool = homa->tx_pools[nid];
 
 	while (bytes_left  > 0) {
 		/* Expand the frag array if needed. */
@@ -217,7 +218,6 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 		frags_allocated++;
 		bytes_left -= skb_frag_size(frag);
 	}
-	nid = tx_core->nid;
 	local_unlock_nested_bh(&homa_tx_pool_core.preempt_lock);
 	local_bh_enable();
 	*frags  = cur_frags;
@@ -225,7 +225,7 @@ int homa_tx_pool_alloc(struct homa *homa, int length, int *num_frags,
 	return nid;
 
 error:
-	homa_tx_pool_free(homa, tx_core->nid, frags_allocated, cur_frags);
+	homa_tx_pool_free(homa, nid, frags_allocated, cur_frags);
 	if (cur_frags != *frags)
 		kvfree(cur_frags);
 	*num_frags = 0;
@@ -501,7 +501,7 @@ void homa_tx_pool_gc(struct homa *homa)
 
 		nid = homa_tx_pool_mem_nid(i);
 		tx_core = &per_cpu(homa_tx_pool_core, i);
-		if (tx_core->nid != nid)
+		if (READ_ONCE(tx_core->nid) != nid)
 			WRITE_ONCE(tx_core->nid, nid);
 	}
 }

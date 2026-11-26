@@ -284,6 +284,7 @@ int homa_sock_init(struct homa_sock *hsk)
 	/* Initialize fields outside the Homa part. */
 	hsk->sock.sk_sndbuf = homa->wmem_max;
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
+	hsk->sock.sk_write_space = homa_sock_write_space;
 	IF_NO_STRIP(homa_hijack_sock_init(hsk));
 
 	/* This is needed to prevent blocking when allocating memory in
@@ -317,8 +318,11 @@ int homa_sock_init(struct homa_sock *hsk)
 	}
 	result = homa_sock_link(hsk, hnet->prev_default_port);
 	spin_unlock_bh(&socktab->write_lock);
-	if (result == 0)
+	if (result == 0) {
+		hsk->saved_destruct = hsk->sock.sk_destruct;
+		hsk->sock.sk_destruct = homa_sock_destruct;
 		return result;
+	}
 
 error:
 	hsk->shutdown = true;
@@ -418,6 +422,9 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 */
 	hsk->shutdown = true;
 
+	/* Not used by Homa, but needed by other parts of the kernel. */
+	hsk->sock.sk_shutdown = SHUTDOWN_MASK;
+
 	/* This protects against RPC deletions during the RCU scan of
 	 * active_rpcs below.
 	 */
@@ -435,7 +442,6 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc);
 	}
-	wake_up_interruptible_poll(sk_sleep(&hsk->sock), EPOLLOUT);
 	rcu_read_unlock();
 	homa_unprotect_rpcs(hsk);
 
@@ -443,46 +449,54 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	while (!list_empty(&hsk->interests))
 		homa_interest_notify_shared(hsk, NULL);
 	homa_sock_unlock(hsk);
+
+	/* Wake up all threads waiting on the socket's wait queue (e.g. in
+	 * poll or homa_sock_wait_wmem) so they will notice the shutdown.
+	 */
+	hsk->sock.sk_state_change(&hsk->sock);
 	tt_record1("Finished shutdown for socket %d", hsk->port);
 }
 
 /**
- * homa_sock_destroy() - Release all of the internal resources associated
- * with a socket; is invoked at time when that is safe (i.e., all references
- * on the socket have been dropped).
+ * homa_sock_destroy() - Invoked (as sk_prot->destroy) when a socket is
+ * closed: shuts down the socket and releases all of its RPCs.
  * @sk:       Socket to destroy.
  */
 void homa_sock_destroy(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
+	u64 warn_time;
 
-	IF_NO_STRIP(int i = 0);
+	/* Note: other threads may still hold references to the socket at
+	 * this point, so any cleanup that expects the socket to be
+	 * quiescent must go in homa_sock_destruct.
+	 */
 
 	if (!hsk->homa)
 		return;
+	tt_record1("Starting to destroy socket %d", hsk->port);
 
 	/* Normally homa_close has already done this, but not if socket
 	 * creation failed after homa_socket (inet_create calls only
 	 * sk_common_release).
 	 */
 	homa_sock_shutdown(hsk);
+	homa_pool_shutdown(hsk->buffer_pool);
 
-	tt_record1("Starting to destroy socket %d", hsk->port);
+	/* All RPCs must be reaped here, rather than in homa_sock_destruct:
+	 * their tx memory is included in sk_wmem_alloc, and the kernel will
+	 * not free the socket (so homa_sock_destruct will not be invoked)
+	 * until sk_wmem_alloc drops to zero.
+	 */
+	warn_time = homa_clock() + 5000 * homa_clock_khz();
 	while (!list_empty(&hsk->dead_rpcs)) {
-#ifndef __STRIP__ /* See strip.py */
 		if (!homa_rpc_reap(hsk)) {
-			i++;
-			if (i == 5) {
-				tt_record("Freezing because reap seems hung");
-				tt_freeze();
-			}
+			if (homa_clock() > warn_time)
+				WARN_ONCE(true, "homa_sock_destroy: reap seems hung");
 		}
-#else /* See strip.py */
-		homa_rpc_reap(hsk);
-#endif /* See strip.py */
+		cond_resched();
 	}
 
-	WARN_ON_ONCE(refcount_read(&hsk->sock.sk_wmem_alloc) != 1);
 #ifdef __UNIT_TEST__
 	{
 		u64 tx_memory = refcount_read(&hsk->sock.sk_wmem_alloc);
@@ -492,12 +506,28 @@ void homa_sock_destroy(struct sock *sk)
 			     tx_memory, hsk->port);
 	}
 #endif /* __UNIT_TEST__ */
-
-	if (hsk->buffer_pool) {
-		homa_pool_free(hsk->buffer_pool);
-		hsk->buffer_pool = NULL;
-	}
 	tt_record1("Finished destroying socket %d", hsk->port);
+}
+
+/**
+ * homa_sock_destruct() - Invoked (as sk_destruct) when the last reference
+ * to a socket has been released, just before the socket is freed. Provides
+ * a final opportunity to release resources.
+ * @sk:       Socket whose memory is about to be freed.
+ */
+void homa_sock_destruct(struct sock *sk)
+{
+	struct homa_sock *hsk = homa_sk(sk);
+
+	/* Note: this function may be invoked in atomic context, so it must
+	 * not sleep.
+	 */
+	tt_record1("homa_sock_destruct invoked for port %d", hsk->port);
+	WARN_ON_ONCE(!list_empty(&hsk->active_rpcs) ||
+		     !list_empty(&hsk->dead_rpcs));
+	homa_pool_free(hsk->buffer_pool);
+	hsk->buffer_pool = NULL;
+	hsk->saved_destruct(sk);
 }
 
 /**
@@ -648,6 +678,7 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 	if (nonblocking)
 		timeo = 0;
 	set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+	sk_set_bit(SOCKWQ_ASYNC_NOSPACE, &hsk->sock);
 	tt_record2("homa_sock_wait_wmem waiting on port %d, wmem %d",
 		   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
 
@@ -677,4 +708,39 @@ int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
 	if (result == 0)
 		return -EWOULDBLOCK;
 	return 0;
+}
+
+/**
+ * homa_sock_write_space() - If there are threads waiting for tx memory and
+ * the socket is now below its limit, wake them up. Used by Homa in place of
+ * sock_def_write_space (Homa needs to use a different test to decide whether
+ * enough memory is available).
+ * @sk:    Socket for which tx memory may have become available. The
+ *         caller must hold a reference on it.
+ */
+void homa_sock_write_space(struct sock *sk)
+{
+	struct homa_sock *hsk = homa_sk(sk);
+	struct socket_wq *wq;
+
+	if (!homa_sock_wmem_avl(hsk))
+		return;
+	if (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags)) {
+		tt_record2("homa_sock_write_space clearing NOSPACE for port %d, wmem %d",
+			   hsk->port, refcount_read(&sk->sk_wmem_alloc));
+		clear_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+	}
+
+	/* The code below follows the pattern of sock_def_write_space to
+	 * deal with situations where the socket has been closed and sk_wq
+	 * is NULL. skwq_has_sleeper provides a race-free way to determine
+	 * whether a wakeup is needed (HOMA_SOCK_NOSPACE does not).
+	 */
+	rcu_read_lock();
+	wq = rcu_dereference(sk->sk_wq);
+	if (skwq_has_sleeper(wq))
+		wake_up_interruptible_poll(&wq->wait, EPOLLOUT | EPOLLWRNORM |
+					   EPOLLWRBAND);
+	sk_wake_async_rcu(sk, SOCK_WAKE_SPACE, POLL_OUT);
+	rcu_read_unlock();
 }

@@ -36,11 +36,19 @@ int homa_message_out_init(struct homa_rpc *rpc, int length)
 	memset(&rpc->msgout, 0, sizeof(rpc->msgout));
 	rpc->msgout.length = length;
 #ifndef __STRIP__ /* See strip.py */
+	rpc->msgout.unscheduled = rpc->hsk->homa->unsched_bytes;
+	if (rpc->msgout.unscheduled >= length)
+		rpc->msgout.unscheduled = length;
+	else
+	        /* If we can't send the entire message unscheduled, send only
+		 * a single packet unscheduled (reduces switch buffer usage at
+		 * the receiver when congested).
+		 */
+		rpc->msgout.unscheduled = 1;
+	rpc->msgout.granted = rpc->msgout.unscheduled;
 	rpc->msgout.priority = homa_unsched_priority(rpc->hsk->homa,
 						     rpc->route->peer,
-						     length);
-	if (length <= rpc->hsk->homa->unsched_bytes)
-		rpc->msgout.granted = length;
+						     rpc->msgout.length);
 #endif /* See strip.py */
 	rpc->msgout.init_time = homa_clock();
 
@@ -117,7 +125,7 @@ int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
 	homa_rpc_unlock(rpc);
 #ifndef __STRIP__ /* See strip.py */
 	tt_record3("starting copy from user space for id %d, length %d, unscheduled %d",
-		   rpc->id, rpc->msgout.length, rpc->msgout.granted != 0);
+		   rpc->id, rpc->msgout.length, rpc->msgout.granted);
 #else /* See strip.py */
 	tt_record2("starting copy from user space for id %d, length %d",
 		   rpc->id, rpc->msgout.length);
@@ -143,6 +151,26 @@ int homa_tx_copy_from_user(struct homa_rpc *rpc, struct iov_iter *iter,
 		 * also sees related changes to rpc->msgout.
 		 */
 		smp_store_release(&rpc->msgout.copied_from_user, offset);
+
+#ifndef __STRIP__ /* See strip.py */
+		/* Transmit unscheduled data if requested. We only transmit
+		 * unscheduled data here, under the assumption that a
+		 * SoftIRQ thread will transmit the remaining data as grants
+		 * come in. That way we get parallelism between 2 threads:
+		 * this thread copies and the SoftIRQ thread transmits.
+		 * Parallelism is important on networks of 100 Gbps and more
+		 * because copying data is the bottleneck; we don't want to
+		 * use cycles in this thread sending packets. It is important
+		 * to send all the unscheduled data here in order to keep the
+		 * network busy until the first grant arrives.
+		 */
+		if (xmit && rpc->msgout.next_xmit_offset <
+			    rpc->msgout.unscheduled) {
+			homa_rpc_lock(rpc);
+			homa_xmit_data(rpc);
+			homa_rpc_unlock(rpc);
+		}
+#endif /* See strip.py */
 	}
 	tt_record2("finished copy from user space for id %d, length %d",
 		   rpc->id, rpc->msgout.length);
@@ -284,6 +312,7 @@ struct sk_buff *homa_tx_skb_alloc(struct homa_rpc *rpc, u32 offset, u32 *end)
 			   sizeof(struct homa_seg_hdr));
 	h->common.sender_id = cpu_to_be64(rpc->id);
 	h->msg_length = htonl(rpc->msgout.length);
+	IF_NO_STRIP(h->incoming = htonl(rpc->msgout.granted));
 	homa_route_get_acks(rpc->route, 1, &h->ack);
 	IF_NO_STRIP(h->cutoff_version = rpc->route->peer->cutoff_version);
 	if (offset < rpc->msgout.next_xmit_offset)
@@ -422,8 +451,9 @@ int homa_tx_skb_send(struct homa_rpc *rpc, u32 offset, u32 *end)
 		tt_record3("retransmitting offset %d, length %d, id %d",
 			   offset, *end - offset, rpc->id);
 		priority = rpc->msgout.retrans_priority;
-	} else
+	} else {
 		priority = rpc->msgout.priority;
+	}
 	priority = rpc->hsk->homa->priority_map[priority];
 #endif /* See strip.py */
 #ifndef __UPSTREAM__ /* See strip.py */
@@ -604,28 +634,6 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	}
 }
 
-#ifndef __STRIP__ /* See strip.py */
-/**
- * homa_xmit_start_msg() - Emit a START_MSG packet for a scheduled outgoing
- * message (this will trigger grant generation on the receiver).
- * @rpc:      RPC for which to emit the packet. homa_message_out_init
- *            must have been invoked.
- * @length:   Number of bytes in outgoing message.
- */
-void homa_xmit_start_msg(struct homa_rpc *rpc, int length)
-	__must_hold(rpc->bucket->lock)
-{
-	struct homa_start_msg_hdr h;
-
-	memset(&h, 0, sizeof(h));
-	h.msg_length = htonl(length);
-	tt_record4("Sending START_MSG to 0x%x:%d for id %llu, length %d",
-		   tt_addr(rpc->route->peer->addr), rpc->hsk->port, rpc->id,
-		   rpc->msgout.length);
-	homa_xmit_control(START_MSG, &h, sizeof(h), rpc);
-}
-#endif /* See strip.py */
-
 /**
  * homa_xmit_data() - If an RPC has outbound data packets that are permitted
  * to be transmitted according to the scheduling mechanism, arrange for
@@ -648,17 +656,37 @@ void homa_xmit_data(struct homa_rpc *rpc)
 		}
 #endif /* See strip.py */
 
-		/* Don't transmit unless enough data has been copied from user
-		 * space for a maximum-size packet.
+#ifndef __STRIP__ /* See strip.py */
+		if (xmit_offset < rpc->msgout.unscheduled)
+			end = rpc->msgout.unscheduled;
+		else
+			end = rpc->msgout.length;
+#else /* See strip.py */
+		if (xmit_offset >= rpc->msgout.length)
+			break;
+		end = rpc->msgout.length;
+#endif /* See strip.py */
+
+#ifndef __STRIP__ /* See strip.py */
+		/* Don't transmit if there isn't enough data available to fill
+		 * a maximum-size packet, unless we can't actually send a
+		 * full-size packet now anyway (e.g., we're at the end of
+		 * the message or remaining unscheduled data doesn't fill a
+		 * max packet).
 		 */
+		if (xmit_offset + rpc->msgout.max_gso_data >
+		    rpc->msgout.copied_from_user &&
+		    rpc->msgout.copied_from_user < rpc->msgout.length &&
+		    !(xmit_offset < rpc->msgout.unscheduled &&
+		      rpc->msgout.copied_from_user >=
+		      rpc->msgout.unscheduled))
+			break;
+#else /* See strip.py */
 		if (xmit_offset + rpc->msgout.max_gso_data >
 		    rpc->msgout.copied_from_user &&
 		    rpc->msgout.copied_from_user < rpc->msgout.length)
 			break;
-
-		if (xmit_offset >= rpc->msgout.length)
-			break;
-		end = rpc->msgout.length;
+#endif /* See strip.py */
 		if (homa_tx_skb_send(rpc, xmit_offset, &end) != 0)
 			break;
 #ifndef __STRIP__ /* See strip.py */

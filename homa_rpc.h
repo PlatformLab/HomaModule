@@ -106,15 +106,21 @@ struct homa_message_out {
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
-	 * @granted: Total number of initial bytes we are currently permitted
-	 * to send; must wait for grants before sending bytes at or beyond
-	 * this position. For unscheduled messages, equals @length. Never
-	 * larger than @length.
+	 * @unscheduled: Initial bytes of message that we'll send
+	 * without waiting for grants.
+	 */
+	int unscheduled;
+
+	/**
+	 * @granted: Total number of bytes we are currently permitted to
+	 * send, including unscheduled bytes; must wait for grants before
+	 * sending bytes at or beyond this position. Never larger than
+	 * @length.
 	 */
 	int granted;
 
 	/**
-	 * @priority: Priority level to use for transmitted packets.
+	 * @priority: Priority level to use for outgoing DATA packets.
 	 */
 	u8 priority;
 
@@ -215,16 +221,14 @@ struct homa_message_in {
 
 	/**
 	 * @granted: Total # of bytes (starting from offset 0) that the sender
-	 * will transmit without additional grants. If nonzero, then either
-	 * the message is entirely unscheduled (in which case @granted equals
-	 * @length) or it is the offset sent in the most recent grant packet.
+	 * will transmit without additional grants, including unscheduled bytes.
 	 * Never larger than @length. Managed by homa_grant.c.
 	 */
 	int granted;
 
 	/**
 	 * @prev_grant: Offset in the last GRANT packet sent for this RPC
-	 * (initially 0).
+	 * (initially set to unscheduled bytes). Managed by homa_grant.c.
 	 */
 	int prev_grant;
 
@@ -364,16 +368,12 @@ struct homa_rpc {
 	 *                         homa_grant_check_rpc is called, so it is
 	 *                         possible for RPC_GRANTABLE to be set but
 	 *                         not RPC_GRANT_MANAGED.
-	 * RPC_GOT_START_MSG -     1 means we have already received a
-	 *                         START_MSG packet for this RPC; used to
-	 *                         detect START_MSG retransmissions.
 	 */
 #define RPC_PKTS_READY        0
 #define APP_NEEDS_LOCK        1
 #define RPC_PRIVATE           2
 #define RPC_GRANTABLE         3
 #define RPC_GRANT_MANAGED     4
-#define RPC_GOT_START_MSG     5
 
 	/**
 	 * @refs: Number of references to this RPC, including one for each
@@ -529,7 +529,7 @@ struct homa_rpc
 struct homa_rpc
 	*homa_rpc_alloc_server(struct homa_sock *hsk,
 			       const struct in6_addr *source,
-			       struct homa_common_hdr *h);
+			       struct homa_data_hdr *h);
 void     homa_rpc_end(struct homa_rpc *rpc);
 struct homa_rpc
 	*homa_rpc_find_client(struct homa_sock *hsk, u64 id);

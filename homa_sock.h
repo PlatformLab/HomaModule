@@ -217,6 +217,13 @@ struct homa_sock {
 	struct homa_pool *buffer_pool;
 
 	/**
+	 * @saved_destruct: The value of sock.sk_destruct (e.g.
+	 * inet_sock_destruct) before Homa replaced it with
+	 * homa_sock_destruct; homa_sock_destruct must invoke it.
+	 */
+	void (*saved_destruct)(struct sock *sk);
+
+	/**
 	 * @port: Port number: identifies this socket uniquely among all
 	 * those on this node.
 	 */
@@ -282,16 +289,16 @@ struct homa_sock {
 	unsigned long flags;
 
 	/* Valid bit numbers for @flags:
-	 * HOMA_SOCK_NOSPACE -     Nonzero means that the socket has hit its
-	 *                         limit on tx buffer space and threads are
-	 *                         blocked waiting for skbs to be released. Used
-	 *                         instead of the SOCK_NOSPACE flag in
-	 *                         @sock.sk_socket->flags. This is because
-	 *                         @sock.sk_socket can become NULL unexpectedly
-	 *                         (especially since Homa never acquires the
-	 *                         Linux socket lock). Thus code using sk_socket
-	 *                         requires tricky synchronization and is
-	 *                         error-prone.
+	 * HOMA_SOCK_NOSPACE -     Nonzero means that a thread has found tx
+	 *                         memory unavailable and memory has not become
+	 *                         available since then. It is not safe to
+	 *                         use this flag to decide whether to wake up
+	 *                         waiting threads (there is a race between a
+	 *                         thread wanting memory and one freeing it).
+	 *                         Used instead of SOCK_NOSPACE in
+	 *                         @sock.sk_socket->flags because sk_socket can
+	 *                         become NULL while Homa is still using the
+	 *                         socket.
 	 */
 #define HOMA_SOCK_NOSPACE        0
 
@@ -369,6 +376,7 @@ void               homa_sock_lock_slow(struct homa_sock *hsk);
 int                homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 				  u16 port);
 void               homa_sock_destroy(struct sock *sk);
+void               homa_sock_destruct(struct sock *sk);
 void               homa_socktab_fill_scan(struct homa_socktab_scan *scan);
 struct homa_sock  *homa_sock_find(struct homa_net *hnet, u16 port);
 int                homa_sock_init(struct homa_sock *hsk);
@@ -376,6 +384,7 @@ int                homa_sock_link(struct homa_sock *hsk, int port);
 void               homa_sock_shutdown(struct homa_sock *hsk);
 void               homa_sock_unlink(struct homa_sock *hsk);
 int                homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking);
+void               homa_sock_write_space(struct sock *sk);
 void               homa_socktab_destroy(struct homa_socktab *socktab);
 void               homa_socktab_end_scan(struct homa_socktab_scan *scan);
 void               homa_socktab_init(struct homa_socktab *socktab);
@@ -526,29 +535,6 @@ static inline struct homa_sock *homa_sk(const struct sock *sk)
 static inline bool homa_sock_wmem_avl(struct homa_sock *hsk)
 {
 	return refcount_read(&hsk->sock.sk_wmem_alloc) < hsk->sock.sk_sndbuf;
-}
-
-/**
- * homa_sock_wakeup_wmem() - Invoked when tx packet memory has been freed;
- * if memory usage is below the limit and there are tasks waiting for memory,
- * wake them up.
- * @hsk:   Socket of interest.
- */
-static inline void homa_sock_wakeup_wmem(struct homa_sock *hsk)
-{
-	/* Note: can't use sk_stream_write_space for this functionality
-	 * because it uses a different test to determine whether enough
-	 * memory is available.
-	 */
-	if (test_bit(HOMA_SOCK_NOSPACE, &hsk->flags) &&
-	    homa_sock_wmem_avl(hsk)) {
-		tt_record2("homa_sock_wakeup_wmem waking up port %d, wmem %d",
-			   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
-		clear_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
-		rcu_read_lock();
-		wake_up_interruptible_poll(sk_sleep(&hsk->sock), EPOLLOUT);
-		rcu_read_unlock();
-	}
 }
 
 #endif /* _HOMA_SOCK_H */

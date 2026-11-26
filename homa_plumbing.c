@@ -437,8 +437,7 @@ static const u16 header_lengths[] = {
 	sizeof(struct homa_cutoffs_hdr),
 	sizeof(struct homa_freeze_hdr),
 	sizeof(struct homa_need_ack_hdr),
-	sizeof(struct homa_ack_hdr),
-	sizeof(struct homa_start_msg_hdr)
+	sizeof(struct homa_ack_hdr)
 };
 #else /* See strip.py */
 static const u16 header_lengths[] = {
@@ -450,8 +449,7 @@ static const u16 header_lengths[] = {
 	0,
 	0,
 	sizeof(struct homa_need_ack_hdr),
-	sizeof(struct homa_ack_hdr),
-	0
+	sizeof(struct homa_ack_hdr)
 };
 #endif /* See strip.py */
 
@@ -506,9 +504,6 @@ int __init homa_load(void)
 #endif /* See strip.py */
 	BUILD_BUG_ON(sizeof(struct homa_need_ack_hdr) > HOMA_MAX_HEADER);
 	BUILD_BUG_ON(sizeof(struct homa_ack_hdr) > HOMA_MAX_HEADER);
-#ifndef __STRIP__ /* See strip.py */
-	BUILD_BUG_ON(sizeof(struct homa_start_msg_hdr) > HOMA_MAX_HEADER);
-#endif /* See strip.py */
 
 	/* Extra constraints on data packets:
 	 * - Ensure minimum header length so Homa doesn't have to worry about
@@ -1026,7 +1021,7 @@ int homa_ioc_release(struct socket *sock, unsigned long arg)
 		hsk->error_msg = "invalid HOMAIOCRELEASE arguments";
 		return -EINVAL;
 	}
-	if (!hsk->buffer_pool) {
+	if (!homa_pool_exists(hsk->buffer_pool)) {
 		hsk->error_msg = "SO_HOMA_RECVBUF socket option has not been set";
 		return -EINVAL;
 	}
@@ -1338,14 +1333,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = homa_message_out_init(rpc, msg->msg_iter.count);
 		if (result)
 			goto error;
-#ifndef __STRIP__ /* See strip.py */
-		if (rpc->msgout.granted == 0)
-			homa_xmit_start_msg(rpc, msg->msg_iter.count);
-#endif /* See strip.py */
 		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result)
 			goto error;
-		homa_xmit_data(rpc);
 		args.id = rpc->id;
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_alloc_client. */
 
@@ -1401,16 +1391,11 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = homa_message_out_init(rpc, msg->msg_iter.count);
 		if (result)
 			goto error;
-#ifndef __STRIP__ /* See strip.py */
-		if (rpc->msgout.granted == 0)
-			homa_xmit_start_msg(rpc, msg->msg_iter.count);
-#endif /* See strip.py */
 		result = homa_tx_copy_from_user(rpc, &msg->msg_iter, true);
 		if (result && rpc->state != RPC_DEAD) {
 			hsk->error_msg = "error copying response message data from user space";
 			goto error;
 		}
-		homa_xmit_data(rpc);
 		homa_rpc_put(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 #ifndef __STRIP__ /* See strip.py */
@@ -1495,7 +1480,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		result = -EINVAL;
 		goto done;
 	}
-	if (!hsk->buffer_pool) {
+	if (!homa_pool_exists(hsk->buffer_pool)) {
 		hsk->error_msg = "SO_HOMA_RECVBUF socket option has not been set";
 		result = -EINVAL;
 		goto done;
@@ -1710,14 +1695,18 @@ int homa_softirq(struct sk_buff *skb)
 
 		if (!homa_make_header_avl(skb)) {
 #ifndef __STRIP__ /* See strip.py */
-			const struct in6_addr saddr =
-					skb_canonical_ipv6_saddr(skb);
 
-			if (homa->verbose)
+			if (homa->verbose) {
+				struct in6_addr saddr;
+
+				saddr = skb_canonical_ipv6_saddr(skb);
+				h = (struct homa_common_hdr *)
+				    skb_transport_header(skb);
 				pr_warn("Homa %s packet from %s too short or bogus type: %d bytes\n",
 					homa_symbol_for_type(h->type),
 					homa_print_ipv6_addr(&saddr),
 					skb->len);
+			}
 #endif /* See strip.py */
 			reason = SKB_DROP_REASON_PKT_TOO_SMALL;
 			goto discard;
@@ -1915,13 +1904,18 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	tt_record2("homa_poll found sk_wmem_alloc %d, sk_sndbuf %d",
 		   refcount_read(&hsk->sock.sk_wmem_alloc),
 		   hsk->sock.sk_sndbuf);
-	if (homa_sock_wmem_avl(hsk))
+	if (homa_sock_wmem_avl(hsk)) {
 		mask |= EPOLLOUT | EPOLLWRNORM;
-	else
+	} else {
 		set_bit(HOMA_SOCK_NOSPACE, &hsk->flags);
+		sk_set_bit(SOCKWQ_ASYNC_NOSPACE, &hsk->sock);
+	}
 
+	/* These flags mimic what datagram_poll does when sk_shutdown is
+	 * SHUTDOWN_MASK.
+	 */
 	if (hsk->shutdown)
-		mask |= EPOLLIN;
+		mask |= EPOLLIN | EPOLLRDNORM | EPOLLRDHUP | EPOLLHUP;
 
 	if (!list_empty(&hsk->ready_rpcs))
 		mask |= EPOLLIN | EPOLLRDNORM;

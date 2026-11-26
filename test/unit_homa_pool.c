@@ -168,6 +168,13 @@ TEST_F(homa_pool, homa_pool_set_region__success)
 	EXPECT_EQ(-1, this_cpu_ptr(pool->cores)->page);
 }
 
+TEST_F(homa_pool, homa_pool_shutdown__basics)
+{
+	homa_pool_shutdown(self->hsk.buffer_pool);
+	EXPECT_TRUE(self->hsk.buffer_pool->shutdown);
+	EXPECT_STREQ("cancel_work_sync invoked", unit_log_get());
+}
+
 TEST_F(homa_pool, homa_pool_get_rcvbuf)
 {
 	struct homa_rcvbuf_args args;
@@ -783,38 +790,24 @@ TEST_F(homa_pool, homa_pool_wakeup_worker__race_steals_needed_pages)
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
 }
 
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_pool, homa_pool_wakeup_rpc__scheduled)
+TEST_F(homa_pool, homa_pool_wakeup_rpc__basics)
 {
 	struct homa_rpc *srpc;
 
-	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_START_MSG, &self->client_ip,
+	/* Message needs grants, but wakeup should still request
+	 * retransmission (not issue a grant).
+	 */
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 101, 20000, 100);
 	ASSERT_NE(NULL, srpc);
-	srpc->msgin.granted = 0;
-
-	unit_log_clear();
-	homa_rpc_lock(srpc);
-	homa_pool_wakeup_rpc(srpc);
-	EXPECT_STREQ("xmit GRANT 20000@0", unit_log_get());
-	homa_rpc_unlock(srpc);
-}
-#endif /* See strip.py */
-TEST_F(homa_pool, homa_pool_wakeup_rpc__unscheduled)
-{
-	struct homa_rpc *srpc;
-
-	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
-			&self->server_ip, 4000, 101, 200, 100);
-	ASSERT_NE(NULL, srpc);
 
 	unit_log_clear();
 	homa_rpc_lock(srpc);
 	homa_pool_wakeup_rpc(srpc);
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_STREQ("xmit RESEND 0, 200 @6", unit_log_get());
+	EXPECT_STREQ("xmit RESEND 0, -1 @6", unit_log_get());
 #else /* See strip.py */
-	EXPECT_STREQ("xmit RESEND 0, 200", unit_log_get());
+	EXPECT_STREQ("xmit RESEND 0, -1", unit_log_get());
 #endif /* See strip.py */
 	homa_rpc_unlock(srpc);
 }

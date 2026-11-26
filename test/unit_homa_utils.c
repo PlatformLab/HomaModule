@@ -164,6 +164,8 @@ TEST_F(homa_utils, homa_net_destroy__delete_sockets)
 	EXPECT_EQ(1, hsk2.shutdown);
 	EXPECT_EQ(0, hsk3.shutdown);
 
+	mock_sock_release(&hsk1.sock);
+	mock_sock_release(&hsk2.sock);
 	unit_sock_destroy(&hsk3);
 }
 TEST_F(homa_utils, homa_net_destroy__delete_peers)
@@ -189,6 +191,7 @@ TEST_F(homa_utils, homa_net_destroy__delete_peers)
 	homa_net_unlink(hnet);
 	homa_net_destroy(hnet);
 	EXPECT_EQ(1, unit_count_routes(&self->homa));
+	mock_sock_release(&hsk2.sock);
 }
 
 #ifndef __STRIP__ /* See strip.py */

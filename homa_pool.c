@@ -129,22 +129,29 @@ error:
 }
 
 /**
+ * homa_pool_shutdown() - Ensures that @pool's wakeup work is not running
+ * and will not be queued again. Must be called in a context that can sleep.
+ * @pool: Pool to shut down.
+ */
+void homa_pool_shutdown(struct homa_pool *pool)
+{
+	homa_pool_lock(pool);
+	pool->shutdown = true;
+	homa_pool_unlock(pool);
+	cancel_work_sync(&pool->wakeup_work);
+}
+
+/**
  * homa_pool_free() - Destructor for homa_pool. After this method
  * returns, the object should not be used (it will be freed here).
- * Must be called in a context that can sleep.
- * @pool: Pool to destroy.
+ * @pool: Pool to destroy. The caller must ensure that the pool is not in
+ *        use by any other thread.
  */
 void homa_pool_free(struct homa_pool *pool)
 {
 #ifdef __UNIT_TEST__
 	mock_free_pool(pool);
 #endif /* __UNIT_TEST__ */
-
-	/* Ensure the wakeup work isn't running and won't run again. */
-	homa_pool_lock(pool);
-	pool->shutdown = true;
-	homa_pool_unlock(pool);
-	cancel_work_sync(&pool->wakeup_work);
 
 	if (homa_pool_exists(pool)) {
 		kfree(pool->free_stack);
@@ -498,17 +505,14 @@ void homa_pool_wakeup_rpc(struct homa_rpc *rpc)
 {
 	struct homa_resend_hdr resend;
 
-#ifndef __STRIP__ /* See strip.py */
-	/* If the RPC is scheduled, all we have to do is issue a grant. */
-	if (test_bit(RPC_GRANTABLE, &rpc->flags)) {
-		homa_grant_check_rpc(rpc);
-		return;
-	}
-#endif /* See strip.py */
-
-	/* Unscheduled: must ask for the message to be retransmitted. */
+	/* Any packets that arrived while the RPC was waiting for buffers
+	 * were dropped, so request retransmission of everything the sender
+	 * has transmitted so far (length -1). Don't request the entire
+	 * message: the sender would treat that as an implicit grant for
+	 * the whole message.
+	 */
 	resend.offset = htonl(0);
-	resend.length = htonl(rpc->msgin.length);
+	resend.length = htonl(-1);
 
 #ifndef __STRIP__ /* See strip.py */
 	/* Use the next-to-highest priority level to provide a priority boost

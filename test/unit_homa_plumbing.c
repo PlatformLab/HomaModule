@@ -68,6 +68,9 @@ FIXTURE_SETUP(homa_plumbing)
 		.type = DATA,
 		.sender_id = cpu_to_be64(self->client_id)},
 		.msg_length = htonl(10000),
+#ifndef __STRIP__ /* See strip.py */
+		.incoming = htonl(10000),
+#endif /* See strip.py */
 	};
 	memset(&self->recvmsg_args, 0, sizeof(self->recvmsg_args));
 	self->recvmsg_hdr.msg_name = &self->addr;
@@ -624,17 +627,18 @@ TEST_F(homa_plumbing, homa_ioctl_release__invalid_count)
 	EXPECT_STREQ("invalid HOMAIOCRELEASE arguments", self->hsk.error_msg);
 	self->recvmsg_args.num_bpages = 0;
 }
-TEST_F(homa_plumbing, homa_ioc_release__no_buffer_pool)
+TEST_F(homa_plumbing, homa_ioc_release__no_buffer_region)
 {
-	struct homa_pool *saved_pool = self->hsk.buffer_pool;
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	char __user *saved_region = pool->region;
 
-	self->hsk.buffer_pool = NULL;
+	pool->region = NULL;
 	self->recvmsg_args.num_bpages = 2;
 	EXPECT_EQ(EINVAL, -homa_ioc_release(self->hsk.sock.sk_socket,
 					    (unsigned long)&self->recvmsg_args));
 	EXPECT_STREQ("SO_HOMA_RECVBUF socket option has not been set",
 		     self->hsk.error_msg);
-	self->hsk.buffer_pool = saved_pool;
+	pool->region = saved_region;
 }
 TEST_F(homa_plumbing, homa_ioctl_release__success)
 {
@@ -692,6 +696,12 @@ TEST_F(homa_plumbing, homa_socket__success)
 	memset(&hsk, 0, sizeof(hsk));
 	hsk.sock.sk_net.net = mock_net_for_hnet(self->hnet);
 	refcount_set(&hsk.sock.sk_wmem_alloc, 1);
+
+	/* The following initialization is normally done by mock_sock_init. */
+	atomic_set(&hsk.sock.sk_refcnt.refs, 1);
+	hsk.sock.sk_state_change = mock_state_change;
+	hsk.sock.sk_destruct = mock_sk_destruct;
+
 	EXPECT_EQ(0, homa_socket(&hsk.sock));
 	unit_sock_destroy(&hsk);
 }
@@ -1066,14 +1076,6 @@ TEST_F(homa_plumbing, homa_sendmsg__request_sent_successfully)
 	homa_rpc_unlock(crpc);
 }
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_packet_for_scheduled_msg)
-{
-	self->homa.unsched_bytes = 100;
-	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
-		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_SUBSTR("xmit START_MSG 200", unit_log_get());
-	ASSERT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-}
 TEST_F(homa_plumbing, homa_sendmsg__request_metrics)
 {
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
@@ -1152,20 +1154,6 @@ TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_message_out_init_for_response)
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-#ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_plumbing, homa_sendmsg__send_start_msg_for_scheduled_response)
-{
-	unit_server_rpc(&self->hsk, UNIT_IN_SERVICE, self->client_ip,
-			self->server_ip, self->client_port, self->server_id,
-			2000, 100);
-	self->sendmsg_args.id = self->server_id;
-	self->homa.unsched_bytes = 100;
-	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
-		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
-	EXPECT_SUBSTR("xmit START_MSG 200", unit_log_get());
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-}
-#endif /* See strip.py */
 TEST_F(homa_plumbing, homa_sendmsg__homa_tx_copy_from_user_returns_error)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
@@ -1269,17 +1257,18 @@ TEST_F(homa_plumbing, homa_recvmsg__reserved_not_zero)
 	EXPECT_EQ(10, self->recvmsg_args.num_bpages);
 	self->recvmsg_args.num_bpages = 0;
 }
-TEST_F(homa_plumbing, homa_recvmsg__no_buffer_pool)
+TEST_F(homa_plumbing, homa_recvmsg__no_buffer_region)
 {
-	struct homa_pool *saved_pool = self->hsk.buffer_pool;
+	struct homa_pool *pool = self->hsk.buffer_pool;
+	char __user *saved_region = pool->region;
 
-	self->hsk.buffer_pool = NULL;
+	pool->region = NULL;
 	self->recvmsg_args.num_bpages = 10;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_STREQ("SO_HOMA_RECVBUF socket option has not been set",
 		     self->hsk.error_msg);
-	self->hsk.buffer_pool = saved_pool;
+	pool->region = saved_region;
 	EXPECT_EQ(10, self->recvmsg_args.num_bpages);
 	self->recvmsg_args.num_bpages = 0;
 }
@@ -1899,8 +1888,11 @@ TEST_F(homa_plumbing, homa_poll__no_tx_buffer_space)
 	struct socket sock = {.sk = &self->hsk.sock};
 
 	self->hsk.sock.sk_sndbuf = 0;
+	sock_set_flag(&self->hsk.sock, SOCK_FASYNC);
 	EXPECT_EQ(0, homa_poll(NULL, &sock, NULL));
 	EXPECT_EQ(1, test_bit(HOMA_SOCK_NOSPACE, &self->hsk.flags));
+	EXPECT_EQ(1, test_bit(SOCKWQ_ASYNC_NOSPACE,
+			      &self->hsk.sock.sk_wq_raw->flags));
 }
 TEST_F(homa_plumbing, homa_poll__not_readable)
 {
@@ -1913,7 +1905,8 @@ TEST_F(homa_plumbing, homa_poll__socket_shutdown)
 	struct socket sock = {.sk = &self->hsk.sock};
 
 	unit_sock_destroy(&self->hsk);
-	EXPECT_EQ(POLLIN | POLLOUT | POLLWRNORM, homa_poll(NULL, &sock, NULL));
+	EXPECT_EQ(POLLIN | POLLRDNORM | POLLRDHUP | POLLHUP | POLLOUT |
+		  POLLWRNORM, homa_poll(NULL, &sock, NULL));
 }
 TEST_F(homa_plumbing, homa_poll__socket_readable)
 {
