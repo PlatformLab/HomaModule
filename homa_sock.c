@@ -22,6 +22,7 @@ void homa_socktab_init(struct homa_socktab *socktab)
 
 	spin_lock_init(&socktab->write_lock);
 	socktab->next_sequence = 1;
+	socktab->num_socks = 0;
 	for (i = 0; i < HOMA_SOCKTAB_BUCKETS; i++)
 		INIT_HLIST_HEAD(&socktab->buckets[i]);
 }
@@ -307,6 +308,7 @@ int homa_sock_link(struct homa_sock *hsk, int port)
 	socktab->next_sequence++;
 	hlist_add_head_rcu(&slink->links,
 			   &socktab->buckets[homa_socktab_bucket(port)]);
+	WRITE_ONCE(socktab->num_socks, socktab->num_socks + 1);
 	hsk->port = port;
 	hsk->inet.inet_num = port;
 	hsk->inet.inet_sport = htons(port);
@@ -323,6 +325,7 @@ int homa_sock_link(struct homa_sock *hsk, int port)
 void homa_sock_unlink(struct homa_sock *hsk)
 	__must_hold(hsk->hnet->socktab->write_lock)
 {
+	struct homa_socktab *socktab = hsk->hnet->socktab;
 	struct homa_sock_link *slink;
 
 	slink = hsk->slink;
@@ -330,6 +333,7 @@ void homa_sock_unlink(struct homa_sock *hsk)
 		return;
 	hsk->slink = NULL;
 	hlist_del_rcu(&slink->links);
+	WRITE_ONCE(socktab->num_socks, socktab->num_socks - 1);
 	kfree_rcu(slink, rcu_head);
 }
 

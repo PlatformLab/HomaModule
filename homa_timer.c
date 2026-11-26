@@ -244,14 +244,17 @@ void homa_timer(struct homa *homa)
 	/* Scan all existing RPCs in all sockets in all network namespaces.
 	 * The scan of a namespace can block, so it can't be done while
 	 * holding the RCU read lock; a reference on the namespace keeps it
-	 * from being deleted instead.
+	 * from being deleted instead. Namespaces with no sockets are
+	 * skipped, since there may be many of them.
 	 */
 	rcu_read_lock();
 	for_each_net_rcu(net) {
+		socktab = homa_net(net)->socktab;
+		if (!READ_ONCE(socktab->num_socks))
+			continue;
 		if (!maybe_get_net(net))
 			continue;
 		rcu_read_unlock();
-		socktab = homa_net(net)->socktab;
 		for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
 		     hsk = homa_socktab_next(&scan)) {
 			while (hsk->dead_frags > homa->dead_frags_limit) {

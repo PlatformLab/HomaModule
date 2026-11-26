@@ -415,13 +415,16 @@ TEST_F(homa_sock, homa_sock_link__basics)
 {
 	struct homa_sock_link *slink;
 	struct homa_sock hsk;
+	int num_socks;
 	int sequence;
 
 	/* Create initial linking. */
 	sequence = self->hnet->socktab->next_sequence;
+	num_socks = self->hnet->socktab->num_socks;
 	mock_sock_init(&hsk, self->hnet, HOMA_MIN_DEFAULT_PORT + 10);
 	slink = hsk.slink;
 	ASSERT_NE(NULL, slink);
+	EXPECT_EQ(num_socks + 1, self->hnet->socktab->num_socks);
 	EXPECT_EQ(&hsk.slink->links, self->hnet->socktab->buckets[10].first);
 	EXPECT_EQ(&hsk, hsk.slink->hsk);
 	EXPECT_EQ(sequence, hsk.slink->sequence);
@@ -431,6 +434,7 @@ TEST_F(homa_sock, homa_sock_link__basics)
 	EXPECT_NE(slink, hsk.slink);
 	EXPECT_EQ(sequence + 1, hsk.slink->sequence);
 	EXPECT_EQ(sequence + 2, self->hnet->socktab->next_sequence);
+	EXPECT_EQ(num_socks + 1, self->hnet->socktab->num_socks);
 	EXPECT_EQ(NULL, self->hnet->socktab->buckets[10].first);
 	EXPECT_NE(NULL, self->hnet->socktab->buckets[12].first);
 	EXPECT_EQ(12, hsk.port);
@@ -460,12 +464,15 @@ TEST_F(homa_sock, homa_sock_unlink)
 {
 	struct homa_sock hsk2, hsk3;
 	int client2, client3;
+	int num_socks;
 
+	num_socks = self->hnet->socktab->num_socks;
 	mock_sock_init(&hsk2, self->hnet, 0);
 	EXPECT_EQ(0, homa_sock_bind(self->hnet, &hsk2, 100));
 	client2 = hsk2.port;
 	mock_sock_init(&hsk3, self->hnet, 0);
 	client3 = hsk3.port;
+	EXPECT_EQ(num_socks + 2, self->hnet->socktab->num_socks);
 
 	EXPECT_EQ(&hsk2, homa_sock_find(self->hnet, client2));
 	EXPECT_EQ(&hsk3, homa_sock_find(self->hnet, client3));
@@ -476,12 +483,14 @@ TEST_F(homa_sock, homa_sock_unlink)
 
 	EXPECT_EQ(NULL, homa_sock_find(self->hnet, client2));
 	EXPECT_EQ(&hsk3, homa_sock_find(self->hnet, client3));
+	EXPECT_EQ(num_socks + 1, self->hnet->socktab->num_socks);
 	sock_put(&hsk3.sock);
 
 	unit_sock_destroy(&hsk3);
 
 	EXPECT_EQ(NULL, homa_sock_find(self->hnet, client2));
 	EXPECT_EQ(NULL, homa_sock_find(self->hnet, client3));
+	EXPECT_EQ(num_socks, self->hnet->socktab->num_socks);
 }
 
 TEST_F(homa_sock, homa_sock_shutdown__unlink_socket)

@@ -362,15 +362,27 @@ TEST_F(homa_timer, homa_timer__maybe_get_net_fails)
 	EXPECT_EQ(1, crpc2->silent_ticks);
 	unit_sock_destroy(&hsk2);
 }
-TEST_F(homa_timer, homa_timer__rcu_lock_held_for_put_net)
+TEST_F(homa_timer, homa_timer__skip_hnet_with_no_sockets)
 {
 	mock_hnet(1, &self->homa);
+	unit_log_clear();
+	mock_log_net_refs = 1;
+	homa_timer(&self->homa);
+	EXPECT_STREQ("maybe_get_net, rcu depth 1; put_net, rcu depth 1",
+		     unit_log_get());
+}
+TEST_F(homa_timer, homa_timer__rcu_lock_held_for_put_net)
+{
+	struct homa_sock hsk2;
+
+	mock_sock_init(&hsk2, mock_hnet(1, &self->homa), 0);
 	unit_log_clear();
 	mock_log_net_refs = 1;
 	homa_timer(&self->homa);
 	EXPECT_STREQ("maybe_get_net, rcu depth 1; put_net, rcu depth 1; "
 		     "maybe_get_net, rcu depth 1; put_net, rcu depth 1",
 		     unit_log_get());
+	unit_sock_destroy(&hsk2);
 }
 TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 {

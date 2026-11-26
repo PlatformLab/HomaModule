@@ -36,6 +36,12 @@ struct homa_socktab {
 	u64 next_sequence;
 
 	/**
+	 * @num_socks: Number of sockets currently in the table. Modified
+	 * only while holding @write_lock, but may be read without it.
+	 */
+	int num_socks;
+
+	/**
 	 * @buckets: Heads of chains for hash table buckets. Chains
 	 * consist of homa_sock_link objects, in decreasing order of
 	 * sequence number.
