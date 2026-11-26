@@ -363,8 +363,7 @@ void homa_rpc_abort(struct homa_rpc *rpc, int error)
 
 /**
  * homa_abort_rpcs() - Abort all RPCs to/from a particular peer.
- * @hnet:    Network namespace containing the RPCs; RPCs in other
- *           namespaces are not affected.
+ * @hnet:    Network namespace whose RPCs are to be aborted.
  * @addr:    Address (network order) of the destination whose RPCs are
  *           to be aborted.
  * @port:    If nonzero, then RPCs will only be aborted if they were

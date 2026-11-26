@@ -322,8 +322,7 @@ static struct socket mock_socket;
 static struct wait_queue_entry mock_sleeper;
 
 /* Each of the entries in mock_hnets below is associated with the
- * corresonding entry in mock_nets. A mock_net is linked into
- * net_namespace_list as long as its mock_hnet exists.
+ * corresonding entry in mock_nets.
  */
 #define MOCK_MAX_NETS 10
 struct net mock_nets[MOCK_MAX_NETS];
@@ -2280,11 +2279,9 @@ void mock_hnet_unlink(struct homa_net *hnet)
 }
 
 /**
- * mock_hnets_destroy() - Destroy all of the homa_nets whose struct nets
- * are still in net_namespace_list (along with any sockets still open in
- * them). Tests must invoke this before homa_destroy, just as Linux destroys
- * all of the homa_nets in unregister_pernet_subsys before homa_destroy is
- * invoked.
+ * mock_hnets_destroy() - Destroy all of the homa_nets that are still in
+ * net_namespace_list, along with any sockets still open in them. Tests
+ * must invoke this before homa_destroy.
  */
 void mock_hnets_destroy(void)
 {
@@ -2362,11 +2359,10 @@ void *mock_malloc(size_t size, gfp_t flags, const char *free_type)
 }
 
 /**
- * mock_maybe_get_net() - Called instead of maybe_get_net; counts the
- * references so that mock_teardown can detect leaks.
+ * mock_maybe_get_net() - Called instead of maybe_get_net when Homa is
+ * compiled for unit testing.
  * @net:      Network namespace to reference.
- * Return:    @net, or NULL if mock_maybe_get_net_errors says to fail (as
- *            if the namespace were being deleted).
+ * Return:    @net, or NULL if mock_maybe_get_net_errors says to fail.
  */
 struct net *mock_maybe_get_net(struct net *net)
 {
