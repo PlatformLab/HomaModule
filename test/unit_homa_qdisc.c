@@ -193,6 +193,7 @@ FIXTURE_TEARDOWN(homa_qdisc)
 			homa_qdisc_destroy(self->qdiscs[i]);
 		kfree(self->qdiscs[i]);
 	}
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	homa_qdisc_unregister();
 	unit_teardown();

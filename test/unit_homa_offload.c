@@ -101,6 +101,7 @@ FIXTURE_TEARDOWN(homa_offload)
 	homa_offload_end();
 	list_for_each_entry_safe(skb, tmp, &self->napi.gro.hash[2].list, list)
 		kfree_skb(skb);
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

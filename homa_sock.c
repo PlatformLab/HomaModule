@@ -22,6 +22,7 @@ void homa_socktab_init(struct homa_socktab *socktab)
 
 	spin_lock_init(&socktab->write_lock);
 	socktab->next_sequence = 1;
+	socktab->num_socks = 0;
 	for (i = 0; i < HOMA_SOCKTAB_BUCKETS; i++)
 		INIT_HLIST_HEAD(&socktab->buckets[i]);
 }
@@ -30,18 +31,14 @@ void homa_socktab_init(struct homa_socktab *socktab)
  * homa_socktab_destroy() - Destructor for homa_socktabs: deletes all
  * existing sockets.
  * @socktab:  The object to destroy.
- * @hnet:     If non-NULL, only sockets for this namespace are deleted.
  */
-void homa_socktab_destroy(struct homa_socktab *socktab, struct homa_net *hnet)
+void homa_socktab_destroy(struct homa_socktab *socktab)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 
 	for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
 			hsk = homa_socktab_next(&scan)) {
-		if (hnet && hnet != hsk->hnet)
-			continue;
-
 		/* In actual use there should be no sockets left when this
 		 * function is invoked, so the code below will never be
 		 * invoked. However, it is useful during unit tests.
@@ -191,7 +188,7 @@ int homa_sock_init(struct homa_sock *hsk)
 	hnet = (struct homa_net *)net_generic(sock_net(&hsk->sock),
 					      homa_net_id);
 	homa = hnet->homa;
-	socktab = homa->socktab;
+	socktab = hnet->socktab;
 
 	/* Do things requiring memory allocation before locking the socket,
 	 * so that GFP_ATOMIC is not needed.
@@ -297,9 +294,9 @@ error:
  * Return:  0 for success, otherwise a negative errno.
  */
 int homa_sock_link(struct homa_sock *hsk, int port)
-	__must_hold(hsk->homa->socktab->write_lock)
+	__must_hold(hsk->hnet->socktab->write_lock)
 {
-	struct homa_socktab *socktab = hsk->homa->socktab;
+	struct homa_socktab *socktab = hsk->hnet->socktab;
 	struct homa_sock_link *slink;
 
 	slink = kmalloc(sizeof(*slink), GFP_ATOMIC | __GFP_ACCOUNT);
@@ -310,8 +307,8 @@ int homa_sock_link(struct homa_sock *hsk, int port)
 	slink->sequence = socktab->next_sequence;
 	socktab->next_sequence++;
 	hlist_add_head_rcu(&slink->links,
-			   &socktab->buckets[homa_socktab_bucket(hsk->hnet,
-								 port)]);
+			   &socktab->buckets[homa_socktab_bucket(port)]);
+	WRITE_ONCE(socktab->num_socks, socktab->num_socks + 1);
 	hsk->port = port;
 	hsk->inet.inet_num = port;
 	hsk->inet.inet_sport = htons(port);
@@ -326,8 +323,9 @@ int homa_sock_link(struct homa_sock *hsk, int port)
  *        socktab.
  */
 void homa_sock_unlink(struct homa_sock *hsk)
-	__must_hold(hsk->homa->socktab->write_lock)
+	__must_hold(hsk->hnet->socktab->write_lock)
 {
+	struct homa_socktab *socktab = hsk->hnet->socktab;
 	struct homa_sock_link *slink;
 
 	slink = hsk->slink;
@@ -335,6 +333,7 @@ void homa_sock_unlink(struct homa_sock *hsk)
 		return;
 	hsk->slink = NULL;
 	hlist_del_rcu(&slink->links);
+	WRITE_ONCE(socktab->num_socks, socktab->num_socks - 1);
 	kfree_rcu(slink, rcu_head);
 }
 
@@ -385,7 +384,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	atomic_inc(&hsk->protect_count);
 	homa_sock_unlock(hsk);
 
-	socktab = hsk->homa->socktab;
+	socktab = hsk->hnet->socktab;
 	spin_lock_bh(&socktab->write_lock);
 	homa_sock_unlink(hsk);
 	spin_unlock_bh(&socktab->write_lock);
@@ -499,7 +498,7 @@ void homa_sock_destruct(struct sock *sk)
 int homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 		   u16 port)
 {
-	struct homa_socktab *socktab = hnet->homa->socktab;
+	struct homa_socktab *socktab = hnet->socktab;
 	struct homa_sock *owner;
 	int result = 0;
 
@@ -545,17 +544,16 @@ done:
  */
 struct homa_sock *homa_sock_find(struct homa_net *hnet, u16 port)
 {
-	int bucket = homa_socktab_bucket(hnet, port);
+	int bucket = homa_socktab_bucket(port);
 	struct homa_sock *result = NULL;
 	struct homa_sock_link *slink;
 	struct homa_sock *hsk;
 
 	rcu_read_lock();
-	hlist_for_each_entry_rcu(slink, &hnet->homa->socktab->buckets[bucket],
+	hlist_for_each_entry_rcu(slink, &hnet->socktab->buckets[bucket],
 				 links) {
 		hsk = slink->hsk;
-		if (hsk && hsk->port == port && hsk->hnet == hnet &&
-		    !hsk->shutdown &&
+		if (hsk && hsk->port == port && !hsk->shutdown &&
 		    refcount_inc_not_zero(&hsk->sock.sk_refcnt)) {
 			result = hsk;
 			break;

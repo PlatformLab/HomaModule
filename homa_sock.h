@@ -36,6 +36,12 @@ struct homa_socktab {
 	u64 next_sequence;
 
 	/**
+	 * @num_socks: Number of sockets currently in the table. Modified
+	 * only while holding @write_lock, but may be read without it.
+	 */
+	int num_socks;
+
+	/**
 	 * @buckets: Heads of chains for hash table buckets. Chains
 	 * consist of homa_sock_link objects, in decreasing order of
 	 * sequence number.
@@ -377,8 +383,7 @@ void               homa_sock_shutdown(struct homa_sock *hsk);
 void               homa_sock_unlink(struct homa_sock *hsk);
 int                homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking);
 void               homa_sock_write_space(struct sock *sk);
-void               homa_socktab_destroy(struct homa_socktab *socktab,
-					struct homa_net *hnet);
+void               homa_socktab_destroy(struct homa_socktab *socktab);
 void               homa_socktab_end_scan(struct homa_socktab_scan *scan);
 void               homa_socktab_init(struct homa_socktab *socktab);
 struct homa_sock  *homa_socktab_next(struct homa_socktab_scan *scan);
@@ -422,18 +427,17 @@ static inline void homa_sock_unlock(struct homa_sock *hsk)
 /**
  * homa_socktab_bucket() - Compute the bucket number in a homa_socktab
  * that will contain a particular socket.
- * @hnet:   Network namespace of the desired socket.
  * @port:   Port number of the socket.
  *
- * Return:  The index of the bucket in which a socket matching @hnet and
- *          @port will be found (if it exists).
+ * Return:  The index of the bucket in which a socket matching @port
+ *          will be found (if it exists).
  */
-static inline int homa_socktab_bucket(struct homa_net *hnet, u16 port)
+static inline int homa_socktab_bucket(u16 port)
 {
 #ifdef __UNIT_TEST__
 	return port & (HOMA_SOCKTAB_BUCKETS - 1);
 #else /* __UNIT_TEST__ */
-	return hash_32((uintptr_t)hnet ^ port, HOMA_SOCKTAB_BUCKET_BITS);
+	return hash_32(port, HOMA_SOCKTAB_BUCKET_BITS);
 #endif /* __UNIT_TEST__ */
 }
 

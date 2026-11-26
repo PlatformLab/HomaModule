@@ -48,6 +48,7 @@ FIXTURE_SETUP(homa_tx_pool)
 }
 FIXTURE_TEARDOWN(homa_tx_pool)
 {
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

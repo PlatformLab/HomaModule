@@ -407,9 +407,7 @@ void homa_freeze_peers(void)
 	/* Find a socket to use (any socket for the namespace will do). */
 	hnet = homa_net(&init_net);
 	rcu_read_lock();
-	hsk = homa_socktab_start_scan(hnet->homa->socktab, &scan);
-	while (hsk && hsk->hnet != hnet)
-		hsk = homa_socktab_next(&scan);
+	hsk = homa_socktab_start_scan(hnet->socktab, &scan);
 	homa_socktab_end_scan(&scan);
 	if (!hsk) {
 		tt_record("homa_freeze_peers couldn't find a socket");
@@ -704,29 +702,35 @@ void homa_rpc_log(struct homa_rpc *rpc)
  */
 void homa_rpc_log_active(struct homa *homa, uint64_t id)
 {
+	struct homa_socktab *socktab;
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc;
+	struct net *net;
 	int count = 0;
 
 	pr_notice("Logging active Homa RPCs:\n");
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
-	     hsk; hsk = homa_socktab_next(&scan)) {
-		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
-			continue;
-
-		if (!homa_protect_rpcs(hsk))
-			continue;
-		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-			count++;
-			if (id != 0 && id != rpc->id)
+	for_each_net_rcu(net) {
+		socktab = homa_net(net)->socktab;
+		for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
+		     hsk = homa_socktab_next(&scan)) {
+			if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 				continue;
-			homa_rpc_log(rpc);
-					}
-		homa_unprotect_rpcs(hsk);
+
+			if (!homa_protect_rpcs(hsk))
+				continue;
+			list_for_each_entry_rcu(rpc, &hsk->active_rpcs,
+						active_links) {
+				count++;
+				if (id != 0 && id != rpc->id)
+					continue;
+				homa_rpc_log(rpc);
+						}
+			homa_unprotect_rpcs(hsk);
+		}
+		homa_socktab_end_scan(&scan);
 	}
-	homa_socktab_end_scan(&scan);
 	rcu_read_unlock();
 	pr_notice("Finished logging active Homa RPCs: %d active RPCs\n", count);
 }
@@ -799,43 +803,50 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
  */
 void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 {
+	struct homa_socktab *socktab;
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc;
+	struct net *net;
 	int count = 0;
 
 	tt_record("Logging Homa RPCs:");
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
-			hsk; hsk = homa_socktab_next(&scan)) {
-		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
-			continue;
-
-		if (!homa_protect_rpcs(hsk))
-			continue;
-		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-			struct homa_freeze_hdr freeze;
-
-			count++;
-			homa_rpc_log_tt(rpc);
-			if (freeze_count == 0)
+	for_each_net_rcu(net) {
+		socktab = homa_net(net)->socktab;
+		for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
+		     hsk = homa_socktab_next(&scan)) {
+			if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 				continue;
-			if (rpc->state != RPC_INCOMING)
+
+			if (!homa_protect_rpcs(hsk))
 				continue;
+			list_for_each_entry_rcu(rpc, &hsk->active_rpcs,
+						active_links) {
+				struct homa_freeze_hdr freeze;
+
+				count++;
+				homa_rpc_log_tt(rpc);
+				if (freeze_count == 0)
+					continue;
+				if (rpc->state != RPC_INCOMING)
+					continue;
 #ifndef __STRIP__
-			if (rpc->msgin.granted <= (rpc->msgin.length
-					- rpc->msgin.bytes_remaining))
-				continue;
+				if (rpc->msgin.granted <= (rpc->msgin.length
+						- rpc->msgin.bytes_remaining))
+					continue;
 #endif /* __STRIP__ */
-			freeze_count--;
-			pr_notice("Emitting FREEZE in %s\n", __func__);
-			homa_rpc_lock(rpc);
-			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
-			homa_rpc_unlock(rpc);
+				freeze_count--;
+				pr_notice("Emitting FREEZE in %s\n", __func__);
+				homa_rpc_lock(rpc);
+				homa_xmit_control(FREEZE, &freeze, sizeof(freeze),
+						  rpc);
+				homa_rpc_unlock(rpc);
+			}
+			homa_unprotect_rpcs(hsk);
 		}
-		homa_unprotect_rpcs(hsk);
+		homa_socktab_end_scan(&scan);
 	}
-	homa_socktab_end_scan(&scan);
 	rcu_read_unlock();
 	tt_record1("Finished logging (%d active Homa RPCs)", count);
 }
@@ -854,56 +865,62 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
  */
 int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 {
+	struct homa_socktab *socktab;
 	struct homa_socktab_scan scan;
 	int total_incoming = 0;
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc;
+	struct net *net;
 	int actual;
 
 	tt_record1("homa_validate_incoming starting, total_incoming %d",
 		   atomic_read(&homa->grant->total_incoming));
 	*link_errors = 0;
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
-			hsk; hsk = homa_socktab_next(&scan)) {
-		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
-			continue;
+	for_each_net_rcu(net) {
+		socktab = homa_net(net)->socktab;
+		for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
+		     hsk = homa_socktab_next(&scan)) {
+			if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
+				continue;
 
-		if (!homa_protect_rpcs(hsk))
-			continue;
-		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-			int incoming;
+			if (!homa_protect_rpcs(hsk))
+				continue;
+			list_for_each_entry_rcu(rpc, &hsk->active_rpcs,
+						active_links) {
+				int incoming;
 
-			if (rpc->state != RPC_INCOMING)
-				continue;
-			incoming = rpc->msgin.granted -
-					(rpc->msgin.length
-					- rpc->msgin.bytes_remaining);
-			if (incoming < 0)
-				incoming = 0;
-			if (rpc->msgin.rec_incoming == 0)
-				continue;
-			total_incoming += rpc->msgin.rec_incoming;
-			if (verbose)
-				tt_record3("homa_validate_incoming: RPC id %d, incoming %d, rec_incoming %d",
-					   rpc->id, incoming,
-					   rpc->msgin.rec_incoming);
-			if (rpc->msgin.granted >= rpc->msgin.length)
-				continue;
-			if (list_empty(&rpc->grantable_links)) {
-				tt_record1("homa_validate_incoming: RPC id %d not linked in grantable list",
-					   rpc->id);
-				*link_errors = 1;
+				if (rpc->state != RPC_INCOMING)
+					continue;
+				incoming = rpc->msgin.granted -
+						(rpc->msgin.length
+						- rpc->msgin.bytes_remaining);
+				if (incoming < 0)
+					incoming = 0;
+				if (rpc->msgin.rec_incoming == 0)
+					continue;
+				total_incoming += rpc->msgin.rec_incoming;
+				if (verbose)
+					tt_record3("homa_validate_incoming: RPC id %d, incoming %d, rec_incoming %d",
+						   rpc->id, incoming,
+						   rpc->msgin.rec_incoming);
+				if (rpc->msgin.granted >= rpc->msgin.length)
+					continue;
+				if (list_empty(&rpc->grantable_links)) {
+					tt_record1("homa_validate_incoming: RPC id %d not linked in grantable list",
+						   rpc->id);
+					*link_errors = 1;
+				}
+				if (list_empty(&rpc->grantable_links)) {
+					tt_record1("homa_validate_incoming: RPC id %d peer not linked in grantable list",
+						   rpc->id);
+					*link_errors = 1;
+				}
 			}
-			if (list_empty(&rpc->grantable_links)) {
-				tt_record1("homa_validate_incoming: RPC id %d peer not linked in grantable list",
-					   rpc->id);
-				*link_errors = 1;
-			}
+			homa_unprotect_rpcs(hsk);
 		}
-		homa_unprotect_rpcs(hsk);
+		homa_socktab_end_scan(&scan);
 	}
-	homa_socktab_end_scan(&scan);
 	rcu_read_unlock();
 	actual = atomic_read(&homa->grant->total_incoming);
 	tt_record3("homa_validate_incoming diff %d (expected %d, got %d)",

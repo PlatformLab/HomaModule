@@ -516,7 +516,7 @@ struct homa_rpc {
 	u64 start_time;
 };
 
-void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
+void     homa_abort_rpcs(struct homa_net *hnet, const struct in6_addr *addr,
 			 int port, int error);
 void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 void     homa_rpc_abort(struct homa_rpc *crpc, int error);

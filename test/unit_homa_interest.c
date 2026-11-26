@@ -95,6 +95,7 @@ FIXTURE_SETUP(homa_interest)
 }
 FIXTURE_TEARDOWN(homa_interest)
 {
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

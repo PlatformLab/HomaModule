@@ -42,6 +42,7 @@ FIXTURE_SETUP(homa_peer)
 FIXTURE_TEARDOWN(homa_peer)
 {
 	mock_rcu_free();
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

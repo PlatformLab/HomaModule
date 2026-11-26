@@ -47,6 +47,7 @@ FIXTURE_SETUP(homa_timer)
 }
 FIXTURE_TEARDOWN(homa_timer)
 {
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
@@ -313,6 +314,75 @@ TEST_F(homa_timer, homa_timer__basics)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->rpc_timeouts);
 #endif /* See strip.py */
 	EXPECT_EQ(ETIMEDOUT, -crpc->error);
+}
+TEST_F(homa_timer, homa_timer__multiple_hnets)
+{
+	struct homa_rpc *crpc1, *crpc2;
+	struct homa_net *hnet2;
+	struct homa_sock hsk2;
+
+	hnet2 = mock_hnet(1, &self->homa);
+	mock_sock_init(&hsk2, hnet2, 0);
+	crpc1 = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
+				self->client_ip, self->server_ip,
+				self->server_port, self->client_id, 200, 5000);
+	crpc2 = unit_client_rpc(&hsk2, UNIT_RCVD_ONE_PKT,
+				self->client_ip, self->server_ip,
+				self->server_port, self->client_id + 2, 200,
+				5000);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	unit_log_clear();
+	homa_timer(&self->homa);
+	EXPECT_EQ(1, crpc1->silent_ticks);
+	EXPECT_EQ(1, crpc2->silent_ticks);
+	unit_sock_destroy(&hsk2);
+}
+TEST_F(homa_timer, homa_timer__maybe_get_net_fails)
+{
+	struct homa_rpc *crpc1, *crpc2;
+	struct homa_net *hnet2;
+	struct homa_sock hsk2;
+
+	hnet2 = mock_hnet(1, &self->homa);
+	mock_sock_init(&hsk2, hnet2, 0);
+	crpc1 = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
+				self->client_ip, self->server_ip,
+				self->server_port, self->client_id, 200, 5000);
+	crpc2 = unit_client_rpc(&hsk2, UNIT_RCVD_ONE_PKT,
+				self->client_ip, self->server_ip,
+				self->server_port, self->client_id + 2, 200,
+				5000);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	unit_log_clear();
+	mock_maybe_get_net_errors = 1;
+	homa_timer(&self->homa);
+	EXPECT_EQ(0, crpc1->silent_ticks);
+	EXPECT_EQ(1, crpc2->silent_ticks);
+	unit_sock_destroy(&hsk2);
+}
+TEST_F(homa_timer, homa_timer__skip_hnet_with_no_sockets)
+{
+	mock_hnet(1, &self->homa);
+	unit_log_clear();
+	mock_log_net_refs = 1;
+	homa_timer(&self->homa);
+	EXPECT_STREQ("maybe_get_net, rcu depth 1; put_net, rcu depth 1",
+		     unit_log_get());
+}
+TEST_F(homa_timer, homa_timer__rcu_lock_held_for_put_net)
+{
+	struct homa_sock hsk2;
+
+	mock_sock_init(&hsk2, mock_hnet(1, &self->homa), 0);
+	unit_log_clear();
+	mock_log_net_refs = 1;
+	homa_timer(&self->homa);
+	EXPECT_STREQ("maybe_get_net, rcu depth 1; put_net, rcu depth 1; "
+		     "maybe_get_net, rcu depth 1; put_net, rcu depth 1",
+		     unit_log_get());
+	unit_sock_destroy(&hsk2);
 }
 TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 {

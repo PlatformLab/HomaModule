@@ -16,6 +16,7 @@ FIXTURE_SETUP(homa_metrics)
 }
 FIXTURE_TEARDOWN(homa_metrics)
 {
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	homa_metrics_end();
 	unit_teardown();

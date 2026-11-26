@@ -1802,7 +1802,7 @@ discard:
  */
 int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
-	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
+	struct homa_net *hnet = homa_net(dev_net(skb->dev));
 	const struct icmphdr *icmp = icmp_hdr(skb);
 	struct in6_addr daddr;
 	int type = icmp->type;
@@ -1829,7 +1829,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 			  __func__, info, type, code);
 	}
 	if (error != 0)
-		homa_abort_rpcs(homa, &daddr, port, error);
+		homa_abort_rpcs(hnet, &daddr, port, error);
 	return 0;
 }
 
@@ -1850,7 +1850,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			u8 type,  u8 code,  int offset,  __be32 info)
 {
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
-	struct homa *homa = homa_net(dev_net(skb->dev))->homa;
+	struct homa_net *hnet = homa_net(dev_net(skb->dev));
 	int error = 0;
 	int port = 0;
 
@@ -1866,7 +1866,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 		error = -EPROTONOSUPPORT;
 	}
 	if (error != 0)
-		homa_abort_rpcs(homa, &iph->daddr, port, error);
+		homa_abort_rpcs(hnet, &iph->daddr, port, error);
 	return 0;
 }
 

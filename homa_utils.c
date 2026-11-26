@@ -50,12 +50,6 @@ int homa_init(struct homa *homa)
 		homa->peertab = NULL;
 		goto error;
 	}
-	homa->socktab = kmalloc(sizeof(*homa->socktab), GFP_KERNEL);
-	if (!homa->socktab) {
-		err = -ENOMEM;
-		goto error;
-	}
-	homa_socktab_init(homa->socktab);
 	err = homa_tx_pool_init(homa);
 	if (err) {
 		pr_err("Couldn't initialize homa_tx_pool (errno %d)\n",
@@ -124,11 +118,6 @@ void homa_destroy(struct homa *homa)
 	UNIT_LOG("; ", "homa_destroy");
 
 	/* The order of the following cleanups matters! */
-	if (homa->socktab) {
-		homa_socktab_destroy(homa->socktab, NULL);
-		kfree(homa->socktab);
-		homa->socktab = NULL;
-	}
 #ifndef __STRIP__ /* See strip.py */
 	if (homa->grant) {
 		homa_grant_free(homa->grant);
@@ -156,6 +145,10 @@ int homa_net_init(struct homa_net *hnet, struct homa *homa)
 {
 	memset(hnet, 0, sizeof(*hnet));
 	hnet->homa = homa;
+	hnet->socktab = kmalloc(sizeof(*hnet->socktab), GFP_KERNEL_ACCOUNT);
+	if (!hnet->socktab)
+		return -ENOMEM;
+	homa_socktab_init(hnet->socktab);
 	hnet->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
 	return 0;
 }
@@ -167,7 +160,8 @@ int homa_net_init(struct homa_net *hnet, struct homa *homa)
  */
 void homa_net_destroy(struct homa_net *hnet)
 {
-	homa_socktab_destroy(hnet->homa->socktab, hnet);
+	homa_socktab_destroy(hnet->socktab);
+	kfree(hnet->socktab);
 	homa_peer_free_net(hnet);
 }
 

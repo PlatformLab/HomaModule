@@ -104,6 +104,7 @@ FIXTURE_TEARDOWN(homa_plumbing)
 		homa_pool_free_bufs(self->hsk.buffer_pool,
 				self->recvmsg_args.num_bpages,
 				self->recvmsg_args.bpage_offsets);
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
@@ -142,6 +143,7 @@ TEST_F(homa_plumbing, homa_load__error_in_tt_init)
 {
 	int result;
 
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 
 	/* Fail the first timetrace-buffer allocation. homa_load must
@@ -154,6 +156,7 @@ TEST_F(homa_plumbing, homa_load__error_in_tt_init)
 #endif /* See strip.py */
 TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
 {
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 
 	mock_register_protosw_errors = 1;
@@ -175,6 +178,7 @@ TEST_F(homa_plumbing, homa_load__destroy_after_unregister)
 	const char *destroy;
 	int result;
 
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 
 	/* Exclude destruction of the fixture's Homa instance. */
@@ -221,6 +225,7 @@ TEST_F(homa_plumbing, homa_net_exit__free_route)
 	homa_route_release(homa_route_get(&self->hsk, &addr3));
 
 	EXPECT_EQ(3, unit_count_routes(&self->homa));
+	mock_hnet_unlink(self->hsk.hnet);
 	homa_net_exit(mock_net_for_hnet(self->hsk.hnet));
 	EXPECT_EQ(0, unit_count_routes(&self->homa));
 }

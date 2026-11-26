@@ -26,6 +26,7 @@ FIXTURE_SETUP(homa_utils)
 }
 FIXTURE_TEARDOWN(homa_utils)
 {
+	mock_hnets_destroy();
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
@@ -80,7 +81,7 @@ TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_EQ(NULL, homa2.peertab);
 }
-TEST_F(homa_utils, homa_init__cant_allocate_socktab)
+TEST_F(homa_utils, homa_init__cant_initialize_tx_pool)
 {
 	struct homa homa2;
 
@@ -88,19 +89,6 @@ TEST_F(homa_utils, homa_init__cant_allocate_socktab)
 	mock_kmalloc_errors = 0x20;
 #else /* See strip.py */
 	mock_kmalloc_errors = 8;
-#endif/* See strip.py */
-	unit_log_clear();
-	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_EQ(NULL, homa2.socktab);
-}
-TEST_F(homa_utils, homa_init__cant_initialize_tx_pool)
-{
-	struct homa homa2;
-
-#ifndef __STRIP__ /* See strip.py */
-	mock_kmalloc_errors = 0x40;
-#else /* See strip.py */
-	mock_kmalloc_errors = 0x10;
 #endif/* See strip.py */
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_SUBSTR("Couldn't initialize homa_tx_pool (errno 12)",
@@ -114,6 +102,22 @@ TEST_F(homa_utils, homa_destroy)
 	homa_init(&homa2);
 	homa_destroy(&homa2);
 }
+TEST_F(homa_utils, homa_net_init__basics)
+{
+	struct homa_net *hnet;
+
+	hnet = mock_hnet(1, &self->homa);
+	EXPECT_EQ(&self->homa, hnet->homa);
+	EXPECT_EQ(1, hnet->socktab->next_sequence);
+}
+TEST_F(homa_utils, homa_net_init__cant_allocate_socktab)
+{
+	struct homa_net hnet;
+
+	mock_kmalloc_errors = 1;
+	EXPECT_EQ(ENOMEM, -homa_net_init(&hnet, &self->homa));
+	EXPECT_EQ(NULL, hnet.socktab);
+}
 
 TEST_F(homa_utils, homa_net_destroy__delete_sockets)
 {
@@ -125,6 +129,7 @@ TEST_F(homa_utils, homa_net_destroy__delete_sockets)
 	mock_sock_init(&hsk2, hnet, 101);
 	mock_sock_init(&hsk3, self->hnet, 100);
 
+	mock_hnet_unlink(hnet);
 	homa_net_destroy(hnet);
 	EXPECT_EQ(1, hsk1.shutdown);
 	EXPECT_EQ(1, hsk2.shutdown);
@@ -154,6 +159,7 @@ TEST_F(homa_utils, homa_net_destroy__delete_peers)
 	homa_route_release(route);
 	EXPECT_EQ(3, unit_count_routes(&self->homa));
 
+	mock_hnet_unlink(hnet);
 	homa_net_destroy(hnet);
 	EXPECT_EQ(1, unit_count_routes(&self->homa));
 	mock_sock_release(&hsk2.sock);

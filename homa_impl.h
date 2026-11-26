@@ -149,12 +149,6 @@ struct homa {
 	struct homa_peertab *peertab;
 
 	/**
-	 * @socktab: Information about all open sockets. Dynamically
-	 * allocated; must be kfreed.
-	 */
-	struct homa_socktab *socktab;
-
-	/**
 	 * @tx_pools: One tx_page_pool for each NUMA node on the machine.
 	 */
 	struct homa_tx_pool *tx_pools[MAX_NUMNODES];
@@ -496,6 +490,12 @@ struct homa {
 struct homa_net {
 	/** @homa: Global Homa information. */
 	struct homa *homa;
+
+	/**
+	 * @socktab: Information about all open sockets in this namespace.
+	 * Dynamically allocated; must be kfreed.
+	 */
+	struct homa_socktab *socktab;
 
 	/**
 	 * @prev_default_port: The most recent port number assigned from
