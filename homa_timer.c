@@ -290,7 +290,7 @@ void homa_timer(struct homa *homa)
 				 * on this core.
 				 */
 				rcu_read_unlock();
-				schedule();
+				cond_resched();
 				rcu_read_lock();
 				rpc_count = 0;
 			}
